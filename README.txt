@@ -1,0 +1,32 @@
+This is an incredibly rough playground for building a prototype of the Oxide API.
+
+There are a couple of different avenues we could go down:
+
+- API infrastructure: figure out how to structure the code to implement a bunch
+  of resources with two possible backends
+- server skeleton: set up an HTTP server with all the logging, tracing, error
+  handling, etc. that we want
+- openapi infrastructure: this is to some extent dependent on the API
+  infrastructure, but we could for example put together an openapi.yaml file and
+  generate some models or work on a system/tool for annotating models to
+  generate such a file.
+
+There's a tiny bit of the server skeleton in src/main.rs.
+
+I'm currently working on the API infrastructure since that's the next step in
+wiring something up to the API and it's an area where I feel like we can make
+some useful abstractions but need to work through it.  That's in "src/model.rs".
+
+Next steps:
+- Start implementing some API infrastructure
+  - Build a basic Error type
+  - Start building some entry points for a few small resources
+    (see my big list in src/model.rs, then see what I've got so far in
+    src/demo.rs.)
+  - Revisit the Error type
+  - See how this looks.  If it's good, consider building something to spit out
+    an OpenAPI spec?
+
+TODO:
+- Versioning? (Header? Path?)
+- Pagination? (Opaque token?  What does Stripe do?)
