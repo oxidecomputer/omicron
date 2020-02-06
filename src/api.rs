@@ -1,5 +1,5 @@
 /*!
- * api.rs: playground-area implementation of a few resources to experiment with
+ * playground-area implementation of a few resources to experiment with
  * different ways of organizing this code.
  */
 

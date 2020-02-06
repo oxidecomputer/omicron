@@ -1,5 +1,5 @@
 /*!
- * api_error.rs: API error handling facilities
+ * API error handling facilities
  */
 
 /*

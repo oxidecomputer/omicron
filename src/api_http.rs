@@ -1,5 +1,5 @@
 /*!
- * api_http.rs: facilities related to the HTTP layer of the API
+ * facilities related to the HTTP layer of the API
  */
 
 use crate::api_error::ApiError;

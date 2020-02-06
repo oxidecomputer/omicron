@@ -1,7 +1,7 @@
 /*!
- * api_model.rs: facilities for working with objects in the API (agnostic to
- * both the HTTP transport through which consumers interact with them and
- * the backend implementation (simulator or a real rack)).
+ * facilities for working with objects in the API (agnostic to both the HTTP
+ * transport through which consumers interact with them and the backend
+ * implementation (simulator or a real rack)).
  */
 
 use async_trait::async_trait;

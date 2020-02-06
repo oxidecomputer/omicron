@@ -1,5 +1,5 @@
 /*!
- * main.rs: API server process
+ * API server process
  */
 
 /*
