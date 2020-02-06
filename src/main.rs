@@ -71,6 +71,7 @@ async fn main()
  * Set up initial server-wide shared state.
  */
 fn setup_server_state()
+    -> actix_web::web::Data<api::ApiServerState>
 {
     let mut simulator = sim::Simulator::new();
     simulator.project_create("simproject1");
@@ -100,5 +101,5 @@ fn setup_server_state()
 
     actix_web::web::Data::new(api::ApiServerState {
         backend: backend
-    });
+    })
 }

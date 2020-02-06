@@ -48,3 +48,6 @@ Longer term:
 
 - Versioning (header? path? translators for older versions?)
 - Pagination? (Opaque token?  What does Stripe do?)
+- It seems like there are cases where Actix spits out text error messages to the
+  response (e.g., if you haven't configured app\_data() and try to use it).
+  That seems really bad.  We should understand these and remove them.

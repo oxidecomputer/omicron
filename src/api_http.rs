@@ -68,6 +68,6 @@ pub fn api_serialize_object_for_stream<T: serde::Serialize>(
      * to pass a zero-byte buffer to Actix, it interprets that as the end of the
      * response.
      */
-    object_json_bytes.push('\n' as u8);
+    object_json_bytes.push(b'\n');
     Ok(object_json_bytes.into())
 }
