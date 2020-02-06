@@ -5,26 +5,29 @@
  */
 
 use async_trait::async_trait;
+use futures::stream::Stream;
+use serde::Serialize;
+use std::pin::Pin;
 
-use crate::api_error;
+use crate::api_error::ApiError;
 
 /**
  * A stream of Results, each potentially representing an object in the API.
  */
-pub type ApiObjectStream<T> = std::pin::Pin<Box<
-    dyn futures::stream::Stream<Item = Result<T, api_error::ApiError>>
+pub type ApiObjectStream<T> = Pin<Box<
+    dyn Stream<Item = Result<T, ApiError>>
 >>;
 
 /**
  * Result of a list operation that returns an ApiObjectStream.
  */
-pub type ApiListResult<T> = Result<ApiObjectStream<T>, api_error::ApiError>;
+pub type ApiListResult<T> = Result<ApiObjectStream<T>, ApiError>;
 
 
 /**
  * Represents a Project in the Oxide API.
  */
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ApiModelProject {
     pub name: String,
 }

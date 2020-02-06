@@ -2,6 +2,12 @@
  * API error handling facilities
  */
 
+use actix_web::error::ResponseError;
+use serde_json::error::Error as SerdeError;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result;
+
 /*
  * XXX need to take a closer look at what error handling looks like.  What makes
  * this a little complicated is that it looks like each API function needs to
@@ -29,10 +35,10 @@
 #[derive(Debug)]
 pub struct ApiError {
 }
-impl actix_web::error::ResponseError for ApiError {
+impl ResponseError for ApiError {
 }
-impl std::fmt::Display for ApiError {
-    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Display for ApiError {
+    fn fmt(&self, _f: &mut Formatter) -> Result {
         // XXX What is this used for?  Should this emit JSON?
         // (We have to implement it in order to implement the
         // actix_web::error::ResponseError trait.)
@@ -40,8 +46,8 @@ impl std::fmt::Display for ApiError {
     }
 }
 
-impl From<serde_json::error::Error> for ApiError {
-    fn from(_error: serde_json::error::Error)
+impl From<SerdeError> for ApiError {
+    fn from(_error: SerdeError)
         -> Self
     {
         // XXX

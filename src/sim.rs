@@ -2,17 +2,20 @@
  * API simulation of an Oxide rack, used for testing and prototyping.
  */
 
-use futures::stream::StreamExt;
 use async_trait::async_trait;
+use futures::stream::StreamExt;
+use std::collections::BTreeMap;
 
-use crate::api_model;
+use crate::api_model::ApiBackend;
+use crate::api_model::ApiListResult;
+use crate::api_model::ApiModelProject;
 
 /**
  * Maintains simulated state of the Oxide rack.  The current implementation is
  * in-memory only.
  */
 pub struct Simulator {
-    projects_by_name: std::collections::BTreeMap<String, SimProject>
+    projects_by_name: BTreeMap<String, SimProject>
 }
 
 struct SimProject {
@@ -24,7 +27,7 @@ impl Simulator {
         -> Self
     {
         Simulator {
-            projects_by_name: std::collections::BTreeMap::new()
+            projects_by_name: BTreeMap::new()
         }
     }
 
@@ -40,13 +43,13 @@ impl Simulator {
 }
 
 #[async_trait]
-impl api_model::ApiBackend for Simulator {
+impl ApiBackend for Simulator {
     async fn projects_list(&'static self)
-        -> api_model::ApiListResult<api_model::ApiModelProject>
+        -> ApiListResult<ApiModelProject>
     {
         Ok(futures::stream::iter(self.projects_by_name
             .values()
-            .map(|sim_project| Ok(api_model::ApiModelProject {
+            .map(|sim_project| Ok(ApiModelProject {
                 name: sim_project.name.clone()
             }))).boxed())
     }

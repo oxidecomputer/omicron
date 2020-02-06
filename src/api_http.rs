@@ -2,6 +2,9 @@
  * facilities related to the HTTP layer of the API
  */
 
+use bytes::Bytes;
+use serde::Serialize;
+
 use crate::api_error::ApiError;
 
 /**
@@ -16,9 +19,9 @@ use crate::api_error::ApiError;
  * associated with the HTTP request (or response) to indicate what format to use
  * and then use the right one.
  */
-pub fn api_serialize_object_for_stream<T: serde::Serialize>(
+pub fn api_serialize_object_for_stream<T: Serialize>(
     maybe_object: &Result<T, ApiError>)
-    -> Result<bytes::Bytes, ApiError>
+    -> Result<Bytes, ApiError>
 {
     /*
      * This function is invoked for each item in a stream.  Each item is a

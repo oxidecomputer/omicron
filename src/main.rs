@@ -33,10 +33,16 @@ const SERVER_WORKER_MAX_CONN_CONNECTING: usize = 64;
 const SERVER_BIND_ADDRESS: &str = "127.0.0.1:12220";
 
 mod api;
-mod api_http;
 mod api_error;
+mod api_http;
 mod api_model;
 mod sim;
+
+use actix_web::App;
+use actix_web::HttpServer;
+use actix_web::web::Data;
+use api::ApiServerState;
+use sim::Simulator;
 
 #[actix_rt::main]
 async fn main()
@@ -44,8 +50,8 @@ async fn main()
 {
     let app_state = setup_server_state();
 
-    let server = actix_web::HttpServer::new(move || {
-        actix_web::App::new()
+    let server = HttpServer::new(move || {
+        App::new()
             .configure(api::register_actix_api)
             .app_data(app_state.clone())
     })
@@ -71,9 +77,9 @@ async fn main()
  * Set up initial server-wide shared state.
  */
 fn setup_server_state()
-    -> actix_web::web::Data<api::ApiServerState>
+    -> Data<ApiServerState>
 {
-    let mut simulator = sim::Simulator::new();
+    let mut simulator = Simulator::new();
     simulator.project_create("simproject1");
     simulator.project_create("simproject2");
     simulator.project_create("simproject3");
@@ -99,7 +105,7 @@ fn setup_server_state()
     let simbox = Box::new(simulator);
     let backend = Box::leak(simbox);
 
-    actix_web::web::Data::new(api::ApiServerState {
+    Data::new(api::ApiServerState {
         backend: backend
     })
 }
