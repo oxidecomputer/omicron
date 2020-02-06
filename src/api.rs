@@ -9,16 +9,26 @@ use crate::api_error;
 use crate::api_http;
 use crate::api_model;
 
+/**
+ * Stores shared state used by API endpoints
+ */
+pub struct ApiServerState {
+    /** the API backend to use for servicing requests */
+    pub backend: &'static dyn api_model::ApiBackend
+}
+
 pub fn register_actix_api(config: &mut actix_web::web::ServiceConfig)
 {
     config.service(actix_web::web::resource("/projects")
         .route(actix_web::web::get().to(api_projects_get)));
 }
 
-async fn api_projects_get(_req: actix_web::HttpRequest)
+async fn api_projects_get(server: actix_web::web::Data<ApiServerState>,
+    _req: actix_web::HttpRequest)
     -> Result<actix_web::HttpResponse, api_error::ApiError>
 {
-    let project_stream = api_model::api_model_list_projects().await?;
+    let backend = server.backend;
+    let project_stream = api_model::api_model_list_projects(backend).await?;
     let byte_stream = project_stream.map(|project|
         api_http::api_serialize_object_for_stream(&project));
 

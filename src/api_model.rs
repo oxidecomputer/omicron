@@ -4,7 +4,7 @@
  * the backend implementation (simulator or a real rack)).
  */
 
-use futures::stream::StreamExt;
+use async_trait::async_trait;
 
 use crate::api_error;
 
@@ -12,7 +12,13 @@ use crate::api_error;
  * A stream of Results, each potentially representing an object in the API.
  */
 pub type ApiObjectStream<T> = std::pin::Pin<Box<
-    dyn futures::stream::Stream<Item = Result<T, api_error::ApiError>>>>;
+    dyn futures::stream::Stream<Item = Result<T, api_error::ApiError>>
+>>;
+
+/**
+ * Result of a list operation that returns an ApiObjectStream.
+ */
+pub type ApiListResult<T> = Result<ApiObjectStream<T>, api_error::ApiError>;
 
 
 /**
@@ -20,21 +26,19 @@ pub type ApiObjectStream<T> = std::pin::Pin<Box<
  */
 #[derive(Debug, serde::Serialize)]
 pub struct ApiModelProject {
-    name: String,
+    pub name: String,
 }
 
-pub async fn api_model_list_projects()
-    -> Result<ApiObjectStream<ApiModelProject>, api_error::ApiError>
+/**
+ * Represents a backend implementation of the API.
+ */
+#[async_trait]
+pub trait ApiBackend: Send + Sync {
+    async fn projects_list<>(&'static self) -> ApiListResult<ApiModelProject>;
+}
+
+pub async fn api_model_list_projects(backend: &'static dyn ApiBackend)
+    -> ApiListResult<ApiModelProject>
 {
-    /*
-     * TODO This is currently hardcoded to return a particular set of projects,
-     * including an Error to exercise that case.
-     */
-    Ok(futures::stream::iter(
-        vec![
-            Ok(ApiModelProject { name: "project1".to_string() }),
-            // Ok(ApiModelProject { name: "project2".to_string() }),
-            Err(api_error::ApiError {}),
-            Ok(ApiModelProject { name: "project3".to_string() }),
-        ]).boxed())
+    backend.projects_list().await
 }

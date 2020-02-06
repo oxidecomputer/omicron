@@ -42,7 +42,7 @@ Use `curl` to hit the server:
 ## TODO
 
 - Revisit the Error type
-- Start plumbing through a Simulator backend
+- Flesh out endpoints and simulator
 
 Longer term:
 

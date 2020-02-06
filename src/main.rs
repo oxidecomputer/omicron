@@ -36,14 +36,18 @@ mod api;
 mod api_http;
 mod api_error;
 mod api_model;
+mod sim;
 
 #[actix_rt::main]
 async fn main()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
-    let server = actix_web::HttpServer::new(|| {
+    let app_state = setup_server_state();
+
+    let server = actix_web::HttpServer::new(move || {
         actix_web::App::new()
             .configure(api::register_actix_api)
+            .app_data(app_state.clone())
     })
         .workers(SERVER_NWORKERS)
         .maxconn(SERVER_WORKER_MAX_CONN)
@@ -61,4 +65,40 @@ async fn main()
     server.run().await?;
 
     return Ok(())
+}
+
+/**
+ * Set up initial server-wide shared state.
+ */
+fn setup_server_state()
+{
+    let mut simulator = sim::Simulator::new();
+    simulator.project_create("simproject1");
+    simulator.project_create("simproject2");
+    simulator.project_create("simproject3");
+
+    /*
+     * The use of Box and particularly Box::leak() here is worth explaining.
+     * We'd like to use Actix's facilities for streaming HTTP responses out to
+     * end users.  In order to do that, when we send a futures Stream
+     * representing the response body, it must have lifetime 'static.  (See
+     * actix_web::dev::HttpResponseBuilder::streaming().)  Actix needs to be
+     * able to use that object well after our (async) handler function has
+     * completed.
+     *
+     * In practice, this Stream's lifetime will be limited by the lifetime of
+     * the backend that created it.  In the case of the Simulator backend: the
+     * stream cannot live after the simulator (whose data is being emitted from
+     * the stream) has itself been dropped.
+     *
+     * To resolve this, we must elevate the lifetime of the Simulator to
+     * 'static.  We do this by moving it to the heap and then deliberately
+     * leaking the Box.
+     */
+    let simbox = Box::new(simulator);
+    let backend = Box::leak(simbox);
+
+    actix_web::web::Data::new(api::ApiServerState {
+        backend: backend
+    });
 }
