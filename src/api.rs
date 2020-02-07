@@ -3,10 +3,10 @@
  * different ways of organizing this code.
  */
 
-use actix_web::HttpRequest;
 use actix_web::HttpResponse;
 use actix_web::web::Data;
 use actix_web::web::Json;
+use actix_web::web::Path;
 use actix_web::web::ServiceConfig;
 use futures::stream::StreamExt;
 
@@ -30,11 +30,11 @@ pub fn register_actix_api(config: &mut ServiceConfig)
     config.service(actix_web::web::resource("/projects")
         .route(actix_web::web::get().to(api_projects_get))
         .route(actix_web::web::post().to(api_projects_post)));
+    config.service(actix_web::web::resource("/projects/{projectId}")
+        .route(actix_web::web::delete().to(api_projects_delete_project)));
 }
 
-async fn api_projects_get(
-    server: Data<ApiServerState>,
-    _req: HttpRequest)
+async fn api_projects_get(server: Data<ApiServerState>)
     -> Result<HttpResponse, ApiError>
 {
     let backend = &*server.backend;
@@ -61,5 +61,15 @@ async fn api_projects_post(
 {
     let backend = &*server.backend;
     api_model::api_model_project_create(backend, &new_project).await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+async fn api_projects_delete_project(
+    server: Data<ApiServerState>,
+    project_id: Path<String>)
+    -> Result<HttpResponse, ApiError>
+{
+    let backend = &*server.backend;
+    api_model::api_model_project_delete(backend, &*project_id).await?;
     Ok(HttpResponse::NoContent().finish())
 }

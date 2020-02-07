@@ -96,6 +96,20 @@ impl ApiBackend for Simulator {
             name: newname.clone()
         })
     }
+
+    async fn project_delete(&self, project_id: &String)
+        -> Result<(), ApiError>
+    {
+        // TODO conflating id with name here
+        let mut projects_by_name = self.projects_by_name.lock().await;
+        let oldvalue = projects_by_name.remove(project_id);
+        if oldvalue.is_none() {
+            // XXX better error
+            return Err(ApiError {});
+        }
+
+        Ok(())
+    }
 }
 
 struct SimProject {
