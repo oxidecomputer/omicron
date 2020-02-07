@@ -57,6 +57,8 @@ pub trait ApiBackend: Send + Sync {
         -> ApiCreateResult<ApiModelProject>;
     async fn project_delete(&self, project_id: &String)
         -> Result<(), ApiError>;
+    async fn project_lookup(&self, project_id: &String)
+        -> Result<ApiModelProject, ApiError>;
 }
 
 pub async fn api_model_projects_list(backend: &dyn ApiBackend)
@@ -77,4 +79,11 @@ pub async fn api_model_project_delete(backend: &dyn ApiBackend,
     -> Result<(), ApiError>
 {
     backend.project_delete(project_id).await
+}
+
+pub async fn api_model_project_lookup(backend: &dyn ApiBackend,
+    project_id: &String)
+    -> Result<ApiModelProject, ApiError>
+{
+    backend.project_lookup(project_id).await
 }

@@ -73,9 +73,8 @@ impl ApiBackend for Simulator {
         let projects_by_name = self.projects_by_name.lock().await;
         let projects : Vec<Result<ApiModelProject, ApiError>> = projects_by_name
             .values()
-            .map(|sim_project| Ok(ApiModelProject {
-                name: sim_project.name.clone()
-            })).collect();
+            .map(|sim_project| Ok(sim_project.to_model()))
+            .collect();
 
         Ok(futures::stream::iter(projects).boxed())
     }
@@ -91,10 +90,10 @@ impl ApiBackend for Simulator {
 
         let newname = &new_project.name;
         let project = SimProject { name: newname.clone() };
+        let model_project = project.to_model();
+
         projects_by_name.insert(newname.clone(), project);
-        Ok(ApiModelProject {
-            name: newname.clone()
-        })
+        Ok(model_project)
     }
 
     async fn project_delete(&self, project_id: &String)
@@ -110,8 +109,41 @@ impl ApiBackend for Simulator {
 
         Ok(())
     }
+
+    async fn project_lookup(&self, project_id: &String)
+        -> Result<ApiModelProject, ApiError>
+    {
+        // TODO conflating id with name here
+        let projects_by_name = self.projects_by_name.lock().await;
+        let sim_project = projects_by_name.get(project_id);
+
+        match sim_project {
+            // XXX better error
+            None => Err(ApiError {}),
+            Some(p) => Ok(p.to_model())
+        }
+    }
 }
 
+/**
+ * Representation of a Project within the simulated Backend.  This is
+ * potentially distinct from the representation in the API, since the API may
+ * contain a stable set of fields, while the underlying representation could
+ * change.
+ */
 struct SimProject {
     name: String
+}
+
+impl SimProject {
+    /**
+     * Create an API representation of this Project.  You could think of this as
+     * serializing the internal SimProject structure to pass it to the model
+     * layer (which will then serialize _that_ for transfer over HTTP).
+     */
+    fn to_model(&self) -> ApiModelProject {
+        ApiModelProject {
+            name: self.name.clone()
+        }
+    }
 }

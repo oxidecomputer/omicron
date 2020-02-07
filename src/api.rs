@@ -31,7 +31,8 @@ pub fn register_actix_api(config: &mut ServiceConfig)
         .route(actix_web::web::get().to(api_projects_get))
         .route(actix_web::web::post().to(api_projects_post)));
     config.service(actix_web::web::resource("/projects/{projectId}")
-        .route(actix_web::web::delete().to(api_projects_delete_project)));
+        .route(actix_web::web::delete().to(api_projects_delete_project))
+        .route(actix_web::web::get().to(api_projects_get_project)));
 }
 
 async fn api_projects_get(server: Data<ApiServerState>)
@@ -72,4 +73,19 @@ async fn api_projects_delete_project(
     let backend = &*server.backend;
     api_model::api_model_project_delete(backend, &*project_id).await?;
     Ok(HttpResponse::NoContent().finish())
+}
+
+async fn api_projects_get_project(
+    server: Data<ApiServerState>,
+    project_id: Path<String>)
+    -> Result<HttpResponse, ApiError>
+{
+    let backend = &*server.backend;
+    let project = api_model::api_model_project_lookup(
+        backend, &*project_id).await?;
+    let serialized = api_http::api_serialize_object_for_stream(&Ok(project))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serialized))
 }
