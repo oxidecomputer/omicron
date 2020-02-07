@@ -51,3 +51,7 @@ Longer term:
 - It seems like there are cases where Actix spits out text error messages to the
   response (e.g., if you haven't configured app\_data() and try to use it).
   That seems really bad.  We should understand these and remove them.
+- There are also cases where Actix reports a 400 and it's not clear why (e.g.,
+  trying to use curl's "-d" flag when `POST`ing to a JSON endpoint).  I'm sure
+  there's a good reason for this being a 400-level error, but how can we have
+  visibility into these requests?

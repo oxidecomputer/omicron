@@ -6,6 +6,8 @@
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
 use actix_web::web::Data;
+use actix_web::web::Json;
+use actix_web::web::ServiceConfig;
 use futures::stream::StreamExt;
 
 use crate::api_error;
@@ -13,27 +15,30 @@ use crate::api_http;
 use crate::api_model;
 
 use api_error::ApiError;
+use api_model::ApiModelProjectCreate;
 
 /**
  * Stores shared state used by API endpoints
  */
 pub struct ApiServerState {
     /** the API backend to use for servicing requests */
-    pub backend: &'static dyn api_model::ApiBackend
+    pub backend: Box<dyn api_model::ApiBackend>
 }
 
-pub fn register_actix_api(config: &mut actix_web::web::ServiceConfig)
+pub fn register_actix_api(config: &mut ServiceConfig)
 {
     config.service(actix_web::web::resource("/projects")
-        .route(actix_web::web::get().to(api_projects_get)));
+        .route(actix_web::web::get().to(api_projects_get))
+        .route(actix_web::web::post().to(api_projects_post)));
 }
 
-async fn api_projects_get(server: Data<ApiServerState>,
+async fn api_projects_get(
+    server: Data<ApiServerState>,
     _req: HttpRequest)
     -> Result<HttpResponse, ApiError>
 {
-    let backend = server.backend;
-    let project_stream = api_model::api_model_list_projects(backend).await?;
+    let backend = &*server.backend;
+    let project_stream = api_model::api_model_projects_list(backend).await?;
     let byte_stream = project_stream.map(|project|
         api_http::api_serialize_object_for_stream(&project));
 
@@ -47,4 +52,14 @@ async fn api_projects_get(server: Data<ApiServerState>,
         .content_type("application/x-json-stream")
         .streaming(byte_stream);
     Ok(response)
+}
+
+async fn api_projects_post(
+    server: Data<ApiServerState>,
+    new_project: Json<ApiModelProjectCreate>)
+    -> Result<HttpResponse, ApiError>
+{
+    let backend = &*server.backend;
+    api_model::api_model_project_create(backend, &new_project).await?;
+    Ok(HttpResponse::NoContent().finish())
 }
