@@ -2,13 +2,15 @@
  * API server process
  */
 
-/*
- * TODO Figure out appropriate TCP and HTTP keepalive parameters
- * TODO Set hostname
- * TODO Disable signals?
- * TODO Most of this could move to a library function, with the executable
- * itself only being responsible for things like command-line arguments.
- */
+use actix_web::App;
+use actix_web::HttpServer;
+
+mod api_error;
+mod api_http_entrypoints;
+mod api_http_util;
+mod api_model;
+mod api_server;
+mod sim;
 
 /** number of worker threads to start */
 const SERVER_NWORKERS: usize = 4;
@@ -32,28 +34,22 @@ const SERVER_WORKER_MAX_CONN_CONNECTING: usize = 64;
 /** TCP IP address and port on which to bind */
 const SERVER_BIND_ADDRESS: &str = "127.0.0.1:12220";
 
-mod api;
-mod api_error;
-mod api_http;
-mod api_model;
-mod sim;
-
-use actix_web::App;
-use actix_web::HttpServer;
-use actix_web::web::Data;
-use api::ApiServerState;
-use sim::SimulatorBuilder;
-
 #[actix_rt::main]
 async fn main()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
-    let app_state = setup_server_state();
+    /*
+     * TODO it's not clear this is correct because we're not wrapping it in an
+     * actix_web::Data instance.  It may be that we get a new app_state for each
+     * thread.  However, wrapping it does not work at all.  It may be time to
+     * move past Actix...
+     */
+    let app_state = api_server::setup_server_state();
 
     let server = HttpServer::new(move || {
         App::new()
-            .configure(api::register_actix_api)
             .app_data(app_state.clone())
+            .configure(api_http_entrypoints::register_api_entrypoints)
     })
         .workers(SERVER_NWORKERS)
         .maxconn(SERVER_WORKER_MAX_CONN)
@@ -64,6 +60,7 @@ async fn main()
         .shutdown_timeout(SERVER_WORKER_SHUTDOWN_TIMEOUT_S)
         .bind(SERVER_BIND_ADDRESS)?;
 
+
     for (addr, scheme) in server.addrs_with_scheme() {
         eprintln!("listening: {}://{}", scheme, addr);
     }
@@ -71,20 +68,4 @@ async fn main()
     server.run().await?;
 
     return Ok(())
-}
-
-/**
- * Set up initial server-wide shared state.
- */
-fn setup_server_state()
-    -> Data<ApiServerState>
-{
-    let mut simbuilder = SimulatorBuilder::new();
-    simbuilder.project_create("simproject1");
-    simbuilder.project_create("simproject2");
-    simbuilder.project_create("simproject3");
-
-    Data::new(api::ApiServerState {
-        backend: Box::new(simbuilder.build())
-    })
 }

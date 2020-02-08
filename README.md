@@ -41,6 +41,7 @@ Use `curl` to hit the server:
 
 ## TODO
 
+- Explore rewrite to Rocket
 - Revisit the Error type
 - Flesh out endpoints and simulator
 

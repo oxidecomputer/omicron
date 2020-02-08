@@ -11,21 +11,15 @@ use actix_web::web::ServiceConfig;
 use futures::stream::StreamExt;
 
 use crate::api_error;
-use crate::api_http;
+use crate::api_http_util;
 use crate::api_model;
+use crate::api_server;
 
 use api_error::ApiError;
 use api_model::ApiModelProjectCreate;
+use api_server::ApiServerState;
 
-/**
- * Stores shared state used by API endpoints
- */
-pub struct ApiServerState {
-    /** the API backend to use for servicing requests */
-    pub backend: Box<dyn api_model::ApiBackend>
-}
-
-pub fn register_actix_api(config: &mut ServiceConfig)
+pub fn register_api_entrypoints(config: &mut ServiceConfig)
 {
     config.service(actix_web::web::resource("/projects")
         .route(actix_web::web::get().to(api_projects_get))
@@ -35,13 +29,43 @@ pub fn register_actix_api(config: &mut ServiceConfig)
         .route(actix_web::web::get().to(api_projects_get_project)));
 }
 
+/*
+ * Generally, HTTP resources are grouped within some collection.  For a
+ * relatively simple example:
+ *
+ *   GET    /projects               (list the projects in the collection)
+ *   POST   /projects               (create a project in the collection)
+ *   GET    /projects/{project_id}  (look up a project in the collection)
+ *   DELETE /projects/{project_id}  (delete a project in the collection)
+ *   PUT    /projects/{project_id}  (update a project in the collection)
+ *
+ * There's a naming convention for the functions that implement these API entry
+ * points.  When operating on the collection itself, we use:
+ *
+ *    api_{collection_path}_{verb}
+ *
+ * For examples:
+ *
+ *    GET  /projects                    -> api_projects_get()
+ *    POST /projects                    -> api_projects_post()
+ *
+ * For operations on items within the collection, we use:
+ *
+ *    api_{collection_path}_{verb}_{object}
+ *
+ * For examples:
+ *
+ *    GET    /projects/{project_id}     -> api_projects_get_project()
+ *    DELETE /projects/{project_id}     -> api_projects_delete_project()
+ */
+
 async fn api_projects_get(server: Data<ApiServerState>)
     -> Result<HttpResponse, ApiError>
 {
     let backend = &*server.backend;
     let project_stream = api_model::api_model_projects_list(backend).await?;
     let byte_stream = project_stream.map(|project|
-        api_http::api_serialize_object_for_stream(&project));
+        api_http_util::api_http_serialize_for_stream(&project));
 
     /*
      * TODO Figure out if this is the right format (newline-separated JSON) and
@@ -83,7 +107,7 @@ async fn api_projects_get_project(
     let backend = &*server.backend;
     let project = api_model::api_model_project_lookup(
         backend, &*project_id).await?;
-    let serialized = api_http::api_serialize_object_for_stream(&Ok(project))?;
+    let serialized = api_http_util::api_http_serialize_for_stream(&Ok(project))?;
 
     Ok(HttpResponse::Ok()
         .content_type("application/json")

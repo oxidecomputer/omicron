@@ -19,7 +19,7 @@ use crate::api_error::ApiError;
  * associated with the HTTP request (or response) to indicate what format to use
  * and then use the right one.
  */
-pub fn api_serialize_object_for_stream<T: Serialize>(
+pub fn api_http_serialize_for_stream<T: Serialize>(
     maybe_object: &Result<T, ApiError>)
     -> Result<Bytes, ApiError>
 {
