@@ -3,21 +3,25 @@
  * different ways of organizing this code.
  */
 
+use std::sync::Arc;
+
 use actix_web::HttpResponse;
 use actix_web::web::Data;
 use actix_web::web::Json;
 use actix_web::web::Path;
+use actix_web::web::Query;
 use actix_web::web::ServiceConfig;
-use futures::stream::StreamExt;
+use serde::Deserialize;
 
-use crate::api_error;
-use crate::api_http_util;
-use crate::api_model;
-use crate::api_server;
-
-use api_error::ApiError;
-use api_model::ApiModelProjectCreate;
-use api_server::ApiServerState;
+use crate::api_error::ApiError;
+use crate::api_http_util::api_http_create;
+use crate::api_http_util::api_http_delete;
+use crate::api_http_util::api_http_emit_one;
+use crate::api_http_util::api_http_emit_stream;
+use crate::api_model::ApiProject;
+use crate::api_model::ApiProjectCreateParams;
+use crate::api_model::ApiProjectUpdateParams;
+use crate::api_server::ApiServerState;
 
 pub fn register_api_entrypoints(config: &mut ServiceConfig)
 {
@@ -26,10 +30,13 @@ pub fn register_api_entrypoints(config: &mut ServiceConfig)
         .route(actix_web::web::post().to(api_projects_post)));
     config.service(actix_web::web::resource("/projects/{projectId}")
         .route(actix_web::web::delete().to(api_projects_delete_project))
+        .route(actix_web::web::put().to(api_projects_put_project))
         .route(actix_web::web::get().to(api_projects_get_project)));
 }
 
 /*
+ * API ENDPOINT FUNCTION NAMING CONVENTIONS
+ *
  * Generally, HTTP resources are grouped within some collection.  For a
  * relatively simple example:
  *
@@ -55,61 +62,91 @@ pub fn register_api_entrypoints(config: &mut ServiceConfig)
  *
  * For examples:
  *
- *    GET    /projects/{project_id}     -> api_projects_get_project()
  *    DELETE /projects/{project_id}     -> api_projects_delete_project()
+ *    GET    /projects/{project_id}     -> api_projects_get_project()
+ *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-async fn api_projects_get(server: Data<ApiServerState>)
+#[derive(Deserialize)]
+struct ListQueryParams {
+    marker: Option<String>,
+    limit: Option<usize>
+}
+
+/*
+ * "GET /projects": list all projects
+ */
+async fn api_projects_get(
+    server: Data<ApiServerState>,
+    params: Query<ListQueryParams>)
     -> Result<HttpResponse, ApiError>
 {
     let backend = &*server.backend;
-    let project_stream = api_model::api_model_projects_list(backend).await?;
-    let byte_stream = project_stream.map(|project|
-        api_http_util::api_http_serialize_for_stream(&project));
-
-    /*
-     * TODO Figure out if this is the right format (newline-separated JSON) and
-     * if so whether it's a good content-type for this.
-     * Is it important to be able to support different formats later?  (or
-     * useful to factor the code so that we could?)
-     */
-    let response = HttpResponse::Ok()
-        .content_type("application/x-json-stream")
-        .streaming(byte_stream);
-    Ok(response)
+    let limit = params.limit.unwrap_or(3); // XXX
+    let marker = params.marker.as_ref().map(|s| s.clone());
+    let project_stream = backend.projects_list(marker, limit).await?;
+    api_http_emit_stream(project_stream)
 }
 
+/*
+ * "POST /projects": create a new project
+ */
 async fn api_projects_post(
     server: Data<ApiServerState>,
-    new_project: Json<ApiModelProjectCreate>)
+    new_project: Json<ApiProjectCreateParams>)
     -> Result<HttpResponse, ApiError>
 {
     let backend = &*server.backend;
-    api_model::api_model_project_create(backend, &new_project).await?;
-    Ok(HttpResponse::NoContent().finish())
+    let project = backend.project_create(&*new_project).await?;
+    api_http_create(project)
 }
 
-async fn api_projects_delete_project(
-    server: Data<ApiServerState>,
-    project_id: Path<String>)
-    -> Result<HttpResponse, ApiError>
-{
-    let backend = &*server.backend;
-    api_model::api_model_project_delete(backend, &*project_id).await?;
-    Ok(HttpResponse::NoContent().finish())
-}
-
+/*
+ * "GET /project/{project_id}": fetch a specific project
+ */
 async fn api_projects_get_project(
     server: Data<ApiServerState>,
     project_id: Path<String>)
     -> Result<HttpResponse, ApiError>
 {
     let backend = &*server.backend;
-    let project = api_model::api_model_project_lookup(
-        backend, &*project_id).await?;
-    let serialized = api_http_util::api_http_serialize_for_stream(&Ok(project))?;
+    let project_id = project_id.to_string();
+    let project : Arc<ApiProject> = backend.project_lookup(project_id).await?;
+    api_http_emit_one(project)
+}
 
-    Ok(HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serialized))
+/*
+ * "DELETE /project/{project_id}": delete a specific project
+ */
+async fn api_projects_delete_project(
+    server: Data<ApiServerState>,
+    project_id: Path<String>)
+    -> Result<HttpResponse, ApiError>
+{
+    let backend = &*server.backend;
+    let project_id = project_id.to_string();
+    backend.project_delete(project_id).await?;
+    api_http_delete()
+}
+
+/*
+ * "PUT /project/{project_id}": update a specific project
+ *
+ * TODO: Is it valid for PUT to accept application/json that's a subset of what
+ * the resource actually represents?  If not, is that a problem?  (HTTP may
+ * require that this be idempotent.)  If so, can we get around that having this
+ * be a slightly different content-type (e.g., "application/json-patch")?  We
+ * should see what other APIs do.
+ */
+async fn api_projects_put_project(
+    server: Data<ApiServerState>,
+    project_id: Path<String>,
+    updated_project: Json<ApiProjectUpdateParams>)
+    -> Result<HttpResponse, ApiError>
+{
+    let backend = &*server.backend;
+    let project_id = project_id.to_string();
+    let newproject = backend.project_update(
+        project_id, &*updated_project).await?;
+    api_http_emit_one(newproject)
 }
