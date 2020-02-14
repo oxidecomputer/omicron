@@ -2,14 +2,6 @@
  * server-wide state and facilities
  */
 
-/*
- * TODO Figure out appropriate TCP and HTTP keepalive parameters
- * TODO Set hostname
- * TODO Disable signals?
- * TODO Most of this could move to a library function, with the executable
- * itself only being responsible for things like command-line arguments.
- */
-
 use actix_web::web::Data;
 
 use crate::api_model;

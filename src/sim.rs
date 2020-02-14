@@ -37,12 +37,18 @@ impl SimulatorBuilder {
         }
     }
 
+    /**
+     * Seed the simulator with a generic-looking project called "project_name".
+     */
     pub fn project_create(&mut self, project_name: &str)
     {
         let name = project_name.to_string();
         self.projects_by_name.insert(name.clone());
     }
 
+    /**
+     * Return a Simulator instance holding the state created using this builder.
+     */
     pub fn build(self)
         -> Simulator
     {
@@ -71,14 +77,13 @@ impl SimulatorBuilder {
  * in-memory only.
  */
 pub struct Simulator {
+    /** all projects, indexed by name. */
     projects_by_name: Arc<Mutex<BTreeMap<String, Arc<ApiProject>>>>
 }
 
 /**
- * Representation of a Project within the simulated Backend.  This is
- * potentially distinct from the representation in the API, since the API may
- * contain a stable set of fields, while the underlying representation could
- * change.
+ * Backend-specific implementation of an ApiProject.  We currently don't need
+ * any additional fields for this.
  */
 struct SimProject {}
 
@@ -97,7 +102,7 @@ impl ApiBackend for Simulator {
         let simproject = SimProject {};
         let project = Arc::new(ApiProject { 
             backend_impl: Box::new(simproject),
-            id: newname.clone(), // XXX
+            id: newname.clone(),
             name: newname.clone(),
             description: new_project.description.clone(),
             generation: 1,
@@ -117,10 +122,11 @@ impl ApiBackend for Simulator {
          * We assemble the list of projects that we're going to return now,
          * under the lock, so that we can release the lock right away.  (This
          * also makes the lifetime of the return value far easier.)
+         *
+         * TODO Is there a cleaner way to write this?  I want to treat
+         * btreemap::iter() the same type as btreemap::range().  They're both
+         * iterators that emit Arc<ApiProject>>, after all.
          */
-        // TODO Is there a cleaner way to write this?  I want to treat
-        // btreemap::iter() the same type as btreemap::range().  They're both
-        // iterators that emit Arc<ApiProject>>, after all.
         let projects: Vec<Result<Arc<ApiProject>, ApiError>> = match marker {
             None => projects_by_name
                 .iter()
@@ -149,8 +155,7 @@ impl ApiBackend for Simulator {
     {
         let projects = self.projects_by_name.lock().await;
         // XXX better error
-        let project = projects.get(&name)
-            .ok_or_else(|| ApiError {})?;
+        let project = projects.get(&name).ok_or_else(|| ApiError {})?;
         let rv = Arc::clone(project);
         Ok(rv)
     }
@@ -159,16 +164,11 @@ impl ApiBackend for Simulator {
         -> DeleteResult
     {
         let mut projects = self.projects_by_name.lock().await;
-        let oldvalue = projects.remove(&name);
-        if oldvalue.is_none() {
-            // XXX better error
-            return Err(ApiError {});
-        }
-
+        // XXX better error
+        projects.remove(&name).ok_or_else(|| ApiError {})?;
         Ok(())
     }
 
-    // XXX This whole function could use some cleanup.
     async fn project_update(&self,
         name: String,
         new_params: &ApiProjectUpdateParams)
@@ -176,12 +176,9 @@ impl ApiBackend for Simulator {
     {
         let mut projects = self.projects_by_name.lock().await;
 
-        let oldproject : Arc<ApiProject> = match projects.remove(&name) {
-            // XXX better error
-            None => return Err(ApiError {}),
-            Some(v) => v
-        };
-
+        // XXX better error
+        let oldproject : Arc<ApiProject> =
+            projects.remove(&name).ok_or_else(|| ApiError {})?;
         let newname = &new_params.name.as_ref().unwrap_or(&oldproject.name);
         let newdescription = &new_params.description.as_ref().unwrap_or(
             &oldproject.description);
@@ -189,15 +186,15 @@ impl ApiBackend for Simulator {
         let newgen = oldproject.generation + 1;
 
         /*
-         * Note: right now, it's fine to just create a new backend object.  It's
-         * not clear if that will work once we flesh out this implementation
-         * (e.g., if there's other state in that object).  However, there could
-         * be other holders of the Arc<ApiProject> right now, so we can't just
-         * move "backend_impl" into the new object.  We'd have to either mutate
-         * the original ApiProject, construct a whole new SimProject (which is
-         * what we do here because it's trivial), or else put the SimProject
-         * behind an Arc.  (It's not clear that will make sense -- the two
-         * ApiProjects will have different state!)
+         * Right now, it's fine to just create a new backend object as we do
+         * here.  It's not clear if that will work once we flesh out this
+         * implementation (e.g., if there's other state in that object).
+         * However, there could be other holders of the Arc<ApiProject> right
+         * now, so we can't just move "backend_impl" into the new object.  We'd
+         * have to either mutate the original ApiProject, construct a whole new
+         * SimProject (which is what we do here because it's trivial), or else
+         * put the SimProject behind an Arc.  (It's not clear that will make
+         * sense -- the two ApiProjects will have different state!)
          */
         let beimpl : Box<SimProject> = Box::new(SimProject {});
         let newvalue = Arc::new(ApiProject {
