@@ -33,12 +33,6 @@ const SERVER_WORKER_SHUTDOWN_TIMEOUT_S: u64 = 10;
 async fn main()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
-    /*
-     * XXX it's not clear this is correct because we're not wrapping it in an
-     * actix_web::Data instance.  It may be that we get a new app_state for each
-     * thread.  However, wrapping it does not work at all.  It may be time to
-     * move past Actix...
-     */
     let app_state = api_server::setup_server_state();
 
     /*
