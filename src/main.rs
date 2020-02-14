@@ -4,6 +4,7 @@
 
 use actix_web::App;
 use actix_web::HttpServer;
+use actix_service::ServiceFactory;
 
 mod api_error;
 mod api_http_entrypoints;
@@ -34,14 +35,6 @@ async fn main()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
     /*
-     * XXX it's not clear this is correct because we're not wrapping it in an
-     * actix_web::Data instance.  It may be that we get a new app_state for each
-     * thread.  However, wrapping it does not work at all.  It may be time to
-     * move past Actix...
-     */
-    let app_state = api_server::setup_server_state();
-
-    /*
      * TODO Figure out appropriate TCP and HTTP keepalive parameters
      * TODO Set hostname
      * TODO Disable signals?
@@ -51,10 +44,9 @@ async fn main()
      * written down, so we cannot pass it between functions, store it in a
      * wrapper type, or anything else useful like that.
      */
+    api_server::init_server_state();
     let server = HttpServer::new(move || {
-        App::new()
-            .app_data(app_state.clone())
-            .configure(api_http_entrypoints::register_api_entrypoints)
+        App::new().configure(api_server::configure_app)
     })
         .workers(SERVER_NWORKERS)
         .maxconn(SERVER_WORKER_MAX_CONN)
@@ -73,3 +65,21 @@ async fn main()
 
     return Ok(())
 }
+
+// use actix_service::ServiceFactory;
+// use actix_web::dev::{MessageBody, ServiceRequest, ServiceResponse};
+// use actix_web::{web, Error, HttpResponse};
+// pub fn api_create_app(app_state: web::Data<api_server::ApiServerState>) -> App<
+//     impl ServiceFactory<
+//         Config = (),
+//         Request = ServiceRequest,
+//         Response = ServiceResponse<impl MessageBody>,
+//         Error = Error,
+//     >,
+//     impl MessageBody,
+// >
+// {
+//     App::new()
+//         .app_data(app_state.clone())
+//         .configure(api_http_entrypoints::register_api_entrypoints)
+// }

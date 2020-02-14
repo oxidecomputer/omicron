@@ -7,6 +7,12 @@ edition = "2018"
 [dependencies]
 actix-web = "2.0"
 actix-rt = "1.0"
+# It's really unfortunate that we need "actix-http" and "actix-service", but we
+# need it for the IntoServiceFactory trait we need if we're to pass around
+# ServiceFactory instances, which we need if we don't want to put the whole
+# program into main() (e.g., to put some of it into unit tests as well).
+actix-http = "1.0"
+actix-service = "1.0"
 async-trait = "0.1.24"
 futures = "0.3.1"
 bytes = "0.5.4"
