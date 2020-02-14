@@ -37,6 +37,6 @@ pub fn setup_server_state()
     simbuilder.project_create("simproject3");
 
     Data::new(ApiServerState {
-        backend: simbuilder.build()
+        backend: Arc::new(simbuilder.build())
     })
 }

@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use serde::Deserialize;
 use serde::Serialize;
+use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use crate::api_error::ApiError;
  * A stream of Results, each potentially representing an object in the API.
  */
 pub type ObjectStream<T> = Pin<Box<
-    dyn Stream<Item = Result<T, ApiError>>
+    dyn Stream<Item = Result<Arc<T>, ApiError>>
 >>;
 
 /**
@@ -47,6 +48,7 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 
 
 /**
+ * XXX update this comment
  * ApiObject is a trait implemented by the types used to represent objects in
  * the API.  It's helpful to start with a concrete example, so let's consider
  * a Project, which is about as simple a resource as we have.
@@ -79,38 +81,44 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
  */
 
 pub trait ApiObject {
-    type View;
-    
-    fn to_view(&self)
-        -> Self::View;
+    type View: Serialize;
+    fn to_view(&self) -> Self::View;
 }
-
-#[async_trait]
-pub trait ApiObjectCreateable: ApiObject {
-    type CreateParams;
-
-    // XXX does create() make sense here?  How can we call it generically?
-    // async fn create(p: CreateParams) -> CreateResult<Self>
-    async fn delete(&self)
-        -> DeleteResult;
-}
-
-#[async_trait]
-pub trait ApiObjectUpdateable<V>: ApiObject<View=V> {
-    type UpdateParams;
-
-    async fn update(&self, p: &Self::UpdateParams)
-        -> UpdateResult<dyn ApiObjectUpdateable<V, UpdateParams=Self::UpdateParams>>;
-}
-
 
 /**
  * Represents a Project in the API.
  */
-pub trait ApiProject :
-    ApiObject<View=ApiProjectView> +
-    ApiObjectCreateable<CreateParams=ApiProjectCreateParams> +
-    ApiObjectUpdateable<ApiProjectView, UpdateParams=ApiProjectUpdateParams> {
+pub struct ApiProject {
+    pub backend_impl: Box<dyn Any + Send + Sync>,
+
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub generation: u64,
+}
+
+impl ApiObject for ApiProject {
+    type View = ApiProjectView;
+
+    fn to_view(&self)
+        -> ApiProjectView
+    {
+        ApiProjectView {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            description: self.description.clone()
+        }
+    }
+}
+
+/**
+ * Represents the properties of a Project that can be seen by end users.
+ */
+#[derive(Debug, Serialize)]
+pub struct ApiProjectView {
+    pub id: String,
+    pub name: String,
+    pub description: String
 }
 
 /**
@@ -132,38 +140,24 @@ pub struct ApiProjectUpdateParams {
 }
 
 /**
- * Represents the properties of a Project that can be seen by end users.
- */
-#[derive(Debug, Serialize)]
-pub struct ApiProjectView {
-    pub id: String,
-    pub name: String,
-    pub description: String
-}
-
-/**
  * Represents a backend implementation of the API.
+ * TODO Is it possible to make some of these operations more generic?  A
+ * particularly good example is probably list() (or even lookup()), where
+ * with the right type parameters, generic code can be written to work on all
+ * types.
+ * TODO update and delete need to accommodate both with-etag and don't-care
  */
 #[async_trait]
 pub trait ApiBackend: Send + Sync {
-    async fn project_create(&self, params: &ApiProjectCreateParams) ->
-        CreateResult<dyn ApiProject>;
-    async fn project_lookup(&self, name: String) ->
-        LookupResult<dyn ApiProject>;
-
-    // TODO needs to accommodate both with-etag and don't-care
-    // TODO we don't even need these generic funcs, right?  They'll be functions
-    // on the objects returned from *_create() and *_lookup()
-    // async fn object_delete<T>(&self, o: T)
-    //     where T: ApiObjectCreateable
-    //     -> DeleteResult;
-    // async fn object_update<ObjectType, UpdateParamType>(&self,
-    //     object: ObjectType, params: UpdateParamType)
-    //     where ObjectType: ApiObjectUpdateable<UpdateParams=UpdateParamType>
-    //     -> UpdateResult<ObjectType>;
-    // async fn object_lookup<T>(&self, id: String)
-    //     where T: ApiObject
-    //     -> LookupResult<ObjectType>;
-
-    // TODO what does list() look like?  With a marker type?
+    async fn project_create(&self, params: &ApiProjectCreateParams)
+        -> CreateResult<ApiProject>;
+    async fn project_lookup(&self, name: String)
+        -> LookupResult<ApiProject>;
+    async fn project_delete(&self, name: String)
+        -> DeleteResult;
+    async fn project_update(&self, name: String,
+        params: &ApiProjectUpdateParams)
+        -> UpdateResult<ApiProject>;
+    async fn projects_list(&self, marker: Option<String>, limit: usize)
+        -> ListResult<ApiProject>;
 }

@@ -9,14 +9,18 @@ use actix_web::HttpResponse;
 use actix_web::web::Data;
 use actix_web::web::Json;
 use actix_web::web::Path;
+use actix_web::web::Query;
 use actix_web::web::ServiceConfig;
-use serde::Serialize;
+use futures::stream::StreamExt;
+use serde::Deserialize;
 
 use crate::api_error::ApiError;
 use crate::api_http_util::api_http_serialize_for_stream;
+use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+use crate::api_model::ObjectStream;
 use crate::api_server::ApiServerState;
 
 pub fn register_api_entrypoints(config: &mut ServiceConfig)
@@ -34,11 +38,11 @@ pub fn register_api_entrypoints(config: &mut ServiceConfig)
  * Helper functions for emitting responses
  */
 
-fn api_http_create<T>(object: T)
+fn api_http_create<T>(object: Arc<T>)
     -> Result<HttpResponse, ApiError>
-    where T: Serialize
+    where T: ApiObject
 {
-    let serialized = api_http_serialize_for_stream(&Ok(object))?;
+    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
     Ok(HttpResponse::Created()
         .content_type("application/json")
         .body(serialized))
@@ -50,14 +54,33 @@ fn api_http_delete()
     Ok(HttpResponse::NoContent().finish())
 }
 
-fn api_http_emit_one<T>(object: T)
+fn api_http_emit_one<T>(object: Arc<T>)
     -> Result<HttpResponse, ApiError>
-    where T: Serialize
+    where T: ApiObject
 {
-    let serialized = api_http_serialize_for_stream(&Ok(object))?;
+    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
     Ok(HttpResponse::Ok()
         .content_type("application/json")
         .body(serialized))
+}
+
+fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
+    -> Result<HttpResponse, ApiError>
+    where T: ApiObject
+{
+    let byte_stream = object_stream
+        .map(|maybe_object| maybe_object.map(|object| object.to_view()))
+        .map(|maybe_object| api_http_serialize_for_stream(&maybe_object));
+    /*
+     * TODO Figure out if this is the right format (newline-separated JSON) and
+     * if so whether it's a good content-type for this.
+     * Is it important to be able to support different formats later?  (or
+     * useful to factor the code so that we could?)
+     */
+    let response = HttpResponse::Ok()
+        .content_type("application/x-json-stream")
+        .streaming(byte_stream);
+    Ok(response)
 }
 
 /*
@@ -90,16 +113,22 @@ fn api_http_emit_one<T>(object: T)
  *    DELETE /projects/{project_id}     -> api_projects_delete_project()
  */
 
-async fn api_projects_get()
+#[derive(Deserialize)]
+struct ListQueryParams {
+    marker: Option<String>,
+    limit: Option<usize>
+}
+
+async fn api_projects_get(
+    server: Data<ApiServerState>,
+    params: Query<ListQueryParams>)
     -> Result<HttpResponse, ApiError>
 {
-    /*
-     * TODO Figure out if this is the right format (newline-separated JSON) and
-     * if so whether it's a good content-type for this.
-     * Is it important to be able to support different formats later?  (or
-     * useful to factor the code so that we could?)
-     */
-    unimplemented!("list projects");
+    let backend = &*server.backend;
+    let limit = params.limit.unwrap_or(3); // XXX
+    let marker = params.marker.as_ref().map(|s| s.clone());
+    let project_stream = backend.projects_list(marker, limit).await?;
+    api_http_emit_stream(project_stream)
 }
 
 async fn api_projects_post(
@@ -109,7 +138,7 @@ async fn api_projects_post(
 {
     let backend = &*server.backend;
     let project = backend.project_create(&*new_project).await?;
-    api_http_create(project.to_view())
+    api_http_create(project)
 }
 
 async fn api_projects_get_project(
@@ -119,8 +148,8 @@ async fn api_projects_get_project(
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
-    let project : Arc<dyn ApiProject> = backend.project_lookup(project_id).await?;
-    api_http_emit_one(project.to_view())
+    let project : Arc<ApiProject> = backend.project_lookup(project_id).await?;
+    api_http_emit_one(project)
 }
 
 async fn api_projects_delete_project(
@@ -130,11 +159,17 @@ async fn api_projects_delete_project(
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
-    let project : Arc<dyn ApiProject> = backend.project_lookup(project_id).await?;
-    project.delete().await?;
+    backend.project_delete(project_id).await?;
     api_http_delete()
 }
 
+/*
+ * TODO: Is it valid for PUT to accept application/json that's a subset of what
+ * the resource actually represents?  If not, is that a problem?  (HTTP may
+ * require that this be idempotent.)  If so, can we get around that having this
+ * be a slightly different content-type (e.g., "application/json-patch")?  We
+ * should see what other APIs do.
+ */
 async fn api_projects_put_project(
     server: Data<ApiServerState>,
     project_id: Path<String>,
@@ -143,7 +178,6 @@ async fn api_projects_put_project(
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
-    let oldproject : Arc<dyn ApiProject> = backend.project_lookup(project_id).await?;
-    let newproject = oldproject.update(&*updated_project).await?;
-    api_http_emit_one(newproject.to_view())
+    let newproject = backend.project_update(project_id, &*updated_project).await?;
+    api_http_emit_one(newproject)
 }
