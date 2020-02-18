@@ -11,11 +11,7 @@
  *   shutdown timeout), server backlog, number of workers, max connections per
  *   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
  *   timeout)
- * TODO Most of this could move to a library function, with the executable
- * itself only being responsible for things like command-line arguments.
- * The problem is that the HttpServer type provided by Actix cannot be
- * written down, so we cannot pass it between functions, store it in a
- * wrapper type, or anything else useful like that.
+ * - Move even more of the server setup into api_server.rs
  */
 
 mod api_error;
