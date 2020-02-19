@@ -136,6 +136,7 @@ async fn http_request_handle(
     } else {
         let body_bytes = http_read_body(
             request.body_mut(), server.config.request_body_max_bytes).await?;
+        eprintln!("dap: read {} bytes", body_bytes.len());
     }
 
     Ok(Response::new("Hello\n".into()))

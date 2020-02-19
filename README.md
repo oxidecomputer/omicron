@@ -41,18 +41,15 @@ Use `curl` to hit the server:
 
 ## TODO
 
-- Explore rewrite to Rocket
-- Revisit the Error type
+- Rebuilding for Hyper:
+  - Wire up the request handlers I built previously
+    - Build out routing table (has to include JSON parsing and query parsing
+      where wanted)
+    - Flesh out the Response type emitted by the endpoints
+  - Revisit the Error type
 - Flesh out endpoints and simulator
 
 Longer term:
 
 - Versioning (header? path? translators for older versions?)
 - Pagination? (Opaque token?  What does Stripe do?)
-- It seems like there are cases where Actix spits out text error messages to the
-  response (e.g., if you haven't configured app\_data() and try to use it).
-  That seems really bad.  We should understand these and remove them.
-- There are also cases where Actix reports a 400 and it's not clear why (e.g.,
-  trying to use curl's "-d" flag when `POST`ing to a JSON endpoint).  I'm sure
-  there's a good reason for this being a 400-level error, but how can we have
-  visibility into these requests?
