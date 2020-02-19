@@ -37,6 +37,8 @@ pub struct ApiError {
 }
 impl ResponseError for ApiError {
 }
+impl std::error::Error for ApiError {
+}
 impl Display for ApiError {
     fn fmt(&self, _f: &mut Formatter) -> Result {
         // XXX What is this used for?  Should this emit JSON?
@@ -52,5 +54,21 @@ impl From<SerdeError> for ApiError {
     {
         // XXX
         ApiError {}
+    }
+}
+
+impl From<hyper::error::Error> for ApiError {
+    fn from(_error: hyper::error::Error)
+        -> Self
+    {
+        // XXX
+        ApiError {}
+    }
+}
+
+impl ApiError {
+    pub fn into_generic_error(self) -> Box<dyn std::error::Error + Send + Sync> {
+        // XXX
+        unimplemented!("convert API error to generic error");
     }
 }
