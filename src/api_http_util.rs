@@ -2,9 +2,13 @@
  * facilities related to the HTTP layer of the API
  */
 
-use actix_web::HttpResponse;
 use bytes::Bytes;
 use futures::stream::StreamExt;
+use http::header;
+use http::status::StatusCode;
+use hyper::Body;
+use hyper::Response;
+use hyper::body::HttpBody;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -90,60 +94,63 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
  * ApiObject.
  */
 pub fn api_http_create<T>(object: Arc<T>)
-    -> Result<HttpResponse, ApiError>
-    where T: ApiObject
+    -> Result<Response<Body>, ApiError>
+    where
+        T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-    Ok(HttpResponse::Created()
-        .content_type("application/json")
-        .body(serialized))
+    // XXX need way to convert this stream to a real body
+    Ok(Response::builder()
+        .status(StatusCode::CREATED)
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(serialized.into())?)
 }
 
-/**
- * Return an HTTP response appropriate for having successfully deleted a
- * resource.  This returns an empty 204 "No Content" response.
- */
-pub fn api_http_delete()
-    -> Result<HttpResponse, ApiError>
-{
-    Ok(HttpResponse::NoContent().finish())
-}
-
-/**
- * Returns an HTTP response appropriate for fetching a single resource.  This
- * returns a 200 "OK" response whose body describes the given ApiObject.
- */
-pub fn api_http_emit_one<T>(object: Arc<T>)
-    -> Result<HttpResponse, ApiError>
-    where T: ApiObject
-{
-    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-    Ok(HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serialized))
-}
-
-/**
- * Returns an HTTP response appropriate for streaming a sequence of resources
- * represented by `object_stream`.  This returns a 200 "OK" response whose body
- * contains the list of resources, newline-separated.  These are streamed out
- * asynchronously.
- */
-pub fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
-    -> Result<HttpResponse, ApiError>
-    where T: ApiObject
-{
-    let byte_stream = object_stream
-        .map(|maybe_object| maybe_object.map(|object| object.to_view()))
-        .map(|maybe_object| api_http_serialize_for_stream(&maybe_object));
-    /*
-     * TODO Figure out if this is the right format (newline-separated JSON) and
-     * if so whether it's a good content-type for this.
-     * Is it important to be able to support different formats later?  (or
-     * useful to factor the code so that we could?)
-     */
-    let response = HttpResponse::Ok()
-        .content_type("application/x-json-stream")
-        .streaming(byte_stream);
-    Ok(response)
-}
+// /**
+//  * Return an HTTP response appropriate for having successfully deleted a
+//  * resource.  This returns an empty 204 "No Content" response.
+//  */
+// pub fn api_http_delete()
+//     -> Result<Response, ApiError>
+// {
+//     Ok(Response::NoContent().finish())
+// }
+// 
+// /**
+//  * Returns an HTTP response appropriate for fetching a single resource.  This
+//  * returns a 200 "OK" response whose body describes the given ApiObject.
+//  */
+// pub fn api_http_emit_one<T>(object: Arc<T>)
+//     -> Result<Response, ApiError>
+//     where T: ApiObject
+// {
+//     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
+//     Ok(Response::Ok()
+//         .content_type("application/json")
+//         .body(serialized))
+// }
+// 
+// /**
+//  * Returns an HTTP response appropriate for streaming a sequence of resources
+//  * represented by `object_stream`.  This returns a 200 "OK" response whose body
+//  * contains the list of resources, newline-separated.  These are streamed out
+//  * asynchronously.
+//  */
+// pub fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
+//     -> Result<Response, ApiError>
+//     where T: ApiObject
+// {
+//     let byte_stream = object_stream
+//         .map(|maybe_object| maybe_object.map(|object| object.to_view()))
+//         .map(|maybe_object| api_http_serialize_for_stream(&maybe_object));
+//     /*
+//      * TODO Figure out if this is the right format (newline-separated JSON) and
+//      * if so whether it's a good content-type for this.
+//      * Is it important to be able to support different formats later?  (or
+//      * useful to factor the code so that we could?)
+//      */
+//     let response = Response::Ok()
+//         .content_type("application/x-json-stream")
+//         .streaming(byte_stream);
+//     Ok(response)
+// }

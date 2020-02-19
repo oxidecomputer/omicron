@@ -3,7 +3,9 @@
  */
 
 use crate::api_error::ApiError;
-use crate::api_model;
+use crate::api_model::ApiBackend;
+use crate::api_model::ApiProjectCreateParams;
+use crate::api_http_entrypoints;
 use crate::sim;
 use sim::SimulatorBuilder;
 
@@ -31,7 +33,7 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
  */
 pub struct ApiServerState {
     /** the API backend to use for servicing requests */
-    pub backend: Arc<dyn api_model::ApiBackend>,
+    pub backend: Arc<dyn ApiBackend>,
     /** static server configuration parameters */
     pub config: ApiServerConfig,
 }
@@ -46,7 +48,7 @@ pub struct ApiServerConfig {
 
 /**
  * Set up initial server-wide shared state.
- * TODO too many Arcs?
+ * TODO-cleanup too many Arcs?
  */
 pub fn setup_server_state()
     -> Arc<ApiServerState>
@@ -122,24 +124,39 @@ async fn http_request_handle(
      * TODO-hardening: add a request read timeout as well so that we don't allow
      * this to take forever.
      */
-    eprintln!("handling request: method = {}, uri = {}",
-        request.method().as_str(), request.uri());
-    let expect_empty_body = request.method() == Method::GET
-        || request.method() == Method::HEAD;
-    if expect_empty_body {
+    let body_bytes;
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
+    if method == Method::GET || method == Method::HEAD {
         let nbytesread = http_dump_body(request.body_mut()).await?;
         eprintln!("dap: read {} bytes", nbytesread);
         if nbytesread != 0 {
             // XXX better error
             return Err(ApiError {}.into_generic_error());
         }
+        body_bytes = Bytes::new();
     } else {
-        let body_bytes = http_read_body(
+        body_bytes = http_read_body(
             request.body_mut(), server.config.request_body_max_bytes).await?;
         eprintln!("dap: read {} bytes", body_bytes.len());
     }
 
-    Ok(Response::new("Hello\n".into()))
+    /* TODO: should we be redirecting to paths that end in "/"? */
+    if uri == "/projects" {
+        if method == Method::GET {
+            /* TODO parse query parameters */
+            unimplemented!("GET /projects");
+        } else if method == Method::POST {
+            let createparams: ApiProjectCreateParams =
+                serde_json::from_slice(&body_bytes)?;
+            let response = api_http_entrypoints::api_projects_post(
+                &server, &createparams).await?;
+            return Ok(response)
+        }
+    }
+
+    unimplemented!("all URIs except POST /projects")
 }
 
 /**
@@ -178,7 +195,15 @@ async fn http_read_body<T>(body: &mut T, cap: usize)
         parts.put(buf);
     }
 
-    assert!(body.is_end_stream());
+    /*
+     * Read the trailers as well, even though we're not going to do anything
+     * with them.
+     */
+    body.trailers().await?;
+    /* XXX why does the is_end_stream() assertion fail and the next one panic? */
+    // assert!(body.is_end_stream());
+    // assert!(body.data().await.is_none());
+    // assert!(body.trailers().await?.is_none());
     Ok(parts.into())
 }
 

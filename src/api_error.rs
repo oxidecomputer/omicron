@@ -66,6 +66,15 @@ impl From<hyper::error::Error> for ApiError {
     }
 }
 
+impl From<http::Error> for ApiError {
+    fn from(_error: http::Error)
+        -> Self
+    {
+        // XXX
+        ApiError {}
+    }
+}
+
 impl ApiError {
     pub fn into_generic_error(self) -> Box<dyn std::error::Error + Send + Sync> {
         // XXX
