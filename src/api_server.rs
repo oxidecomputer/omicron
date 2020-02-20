@@ -5,6 +5,7 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiProjectCreateParams;
+use crate::api_model::ApiProjectUpdateParams;
 use crate::api_http_entrypoints;
 use crate::sim;
 use sim::SimulatorBuilder;
@@ -123,40 +124,135 @@ async fn http_request_handle(
      * TODO-hardening: check that this is appropriate behavior
      * TODO-hardening: add a request read timeout as well so that we don't allow
      * this to take forever.
+     * TODO-correctness: check that URL processing (particularly with slashes as
+     * the only separator) is correct.  (Do we need to URL-escape or un-escape
+     * here?  Redirect container URls that don't end it "/"?)
+     * TODO-cleanup: use "url" crate for better URL parsing?
      */
-    let body_bytes;
     let method = request.method().clone();
     let uri = request.uri().clone();
+    let uri_parts : Vec<&str> = uri
+        .path()
+        .split("/")
+        .filter(|s| *s != "")
+        .collect();
     eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
-    if method == Method::GET || method == Method::HEAD {
+
+    /*
+     * The URI must have started with a "/".  When we split by "/", we should
+     * get at least two components: at least one for the characters before that
+     * initial "/" character, and one for the characters after it.  However,
+     * both could be empty, as in the case of the URI "/", and we filtered out
+     * empty components above.
+     *
+     * We currently only support paths under "/projects", so if we had zero
+     * non-empty components (which would indicate the resource "/") or anything
+     * whose first component is not "projects", bail out now.
+     */
+    if uri_parts.is_empty() || uri_parts[0] != "projects" {
+        // TODO do we need to do this?  Will hyper do it for us?
+        http_dump_body(request.body_mut()).await?;
+        // XXX better error
+        return Err((ApiError {}).into_generic_error());
+    }
+
+    /*
+     * Similarly, we don't support any nested resources beneath
+     * "/projects/{project_id}", so if there are more than two URI components,
+     * bail out.
+     */
+    if uri_parts.len() > 2 {
+        // TODO do we need to do this?  Will hyper do it for us?
+        http_dump_body(request.body_mut()).await?;
+        // XXX better error
+        return Err((ApiError {}).into_generic_error());
+    }
+
+    /*
+     * Operations on specific projects.
+     */
+    if uri_parts.len() == 2 {
+        let project_id = uri_parts[1];
+
+        /* PUT /projects/{project_id} */
+        if method == Method::PUT {
+            let project_id = uri_parts[1];
+            let body_bytes = http_read_body(
+                request.body_mut(), server.config.request_body_max_bytes).await?;
+            let update_params: ApiProjectUpdateParams =
+                serde_json::from_slice(&body_bytes)?;
+            let response = api_http_entrypoints::api_projects_put_project(
+                &server, project_id.to_string(), &update_params).await?;
+            return Ok(response);
+        }
+
+        /*
+         * The remaining supported methods do not support bodies.
+         */
         let nbytesread = http_dump_body(request.body_mut()).await?;
-        eprintln!("dap: read {} bytes", nbytesread);
         if nbytesread != 0 {
             // XXX better error
-            return Err(ApiError {}.into_generic_error());
+            return Err((ApiError {}).into_generic_error());
         }
-        body_bytes = Bytes::new();
-    } else {
-        body_bytes = http_read_body(
-            request.body_mut(), server.config.request_body_max_bytes).await?;
-        eprintln!("dap: read {} bytes", body_bytes.len());
-    }
 
-    /* TODO: should we be redirecting to paths that end in "/"? */
-    if uri == "/projects" {
+        /* GET /projects/{project_id} */
         if method == Method::GET {
-            /* TODO parse query parameters */
-            unimplemented!("GET /projects");
-        } else if method == Method::POST {
-            let createparams: ApiProjectCreateParams =
-                serde_json::from_slice(&body_bytes)?;
-            let response = api_http_entrypoints::api_projects_post(
-                &server, &createparams).await?;
-            return Ok(response)
+            let response = api_http_entrypoints::api_projects_get_project(
+                &server, project_id.to_string()).await?;
+            return Ok(response);
         }
+
+        /* DELETE /projects/{project_id} */
+        if method == Method::DELETE {
+            let response = api_http_entrypoints::api_projects_delete_project(
+                &server, project_id.to_string()).await?;
+            return Ok(response);
+        }
+
+        // XXX better error
+        return Err((ApiError {}).into_generic_error());
     }
 
-    unimplemented!("all URIs except POST /projects")
+    /*
+     * Operations on the "/projects" collection.
+     */
+    assert!(uri_parts.len() == 1 && uri_parts[0] == "projects");
+
+    /* POST /projects */
+    if method == Method::POST {
+        let body_bytes = http_read_body(
+            request.body_mut(), server.config.request_body_max_bytes).await?;
+        let create_params: ApiProjectCreateParams =
+            serde_json::from_slice(&body_bytes)?;
+        // TODO-understanding: "server" is an Arc.  How is it that we can pass a
+        // reference to it when the callee is expecting the type itself?  Does
+        // it implicitly get cloned?  Are we passing ownership?
+        let response = api_http_entrypoints::api_projects_post(
+            &server, &create_params).await?;
+        return Ok(response);
+    }
+
+    /* GET /projects */
+    if method == Method::GET {
+        /* GETs do not support bodies. */
+        let nbytesread = http_dump_body(request.body_mut()).await?;
+        if nbytesread != 0 {
+            // XXX better error
+            return Err((ApiError {}).into_generic_error());
+        }
+
+        // XXX working here: query parameters!
+        let query_params = api_http_entrypoints::ListQueryParams {
+            marker: None,
+            limit: Some(10)
+        };
+        let response = api_http_entrypoints::api_projects_get(
+            &server, &query_params).await?;
+        return Ok(response);
+    }
+
+    // XXX better error
+    return Err((ApiError {}).into_generic_error());
 }
 
 /**

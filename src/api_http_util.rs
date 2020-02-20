@@ -2,7 +2,9 @@
  * facilities related to the HTTP layer of the API
  */
 
+use bytes::BufMut;
 use bytes::Bytes;
+use bytes::BytesMut;
 use futures::stream::StreamExt;
 use http::header;
 use http::status::StatusCode;
@@ -106,51 +108,69 @@ pub fn api_http_create<T>(object: Arc<T>)
         .body(serialized.into())?)
 }
 
-// /**
-//  * Return an HTTP response appropriate for having successfully deleted a
-//  * resource.  This returns an empty 204 "No Content" response.
-//  */
-// pub fn api_http_delete()
-//     -> Result<Response, ApiError>
-// {
-//     Ok(Response::NoContent().finish())
-// }
-// 
-// /**
-//  * Returns an HTTP response appropriate for fetching a single resource.  This
-//  * returns a 200 "OK" response whose body describes the given ApiObject.
-//  */
-// pub fn api_http_emit_one<T>(object: Arc<T>)
-//     -> Result<Response, ApiError>
-//     where T: ApiObject
-// {
-//     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-//     Ok(Response::Ok()
-//         .content_type("application/json")
-//         .body(serialized))
-// }
-// 
-// /**
-//  * Returns an HTTP response appropriate for streaming a sequence of resources
-//  * represented by `object_stream`.  This returns a 200 "OK" response whose body
-//  * contains the list of resources, newline-separated.  These are streamed out
-//  * asynchronously.
-//  */
-// pub fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
-//     -> Result<Response, ApiError>
-//     where T: ApiObject
-// {
-//     let byte_stream = object_stream
-//         .map(|maybe_object| maybe_object.map(|object| object.to_view()))
-//         .map(|maybe_object| api_http_serialize_for_stream(&maybe_object));
-//     /*
-//      * TODO Figure out if this is the right format (newline-separated JSON) and
-//      * if so whether it's a good content-type for this.
-//      * Is it important to be able to support different formats later?  (or
-//      * useful to factor the code so that we could?)
-//      */
-//     let response = Response::Ok()
-//         .content_type("application/x-json-stream")
-//         .streaming(byte_stream);
-//     Ok(response)
-// }
+/**
+ * Return an HTTP response appropriate for having successfully deleted a
+ * resource.  This returns an empty 204 "No Content" response.
+ */
+pub fn api_http_delete()
+    -> Result<Response<Body>, ApiError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())?)
+}
+
+/**
+ * Returns an HTTP response appropriate for fetching a single resource.  This
+ * returns a 200 "OK" response whose body describes the given ApiObject.
+ */
+pub fn api_http_emit_one<T>(object: Arc<T>)
+    -> Result<Response<Body>, ApiError>
+    where T: ApiObject
+{
+    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(serialized.into())?)
+}
+
+/**
+ * Returns an HTTP response appropriate for streaming a sequence of resources
+ * represented by `object_stream`.  This returns a 200 "OK" response whose body
+ * contains the list of resources, newline-separated.  These are streamed out
+ * asynchronously.
+ * TODO It's weird that this is async and the other ones are not.  This is like
+ * half-buffered and half-streaming.
+ */
+pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
+    -> Result<Response<Body>, ApiError>
+    where T: ApiObject
+{
+    let byte_stream = object_stream
+        .map(|maybe_object| maybe_object.map(|object| object.to_view()))
+        .map(|maybe_object| api_http_serialize_for_stream(&maybe_object));
+
+    /*
+     * TODO here's where the half-async, half-buffering rears its head...
+     */
+    let bufvec: Vec<Result<Bytes, ApiError>> = byte_stream.collect().await;
+    let mut bytebuf = BytesMut::new();
+    for result in bufvec {
+        let bytes = result?;
+        bytebuf.put(bytes);
+    }
+
+    /*
+     * TODO Figure out if this is the right format (newline-separated JSON) and
+     * if so whether it's a good content-type for this.
+     * Is it important to be able to support different formats later?  (or
+     * useful to factor the code so that we could?)
+     * TODO is it better if this is streaming all the way to the client?  That
+     * would be nice, but is it more trouble than it's worth?
+     */
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, "application/x-json-stream")
+        .body(bytebuf.freeze().into())?)
+}
