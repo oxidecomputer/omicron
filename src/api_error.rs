@@ -2,19 +2,13 @@
  * API error handling facilities
  */
 
-use actix_web::error::ResponseError;
 use serde_json::error::Error as SerdeError;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
 /*
- * XXX need to take a closer look at what error handling looks like.  What makes
- * this a little complicated is that it looks like each API function needs to
- * return a Result<_, E> where E must be an actual struct that implements the
- * actix_web::error::ResponseError trait.  That is, it can't be "dyn
- * actix_web::error::ResponseError", nor can it be a Box of that.
- *
+ * XXX need to take a closer look at what error handling looks like
  * We should probably look at the "fail"/"failure" crate, as that seems
  * widely used and there's some support for it in Actix.  There's also an Error
  * struct within Actix we could potentially use.
@@ -35,15 +29,14 @@ use std::fmt::Result;
 #[derive(Debug)]
 pub struct ApiError {
 }
-impl ResponseError for ApiError {
-}
 impl std::error::Error for ApiError {
 }
+
 impl Display for ApiError {
     fn fmt(&self, _f: &mut Formatter) -> Result {
         // XXX What is this used for?  Should this emit JSON?
         // (We have to implement it in order to implement the
-        // actix_web::error::ResponseError trait.)
+        // std::error::Error trait.)
         Ok(())
     }
 }

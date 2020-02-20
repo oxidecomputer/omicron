@@ -6,11 +6,9 @@ use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::stream::StreamExt;
-use http::header;
 use http::status::StatusCode;
 use hyper::Body;
 use hyper::Response;
-use hyper::body::HttpBody;
 use serde::Serialize;
 use std::sync::Arc;
 

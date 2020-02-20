@@ -6,19 +6,15 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1.24"
+bytes = "0.5.4"
 hyper = "0.13"
 http = "0.2.0"
 tokio = { version = "0.2", features = [ "full" ] }
 futures = "0.3.1"
-serde = "1.0"
+serde = { version = "1.0", features = [ "derive" ] }
 #serde_derive = "1.0"
 serde_json = "1.0"
 #log = "0.3.0"
 #url = {version = "1.5", optional = true}
 #percent-encoding = {version = "1.0.0", optional = true}
 #clap = "2.25"
-# TODO remove these once actix conversion is complete
-actix-web = "2.0"
-actix-rt = "1.0"
-# TODO do we still need these after Actix conversion?
-bytes = "0.5.4"
