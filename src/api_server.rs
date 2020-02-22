@@ -2,7 +2,7 @@
  * server-wide state and facilities
  */
 
-use crate::api_error::ApiError;
+use crate::api_error::ApiHttpError;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
@@ -12,6 +12,7 @@ use sim::SimulatorBuilder;
 
 use bytes::Bytes;
 use bytes::BufMut;
+use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
 use hyper::Request;
@@ -104,8 +105,20 @@ async fn http_connection_handle(
  */
 async fn http_request_handle(
     server: Arc<ApiServerState>,
-    mut request: Request<Body>)
+    request: Request<Body>)
     -> Result<Response<Body>, GenericError>
+{
+    /* XXX super cheesy for now */
+    match http_request_handle_real(server, request).await {
+        Ok(response) => Ok(response),
+        Err(e) => Ok(e.into_response())
+    }
+}
+
+async fn http_request_handle_real(
+    server: Arc<ApiServerState>,
+    mut request: Request<Body>)
+    -> Result<Response<Body>, ApiHttpError>
 {
     /*
      * For now, we essentially use statically-defined request routing -- namely,
@@ -152,8 +165,7 @@ async fn http_request_handle(
     if uri_parts.is_empty() || uri_parts[0] != "projects" {
         // TODO do we need to do this?  Will hyper do it for us?
         http_dump_body(request.body_mut()).await?;
-        // XXX better error
-        return Err((ApiError {}).into_generic_error());
+        return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND));
     }
 
     /*
@@ -164,8 +176,7 @@ async fn http_request_handle(
     if uri_parts.len() > 2 {
         // TODO do we need to do this?  Will hyper do it for us?
         http_dump_body(request.body_mut()).await?;
-        // XXX better error
-        return Err((ApiError {}).into_generic_error());
+        return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND));
     }
 
     /*
@@ -191,8 +202,8 @@ async fn http_request_handle(
          */
         let nbytesread = http_dump_body(request.body_mut()).await?;
         if nbytesread != 0 {
-            // XXX better error
-            return Err((ApiError {}).into_generic_error());
+            return Err(ApiHttpError::for_bad_request(
+                "expected empty body".to_string()));
         }
 
         /* GET /projects/{project_id} */
@@ -209,8 +220,7 @@ async fn http_request_handle(
             return Ok(response);
         }
 
-        // XXX better error
-        return Err((ApiError {}).into_generic_error());
+        return Err(ApiHttpError::for_status(StatusCode::METHOD_NOT_ALLOWED));
     }
 
     /*
@@ -237,11 +247,11 @@ async fn http_request_handle(
         /* GETs do not support bodies. */
         let nbytesread = http_dump_body(request.body_mut()).await?;
         if nbytesread != 0 {
-            // XXX better error
-            return Err((ApiError {}).into_generic_error());
+            return Err(ApiHttpError::for_bad_request(
+                "expected empty body".to_string()));
         }
 
-        // XXX working here: query parameters!
+        // XXX support for query params
         let query_params = api_http_entrypoints::ListQueryParams {
             marker: None,
             limit: Some(10)
@@ -251,8 +261,7 @@ async fn http_request_handle(
         return Ok(response);
     }
 
-    // XXX better error
-    return Err((ApiError {}).into_generic_error());
+    return Err(ApiHttpError::for_status(StatusCode::METHOD_NOT_ALLOWED));
 }
 
 /**
@@ -261,7 +270,7 @@ async fn http_request_handle(
  * bytes read.  If not, an error is returned.
  */
 async fn http_read_body<T>(body: &mut T, cap: usize)
-    -> Result<Bytes, ApiError>
+    -> Result<Bytes, ApiHttpError>
     where T: HttpBody<Data=Bytes, Error=hyper::error::Error> + std::marker::Unpin,
 {
     /*
@@ -283,8 +292,9 @@ async fn http_read_body<T>(body: &mut T, cap: usize)
 
         if nbytesread + bufsize > cap {
             http_dump_body(body).await?;
-            // XXX better error
-            return Err(ApiError {});
+            // XXX check status code
+            return Err(ApiHttpError::for_bad_request(
+                format!("request body exceeded maximum size of {} bytes", cap)));
         }
 
         nbytesread += bufsize;

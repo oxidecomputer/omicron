@@ -95,7 +95,10 @@ impl ApiBackend for Simulator {
         let mut projects_by_name = self.projects_by_name.lock().await;
         if projects_by_name.contains_key(&new_project.name) {
             // XXX better error
-            return Err(ApiError {});
+            return Err(ApiError::ObjectAlreadyExists {
+                type_name: "project",
+                object_name: new_project.name.clone()
+            });
         }
 
         let newname = &new_project.name;
@@ -155,7 +158,11 @@ impl ApiBackend for Simulator {
     {
         let projects = self.projects_by_name.lock().await;
         // XXX better error
-        let project = projects.get(&name).ok_or_else(|| ApiError {})?;
+        let project = projects.get(&name).ok_or_else(||
+            ApiError::ObjectNotFound {
+                type_name: "project",
+                object_name: name.clone()
+            })?;
         let rv = Arc::clone(project);
         Ok(rv)
     }
@@ -165,7 +172,10 @@ impl ApiBackend for Simulator {
     {
         let mut projects = self.projects_by_name.lock().await;
         // XXX better error
-        projects.remove(&name).ok_or_else(|| ApiError {})?;
+        projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
+            type_name: "project",
+            object_name: name.clone()
+        })?;
         Ok(())
     }
 
@@ -178,7 +188,10 @@ impl ApiBackend for Simulator {
 
         // XXX better error
         let oldproject : Arc<ApiProject> =
-            projects.remove(&name).ok_or_else(|| ApiError {})?;
+            projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
+                type_name: "project",
+                object_name: name.clone()
+            })?;
         let newname = &new_params.name.as_ref().unwrap_or(&oldproject.name);
         let newdescription = &new_params.description.as_ref().unwrap_or(
             &oldproject.description);

@@ -13,6 +13,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::api_error::ApiError;
+use crate::api_error::ApiHttpError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
 
@@ -94,7 +95,7 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
  * ApiObject.
  */
 pub fn api_http_create<T>(object: Arc<T>)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
     where
         T: ApiObject
 {
@@ -111,7 +112,7 @@ pub fn api_http_create<T>(object: Arc<T>)
  * resource.  This returns an empty 204 "No Content" response.
  */
 pub fn api_http_delete()
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -123,7 +124,7 @@ pub fn api_http_delete()
  * returns a 200 "OK" response whose body describes the given ApiObject.
  */
 pub fn api_http_emit_one<T>(object: Arc<T>)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
     where T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
@@ -142,7 +143,7 @@ pub fn api_http_emit_one<T>(object: Arc<T>)
  * half-buffered and half-streaming.
  */
 pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
     where T: ApiObject
 {
     let byte_stream = object_stream

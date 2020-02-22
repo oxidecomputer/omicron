@@ -9,7 +9,7 @@ use hyper::Response;
 use hyper::Body;
 use serde::Deserialize;
 
-use crate::api_error::ApiError;
+use crate::api_error::ApiHttpError;
 use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
@@ -65,7 +65,7 @@ pub struct ListQueryParams {
 pub async fn api_projects_get(
     server: &ApiServerState,
     params: &ListQueryParams)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*server.backend;
     let limit = params.limit.unwrap_or(3); // XXX
@@ -81,7 +81,7 @@ pub async fn api_projects_get(
 pub async fn api_projects_post(
     server: &ApiServerState,
     new_project: &ApiProjectCreateParams)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*server.backend;
     let project = backend.project_create(&*new_project).await?;
@@ -94,7 +94,7 @@ pub async fn api_projects_post(
 pub async fn api_projects_get_project(
     server: &ApiServerState,
     project_id: String)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
@@ -108,7 +108,7 @@ pub async fn api_projects_get_project(
 pub async fn api_projects_delete_project(
     server: &ApiServerState,
     project_id: String)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
@@ -129,7 +129,7 @@ pub async fn api_projects_put_project(
     server: &ApiServerState,
     project_id: String,
     updated_project: &ApiProjectUpdateParams)
-    -> Result<Response<Body>, ApiError>
+    -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*server.backend;
     let project_id = project_id.to_string();
