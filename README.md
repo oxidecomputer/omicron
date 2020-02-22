@@ -48,6 +48,8 @@ Use `curl` to hit the server:
     - Flesh out the Response type emitted by the endpoints
   - Revisit the Error type
 - Flesh out endpoints and simulator
+- Write out road map
+  - regions, AZs, etc. need to be added per RFD 24
 
 Longer term:
 
