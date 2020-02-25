@@ -41,8 +41,6 @@ Use `curl` to hit the server:
 
 ## TODO
 
-- Lots of clean up from all the recent changes for error handling and the test
-  suite.
 - Consider implementing something similar to Actix's magic for extracting query
   parameters and JSON bodies as arguments to handler functions.  Straw man:
   - Define a Handler type similar to Actix's Factory/Handler trait/struct.
