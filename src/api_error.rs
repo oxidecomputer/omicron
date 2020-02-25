@@ -28,33 +28,30 @@
  * * We'd like to take advantage of Rust's built-in error handling control flow
  *   tools, like Results and the '?' operator.
  *
- * We adopt the following approach:
+ * To achive this, we first define `ApiHttpError`, which provides a status code,
+ * error code (via an Enum), external message (for sending in the response),
+ * optional metadata, and an internal message (for the log file or other
+ * instrumentation).  The HTTP layers of the request-handling stack may use this
+ * struct directly.  **The set of possible error codes here is part of the
+ * OpenAPI contract, as is the schema for any metadata.**  By the time an error
+ * bubbles up to the top of the request handling stack, it must be an
+ * ApiHttpError.
  *
- * * We define `ApiHttpError`, which provides a status code, error code (via an
- *   Enum), external message (for sending in the response), optional metadata,
- *   and an internal message (for the log file or other instrumentation).  The
- *   HTTP layers of the request-handling stack may use this struct directly.
- *   **The set of possible error codes here is part of the OpenAPI contract, as
- *   is the schema for any metadata.**  By the time an error bubbles up to the
- *   top of the request handling stack, it must be an ApiHttpError.  
- * * For the HTTP-agnostic layers of the API server (i.e., the model and the
- *   backend), we'll use a separate enum `ApiError` representing their errors.
- *   We'll provide a `From` implementation that converts these errors into
- *   ApiHttpErrors.  One could imagine separate enums for separate layers, but
- *   the added complexity doesn't buy us much.  We could also consider merging
- *   this with `ApiHttpError`, but it seems useful to keep these components
- *   separate from the HTTP implementation (i.e., they shouldn't have to know
- *   about status codes, and it may not be trivial to map status codes from
- *   these errors).
+ * For the HTTP-agnostic layers of the API server (i.e., the model and the
+ * backend), we'll use a separate enum `ApiError` representing their errors.
+ * We'll provide a `From` implementation that converts these errors into
+ * ApiHttpErrors.  One could imagine separate enums for separate layers, but the
+ * added complexity doesn't buy us much.  We could also consider merging this
+ * with `ApiHttpError`, but it seems useful to keep these components separate
+ * from the HTTP implementation (i.e., they shouldn't have to know about status
+ * codes, and it may not be trivial to map status codes from these errors).
  */
 
 use crate::api_http_util;
+use crate::api_model;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::error::Error as SerdeError;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::fmt::Result;
 
 /**
  * ApiHttpError represents an error generated as part of handling an API
@@ -88,8 +85,10 @@ use std::fmt::Result;
  */
 #[derive(Debug)]
 pub struct ApiHttpError {
-    // XXX add string error code
-    // XXX add cause chain for a complete log message?
+    /*
+     * TODO-polish add string error code and coverage in the test suite
+     * TODO-polish add cause chain for a complete log message?
+     */
     /** HTTP status code for this error */
     pub status_code: http::StatusCode,
     /** Error message to be sent to API client for this error */
@@ -98,26 +97,9 @@ pub struct ApiHttpError {
     pub internal_message: String,
 }
 
-/* XXX revisit this for polish */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiHttpErrorResponseBody {
     pub message: String
-}
-
-/*
- * XXX can we avoid implementing Error so we can avoid implementing Display?
- * Debug makes sense for us.  But it's not clear what Display would mean.  We
- * want to be really careful about what becomes a committed interface here.
- */
-impl std::error::Error for ApiHttpError {}
-
-impl Display for ApiHttpError {
-    fn fmt(&self, _f: &mut Formatter) -> Result {
-        // XXX What is this used for?  Should this emit JSON?
-        // (We have to implement it in order to implement the
-        // std::error::Error trait.)
-        Ok(())
-    }
 }
 
 impl From<SerdeError> for ApiHttpError {
@@ -125,8 +107,8 @@ impl From<SerdeError> for ApiHttpError {
         -> Self
     {
         /*
-         * TODO it would really be much better to annotate this with context
-         * about what we were parsing.
+         * TODO-polish it would really be much better to annotate this with
+         * context about what we were parsing.
          */
         ApiHttpError::for_bad_request(format!("invalid input: {}", error))
     }
@@ -137,8 +119,8 @@ impl From<hyper::error::Error> for ApiHttpError {
         -> Self
     {
         /*
-         * TODO dig deeper into the various cases to make sure this is a valid
-         * way to represent it.
+         * TODO-correctness dig deeper into the various cases to make sure this
+         * is a valid way to represent it.
          */
         ApiHttpError::for_bad_request(format!(
             "error processing request: {}", error))
@@ -150,8 +132,8 @@ impl From<http::Error> for ApiHttpError {
         -> Self
     {
         /*
-         * TODO dig deeper into the various cases to make sure this is a valid
-         * way to represent it.
+         * TODO-correctness dig deeper into the various cases to make sure this
+         * is a valid way to represent it.
          */
         ApiHttpError::for_bad_request(format!(
             "error processing request: {}", error))
@@ -187,7 +169,7 @@ impl ApiHttpError {
     pub fn for_status(code: http::StatusCode)
         -> Self
     {
-        // XXX This should probably be our own message.
+        /* TODO-polish This should probably be our own message. */
         let message = code.canonical_reason().unwrap().to_string();
         ApiHttpError::for_client_error(code, message)
     }
@@ -206,7 +188,16 @@ impl ApiHttpError {
     pub fn into_response(self)
         -> hyper::Response<hyper::Body>
     {
-        // XXX are these unwraps okay?
+        /*
+         * TODO-hardening: consider handling the operational errors that the
+         * Serde serialization fails or the response construction fails.  In
+         * those cases, we should probably try to report this as a serious
+         * problem (e.g., to the log) and send back a 500-level response.  (Of
+         * course, that could fail in the same way, but it's less likely because
+         * there's only one possible set of input and we can test it.  We'll
+         * probably have to use unwrap() there and make sure we've tested that
+         * code at least once!)
+         */
         hyper::Response::builder()
             .status(self.status_code)
             .header(
@@ -218,14 +209,17 @@ impl ApiHttpError {
     }
 }
 
-// XXX type names could be an enum?  at least constants...
+/**
+ * ApiError represents errors that can be generated within the API server.  See
+ * the module-level documentation for details.
+ */
 pub enum ApiError {
     ObjectNotFound {
-        type_name: &'static str,
+        type_name: api_model::ApiResourceType,
         object_name: String,
     },
     ObjectAlreadyExists {
-        type_name: &'static str,
+        type_name: api_model::ApiResourceType,
         object_name: String,
     },
 }

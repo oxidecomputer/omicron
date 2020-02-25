@@ -210,8 +210,6 @@ async fn make_request<RequestBodyType: Serialize + Debug>(
     /*
      * We got an error.  Parse the response body to make sure it's valid and
      * then return that.
-     * TODO-coverage: when we add an error code and other information here, we
-     * should validate them, too.
      */
     let error_body: ApiHttpErrorResponseBody = read_json(&mut response).await;
     eprintln!("client error: {:?}", error_body);

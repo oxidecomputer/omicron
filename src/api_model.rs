@@ -9,6 +9,9 @@ use futures::stream::Stream;
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FormatResult;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -55,6 +58,21 @@ use crate::api_error::ApiError;
 pub trait ApiObject {
     type View: Serialize;
     fn to_view(&self) -> Self::View;
+}
+
+/**
+ * List of API resource types
+ */
+pub enum ApiResourceType {
+    Project,
+}
+
+impl Display for ApiResourceType {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        write!(f, "{}", match self {
+            ApiResourceType::Project => "project",
+        })
+    }
 }
 
 /*

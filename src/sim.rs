@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::api_error::ApiError;
+use crate::api_model::ApiResourceType;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -94,9 +95,8 @@ impl ApiBackend for Simulator {
     {
         let mut projects_by_name = self.projects_by_name.lock().await;
         if projects_by_name.contains_key(&new_project.name) {
-            // XXX better error
             return Err(ApiError::ObjectAlreadyExists {
-                type_name: "project",
+                type_name: ApiResourceType::Project,
                 object_name: new_project.name.clone()
             });
         }
@@ -157,10 +157,9 @@ impl ApiBackend for Simulator {
         LookupResult<ApiProject>
     {
         let projects = self.projects_by_name.lock().await;
-        // XXX better error
         let project = projects.get(&name).ok_or_else(||
             ApiError::ObjectNotFound {
-                type_name: "project",
+                type_name: ApiResourceType::Project,
                 object_name: name.clone()
             })?;
         let rv = Arc::clone(project);
@@ -171,9 +170,8 @@ impl ApiBackend for Simulator {
         -> DeleteResult
     {
         let mut projects = self.projects_by_name.lock().await;
-        // XXX better error
         projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
-            type_name: "project",
+            type_name: ApiResourceType::Project,
             object_name: name.clone()
         })?;
         Ok(())
@@ -186,10 +184,9 @@ impl ApiBackend for Simulator {
     {
         let mut projects = self.projects_by_name.lock().await;
 
-        // XXX better error
         let oldproject : Arc<ApiProject> =
             projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
-                type_name: "project",
+                type_name: ApiResourceType::Project,
                 object_name: name.clone()
             })?;
         let newname = &new_params.name.as_ref().unwrap_or(&oldproject.name);
