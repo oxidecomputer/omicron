@@ -10,11 +10,14 @@ use hyper::Request;
 use hyper::Response;
 use hyper::StatusCode;
 use hyper::client::HttpConnector;
+use oxide_api_prototype::api_error::ApiHttpErrorResponseBody;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 use oxide_api_prototype::api_server;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use tokio::task::JoinHandle;
 
@@ -91,6 +94,132 @@ async fn test_teardown(testctx: TestContext)
 }
 
 /**
+ * List of allowed HTTP headers in responses.  This is used to make sure we
+ * don't leak headers unexpectedly.
+ */
+const ALLOWED_HEADER_NAMES: [&str; 3] = [
+    "content-length",
+    "content-type",
+    "date",
+];
+
+/**
+ * Execute an HTTP request against the test server and perform basic validation
+ * of the result, including:
+ *
+ * - the expected status code
+ * - the expected Date header (within reason)
+ * - for error responses: the expected body content
+ * - header names are in allowed list
+ * - any other semantics that can be verified in general
+ */
+async fn make_request<RequestBodyType: Serialize + Debug>(
+    testctx: &TestContext,
+    method: Method,
+    path: &str,
+    request_body: Option<RequestBodyType>,
+    expected_status: StatusCode)
+    -> Result<Response<Body>, ApiHttpErrorResponseBody>
+{
+    let uri = testctx.url(path);
+
+    let time_before = chrono::offset::Utc::now().timestamp();
+    eprintln!("client request: {} {}\nbody:\n{:?}", method, uri, &request_body);
+
+    let body: Body = match request_body {
+        None => Body::empty(),
+        Some(input) => serde_json::to_string(&input).unwrap().into()
+    };
+
+    let mut response = testctx.client.request(
+        Request::builder()
+            .method(method)
+            .uri(testctx.url(path))
+            .body(body)
+            .expect("attempted to construct invalid request"))
+        .await
+        .expect("failed to make request to server");
+
+    /* Check that we got the expected response code. */
+    let status = response.status();
+    eprintln!("client received response: status {}", status);
+    assert_eq!(expected_status, status);
+
+    /*
+     * Check that we didn't have any unexpected headers.  This could be more
+     * efficient by putting the allowed headers into a BTree or Hash, but right
+     * now the structure is tiny and it's convenient to have it
+     * statically-defined above.
+     */
+    let headers = response.headers();
+    for header_name in headers.keys() {
+        let mut okay = false;
+        for allowed_name in ALLOWED_HEADER_NAMES.iter() {
+            if header_name == allowed_name {
+                okay = true;
+                break;
+            }
+        }
+
+        if !okay {
+            panic!("header name not in allowed list: \"{}\"", header_name);
+        }
+    }
+
+    /*
+     * Sanity check the Date header in the response.  Note that this assertion
+     * will fail spuriously in the unlikely event that the system clock is
+     * adjusted backwards in between when we sent the request and when we
+     * received the response, but we consider that case unlikely enough to be
+     * worth doing this check anyway.  (We'll try to check for the clock reset
+     * condition, too, but we cannot catch all cases that would cause the Date
+     * header check to be incorrect.)
+     *
+     * Note that the Date header typically only has precision down to one
+     * second, so we don't want to try to do a more precise comparison.
+     */
+    let time_after = chrono::offset::Utc::now().timestamp();
+    let date_header = headers
+        .get(http::header::DATE).expect("missing Date header")
+        .to_str().expect("non-ASCII characters in Date header");
+    let time_request = chrono::DateTime::parse_from_rfc2822(date_header)
+        .expect("unable to parse server's Date header");
+    assert!(time_before <= time_after,
+        "time obviously went backwards during the test");
+    assert!(time_request.timestamp() >= time_before - 1);
+    assert!(time_request.timestamp() <= time_after + 1);
+
+    /*
+     * For "204 No Content" responses, validate that we got no content in the
+     * body.
+     */
+    if status == StatusCode::NO_CONTENT {
+        let body_bytes = hyper::body::to_bytes(response.body_mut()).await
+            .expect("error reading body");
+        assert_eq!(0, body_bytes.len());
+    }
+
+    /*
+     * If this was a successful response, there's nothing else to check here.
+     * Return the response so the caller can validate the content if they want.
+     */
+    if !status.is_client_error() && !status.is_server_error() {
+        return Ok(response);
+    }
+
+    /*
+     * We got an error.  Parse the response body to make sure it's valid and
+     * then return that.
+     * TODO-coverage: when we add an error code and other information here, we
+     * should validate them, too.
+     */
+    let error_body: ApiHttpErrorResponseBody = read_json(&mut response).await;
+    eprintln!("client error: {:?}", error_body);
+    Err(error_body)
+}
+
+
+/**
  * Given a Hyper Response whose body is expected to represent newline-separated
  * JSON, each of which is expected to be parseable via Serde as type T,
  * asynchronously read the body of the response and parse it accordingly,
@@ -99,14 +228,19 @@ async fn test_teardown(testctx: TestContext)
 async fn read_ndjson<T: DeserializeOwned>(response: &mut Response<Body>)
     -> Vec<T>
 {
+    let headers = response.headers();
+    assert_eq!(oxide_api_prototype::api_http_util::CONTENT_TYPE_NDJSON,
+        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
     let body_bytes = hyper::body::to_bytes(response.body_mut()).await
         .expect("error reading body");
     let body_string = String::from_utf8(body_bytes.as_ref().into())
         .expect("response contained non-UTF-8 bytes");
 
-    // TODO-cleanup: should probably implement NDJSON-based Serde type?
-    // TODO-correctness: even if not, this should split on (\r?\n)+ to be
-    // NDJSON-compatible.
+    /*
+     * TODO-cleanup: should probably implement NDJSON-based Serde type?
+     * TODO-correctness: even if not, this should split on (\r?\n)+ to be
+     * NDJSON-compatible.
+     */
     body_string
         .split("\n")
         .filter(|line| line.len() > 0)
@@ -123,6 +257,9 @@ async fn read_ndjson<T: DeserializeOwned>(response: &mut Response<Body>)
 async fn read_json<T: DeserializeOwned>(response: &mut Response<Body>)
     -> T
 {
+    let headers = response.headers();
+    assert_eq!(oxide_api_prototype::api_http_util::CONTENT_TYPE_JSON,
+        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
     let body_bytes = hyper::body::to_bytes(response.body_mut()).await
         .expect("error reading body");
     serde_json::from_slice(body_bytes.as_ref()).expect(
@@ -147,8 +284,8 @@ async fn read_json<T: DeserializeOwned>(response: &mut Response<Body>)
  * must not be parallelized or something like that, but that doesn't seem to
  * exist.)
  *
- * TODO: many of these really could be broken out (e.g., all the error cases
- * that are totally independent of everything else) if we allowed the test
+ * TODO-perf: many of these really could be broken out (e.g., all the error
+ * cases that are totally independent of everything else) if we allowed the test
  * server to bind to an arbitrary port.
  */
 #[tokio::test]
@@ -159,118 +296,81 @@ async fn smoke_test()
     /*
      * Error case: GET /nonexistent (a path with no route at all)
      */
-    let response = testctx
-        .client
-        .get(testctx.url("/nonexistent"))
+    let error = make_request(&testctx, Method::GET, "/nonexistent",
+        None as Option<()>, StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
+        .expect_err("expected error");
+    assert_eq!("Not Found", error.message);
 
     /*
      * Error case: GET /projects/nonexistent (a possible value that does not
      * exist inside a collection that does exist)
      */
-    let response = testctx
-        .client
-        .get(testctx.url("/projects/nonexistent"))
+    let error = make_request(&testctx, Method::GET, "/projects/nonexistent",
+        None as Option<()>, StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
+        .expect_err("expected error");
+    assert_eq!("not found: project \"nonexistent\"", error.message);
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
      * exist beneath a resource that does exist)
      */
-    let response = testctx
-        .client
-        .get(testctx.url("/projects/simproject1/nonexistent"))
+    let error = make_request(&testctx, Method::GET,
+        "/projects/simproject1/nonexistent", None as Option<()>,
+        StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
+        .expect_err("expected error");
+    assert_eq!("Not Found", error.message);
 
     /*
      * Error case: PUT /projects
      */
-    let response = testctx.client.request(
-        Request::builder()
-            .method(Method::PUT)
-            .uri(testctx.url("/projects"))
-            .body(Body::empty())
-            .unwrap())
+    let error = make_request(&testctx, Method::PUT, "/projects",
+        None as Option<()>, StatusCode::METHOD_NOT_ALLOWED)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::METHOD_NOT_ALLOWED, response.status());
-    // TODO-coverage: verify error body
+        .expect_err("expected error");
+    assert_eq!("Method Not Allowed", error.message);
 
     /*
      * Error case: DELETE /projects
      */
-    let response = testctx.client.request(
-        Request::builder()
-            .method(Method::DELETE)
-            .uri(testctx.url("/projects"))
-            .body(Body::empty())
-            .unwrap())
+    let error = make_request(&testctx, Method::DELETE, "/projects",
+        None as Option<()>, StatusCode::METHOD_NOT_ALLOWED)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::METHOD_NOT_ALLOWED, response.status());
+        .expect_err("expected error");
+    assert_eq!("Method Not Allowed", error.message);
 
     /*
      * Basic test of out-of-the-box GET /projects
      * TODO-coverage: pagination
      */
-    let mut response = testctx
-        .client
-        .get(testctx.url("/projects"))
+    let mut response = make_request(&testctx, Method::GET, "/projects",
+        None as Option<()>, StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
-    let headers = response.headers();
-    assert_eq!("application/x-ndjson", // XXX-cleanup should be a constant
-        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
-    // TODO-cleanup: have common code that logs request, makes request and
-    // sanity-checks all the headers (see below two TODOs)?  Maybe reads the
-    // body too.
-    // TODO could even consider making this whole test-case table-driven.
-    // TODO-coverage validate that no other headers are present.
-    // TODO-coverage check Date header
-
-    let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
-    assert_eq!(projects.len(), 3);
-    assert_eq!(projects[0].id, "simproject1");
-    assert_eq!(projects[0].name, "simproject1");
-    assert!(projects[0].description.len() > 0);
-    assert_eq!(projects[1].id, "simproject2");
-    assert_eq!(projects[1].name, "simproject2");
-    assert!(projects[1].description.len() > 0);
-    assert_eq!(projects[2].id, "simproject3");
-    assert_eq!(projects[2].name, "simproject3");
-    assert!(projects[2].description.len() > 0);
+        .expect("expected success");
+    let initial_projects: Vec<ApiProjectView> =
+        read_ndjson(&mut response).await;
+    assert_eq!(initial_projects.len(), 3);
+    assert_eq!(initial_projects[0].id, "simproject1");
+    assert_eq!(initial_projects[0].name, "simproject1");
+    assert!(initial_projects[0].description.len() > 0);
+    assert_eq!(initial_projects[1].id, "simproject2");
+    assert_eq!(initial_projects[1].name, "simproject2");
+    assert!(initial_projects[1].description.len() > 0);
+    assert_eq!(initial_projects[2].id, "simproject3");
+    assert_eq!(initial_projects[2].name, "simproject3");
+    assert!(initial_projects[2].description.len() > 0);
 
     /*
      * Basic test of out-of-the-box GET /projects/simproject2
      */
-    let mut response = testctx
-        .client
-        .get(testctx.url("/projects/simproject2"))
+    let mut response = make_request(&testctx, Method::GET,
+        "/projects/simproject2", None as Option<()>, StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
-    let headers = response.headers();
-    assert_eq!("application/json", // XXX-cleanup should be a constant
-        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
-    // TODO-coverage validate that no other headers are present.
-    // TODO-coverage check Date header
-
+        .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    let expected = &projects[1];
+    let expected = &initial_projects[1];
     assert_eq!(project.id, "simproject2");
     assert_eq!(project.id, expected.id);
     assert_eq!(project.name, expected.name);
@@ -281,72 +381,39 @@ async fn smoke_test()
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    let mut response = testctx.client.request(
-        Request::builder()
-            .method(Method::DELETE)
-            .uri(testctx.url("/projects/simproject2"))
-            .body(Body::empty())
-            .unwrap())
+    make_request(&testctx, Method::DELETE, "/projects/simproject2",
+        None as Option<()>, StatusCode::NO_CONTENT)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NO_CONTENT, response.status());
-    assert_eq!(hyper::body::to_bytes(response.body_mut()).await.expect(
-        "error reading body").len(), 0);
+        .expect("expected success");
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/projects/simproject2".
      */
-    let response = testctx
-        .client
-        .get(testctx.url("/projects/simproject2"))
+    make_request(&testctx, Method::GET, "/projects/simproject2",
+        None as Option<()>, StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
-    // TODO-coverage: verify that the error response body looks right
-
-    let fake_update = ApiProjectUpdateParams {
-        name: None,
-        description: None,
-    };
-    let response = testctx.client.request(
-        Request::builder()
-            .method(Method::PUT)
-            .uri(testctx.url("/projects/simproject2"))
-            .body(serde_json::to_string(&fake_update).unwrap().into())
-            .unwrap())
+        .expect_err("expected failure");
+    make_request(&testctx, Method::DELETE, "/projects/simproject2",
+        None as Option<()>, StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
-    // TODO-coverage: verify that the error response body looks right
-
-    let response = testctx.client.request(
-        Request::builder()
-            .method(Method::DELETE)
-            .uri(testctx.url("/projects/simproject2"))
-            .body(Body::empty())
-            .unwrap())
+        .expect_err("expected failure");
+    make_request(&testctx, Method::PUT, "/projects/simproject2",
+        Some(ApiProjectUpdateParams {
+            name: None,
+            description: None,
+        }), StatusCode::NOT_FOUND)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::NOT_FOUND, response.status());
-    // TODO-coverage: verify that the error response body looks right
+        .expect_err("expected failure");
 
     /*
      * Similarly, verify "GET /projects"
      */
-    let mut response = testctx
-        .client
-        .get(testctx.url("/projects"))
+    let mut response = make_request(&testctx, Method::GET, "/projects",
+        None as Option<()>, StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
-
-    let expected_projects: Vec<&ApiProjectView> = projects
+        .expect("expected success");
+    let expected_projects: Vec<&ApiProjectView> = initial_projects
         .iter()
         .filter(|p| p.name != "simproject2")
         .collect();
@@ -367,29 +434,20 @@ async fn smoke_test()
         name: None,
         description: Some("Li'l lightnin'".to_string())
     };
-    let mut response = testctx.client.request(
-        Request::builder()
-            .method(Method::PUT)
-            .uri(testctx.url("/projects/simproject3"))
-            .body(serde_json::to_string(&project_update).unwrap().into())
-            .unwrap())
+    let mut response = make_request(&testctx, Method::PUT,
+        "/projects/simproject3", Some(project_update), StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
+        .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "simproject3");
     assert_eq!(project.name, "simproject3");
     assert_eq!(project.description, "Li'l lightnin'");
 
-    let mut response = testctx
-        .client
-        .get(testctx.url("/projects/simproject3"))
+    let mut response = make_request(&testctx, Method::GET,
+        "/projects/simproject3", None as Option<()>,
+        StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
-
+        .expect("expected success");
     let expected = project;
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, expected.id);
@@ -400,46 +458,38 @@ async fn smoke_test()
     /*
      * Update "simproject3" in a way that changes its name.  This is a deeper
      * operation under the hood.  This case also exercises changes to multiple
-     * fields.
+     * fields in one request.
      */
     let project_update = ApiProjectUpdateParams {
         name: Some("lil_lightnin".to_string()),
         description: Some("little lightning".to_string()),
     };
-    let mut response = testctx.client.request(
-        Request::builder()
-            .method(Method::PUT)
-            .uri(testctx.url("/projects/simproject3"))
-            .body(serde_json::to_string(&project_update).unwrap().into())
-            .unwrap())
+    let mut response = make_request(&testctx, Method::PUT,
+        "/projects/simproject3", Some(project_update), StatusCode::OK)
         .await
         .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "simproject3");
     assert_eq!(project.name, "lil_lightnin");
     assert_eq!(project.description, "little lightning");
 
+    make_request(&testctx, Method::GET,
+        "/projects/simproject3", None as Option<()>, StatusCode::NOT_FOUND)
+        .await
+        .expect_err("expected failure");
+
     /*
-     * Try to create a new project with a name that overlaps with an existing
-     * one.
+     * Try to create a project with a name that conflicts with an existing one.
      */
     let project_create = ApiProjectCreateParams {
         name: "simproject1".to_string(),
         description: "a duplicate of simproject1".to_string()
     };
-    let response = testctx.client.request(
-        Request::builder()
-            .method(Method::POST)
-            .uri(testctx.url("/projects"))
-            .body(serde_json::to_string(&project_create).unwrap().into())
-            .unwrap())
+    let error = make_request(&testctx, Method::POST, "/projects",
+        Some(project_create), StatusCode::BAD_REQUEST)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::BAD_REQUEST, response.status());
-    // TODO-coverage verify error body
+        .expect_err("expected failure");
+    assert_eq!("already exists: project \"simproject1\"", error.message);
 
     /*
      * Now, really do create a new project.
@@ -448,16 +498,10 @@ async fn smoke_test()
         name: "honor roller".to_string(),
         description: "a soapbox racer".to_string(),
     };
-    let mut response = testctx.client.request(
-        Request::builder()
-            .method(Method::POST)
-            .uri(testctx.url("/projects"))
-            .body(serde_json::to_string(&project_create).unwrap().into())
-            .unwrap())
+    let mut response = make_request(&testctx, Method::POST, "/projects",
+        Some(project_create), StatusCode::CREATED)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::CREATED, response.status());
+        .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "honor roller");
     assert_eq!(project.name, "honor roller");
@@ -470,14 +514,10 @@ async fn smoke_test()
      * - "lil_lightnin" with description "little lightning"
      * - "simproject1", same as out-of-the-box
      */
-    let mut response = testctx
-        .client
-        .get(testctx.url("/projects"))
+    let mut response = make_request(&testctx, Method::GET, "/projects",
+        None as Option<()>, StatusCode::OK)
         .await
-        .expect("failed to make request to server");
-    eprintln!("response info: {:?}", response);
-    assert_eq!(StatusCode::OK, response.status());
-
+        .expect("expected success");
     let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(projects.len(), 3);
     assert_eq!(projects[0].id, "honor roller");

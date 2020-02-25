@@ -17,6 +17,9 @@ use crate::api_error::ApiHttpError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
 
+pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
+
 /**
  * Given a `Result` representing an object in the API, serialize the object to
  * JSON bytes.  This function is expected to be used in the body of an API
@@ -103,7 +106,7 @@ pub fn api_http_create<T>(object: Arc<T>)
     // XXX need way to convert this stream to a real body
     Ok(Response::builder()
         .status(StatusCode::CREATED)
-        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
         .body(serialized.into())?)
 }
 
@@ -130,7 +133,7 @@ pub fn api_http_emit_one<T>(object: Arc<T>)
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
         .body(serialized.into())?)
 }
 
@@ -172,6 +175,6 @@ pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
      */
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, "application/x-ndjson")
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
         .body(bytebuf.freeze().into())?)
 }

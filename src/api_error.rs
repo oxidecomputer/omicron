@@ -48,6 +48,9 @@
  *   these errors).
  */
 
+use crate::api_http_util;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::error::Error as SerdeError;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -96,9 +99,9 @@ pub struct ApiHttpError {
 }
 
 /* XXX revisit this for polish */
-#[derive(Debug, serde::Serialize)]
-struct ApiHttpErrorResponseBody {
-    message: String
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiHttpErrorResponseBody {
+    pub message: String
 }
 
 /*
@@ -206,6 +209,9 @@ impl ApiHttpError {
         // XXX are these unwraps okay?
         hyper::Response::builder()
             .status(self.status_code)
+            .header(
+                http::header::CONTENT_TYPE,
+                api_http_util::CONTENT_TYPE_JSON)
             .body(serde_json::to_string_pretty(&ApiHttpErrorResponseBody {
                 message: self.external_message
             }).unwrap().into()).unwrap()
