@@ -104,7 +104,7 @@ impl ApiObject for ApiProject {
  * Represents the properties of a Project that can be seen by end users.
  * TODO Is this where the OpenAPI documentation should go?
  */
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
     pub id: String,
     pub name: String,
@@ -115,7 +115,7 @@ pub struct ApiProjectView {
  * Represents the create-time parameters for a Project.
  * TODO Is this where the OpenAPI documentation should go?
  */
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectCreateParams {
     pub name: String,
     pub description: String,
@@ -125,7 +125,7 @@ pub struct ApiProjectCreateParams {
  * Represents the properties of a Project that can be updated by end users.
  * TODO Is this where the OpenAPI documentation should go?
  */
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
     pub name: Option<String>,
     pub description: Option<String>,

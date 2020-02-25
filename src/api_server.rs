@@ -12,6 +12,7 @@ use sim::SimulatorBuilder;
 
 use bytes::Bytes;
 use bytes::BufMut;
+use futures::FutureExt;
 use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
@@ -46,6 +47,79 @@ pub struct ApiServerState {
 pub struct ApiServerConfig {
     /** maximum allowed size of a request body */
     pub request_body_max_bytes: usize
+}
+
+/**
+ * A thin wrapper around a Hyper Server object that exposes some interfaces that
+ * we find useful (e.g., close()).
+ * TODO-cleanup: this mechanism should probably do better with types.  In
+ * particular, once you call run(), you shouldn't be able to call it again
+ * (i.e., it should consume self).  But you should be able to close() it.  Once
+ * you've called close(), you shouldn't be able to call it again.
+ */
+pub struct ApiHttpServer {
+    server_future: Option<Pin<Box<
+        dyn Future<Output=Result<(), hyper::error::Error>> + Send
+    >>>,
+    local_addr: SocketAddr,
+    close_channel: Option<tokio::sync::oneshot::Sender<()>>
+} 
+
+impl ApiHttpServer {
+    pub fn local_addr(&self)
+        -> SocketAddr
+    {
+        self.local_addr.clone()
+    }
+
+    pub fn close(mut self)
+    {
+        /*
+         * It should be impossible to close a channel that's already been closed
+         * because close() consumes self.  It should also be impossible to fail
+         * to send the close signal because nothing else can cause the server to
+         * exit.
+         */
+        let channel = self.close_channel.take().expect("already closed somehow");
+        channel.send(()).expect("failed to send close signal");
+    }
+
+    pub fn run(&mut self)
+        -> tokio::task::JoinHandle<Result<(), hyper::error::Error>>
+    {
+        let future = self.server_future.take()
+            .expect("cannot run() more than once");
+        tokio::spawn(async {
+            future.await
+        })
+    }
+}
+
+/**
+ * Set up an HTTP server bound on the specified address that runs the API.  You
+ * must invoke `run()` on the returned instance of `ApiHttpServer` (and await
+ * the result) to actually start the server.  You can call `close()` to begin a
+ * graceful shutdown of the server, which will be complete when the `run()`
+ * Future is resolved.
+ */
+pub fn setup_server(bind_address: &SocketAddr)
+    -> Result<ApiHttpServer, hyper::error::Error>
+{
+    let app_state = setup_server_state();
+    let make_service = server_handler(app_state);
+    let builder = hyper::Server::try_bind(bind_address)?;
+    let server = builder.serve(make_service);
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let local_addr = server.local_addr();
+    let graceful = server.with_graceful_shutdown(async {
+        rx.await.ok();
+    });
+
+    Ok(ApiHttpServer {
+        server_future: Some(graceful.boxed()),
+        local_addr: local_addr,
+        close_channel: Some(tx),
+    })
 }
 
 /**

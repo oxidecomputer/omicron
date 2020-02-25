@@ -165,11 +165,13 @@ pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
      * if so whether it's a good content-type for this.
      * Is it important to be able to support different formats later?  (or
      * useful to factor the code so that we could?)
+     * Source: https://github.com/ndjson/ndjson-spec#33-mediatype-and-file-extensions
+     * used by cockroachdb, for example, and eleastic-search
      * TODO is it better if this is streaming all the way to the client?  That
      * would be nice, but is it more trouble than it's worth?
      */
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, "application/x-json-stream")
+        .header(http::header::CONTENT_TYPE, "application/x-ndjson")
         .body(bytebuf.freeze().into())?)
 }

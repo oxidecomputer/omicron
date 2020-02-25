@@ -46,7 +46,7 @@ Use `curl` to hit the server:
     - Build out routing table (has to include JSON parsing and query parsing
       where wanted)
     - Flesh out the Response type emitted by the endpoints
-  - Revisit the Error type
+  - Lots of clean up!
 - Flesh out endpoints and simulator
 - Write out road map
   - regions, AZs, etc. need to be added per RFD 24

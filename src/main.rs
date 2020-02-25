@@ -14,13 +14,6 @@
  * - Move even more of the server setup into api_server.rs
  */
 
-mod api_error;
-mod api_http_entrypoints;
-mod api_http_util;
-mod api_model;
-mod api_server;
-mod sim;
-
 use std::net::SocketAddr;
 
 /** TCP IP address and port on which to bind */
@@ -28,16 +21,19 @@ const SERVER_BIND_ADDRESS: &str = "127.0.0.1:12220";
 
 #[tokio::main]
 async fn main()
-    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
-    let app_state = api_server::setup_server_state();
-    let make_service = api_server::server_handler(app_state);
     let bind_addr: SocketAddr = SERVER_BIND_ADDRESS.parse().unwrap();
-    let builder = hyper::Server::bind(&bind_addr);
-    let server = builder.serve(make_service);
+    let mut server = 
+        match oxide_api_prototype::api_server::setup_server(&bind_addr) {
+            Err(e) => {
+                eprintln!("failed to set up server: {}", e);
+                std::process::exit(1);
+            },
+            Ok(s) => s
+        };
     eprintln!("listening: http://{}", server.local_addr());
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+    if let Err(error) = server.run().await {
+        eprintln!("server failed: {}", error);
+        std::process::exit(1);
     }
-    return Ok(())
 }
