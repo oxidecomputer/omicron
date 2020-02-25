@@ -177,19 +177,24 @@ async fn http_connection_handle(
  * Result that either represents a valid HTTP response or an error (which will
  * also get turned into an HTTP response).
  */
-async fn http_request_handle(
+async fn http_request_handle_wrap(
     server: Arc<ApiServerState>,
     request: Request<Body>)
     -> Result<Response<Body>, GenericError>
 {
-    /* XXX super cheesy for now */
-    match http_request_handle_real(server, request).await {
+    /*
+     * This extra level of indirection makes error handling much more
+     * straightforward, since the request handling code can simply return early
+     * with an error and we'll treat it like an error from any of the endpoints
+     * themselves.
+     */
+    match http_request_handle(server, request).await {
         Ok(response) => Ok(response),
         Err(e) => Ok(e.into_response())
     }
 }
 
-async fn http_request_handle_real(
+async fn http_request_handle(
     server: Arc<ApiServerState>,
     mut request: Request<Body>)
     -> Result<Response<Body>, ApiHttpError>
@@ -366,7 +371,7 @@ async fn http_read_body<T>(body: &mut T, cap: usize)
 
         if nbytesread + bufsize > cap {
             http_dump_body(body).await?;
-            // XXX check status code
+            // TODO-correctness check status code
             return Err(ApiHttpError::for_bad_request(
                 format!("request body exceeded maximum size of {} bytes", cap)));
         }
@@ -380,7 +385,10 @@ async fn http_read_body<T>(body: &mut T, cap: usize)
      * with them.
      */
     body.trailers().await?;
-    /* XXX why does the is_end_stream() assertion fail and the next one panic? */
+    /*
+     * TODO-correctness why does the is_end_stream() assertion fail and the next
+     * one panic?
+     */
     // assert!(body.is_end_stream());
     // assert!(body.data().await.is_none());
     // assert!(body.trailers().await?.is_none());
@@ -482,10 +490,10 @@ impl Service<&AddrStream> for ApiServerConnectionHandler
 
 /**
  * ApiServerRequestHandler is a Hyper Service implementation that forwards
- * incoming requests to `http_request_handle()`, including as an argument the
- * backend server state object.  We could use `service_fn` here using a closure
- * to capture the server state object, but the resulting code is a bit simpler
- * without all that.
+ * incoming requests to `http_request_handle_wrap()`, including as an argument
+ * the backend server state object.  We could use `service_fn` here using a
+ * closure to capture the server state object, but the resulting code is a bit
+ * simpler without all that.
  */
 pub struct ApiServerRequestHandler {
     /** backend state that will be made available to the request handler */
@@ -525,6 +533,6 @@ impl Service<Request<Body>> for ApiServerRequestHandler
     fn call(&mut self, req: Request<Body>)
         -> Self::Future
     {
-        Box::pin(http_request_handle(Arc::clone(&self.server), req))
+        Box::pin(http_request_handle_wrap(Arc::clone(&self.server), req))
     }
 }

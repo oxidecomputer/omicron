@@ -103,7 +103,6 @@ pub fn api_http_create<T>(object: Arc<T>)
         T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-    // XXX need way to convert this stream to a real body
     Ok(Response::builder()
         .status(StatusCode::CREATED)
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
