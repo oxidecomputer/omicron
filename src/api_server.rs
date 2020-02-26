@@ -10,6 +10,7 @@ use crate::api_http_entrypoints;
 use crate::sim;
 use sim::SimulatorBuilder;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use bytes::BufMut;
 use futures::FutureExt;
@@ -21,7 +22,11 @@ use hyper::Response;
 use hyper::body::HttpBody;
 use hyper::server::conn::AddrStream;
 use hyper::service::Service;
+use serde::Serialize;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -229,6 +234,24 @@ async fn http_request_handle(
         .filter(|s| *s != "")
         .collect();
     eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
+
+    /* XXX Testing the ApiHandler stuff. */
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo0" {
+        return invoke_handler(server, request, demo_handler_args_0).await;
+    }
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo1" {
+        return invoke_handler(server, request, demo_handler_args_1).await;
+    }
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo2" {
+        return invoke_handler(server, request, demo_handler_args_2).await;
+    }
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo3" {
+        return invoke_handler(server, request,
+            FuncQueryWrapper{
+                func: demo_handler_args_3query,
+                phantom: PhantomData
+            }).await;
+    }
 
     /*
      * The URI must have started with a "/".  When we split by "/", we should
@@ -535,4 +558,247 @@ impl Service<Request<Body>> for ApiServerRequestHandler
     {
         Box::pin(http_request_handle_wrap(Arc::clone(&self.server), req))
     }
+}
+
+
+/*
+ * API HANDLER INTERFACE
+ * TODO implement me!  This is vaporware.
+ *
+ * We consider it a key goal to be able to automatically generate an OpenAPI
+ * specification from our API endpoint handler functions.  That way, the
+ * implementation serves as the source of truth, and it cannot get out of sync
+ * with the API spec that we publish.  For this to work and for the generated
+ * spec to describe the schemas of both inputs (particulary: query parameters
+ * and request bodies) and outputs (status codes and response bodies), we want
+ * the API handler functions themselves to consume parameters that describe
+ * their actual inputs (called extractors) and produce a result that describes
+ * the output.  That sounds obvious, but it rules out the more obvious approach
+ * of retrieving parameters from a generic request object and producing a
+ * generic response object.  It also means we need to support API handler
+ * functions with a variety of type signatures.
+ *
+ * To achieve this, we take an approach inspired by the actix-web crate (but
+ * much simpler and more explicit than that crate's implementation):
+ *
+ * - We define an ApiHandler trait with just one method called "handle_request"
+ *   that takes a single parameter and asynchronously produces a single output.
+ *   ApiHandler is parametrized so that the output type may be any object
+ *   implementing Serializable or a Stream of objects implementing Serializable.
+ *
+ * - We define implementations for ApiHandler for the following function
+ *   signatures:
+ *
+ *       SIGNATURE                          CONSUMES
+ *       f()                                nothing
+ *       f(server)                          server state only
+ *       f(server, request)                 server state and request
+ *       f(server, request, query)          above plus query parameters
+ *       f(server, request, body)           above plus a request body
+ *       f(server, request, query, body)    all of the above
+ *
+ *   where
+ *
+ *       "server" is Arc<ApiServerState>
+ *       "request" is an HTTP Request object for access to more info
+ *       "query" is an extractor for parameters from query strings
+ *       "body" is an extractor for a request body
+ *
+ *   The "query" and "body" extractors look similar to Query and Json in Actix:
+ *   they are parametrized by a specific type and deserialize either query
+ *   parameters or a JSON object into that type.  For example, Json<T> causes
+ *   the body to fully read and parsed into an instance of T (which must derive
+ *   serde::Deserialize).  This process is type-safe.  Failure to extract the
+ *   parameters will result in a 400 response sent to the client with an error
+ *   message.  (The type parameter for Query and Json can contain Option values
+ *   in order to make a parameter optional.)
+ *
+ *   The implementations of ApiHandler for these various function types take
+ *   care of handling the appropriate extraction.  This is a lot less flexible
+ *   than the actix-web approach, but that flexibility does not appear useful in
+ *   this context and this solution has the advantage of being much more
+ *   explicit.
+ *
+ * - As a transition step, in the handcoded router above, instead of deciding by
+ *   hand whether to parse a body, extract query parameters, etc., we will just
+ *   find the appropriate API endpoint function, treat it as an ApiHandler, and
+ *   invoke "handle_request".
+ *
+ * - The next step will be to build a proper router using a more general data
+ *   structure and algorithm, rather than implementing it by hand in
+ *   http_request_handle().
+ *
+ * - Separately, we should figure out how to allow the handler functions to
+ *   return more specific types while allowing them to be treated uniformly from
+ *   http_request_handle() (and in the above data structures).
+ */
+
+#[async_trait]
+trait ApiHandler<Marker> {
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>)
+        -> Result<Response<Body>, ApiHttpError>;
+}
+
+/*
+ * XXX really cheesy.  Document why we do this.
+ */
+struct ApiHandlerImplArgs0;
+struct ApiHandlerImplArgs1;
+struct ApiHandlerImplArgs2;
+struct ApiHandlerImplArgs3Query;
+// struct ApiHandlerImplArgs3Json;
+// struct ApiHandlerImplArgs4;
+
+#[async_trait]
+impl<F, T> ApiHandler<ApiHandlerImplArgs0> for F
+    where F: Fn() -> T + Send + Sync + 'static,
+          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+{
+    async fn handle_request(&self,
+        _server: Arc<ApiServerState>,
+        _request: Request<Body>)
+        -> Result<Response<Body>, ApiHttpError>
+    {
+        self().await
+    }
+}
+
+#[async_trait]
+impl<F, T> ApiHandler<ApiHandlerImplArgs1> for F
+    where F: Fn(Arc<ApiServerState>) -> T + Send + Sync + 'static,
+          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+{
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        _request: Request<Body>)
+        -> Result<Response<Body>, ApiHttpError>
+    {
+        self(server).await
+    }
+}
+
+#[async_trait]
+impl<F, T> ApiHandler<ApiHandlerImplArgs2> for F
+    where F: Fn(Arc<ApiServerState>, Request<Body>) -> T + Send + Sync + 'static,
+          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+{
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>)
+        -> Result<Response<Body>, ApiHttpError>
+    {
+        self(server, request).await
+    }
+}
+
+async fn invoke_handler<T, H>(
+    server: Arc<ApiServerState>,
+    request: Request<Body>,
+    handler: H)
+    -> Result<Response<Body>, ApiHttpError>
+where
+    H: ApiHandler<T>
+{
+    handler.handle_request(server, request).await
+}
+
+async fn demo_handler_args_0()
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body("demo_handler_args_0".into())?)
+}
+
+async fn demo_handler_args_1(_server: Arc<ApiServerState>)
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body("demo_handler_args_1".into())?)
+}
+
+async fn demo_handler_args_2(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>)
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body("demo_handler_args_2".into())?)
+}
+
+/*
+ * Query support
+ */
+struct Query<QueryType> {
+    inner: QueryType
+}
+impl<QueryType> Query<QueryType> {
+    /*
+     * TODO drop this in favor of Deref?  + Display and Debug for convenience?
+     */
+    fn into_inner(self) -> QueryType {
+        self.inner
+    }
+}
+
+struct FuncQueryWrapper<F, T, Q>
+    where F: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> T + Send + Sync + 'static,
+          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static,
+          Q: DeserializeOwned + Send + Sync
+{
+    func: F,
+    phantom: PhantomData<Q>
+}
+
+#[async_trait]
+impl<F, T, Q> ApiHandler<ApiHandlerImplArgs3Query> for FuncQueryWrapper<F, T, Q>
+    where F: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> T + Send + Sync + 'static,
+          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static,
+          Q: DeserializeOwned + Send + Sync
+{
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>)
+        -> Result<Response<Body>, ApiHttpError>
+    {
+        let query: Query<Q> = http_request_load_query(&request)?;
+        (self.func)(server, request, query).await
+    }
+}
+
+fn http_request_load_query<Q>(request: &Request<Body>)
+    -> Result<Query<Q>, ApiHttpError>
+    where Q: DeserializeOwned
+{
+    let raw_query_string = request.uri().query().unwrap_or("");
+    /*
+     * TODO-correctness: are query strings defined to be urlencoded in this way?
+     */
+    match serde_urlencoded::from_str(raw_query_string) {
+        Ok(q) => Ok(Query { inner: q }),
+        Err(e) => Err(ApiHttpError::for_bad_request(
+            format!("unable to parse query string: {}", e)))
+    }
+
+}
+ 
+#[derive(Serialize, Deserialize)]
+struct DemoQueryArgs {
+    test1: String,
+    test2: Option<u32>
+}
+
+async fn demo_handler_args_3query(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>,
+    query: Query<DemoQueryArgs>)
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
 }
