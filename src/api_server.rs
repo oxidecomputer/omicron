@@ -251,15 +251,16 @@ async fn http_request_handle(
     // if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo2" {
     //     return invoke_handler(server, request, demo_handler_args_2).await;
     // }
-    // if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo3" {
-    //     return invoke_handler(server, request,
-    //         FuncQueryWrapper{
-    //             func: demo_handler_args_3query,
-    //             phantom: PhantomData
-    //         }).await;
-    // }
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo3query" {
+        generic_handler = Some(make_handler(
+                ConcreteRouteHandler::new(demo_handler_args_3query)));
+    }
+    if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo3json" {
+        generic_handler = Some(make_handler(
+                ConcreteRouteHandler::new(demo_handler_args_3json)));
+    }
     if generic_handler.is_some() {
-        return invoke_handler(server, &mut request, generic_handler.unwrap()).await;
+        return invoke_handler(server, request, generic_handler.unwrap()).await;
     }
 
     /*
@@ -642,54 +643,146 @@ impl Service<Request<Body>> for ApiServerRequestHandler
  *   http_request_handle() (and in the above data structures).
  */
 
+/*
+ * Derived
+ */
+
 #[async_trait]
-trait FromRequest: Send + Sync
+trait Derived: Send + Sync + Sized
 {
-    async fn from_request(request: &mut Request<Body>) -> Self;
+    async fn from_request(
+        server: Arc<ApiServerState>,
+        request: &mut Request<Body>) -> Result<Self, ApiHttpError>;
 }
 
 #[async_trait]
-impl FromRequest for ()
+impl Derived for ()
 {
-    async fn from_request(_: &mut Request<Body>)
-        -> ()
+    async fn from_request(_: Arc<ApiServerState>, _: &mut Request<Body>)
+        -> Result<(), ApiHttpError>
     {
-        ()
+        Ok(())
     }
 }
+
+#[async_trait]
+impl<Q> Derived for Query<Q>
+where Q: DeserializeOwned + Send + Sync + 'static /* TODO-cleanup static */
+{
+    async fn from_request(_: Arc<ApiServerState>, request: &mut Request<Body>)
+        -> Result<Query<Q>, ApiHttpError>
+    {
+        http_request_load_query(&request)
+    }
+}
+
+#[async_trait]
+impl<JsonType> Derived for Json<JsonType>
+where JsonType: DeserializeOwned + Send + Sync + 'static /* TODO-cleanup static */
+{
+    async fn from_request(server: Arc<ApiServerState>,
+        mut request: &mut Request<Body>)
+        -> Result<Json<JsonType>, ApiHttpError>
+    {
+        http_request_load_json_body(server, &mut request).await
+    }
+}
+
+#[async_trait]
+impl<T> Derived for (T,)
+where T: Derived + 'static /* TODO-cleanup static */
+{
+    async fn from_request(server: Arc<ApiServerState>,
+        request: &mut Request<Body>)
+        -> Result<(T,), ApiHttpError>
+    {
+        Ok((T::from_request(server, request).await?,))
+    }
+}
+
+/*
+ * ApiHandler
+ */
 
 type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
 
 #[async_trait]
-trait ApiHandler<FuncParams: FromRequest>: Send + Sync + 'static
+trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
 {
-    async fn handle_request(&self, request: &mut Request<Body>, p: FuncParams)
+    async fn handle_request(
+        &self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>,
+        p: FuncParams)
         -> ApiHandlerResult;
 }
 
 #[async_trait]
 impl<FuncType, FutureType> ApiHandler<()> for FuncType
 where
-    FuncType: Fn() -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>) -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
 {
-    async fn handle_request(&self, _request: &mut Request<Body>, _p: ())
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>,
+        _p: ())
         -> ApiHandlerResult
     {
-        (self)().await
+        (self)(server, request).await
     }
 }
 
 #[async_trait]
+impl<FuncType, FutureType, Q> ApiHandler<(Query<Q>,)> for FuncType
+where
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> FutureType + Send + Sync + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
+    Q: DeserializeOwned + Send + Sync + 'static,
+{
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>,
+        (query,): (Query<Q>,))
+        -> ApiHandlerResult
+    {
+        (self)(server, request, query).await
+    }
+}
+
+#[async_trait]
+impl<FuncType, FutureType, J> ApiHandler<(Json<J>,)> for FuncType
+where
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Json<J>) -> FutureType + Send + Sync + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
+    J: DeserializeOwned + Send + Sync + 'static,
+{
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>,
+        (json,): (Json<J>,))
+        -> ApiHandlerResult
+    {
+        (self)(server, request, json).await
+    }
+}
+
+/*
+ * RouteHandler
+ */
+
+#[async_trait]
 trait RouteHandler: Sync + Send {
-    async fn handle_request(&self, request: &mut Request<Body>)
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        request: Request<Body>)
         -> ApiHandlerResult;
 }
 
 struct ConcreteRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: ApiHandler<FuncParams>,
-    FuncParams: FromRequest,
+    FuncParams: Derived,
 {
     handler: HandlerType,
     phantom: PhantomData<FuncParams>
@@ -698,7 +791,7 @@ where
 impl<HandlerType, FuncParams> ConcreteRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: ApiHandler<FuncParams>,
-    FuncParams: FromRequest,
+    FuncParams: Derived,
 {
     fn new(h: HandlerType)
         -> Self
@@ -714,24 +807,92 @@ where
 impl<HandlerType, FuncParams> RouteHandler for ConcreteRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: ApiHandler<FuncParams>,
-    FuncParams: FromRequest,
+    FuncParams: Derived,
 {
-    async fn handle_request(&self, mut request: &mut Request<Body>)
+    async fn handle_request(&self,
+        server: Arc<ApiServerState>,
+        mut request: Request<Body>)
         -> ApiHandlerResult
     {
-        let funcparams = FromRequest::from_request(&mut request).await;
-        self.handler.handle_request(&mut request, funcparams).await
+        let funcparams = Derived::from_request(Arc::clone(&server), &mut request).await?;
+        self.handler.handle_request(server, request, funcparams).await
     }
 }
 
+/*
+ * Query support
+ */
+struct Query<QueryType> {
+    inner: QueryType
+}
+impl<QueryType> Query<QueryType> {
+    /*
+     * TODO drop this in favor of Deref?  + Display and Debug for convenience?
+     */
+    fn into_inner(self) -> QueryType {
+        self.inner
+    }
+}
+
+fn http_request_load_query<Q>(request: &Request<Body>)
+    -> Result<Query<Q>, ApiHttpError>
+    where Q: DeserializeOwned
+{
+    let raw_query_string = request.uri().query().unwrap_or("");
+    /*
+     * TODO-correctness: are query strings defined to be urlencoded in this way?
+     */
+    match serde_urlencoded::from_str(raw_query_string) {
+        Ok(q) => Ok(Query { inner: q }),
+        Err(e) => Err(ApiHttpError::for_bad_request(
+            format!("unable to parse query string: {}", e)))
+    }
+}
+
+/*
+ * JSON body support
+ */
+struct Json<JsonType> {
+    inner: JsonType
+}
+impl<JsonType> Json<JsonType> {
+    /*
+     * TODO drop this in favor of Deref?  + Display and Debug for convenience?
+     */
+    fn into_inner(self) -> JsonType {
+        self.inner
+    }
+}
+
+async fn http_request_load_json_body<JsonType>(
+    server: Arc<ApiServerState>,
+    request: &mut Request<Body>)
+    -> Result<Json<JsonType>, ApiHttpError>
+    where JsonType: DeserializeOwned
+{
+    let body_bytes = http_read_body(
+        request.body_mut(), server.config.request_body_max_bytes).await?;
+    let value: Result<JsonType, serde_json::Error> =
+        serde_json::from_slice(&body_bytes);
+    match value {
+        Ok(j) => Ok(Json { inner: j }),
+        Err(e) => Err(ApiHttpError::for_bad_request(
+            format!("unable to parse body JSON: {}", e)))
+    }
+}
+
+/*
+ * Helper functions for invoking and creating handlers
+ */
+
 async fn invoke_handler(
     server: Arc<ApiServerState>,
-    mut request: &mut Request<Body>,
+    request: Request<Body>,
     handler: Box<dyn RouteHandler>
 )
     -> ApiHandlerResult
 {
-    handler.handle_request(&mut request).await
+    handler.handle_request(server, request).await
 }
 
 fn make_handler<H: RouteHandler + 'static>(handler: H)
@@ -740,7 +901,13 @@ fn make_handler<H: RouteHandler + 'static>(handler: H)
     Box::new(handler)
 }
 
-async fn demo_handler_args_0()
+/*
+ * Demo handler functions
+ */
+
+async fn demo_handler_args_0(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>)
     -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
@@ -748,10 +915,46 @@ async fn demo_handler_args_0()
         .body("demo_handler_args_0\n".into())?)
 }
 
-async fn demo_handler_args_1(/*request: &mut Request<Body>*/)
+async fn demo_handler_args_1(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>)
     -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body("demo_handler_args_0\n".into())?)
+        .body("demo_handler_args_1\n".into())?)
+}
+
+#[derive(Serialize, Deserialize)]
+struct DemoQueryArgs {
+    test1: String,
+    test2: Option<u32>
+}
+
+async fn demo_handler_args_3query(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>,
+    query: Query<DemoQueryArgs>)
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
+}
+
+#[derive(Serialize, Deserialize)]
+struct DemoJsonBody {
+    test1: String,
+    test2: Option<u32>
+}
+
+async fn demo_handler_args_3json(
+    _server: Arc<ApiServerState>,
+    _request: Request<Body>,
+    json: Json<DemoJsonBody>)
+    -> Result<Response<Body>, ApiHttpError>
+{
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
 }
