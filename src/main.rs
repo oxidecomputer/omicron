@@ -24,7 +24,7 @@ async fn main()
 {
     let bind_addr: SocketAddr = SERVER_BIND_ADDRESS.parse().unwrap();
     let mut server = 
-        match oxide_api_prototype::api_server::setup_server(&bind_addr) {
+        match oxide_api_prototype::api_server::api_server_create(&bind_addr) {
             Err(e) => {
                 eprintln!("failed to set up server: {}", e);
                 std::process::exit(1);

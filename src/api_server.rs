@@ -107,11 +107,24 @@ impl ApiHttpServer {
  * graceful shutdown of the server, which will be complete when the `run()`
  * Future is resolved.
  */
-pub fn setup_server(bind_address: &SocketAddr)
+pub fn api_server_create(bind_address: &SocketAddr)
     -> Result<ApiHttpServer, hyper::error::Error>
 {
-    let app_state = setup_server_state();
-    let make_service = server_handler(app_state);
+    let mut simbuilder = SimulatorBuilder::new();
+    simbuilder.project_create("simproject1");
+    simbuilder.project_create("simproject2");
+    simbuilder.project_create("simproject3");
+
+    /* TODO-cleanup too many Arcs? */
+    let app_state = Arc::new(ApiServerState {
+        backend: Arc::new(simbuilder.build()),
+        config: ApiServerConfig {
+            /* We start aggressively to make sure we cover this in our tests. */
+            request_body_max_bytes: 1024
+        }
+    });
+
+    let make_service = ApiServerConnectionHandler::new(app_state);
     let builder = hyper::Server::try_bind(bind_address)?;
     let server = builder.serve(make_service);
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -126,40 +139,6 @@ pub fn setup_server(bind_address: &SocketAddr)
         close_channel: Some(tx),
     })
 }
-
-/**
- * Set up initial server-wide shared state.
- * TODO-cleanup too many Arcs?
- */
-pub fn setup_server_state()
-    -> Arc<ApiServerState>
-{
-    let mut simbuilder = SimulatorBuilder::new();
-    simbuilder.project_create("simproject1");
-    simbuilder.project_create("simproject2");
-    simbuilder.project_create("simproject3");
-
-    Arc::new(ApiServerState {
-        backend: Arc::new(simbuilder.build()),
-        config: ApiServerConfig {
-            /* We start aggressively to make sure we cover this in our tests. */
-            request_body_max_bytes: 1024
-        }
-    })
-}
-
-/**
- * Returns a Service intended to be used with a hyper Server to accept
- * connections and handle them using our API implementation.
- * TODO-cleanup: should return a trait type (Service)?  Then
- * ApiServerConnectionHandler can be non-public.
- */
-pub fn server_handler(app_state: Arc<ApiServerState>)
-    -> ApiServerConnectionHandler
-{
-    ApiServerConnectionHandler::new(app_state)
-}
-
 
 /**
  * Initial entry point for handling a new connection to the HTTP server.

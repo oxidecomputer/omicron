@@ -1,7 +1,7 @@
 /*!
  * Interface for implementing API endpoint handler functions.
  *
- * == Endpoint function signatures
+ * ## Endpoint function signatures
  *
  * All API endpoint handler functions must be `async` (that is, must return
  * a `Future`) and must return a `Result<Response<Body>, ApiHttpError>`.
@@ -25,7 +25,7 @@
  * specification ensures that at least in many important ways, the
  * implementation cannot diverge from the spec without us knowing it.
  *
- * == Extractors
+ * ## Extractors
  *
  * The types `Query` and `Json` are called _extractors_ because they cause
  * information to be pulled out of the request and made available to the handler
@@ -78,7 +78,7 @@
  * }
  * ```
  *
- * == Implementation notes
+ * ## Implementation notes
  *
  * We go through considerable effort below to make this interface possible.
  * Both the interface (primarily) and the implementation (less so) are inspired

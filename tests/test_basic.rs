@@ -69,7 +69,7 @@ fn test_setup()
     -> TestContext
 {
     let bind_address: SocketAddr = "127.0.0.1:1478".parse().unwrap();
-    let mut server = api_server::setup_server(&bind_address).expect(
+    let mut server = api_server::api_server_create(&bind_address).expect(
         "failed to set up server");
     let task = server.run();
 
