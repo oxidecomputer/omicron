@@ -236,16 +236,18 @@ async fn http_request_handle(
     eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
 
     /* XXX Testing the ApiHandler stuff. */
-    let mut generic_handler: Option<Box<dyn ApiHandler>> = None;
+    let mut generic_handler: Option<Box<dyn RouteHandler>> = None;
     if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo0" {
-        generic_handler = Some(Box::new(ApiHandlerFunc0{ func: demo_handler_args_0 }));
+        generic_handler = Some(make_handler(
+            ConcreteRouteHandler::new(demo_handler_args_0)));
     }
     if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo1" {
-        generic_handler = Some(Box::new(ApiHandlerFunc1{ func: demo_handler_args_1 }));
+        generic_handler = Some(make_handler(
+            ConcreteRouteHandler::new(demo_handler_args_1)));
     }
-    if generic_handler.is_some() {
-        return invoke_handler(server, request, generic_handler.unwrap()).await;
-    }
+    // if generic_handler.is_some() {
+    //     return invoke_handler(server, request, generic_handler.unwrap()).await;
+    // }
     // if method == Method::GET && uri_parts.len() == 1 && uri_parts[0] == "foo2" {
     //     return invoke_handler(server, request, demo_handler_args_2).await;
     // }
@@ -256,6 +258,9 @@ async fn http_request_handle(
     //             phantom: PhantomData
     //         }).await;
     // }
+    if generic_handler.is_some() {
+        return invoke_handler(server, &mut request, generic_handler.unwrap()).await;
+    }
 
     /*
      * The URI must have started with a "/".  When we split by "/", we should
@@ -638,73 +643,101 @@ impl Service<Request<Body>> for ApiServerRequestHandler
  */
 
 #[async_trait]
-trait ApiHandler: Send + Sync {
-    async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>)
-        -> Result<Response<Body>, ApiHttpError>;
+trait FromRequest: Send + Sync
+{
+    async fn from_request(request: &mut Request<Body>) -> Self;
 }
 
-struct ApiHandlerFunc0<F, T>
-    where F: Fn() -> T + Send + Sync + 'static,
-          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+#[async_trait]
+impl FromRequest for ()
 {
-    func: F
-}
-
-impl<F, T> From<F> for ApiHandlerFunc0<F, T>
-    where F: Fn() -> T + Send + Sync + 'static,
-          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
-{
-    fn from(func: F)
-        -> ApiHandlerFunc0<F, T>
+    async fn from_request(_: &mut Request<Body>)
+        -> ()
     {
-        ApiHandlerFunc0{ func: func }
+        ()
+    }
+}
+
+type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
+
+#[async_trait]
+trait ApiHandler<FuncParams: FromRequest>: Send + Sync + 'static
+{
+    async fn handle_request(&self, request: &mut Request<Body>, p: FuncParams)
+        -> ApiHandlerResult;
+}
+
+#[async_trait]
+impl<FuncType, FutureType> ApiHandler<()> for FuncType
+where
+    FuncType: Fn() -> FutureType + Send + Sync + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
+{
+    async fn handle_request(&self, _request: &mut Request<Body>, _p: ())
+        -> ApiHandlerResult
+    {
+        (self)().await
     }
 }
 
 #[async_trait]
-impl<F, T> ApiHandler for ApiHandlerFunc0<F, T>
-    where F: Fn() -> T + Send + Sync + 'static,
-          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+trait RouteHandler: Sync + Send {
+    async fn handle_request(&self, request: &mut Request<Body>)
+        -> ApiHandlerResult;
+}
+
+struct ConcreteRouteHandler<HandlerType, FuncParams>
+where
+    HandlerType: ApiHandler<FuncParams>,
+    FuncParams: FromRequest,
 {
-    async fn handle_request(&self,
-        _server: Arc<ApiServerState>,
-        _request: Request<Body>)
-        -> Result<Response<Body>, ApiHttpError>
+    handler: HandlerType,
+    phantom: PhantomData<FuncParams>
+}
+
+impl<HandlerType, FuncParams> ConcreteRouteHandler<HandlerType, FuncParams>
+where
+    HandlerType: ApiHandler<FuncParams>,
+    FuncParams: FromRequest,
+{
+    fn new(h: HandlerType)
+        -> Self
     {
-        (self.func)().await
+        ConcreteRouteHandler {
+            handler: h,
+            phantom: PhantomData,
+        }
     }
 }
 
-struct ApiHandlerFunc1<F, T>
-    where F: Fn(Arc<ApiServerState>) -> T + Send + Sync + 'static,
-          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
-{
-    func: F
-}
-
 #[async_trait]
-impl<F, T> ApiHandler for ApiHandlerFunc1<F, T>
-    where F: Fn(Arc<ApiServerState>) -> T + Send + Sync + 'static,
-          T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static
+impl<HandlerType, FuncParams> RouteHandler for ConcreteRouteHandler<HandlerType, FuncParams>
+where
+    HandlerType: ApiHandler<FuncParams>,
+    FuncParams: FromRequest,
 {
-    async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        _request: Request<Body>)
-        -> Result<Response<Body>, ApiHttpError>
+    async fn handle_request(&self, mut request: &mut Request<Body>)
+        -> ApiHandlerResult
     {
-        (self.func)(server).await
+        let funcparams = FromRequest::from_request(&mut request).await;
+        self.handler.handle_request(&mut request, funcparams).await
     }
 }
 
 async fn invoke_handler(
     server: Arc<ApiServerState>,
-    request: Request<Body>,
-    handler: Box<dyn ApiHandler>)
-    -> Result<Response<Body>, ApiHttpError>
+    mut request: &mut Request<Body>,
+    handler: Box<dyn RouteHandler>
+)
+    -> ApiHandlerResult
 {
-    handler.handle_request(server, request).await
+    handler.handle_request(&mut request).await
+}
+
+fn make_handler<H: RouteHandler + 'static>(handler: H)
+    -> Box<dyn RouteHandler>
+{
+    Box::new(handler)
 }
 
 async fn demo_handler_args_0()
@@ -712,96 +745,13 @@ async fn demo_handler_args_0()
 {
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body("demo_handler_args_0".into())?)
+        .body("demo_handler_args_0\n".into())?)
 }
 
-async fn demo_handler_args_1(_server: Arc<ApiServerState>)
+async fn demo_handler_args_1(/*request: &mut Request<Body>*/)
     -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body("demo_handler_args_1".into())?)
+        .body("demo_handler_args_0\n".into())?)
 }
-
-async fn demo_handler_args_2(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>)
-    -> Result<Response<Body>, ApiHttpError>
-{
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .body("demo_handler_args_2".into())?)
-}
-
-// /*
-//  * Query support
-//  */
-// struct Query<QueryType> {
-//     inner: QueryType
-// }
-// impl<QueryType> Query<QueryType> {
-//     /*
-//      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
-//      */
-//     fn into_inner(self) -> QueryType {
-//         self.inner
-//     }
-// }
-// 
-// struct FuncQueryWrapper<F, T, Q>
-//     where F: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> T + Send + Sync + 'static,
-//           T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static,
-//           Q: DeserializeOwned + Send + Sync
-// {
-//     func: F,
-//     phantom: PhantomData<Q>
-// }
-// 
-// #[async_trait]
-// impl<F, T, Q> ApiHandler<ApiHandlerImplArgs3Query> for FuncQueryWrapper<F, T, Q>
-//     where F: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> T + Send + Sync + 'static,
-//           T: Future<Output=Result<Response<Body>, ApiHttpError>> + Send + Sync + 'static,
-//           Q: DeserializeOwned + Send + Sync
-// {
-//     async fn handle_request(&self,
-//         server: Arc<ApiServerState>,
-//         request: Request<Body>)
-//         -> Result<Response<Body>, ApiHttpError>
-//     {
-//         let query: Query<Q> = http_request_load_query(&request)?;
-//         (self.func)(server, request, query).await
-//     }
-// }
-// 
-// fn http_request_load_query<Q>(request: &Request<Body>)
-//     -> Result<Query<Q>, ApiHttpError>
-//     where Q: DeserializeOwned
-// {
-//     let raw_query_string = request.uri().query().unwrap_or("");
-//     /*
-//      * TODO-correctness: are query strings defined to be urlencoded in this way?
-//      */
-//     match serde_urlencoded::from_str(raw_query_string) {
-//         Ok(q) => Ok(Query { inner: q }),
-//         Err(e) => Err(ApiHttpError::for_bad_request(
-//             format!("unable to parse query string: {}", e)))
-//     }
-// 
-// }
-//  
-// #[derive(Serialize, Deserialize)]
-// struct DemoQueryArgs {
-//     test1: String,
-//     test2: Option<u32>
-// }
-// 
-// async fn demo_handler_args_3query(
-//     _server: Arc<ApiServerState>,
-//     _request: Request<Body>,
-//     query: Query<DemoQueryArgs>)
-//     -> Result<Response<Body>, ApiHttpError>
-// {
-//     Ok(Response::builder()
-//         .status(StatusCode::OK)
-//         .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
-// }
