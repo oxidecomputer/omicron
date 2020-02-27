@@ -6,9 +6,10 @@ use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::stream::StreamExt;
-use http::status::StatusCode;
+use http::StatusCode;
 use hyper::Body;
 use hyper::Response;
+use hyper::body::HttpBody;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -177,3 +178,85 @@ pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
         .body(bytebuf.freeze().into())?)
 }
+
+/**
+ * Reads the rest of the body from the request up to the given number of bytes.
+ * If the body fits within the specified cap, a buffer is returned with all the
+ * bytes read.  If not, an error is returned.
+ */
+pub async fn http_read_body<T>(body: &mut T, cap: usize)
+    -> Result<Bytes, ApiHttpError>
+    where T: HttpBody<Data=Bytes, Error=hyper::error::Error> + std::marker::Unpin,
+{
+    /*
+     * This looks a lot like the implementation of hyper::body::to_bytes(), but
+     * applies the requested cap.  We've skipped the optimization for the
+     * 1-buffer case for now, as it seems likely this implementation will change
+     * anyway.
+     * TODO should this use some Stream interface instead?
+     * TODO why does this look so different in type signature (Data=Bytes,
+     * std::marker::Unpin, &mut T)
+     * TODO Error type shouldn't have to be hyper Error -- Into<ApiError> should
+     * work too?
+     */
+    let mut parts = std::vec::Vec::new();
+    let mut nbytesread: usize = 0;
+    while let Some(maybebuf) = body.data().await {
+        let buf = maybebuf?;
+        let bufsize = buf.len();
+
+        if nbytesread + bufsize > cap {
+            http_dump_body(body).await?;
+            // TODO-correctness check status code
+            return Err(ApiHttpError::for_bad_request(
+                format!("request body exceeded maximum size of {} bytes", cap)));
+        }
+
+        nbytesread += bufsize;
+        parts.put(buf);
+    }
+
+    /*
+     * Read the trailers as well, even though we're not going to do anything
+     * with them.
+     */
+    body.trailers().await?;
+    /*
+     * TODO-correctness why does the is_end_stream() assertion fail and the next
+     * one panic?
+     */
+    // assert!(body.is_end_stream());
+    // assert!(body.data().await.is_none());
+    // assert!(body.trailers().await?.is_none());
+    Ok(parts.into())
+}
+
+/**
+ * Reads the rest of the body from the request, dropping all the bytes.  This is
+ * useful after encountering error conditions.
+ */
+pub async fn http_dump_body<T>(body: &mut T)
+    -> Result<usize, T::Error>
+    where T: HttpBody<Data=Bytes> + std::marker::Unpin
+{
+    /*
+     * TODO should this use some Stream interface instead?
+     * TODO-hardening: does this actually cap the amount of data that will be
+     * read?  What if the underlying implementation chooses to wait for a much
+     * larger number of bytes?
+     * TODO better understand pin_mut!()
+     */
+    let mut nbytesread: usize = 0;
+    while let Some(maybebuf) = body.data().await {
+        let buf = maybebuf?;
+        nbytesread += buf.len();
+    }
+
+    /*
+     * TODO-correctness why does the is_end_stream() assertion fail?
+     */
+    // assert!(body.is_end_stream());
+    Ok(nbytesread)
+}
+
+

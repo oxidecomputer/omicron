@@ -5,6 +5,7 @@
  */
 
 pub mod api_error;
+pub mod api_handler;
 mod api_http_entrypoints;
 pub mod api_http_util;
 pub mod api_model;
