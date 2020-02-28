@@ -152,7 +152,8 @@ impl Derived for ()
 
 #[async_trait]
 impl<T> Derived for (T,)
-where T: Derived + 'static /* TODO-cleanup static */
+where
+    T: Derived + 'static, /* TODO-cleanup static should not be necessary*/
 {
     async fn from_request(server: Arc<ApiServerState>,
         request: &mut Request<Body>)
@@ -165,8 +166,8 @@ where T: Derived + 'static /* TODO-cleanup static */
 #[async_trait]
 impl<T1, T2> Derived for (T1, T2)
 where
-    T1: Derived + 'static, /* TODO-cleanup static */
-    T2: Derived + 'static, /* TODO-cleanup static */
+    T1: Derived + 'static, /* TODO-cleanup static should not be necessary */
+    T2: Derived + 'static, /* TODO-cleanup static should not be necessary */
 {
     async fn from_request(server: Arc<ApiServerState>,
         request: &mut Request<Body>)
@@ -214,7 +215,8 @@ pub trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
 #[async_trait]
 impl<FuncType, FutureType> ApiHandler<()> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>) -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>)
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
 {
     async fn handle_request(&self,
@@ -234,7 +236,8 @@ where
 #[async_trait]
 impl<FuncType, FutureType, Q> ApiHandler<(Query<Q>,)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>) -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>)
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
     Q: DeserializeOwned + Send + Sync + 'static,
 {
@@ -255,7 +258,8 @@ where
 #[async_trait]
 impl<FuncType, FutureType, J> ApiHandler<(Json<J>,)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Json<J>) -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Json<J>)
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
     J: DeserializeOwned + Send + Sync + 'static,
 {
@@ -278,7 +282,8 @@ where
 #[async_trait]
 impl<FuncType, FutureType, Q, J> ApiHandler<(Query<Q>, Json<J>)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>, Json<J>) -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>, Json<J>)
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
     Q: DeserializeOwned + Send + Sync + 'static,
     J: DeserializeOwned + Send + Sync + 'static,
@@ -430,7 +435,8 @@ impl<QueryType> Query<QueryType> {
  */
 fn http_request_load_query<QueryType>(request: &Request<Body>)
     -> Result<Query<QueryType>, ApiHttpError>
-    where QueryType: DeserializeOwned
+where
+    QueryType: DeserializeOwned
 {
     let raw_query_string = request.uri().query().unwrap_or("");
     /*
@@ -494,7 +500,8 @@ async fn http_request_load_json_body<JsonType>(
     server: Arc<ApiServerState>,
     request: &mut Request<Body>)
     -> Result<Json<JsonType>, ApiHttpError>
-    where JsonType: DeserializeOwned
+where
+    JsonType: DeserializeOwned
 {
     let body_bytes = http_read_body(
         request.body_mut(), server.config.request_body_max_bytes).await?;
