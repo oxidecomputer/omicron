@@ -100,6 +100,9 @@ use hyper::Body;
 use hyper::Request;
 use hyper::Response;
 use serde::de::DeserializeOwned;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -195,6 +198,9 @@ where
  * different kinds of `ApiHandler`.  However, since the signature shows up in
  * the `FuncParams` type parameter, we'll need additional abstraction to treat
  * different handlers interchangeably.  See `RouteHandler` below.
+ * TODO-cleanup This might be better called `ApiHandlerFunctionAdapter` (or
+ * something shorter but equivalent).  It's not really a handler itself -- it's
+ * an adapter from one invocation to the one needed for this function.
  */
 #[async_trait]
 pub trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
@@ -308,7 +314,7 @@ where
  * to record that a specific handler has been attached to a specific HTTP route.
  */
 #[async_trait]
-pub trait RouteHandler: Sync + Send {
+pub trait RouteHandler: Debug + Sync + Send {
     async fn handle_request(&self,
         server: Arc<ApiServerState>,
         request: Request<Body>)
@@ -332,6 +338,9 @@ where
     /** the actual ApiHandler used to implement this route */
     handler: HandlerType,
 
+    /** debugging label for the handler */
+    label: String,
+
     /**
      * In order to define `new()` below, we need a type parameter `HandlerType`
      * that implements `ApiHandler<FuncParams>`, which means we also need a
@@ -341,6 +350,19 @@ where
      * `FuncParams`, which allows us to use the type parameter below.
      */
     phantom: PhantomData<FuncParams>
+}
+
+impl<HandlerType, FuncParams> Debug for
+    ConcreteRouteHandler<HandlerType, FuncParams>
+where
+    HandlerType: ApiHandler<FuncParams>,
+    FuncParams: Derived,
+{
+    fn fmt(&self, f: &mut Formatter<'_>)
+        -> FmtResult
+    {
+        write!(f, "handler: {}", self.label)
+    }
 }
 
 #[async_trait]
@@ -388,14 +410,31 @@ where
  * signatures, return a RouteHandler that can be used to respond to HTTP
  * requests using this function.
  */
-pub fn api_handler_create<
-    FuncParams, HandlerType>(handler: HandlerType)
+pub fn api_handler_create<FuncParams, HandlerType>(handler: HandlerType)
+    -> Box<dyn RouteHandler>
+where
+    HandlerType: ApiHandler<FuncParams>,
+    FuncParams: Derived + 'static,
+{
+    api_handler_create_named(handler, "<unlabeled handler>")
+}
+
+/**
+ * Given a function matching one of the supported API handler function
+ * signatures, return a RouteHandler that can be used to respond to HTTP
+ * requests using this function.
+ */
+pub fn api_handler_create_named<FuncParams, HandlerType>(
+    handler: HandlerType,
+    label: &str
+)
     -> Box<dyn RouteHandler>
 where
     HandlerType: ApiHandler<FuncParams>,
     FuncParams: Derived + 'static,
 {
     Box::new(ConcreteRouteHandler {
+        label: label.to_string(),
         handler: handler,
         phantom: PhantomData
     })

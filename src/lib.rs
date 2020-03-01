@@ -7,6 +7,7 @@
 pub mod api_error;
 pub mod api_handler;
 mod api_http_entrypoints;
+mod api_http_router;
 pub mod api_http_util;
 pub mod api_model;
 pub mod api_server;
