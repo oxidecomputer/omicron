@@ -1,6 +1,5 @@
 /*!
- * playground-area implementation of a few resources to experiment with
- * different ways of organizing this code.
+ * Handler functions (entrypoints) for HTTP APIs
  */
 
 use std::sync::Arc;
@@ -23,6 +22,9 @@ use crate::api_http_util::api_http_emit_stream;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+
+/** Default maximum number of items per page of "list" results */
+const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 pub fn api_register_entrypoints(router: &mut HttpRouter)
 {
@@ -88,7 +90,7 @@ async fn api_projects_get(
 {
     let backend = &rqctx.server.backend;
     let params = params_raw.into_inner();
-    let limit = params.limit.unwrap_or(3); // XXX
+    let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
     let marker = params.marker.as_ref().map(|s| s.clone());
     let project_stream = backend.projects_list(marker, limit).await?;
     api_http_emit_stream(project_stream).await

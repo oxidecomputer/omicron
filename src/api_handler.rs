@@ -49,10 +49,9 @@
  * use oxide_api_prototype::api_error::ApiHttpError;
  * use oxide_api_prototype::api_handler::Json;
  * use oxide_api_prototype::api_handler::Query;
- * use oxide_api_prototype::api_server::ApiServerState;
+ * use oxide_api_prototype::api_handler::RequestContext;
  * use http::StatusCode;
  * use hyper::Body;
- * use hyper::Request;
  * use hyper::Response;
  * use std::sync::Arc;
  *
@@ -63,8 +62,7 @@
  * }
  *
  * async fn handle_request(
- *     _: Arc<ApiServerState>, 
- *     _: Request<Body>,
+ *     _: Arc<RequestContext>,
  *     query: Query<MyQueryArgs>)
  *     -> Result<Response<Body>, ApiHttpError>
  * {
