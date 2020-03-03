@@ -3,6 +3,7 @@
  */
 
 use crate::api_handler::api_handler_create;
+use crate::api_handler::RequestContext;
 use crate::api_handler::RouteHandler;
 use crate::api_handler::Json;
 use crate::api_handler::Query;
@@ -10,6 +11,7 @@ use crate::api_error::ApiHttpError;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+use crate::api_http_router::HttpRouter;
 use crate::api_http_util::http_dump_body;
 use crate::api_http_util::http_read_body;
 use crate::api_http_entrypoints;
@@ -17,6 +19,7 @@ use crate::sim;
 use sim::SimulatorBuilder;
 
 use futures::FutureExt;
+use futures::lock::Mutex;
 use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
@@ -24,8 +27,8 @@ use hyper::Request;
 use hyper::Response;
 use hyper::server::conn::AddrStream;
 use hyper::service::Service;
-use serde::Serialize;
 use serde::Deserialize;
+use serde::Serialize;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -41,9 +44,11 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
  */
 pub struct ApiServerState {
     /** the API backend to use for servicing requests */
-    pub backend: Arc<dyn ApiBackend>,
+    pub backend: Arc<dyn ApiBackend + Send + Sync>,
     /** static server configuration parameters */
     pub config: ApiServerConfig,
+    // /** request router */
+    // pub router: HttpRouter,
 }
 
 /**
@@ -121,8 +126,22 @@ pub fn api_server_create(bind_address: &SocketAddr)
         config: ApiServerConfig {
             /* We start aggressively to make sure we cover this in our tests. */
             request_body_max_bytes: 1024
-        }
+        },
+   //     router: HttpRouter::new()
     });
+
+    let bar: Box<dyn crate::api_handler::ApiHandler<(Query<_>,)>> =
+        Box::new(api_http_entrypoints::api_projects_get);
+    // app_state.router.insert(Method::GET, "/projects",
+    //     api_handler_create(api_http_entrypoints::api_projects_get));
+    // app_state.router.insert(Method::POST, "/projects",
+    //     api_handler_create(api_http_entrypoints::api_projects_post));
+    // app_state.router.insert(Method::GET, "/projects/{project_id}",
+    //     api_handler_create(api_http_entrypoints::api_projects_get_project));
+    // app_state.router.insert(Method::DELETE, "/projects/{project_id}",
+    //     api_handler_create(api_http_entrypoints::api_projects_delete_project));
+    // app_state.router.insert(Method::PUT, "/projects/{project_id}",
+    //     api_handler_create(api_http_entrypoints::api_projects_put_project));
 
     let make_service = ApiServerConnectionHandler::new(app_state);
     let builder = hyper::Server::try_bind(bind_address)?;
@@ -207,8 +226,8 @@ async fn http_request_handle(
      */
     let method = request.method().clone();
     let uri = request.uri().clone();
-    let uri_parts : Vec<&str> = uri
-        .path()
+    let uri_path = uri.path();
+    let uri_parts : Vec<&str> = uri_path
         .split("/")
         .filter(|s| *s != "")
         .collect();
@@ -233,7 +252,12 @@ async fn http_request_handle(
     }
 
     if generic_handler.is_some() {
-        return generic_handler.unwrap().handle_request(server, request).await;
+        let rqctx = RequestContext {
+            server: server,
+            request: Arc::new(Mutex::new(request)),
+            path_variables: std::collections::BTreeMap::new(),
+        };
+        return generic_handler.unwrap().handle_request(rqctx).await;
     }
 
     /*
@@ -327,24 +351,24 @@ async fn http_request_handle(
         return Ok(response);
     }
 
-    /* GET /projects */
-    if method == Method::GET {
-        /* GETs do not support bodies. */
-        let nbytesread = http_dump_body(request.body_mut()).await?;
-        if nbytesread != 0 {
-            return Err(ApiHttpError::for_bad_request(
-                "expected empty body".to_string()));
-        }
-
-        // XXX support for query params
-        let query_params = api_http_entrypoints::ListQueryParams {
-            marker: None,
-            limit: Some(10)
-        };
-        let response = api_http_entrypoints::api_projects_get(
-            &server, &query_params).await?;
-        return Ok(response);
-    }
+//    /* GET /projects */
+//    if method == Method::GET {
+//        /* GETs do not support bodies. */
+//        let nbytesread = http_dump_body(request.body_mut()).await?;
+//        if nbytesread != 0 {
+//            return Err(ApiHttpError::for_bad_request(
+//                "expected empty body".to_string()));
+//        }
+//
+//        // XXX support for query params
+//        let query_params = api_http_entrypoints::ListQueryParams {
+//            marker: None,
+//            limit: Some(10)
+//        };
+//        let response = api_http_entrypoints::api_projects_get(
+//            &server, &query_params).await?;
+//        return Ok(response);
+//    }
 
     return Err(ApiHttpError::for_status(StatusCode::METHOD_NOT_ALLOWED));
 }
@@ -474,9 +498,7 @@ impl Service<Request<Body>> for ApiServerRequestHandler
  * we don't want them exposed in a real server.
  */
 
-async fn demo_handler_args_0(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>)
+async fn demo_handler_args_0(_rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
@@ -484,9 +506,7 @@ async fn demo_handler_args_0(
         .body("demo_handler_args_0\n".into())?)
 }
 
-async fn demo_handler_args_1(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>)
+async fn demo_handler_args_1(_rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
     Ok(Response::builder()
@@ -501,8 +521,7 @@ struct DemoQueryArgs {
 }
 
 async fn demo_handler_args_3query(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>,
+    _rqctx: Arc<RequestContext>,
     query: Query<DemoQueryArgs>)
     -> Result<Response<Body>, ApiHttpError>
 {
@@ -518,8 +537,7 @@ struct DemoJsonBody {
 }
 
 async fn demo_handler_args_3json(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>,
+    _rqctx: Arc<RequestContext>,
     json: Json<DemoJsonBody>)
     -> Result<Response<Body>, ApiHttpError>
 {
@@ -534,8 +552,7 @@ struct DemoJsonAndQuery {
     json: DemoJsonBody
 }
 async fn demo_handler_args_4(
-    _server: Arc<ApiServerState>,
-    _request: Request<Body>,
+    _rqctx: Arc<RequestContext>,
     query: Query<DemoQueryArgs>,
     json: Json<DemoJsonBody>)
     -> Result<Response<Body>, ApiHttpError>

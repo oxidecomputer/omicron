@@ -8,11 +8,10 @@
  * Ignoring the return values, handler functions must have one of the following
  * signatures:
  *
- * 1. `f(server: Arc<ApiServerState>, request: Request<Body>)`
- * 2. `f(server: Arc<ApiServerState>, request: Request<Body>, query: Query<Q>)`
- * 3. `f(server: Arc<ApiServerState>, request: Request<Body>, json: Json<J>)`
- * 4. `f(server: Arc<ApiServerState>, request: Request<Body>, query: Query<Q>,
- *     json: Json<J>)`
+ * 1. `f(rqctx: Arc<RequestContext>)`
+ * 2. `f(rqctx: Arc<RequestContext>, query: Query<Q>)`
+ * 3. `f(rqctx: Arc<RequestContext>, json: Json<J>)`
+ * 4. `f(rqctx: Arc<RequestContext>, query: Query<Q>, json: Json<J>)`
  *
  * See "Extractors" below for more on the types `Query` and `Json`.
  *
@@ -99,7 +98,9 @@ use async_trait::async_trait;
 use hyper::Body;
 use hyper::Request;
 use hyper::Response;
+use futures::lock::Mutex;
 use serde::de::DeserializeOwned;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
@@ -112,12 +113,29 @@ use std::sync::Arc;
  */
 pub type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
 
+/**
+ * Handle for various interfaces useful during request processing.
+ * TODO-cleanup What's the right way to package up "request"?  The only time we
+ * need it to be mutable is when we're reading the body (e.g., as part of the
+ * JSON extractor).  In order to support that, we wrap it in something that
+ * supports interior mutability.  It also needs to be thread-safe, since we're
+ * using async/await.  That brings us to Arc<Mutex<...>>, but it seems like
+ * overkill since it will only really be used by one thread at a time (at all,
+ * let alone mutably) and there will never be contention on the Mutex.
+ */
+pub struct RequestContext {
+    /** shared server state */
+    pub server: Arc<ApiServerState>,
+    /** HTTP request details */
+    pub request: Arc<Mutex<Request<Body>>>,
+    /** HTTP request routing variables */
+    pub path_variables: BTreeMap<String, String>
+}
 
 /**
  * `Derived` defines an interface allowing a type to be constructed from a
- * `(server: Arc<ApiServerState>, request: &mut Request<Body>)` tuple.  Unlike
- * most traits, `Derived` essentially defines only a constructor function, not
- * instance functions.
+ * `RequestContext`.  Unlike most traits, `Derived` essentially defines only a
+ * constructor function, not instance functions.
  *
  * The extractors that we provide (e.g., `Query`, `Json`) implement `Derived` in
  * order to construct themselves from the request.  For example, `Derived` is
@@ -129,14 +147,13 @@ pub type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
  * `ConcreteRouteHandler` for more on why this needed.
  */
 #[async_trait]
-pub trait Derived: Send + Sync + Sized
+pub trait Derived: Send + Sized
 {
     /**
-     * Construct an instance of this type from `server` and `request`.
+     * Construct an instance of this type from a `RequestContext`.
      */
-    async fn from_request(
-        server: Arc<ApiServerState>,
-        request: &mut Request<Body>) -> Result<Self, ApiHttpError>;
+    async fn from_request(rqctx: Arc<RequestContext>)
+        -> Result<Self, ApiHttpError>;
 }
 
 /*
@@ -146,7 +163,7 @@ pub trait Derived: Send + Sync + Sized
 #[async_trait]
 impl Derived for ()
 {
-    async fn from_request(_: Arc<ApiServerState>, _: &mut Request<Body>)
+    async fn from_request(_: Arc<RequestContext>)
         -> Result<(), ApiHttpError>
     {
         Ok(())
@@ -158,11 +175,10 @@ impl<T> Derived for (T,)
 where
     T: Derived + 'static, /* TODO-cleanup static should not be necessary*/
 {
-    async fn from_request(server: Arc<ApiServerState>,
-        request: &mut Request<Body>)
+    async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<(T,), ApiHttpError>
     {
-        Ok((T::from_request(server, request).await?,))
+        Ok((T::from_request(rqctx).await?,))
     }
 }
 
@@ -172,12 +188,11 @@ where
     T1: Derived + 'static, /* TODO-cleanup static should not be necessary */
     T2: Derived + 'static, /* TODO-cleanup static should not be necessary */
 {
-    async fn from_request(server: Arc<ApiServerState>,
-        request: &mut Request<Body>)
+    async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<(T1,T2), ApiHttpError>
     {
-        let p1 = T1::from_request(Arc::clone(&server), request).await?;
-        let p2 = T2::from_request(Arc::clone(&server), request).await?;
+        let p1 = T1::from_request(Arc::clone(&rqctx)).await?;
+        let p2 = T2::from_request(Arc::clone(&rqctx)).await?;
         Ok((p1, p2))
     }
 }
@@ -188,10 +203,10 @@ where
  * `ApiHttpError`).
  *
  * As described above, handler functions can have a number of different
- * signatures.  They all consume a reference to the server state and the
- * request.  They may also consume some number of extractor arguments.  The
- * `ApiHandler` trait is parametrized by the type `FuncParams`, which is
- * expected to be a tuple describing these extractor arguments.
+ * signatures.  They all consume a reference to the current request context.
+ * They may also consume some number of extractor arguments.  The `ApiHandler`
+ * trait is parametrized by the type `FuncParams`, which is expected to be a
+ * tuple describing these extractor arguments.
  *
  * Below, we define implementations of `ApiHandler` for various function
  * types.  In this way, we can treat functions with different signatures as
@@ -203,104 +218,93 @@ where
  * an adapter from one invocation to the one needed for this function.
  */
 #[async_trait]
-pub trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
+pub trait ApiHandler<FuncParams: Derived>: Send + 'static
 {
-    async fn handle_request(
-        &self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>,
-        p: FuncParams)
+    async fn handle_request(&self, rqctx: Arc<RequestContext>, p: FuncParams)
         -> ApiHandlerResult;
 }
 
 /**
  * Implementation of `ApiHandler` for functions that consume no extractor
- * arguments (just the server and request arguments).
+ * arguments (just the `RequestContext`).
  * TODO the implementations below could benefit from a macro.
  */
 #[async_trait]
 impl<FuncType, FutureType> ApiHandler<()> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>)
-        -> FutureType + Send + Sync + 'static,
+    FuncType: Fn(Arc<RequestContext>) -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
 {
-    async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>,
-        _p: ())
+    async fn handle_request(&self, rqctx: Arc<RequestContext>, _p: ())
         -> ApiHandlerResult
     {
-        (self)(server, request).await
+        (self)(rqctx).await
     }
 }
 
 /**
  * Implementation of `ApiHandler` for functions that consume a single `Query`
- * extractor argument in addition to the regular server and request arguments.
+ * extractor argument in addition to the regular `RequestContext` argument.
  */
 #[async_trait]
 impl<FuncType, FutureType, Q> ApiHandler<(Query<Q>,)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>)
+    FuncType: Fn(Arc<RequestContext>, Query<Q>)
         -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
-    Q: DeserializeOwned + Send + Sync + 'static,
+    Q: DeserializeOwned + Send + 'static,
 {
     async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>,
+        rqctx: Arc<RequestContext>,
         (query,): (Query<Q>,))
         -> ApiHandlerResult
     {
-        (self)(server, request, query).await
+        (self)(rqctx, query).await
     }
 }
 
 /**
  * Implementation of `ApiHandler` for functions that consume a single `Json`
- * extractor argument in addition to the regular server and request arguments.
+ * extractor argument in addition to the regular `RequestContext` argument.
  */
 #[async_trait]
 impl<FuncType, FutureType, J> ApiHandler<(Json<J>,)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Json<J>)
-        -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
-    J: DeserializeOwned + Send + Sync + 'static,
+    FuncType: Fn(Arc<RequestContext>, Json<J>)
+        -> FutureType + Send + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    J: DeserializeOwned + Send + 'static,
 {
     async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>,
+        rqctx: Arc<RequestContext>,
         (json,): (Json<J>,))
         -> ApiHandlerResult
     {
-        (self)(server, request, json).await
+        (self)(rqctx, json).await
     }
 }
 
 /**
  * Implementation of `ApiHandler` for functions that consume both a `Query` and
- * a `Json` extractor argument in addition to the regular server and request
- * arguments.  Note that the order of these arguments matters.  Reversing them
- * is not supported.
+ * a `Json` extractor argument in addition to the regular `RequestContext`
+ * argument.  Note that the order of these arguments matters.  Reversing them is
+ * not supported.
  */
 #[async_trait]
 impl<FuncType, FutureType, Q, J> ApiHandler<(Query<Q>, Json<J>)> for FuncType
 where
-    FuncType: Fn(Arc<ApiServerState>, Request<Body>, Query<Q>, Json<J>)
-        -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
-    Q: DeserializeOwned + Send + Sync + 'static,
-    J: DeserializeOwned + Send + Sync + 'static,
+    FuncType: Fn(Arc<RequestContext>, Query<Q>, Json<J>)
+        -> FutureType + Send + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    Q: DeserializeOwned + Send + 'static,
+    J: DeserializeOwned + Send + 'static,
 {
     async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>,
+        rqctx: Arc<RequestContext>,
         (query, json): (Query<Q>, Json<J>))
         -> ApiHandlerResult
     {
-        (self)(server, request, query, json).await
+        (self)(rqctx, query, json).await
     }
 }
 
@@ -314,10 +318,8 @@ where
  * to record that a specific handler has been attached to a specific HTTP route.
  */
 #[async_trait]
-pub trait RouteHandler: Debug + Sync + Send {
-    async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        request: Request<Body>)
+pub trait RouteHandler: Debug + Send {
+    async fn handle_request(&self, rqctx: RequestContext)
         -> ApiHandlerResult;
 }
 
@@ -370,11 +372,9 @@ impl<HandlerType, FuncParams> RouteHandler for
     ConcreteRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: ApiHandler<FuncParams>,
-    FuncParams: Derived,
+    FuncParams: Derived + 'static,
 {
-    async fn handle_request(&self,
-        server: Arc<ApiServerState>,
-        mut request: Request<Body>)
+    async fn handle_request(&self, rqctx_raw: RequestContext)
         -> ApiHandlerResult
     {
         /*
@@ -395,9 +395,9 @@ where
          * handler function.  From this point down, all of this is resolved
          * statically.
          */
-        let funcparams = Derived::from_request(
-            Arc::clone(&server), &mut request).await?;
-        self.handler.handle_request(server, request, funcparams).await
+        let rqctx = Arc::new(rqctx_raw);
+        let funcparams = Derived::from_request(Arc::clone(&rqctx)).await?;
+        self.handler.handle_request(rqctx, funcparams).await
     }
 }
 
@@ -499,11 +499,12 @@ where
 #[async_trait]
 impl<QueryType> Derived for Query<QueryType>
 where
-    QueryType: DeserializeOwned + Send + Sync + 'static
+    QueryType: DeserializeOwned + Send + 'static
 {
-    async fn from_request(_: Arc<ApiServerState>, request: &mut Request<Body>)
+    async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<Query<QueryType>, ApiHttpError>
     {
+        let request = rqctx.request.lock().await;
         http_request_load_query(&request)
     }
 }
@@ -535,13 +536,13 @@ impl<JsonType> Json<JsonType> {
  * Given an HTTP request, attempt to read the body, parse it as JSON, and
  * deserialize an instance of `JsonType` from it.
  */
-async fn http_request_load_json_body<JsonType>(
-    server: Arc<ApiServerState>,
-    request: &mut Request<Body>)
+async fn http_request_load_json_body<JsonType>(rqctx: Arc<RequestContext>)
     -> Result<Json<JsonType>, ApiHttpError>
 where
     JsonType: DeserializeOwned
 {
+    let server = &rqctx.server;
+    let mut request = rqctx.request.lock().await;
     let body_bytes = http_read_body(
         request.body_mut(), server.config.request_body_max_bytes).await?;
     let value: Result<JsonType, serde_json::Error> =
@@ -564,12 +565,11 @@ where
 #[async_trait]
 impl<JsonType> Derived for Json<JsonType>
 where
-    JsonType: DeserializeOwned + Send + Sync + 'static,
+    JsonType: DeserializeOwned + Send + 'static,
 {
-    async fn from_request(server: Arc<ApiServerState>,
-        mut request: &mut Request<Body>)
+    async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<Json<JsonType>, ApiHttpError>
     {
-        http_request_load_json_body(server, &mut request).await
+        http_request_load_json_body(rqctx).await
     }
 }

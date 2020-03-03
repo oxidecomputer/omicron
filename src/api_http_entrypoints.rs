@@ -10,6 +10,8 @@ use hyper::Body;
 use serde::Deserialize;
 
 use crate::api_error::ApiHttpError;
+use crate::api_handler::RequestContext;
+use crate::api_handler::Query;
 use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
@@ -63,11 +65,12 @@ pub struct ListQueryParams {
  * "GET /projects": list all projects
  */
 pub async fn api_projects_get(
-    server: &ApiServerState,
-    params: &ListQueryParams)
+    rqctx: Arc<RequestContext>,
+    params_raw: Query<ListQueryParams>)
     -> Result<Response<Body>, ApiHttpError>
 {
-    let backend = &*server.backend;
+    let backend = &rqctx.server.backend;
+    let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(3); // XXX
     let marker = params.marker.as_ref().map(|s| s.clone());
     let project_stream = backend.projects_list(marker, limit).await?;

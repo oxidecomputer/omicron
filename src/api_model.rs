@@ -179,7 +179,7 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 
 /** A stream of Results, each potentially representing an object in the API. */
 pub type ObjectStream<T> = Pin<Box<
-    dyn Stream<Item = Result<Arc<T>, ApiError>> + Send
+    dyn Stream<Item = Result<Arc<T>, ApiError>> + Send + Sync
 >>;
 
 /**

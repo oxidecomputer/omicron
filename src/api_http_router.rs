@@ -2,9 +2,11 @@
  * Routes requests to handlers
  */
 
+use crate::api_error::ApiHttpError;
 use crate::api_handler::RouteHandler;
 
 use http::Method;
+use http::StatusCode;
 use std::collections::BTreeMap;
 use url::Url;
 
@@ -29,8 +31,14 @@ enum PathSegment {
     Varname(String)
 }
 
+#[derive(Debug)]
+pub struct LookupResult<'a> {
+    handler: &'a Box<dyn RouteHandler>,
+    variables: BTreeMap<String, String>,
+}
+
 impl PathSegment {
-    fn from(segment: &str)
+    fn from(segment: &String)
         -> PathSegment
     {
         /*
@@ -65,7 +73,7 @@ impl HttpRouter {
     }
 
     fn path_to_segments(path: &str)
-        -> Vec<PathSegment>
+        -> Vec<String>
     {
         /* TODO-cleanup is this really the right way?  Feels like a hack. */
         let base = Url::parse("http://127.0.0.1/").unwrap();
@@ -80,32 +88,26 @@ impl HttpRouter {
         /*
          * TODO-correctness is it possible for bad input to cause this to fail?
          * If so, we should provide a better error message.
-         * TODO-cleanup can we do this with iterators instead of a vector?  I
-         * ran into a lot of trouble with lifetimes trying to do this.
          */
-        let path_segments: Vec<PathSegment> = url
-            .path_segments()
-            .unwrap()
-            .map(PathSegment::from)
-            .collect();
-        path_segments
+        url.path_segments().unwrap().map(String::from).collect()
     }
 
     pub fn insert(&mut self, method: Method, path: &str,
         handler: Box<dyn RouteHandler>)
     {
         let all_segments = HttpRouter::path_to_segments(path);
-        let mut segments = all_segments.as_slice();
 
         let mut node: &mut Box<HttpRouterNode> = &mut self.root;
-        while let Some(segment) = segments.first() {
+        for raw_segment in all_segments {
+            let segment = PathSegment::from(&raw_segment);
+
             /*
              * XXX panic if this segment doesn't match the existing edges from
              * this node.
              */
             node = match segment {
                 PathSegment::Literal(lit) => {
-                    if !node.edges_constants.contains_key(lit) {
+                    if !node.edges_constants.contains_key(&lit) {
                         let newnode = Box::new(HttpRouterNode {
                             method_handlers: BTreeMap::new(),
                             edges_constants: BTreeMap::new(),
@@ -115,7 +117,7 @@ impl HttpRouter {
                         node.edges_constants.insert(lit.clone(), newnode);
                     }
 
-                    node.edges_constants.get_mut(lit).unwrap()
+                    node.edges_constants.get_mut(&lit).unwrap()
                 },
 
                 PathSegment::Varname(new_varname) => {
@@ -137,8 +139,6 @@ impl HttpRouter {
                     &mut node.edge_varname.as_mut().unwrap().1
                 }
             };
-
-            segments = &segments[1..];
         }
 
         let methodname = method.as_str().to_uppercase();
@@ -149,34 +149,75 @@ impl HttpRouter {
 
         node.method_handlers.insert(methodname, handler);
     }
+
+    /*
+     * TODO-cleanup
+     * consider defining a separate struct type for url-encoded vs. not?
+     */
+    pub fn lookup_route<'a, 'b>(&'a self, method: Method, path: &'b str)
+        -> Result<LookupResult<'a>, ApiHttpError>
+    {
+        let all_segments = HttpRouter::path_to_segments(path);
+        let mut node: &Box<HttpRouterNode> = &self.root;
+        let mut variables: BTreeMap<String, String> = BTreeMap::new();
+
+        for segment in all_segments {
+            let segment_string = segment.to_string();
+            if let Some(n) = node.edges_constants.get(&segment_string) {
+                node = n;
+            } else if let Some(edge) = &node.edge_varname {
+                variables.insert(edge.0.clone(), segment_string);
+                node = &edge.1
+            } else {
+                return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND))
+            }
+        }
+
+        let methodname = method.as_str().to_uppercase();
+        if let Some(handler) = node.method_handlers.get(&methodname) {
+            Ok(LookupResult {
+                handler: handler,
+                variables: variables
+            })
+        } else {
+            Err(ApiHttpError::for_status(StatusCode::METHOD_NOT_ALLOWED))
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::api_error::ApiHttpError;
     use crate::api_handler::api_handler_create;
+    use crate::api_handler::RouteHandler;
     use crate::api_server::ApiServerState;
     use hyper::Request;
     use hyper::Response;
     use hyper::Body;
     use std::sync::Arc;
     use http::Method;
+    use super::HttpRouter;
 
-    async fn demo_handler(_server: Arc<ApiServerState>, _request: Request<Body>)
+    async fn test_handler(_server: Arc<ApiServerState>, _request: Request<Body>)
         -> Result<Response<Body>, ApiHttpError>
     {
-        unimplemented!();
+        panic!("test handler is not supposed to run");
     }
-    
+
+    fn new_handler()
+        -> Box<dyn RouteHandler>
+    {
+        api_handler_create(test_handler)
+    }
+
     #[test]
     fn test_router()
     {
-        let mut router = super::HttpRouter::new();
-        let handler = || api_handler_create(demo_handler);
-    
+        let mut router = HttpRouter::new();
+
         eprintln!("router: {:?}", router);
-        router.insert(Method::GET, "/foo/{bar}/baz", handler());
-        router.insert(Method::GET, "/boo", handler());
+        router.insert(Method::GET, "/foo/{bar}/baz", new_handler());
+        router.insert(Method::GET, "/boo", new_handler());
         eprintln!("router: {:?}", router);
     }
 }
