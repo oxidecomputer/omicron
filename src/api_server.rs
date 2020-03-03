@@ -196,7 +196,6 @@ async fn http_request_handle(
      */
     let method = request.method();
     let uri = request.uri();
-
     let lookup_result = server.router.lookup_route(&method, uri.path())?;
     eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
     let rqctx = RequestContext {
