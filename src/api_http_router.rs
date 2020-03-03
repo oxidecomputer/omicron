@@ -190,6 +190,7 @@ mod test {
     use crate::api_error::ApiHttpError;
     use crate::api_handler::api_handler_create;
     use crate::api_handler::RouteHandler;
+    use crate::api_handler::RequestContext;
     use crate::api_server::ApiServerState;
     use hyper::Request;
     use hyper::Response;
@@ -198,7 +199,7 @@ mod test {
     use http::Method;
     use super::HttpRouter;
 
-    async fn test_handler(_server: Arc<ApiServerState>, _request: Request<Body>)
+    async fn test_handler(_: Arc<RequestContext>)
         -> Result<Response<Body>, ApiHttpError>
     {
         panic!("test handler is not supposed to run");

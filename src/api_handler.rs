@@ -147,7 +147,7 @@ pub struct RequestContext {
  * `ConcreteRouteHandler` for more on why this needed.
  */
 #[async_trait]
-pub trait Derived: Send + Sized
+pub trait Derived: Send + Sync + Sized
 {
     /**
      * Construct an instance of this type from a `RequestContext`.
@@ -218,7 +218,7 @@ where
  * an adapter from one invocation to the one needed for this function.
  */
 #[async_trait]
-pub trait ApiHandler<FuncParams: Derived>: Send + 'static
+pub trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
 {
     async fn handle_request(&self, rqctx: Arc<RequestContext>, p: FuncParams)
         -> ApiHandlerResult;
@@ -233,7 +233,7 @@ pub trait ApiHandler<FuncParams: Derived>: Send + 'static
 impl<FuncType, FutureType> ApiHandler<()> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>) -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
 {
     async fn handle_request(&self, rqctx: Arc<RequestContext>, _p: ())
         -> ApiHandlerResult
@@ -251,8 +251,8 @@ impl<FuncType, FutureType, Q> ApiHandler<(Query<Q>,)> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Query<Q>)
         -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + Sync + 'static,
-    Q: DeserializeOwned + Send + 'static,
+    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    Q: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
@@ -271,9 +271,9 @@ where
 impl<FuncType, FutureType, J> ApiHandler<(Json<J>,)> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Json<J>)
-        -> FutureType + Send + 'static,
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
-    J: DeserializeOwned + Send + 'static,
+    J: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
@@ -294,10 +294,10 @@ where
 impl<FuncType, FutureType, Q, J> ApiHandler<(Query<Q>, Json<J>)> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Query<Q>, Json<J>)
-        -> FutureType + Send + 'static,
+        -> FutureType + Send + Sync + 'static,
     FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
-    Q: DeserializeOwned + Send + 'static,
-    J: DeserializeOwned + Send + 'static,
+    Q: DeserializeOwned + Send + Sync + 'static,
+    J: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
@@ -318,7 +318,7 @@ where
  * to record that a specific handler has been attached to a specific HTTP route.
  */
 #[async_trait]
-pub trait RouteHandler: Debug + Send {
+pub trait RouteHandler: Debug + Send + Sync {
     async fn handle_request(&self, rqctx: RequestContext)
         -> ApiHandlerResult;
 }
@@ -455,11 +455,11 @@ where
  * structure of yours that implements `serde::Deserialize`.  See this module's
  * documentation for more information.
  */
-pub struct Query<QueryType> {
+pub struct Query<QueryType: Send + Sync> {
     inner: QueryType
 }
 
-impl<QueryType> Query<QueryType> {
+impl<QueryType: Send + Sync> Query<QueryType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -472,7 +472,7 @@ impl<QueryType> Query<QueryType> {
  * Given an HTTP request, pull out the query string and attempt to deserialize
  * it as an instance of `QueryType`.
  */
-fn http_request_load_query<QueryType>(request: &Request<Body>)
+fn http_request_load_query<QueryType: Send + Sync>(request: &Request<Body>)
     -> Result<Query<QueryType>, ApiHttpError>
 where
     QueryType: DeserializeOwned
@@ -499,7 +499,7 @@ where
 #[async_trait]
 impl<QueryType> Derived for Query<QueryType>
 where
-    QueryType: DeserializeOwned + Send + 'static
+    QueryType: DeserializeOwned + Send + Sync + 'static
 {
     async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<Query<QueryType>, ApiHttpError>
@@ -519,11 +519,11 @@ where
  * that implements `serde::Deserialize`.  See this module's documentation for
  * more information.
  */
-pub struct Json<JsonType> {
+pub struct Json<JsonType: Send + Sync> {
     inner: JsonType
 }
 
-impl<JsonType> Json<JsonType> {
+impl<JsonType: Send + Sync> Json<JsonType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -539,7 +539,7 @@ impl<JsonType> Json<JsonType> {
 async fn http_request_load_json_body<JsonType>(rqctx: Arc<RequestContext>)
     -> Result<Json<JsonType>, ApiHttpError>
 where
-    JsonType: DeserializeOwned
+    JsonType: DeserializeOwned + Send + Sync
 {
     let server = &rqctx.server;
     let mut request = rqctx.request.lock().await;
@@ -565,7 +565,7 @@ where
 #[async_trait]
 impl<JsonType> Derived for Json<JsonType>
 where
-    JsonType: DeserializeOwned + Send + 'static,
+    JsonType: DeserializeOwned + Send + Sync + 'static,
 {
     async fn from_request(rqctx: Arc<RequestContext>)
         -> Result<Json<JsonType>, ApiHttpError>
