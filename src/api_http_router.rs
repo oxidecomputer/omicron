@@ -33,8 +33,8 @@ enum PathSegment {
 
 #[derive(Debug)]
 pub struct LookupResult<'a> {
-    handler: &'a Box<dyn RouteHandler>,
-    variables: BTreeMap<String, String>,
+    pub handler: &'a Box<dyn RouteHandler>,
+    pub variables: BTreeMap<String, String>,
 }
 
 impl PathSegment {
@@ -154,7 +154,7 @@ impl HttpRouter {
      * TODO-cleanup
      * consider defining a separate struct type for url-encoded vs. not?
      */
-    pub fn lookup_route<'a, 'b>(&'a self, method: Method, path: &'b str)
+    pub fn lookup_route<'a, 'b>(&'a self, method: &'b Method, path: &'b str)
         -> Result<LookupResult<'a>, ApiHttpError>
     {
         let all_segments = HttpRouter::path_to_segments(path);
@@ -191,8 +191,6 @@ mod test {
     use crate::api_handler::api_handler_create;
     use crate::api_handler::RouteHandler;
     use crate::api_handler::RequestContext;
-    use crate::api_server::ApiServerState;
-    use hyper::Request;
     use hyper::Response;
     use hyper::Body;
     use std::sync::Arc;

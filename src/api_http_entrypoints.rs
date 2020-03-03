@@ -5,13 +5,17 @@
 
 use std::sync::Arc;
 
-use hyper::Response;
 use hyper::Body;
+use hyper::Method;
+use hyper::Response;
 use serde::Deserialize;
 
 use crate::api_error::ApiHttpError;
-use crate::api_handler::RequestContext;
+use crate::api_handler::api_handler_create;
+use crate::api_handler::Json;
 use crate::api_handler::Query;
+use crate::api_handler::RequestContext;
+use crate::api_http_router::HttpRouter;
 use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
@@ -19,7 +23,20 @@ use crate::api_http_util::api_http_emit_stream;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
-use crate::api_server::ApiServerState;
+
+pub fn api_register_entrypoints(router: &mut HttpRouter)
+{
+    router.insert(Method::GET, "/projects",
+        api_handler_create(api_projects_get));
+    router.insert(Method::POST, "/projects",
+        api_handler_create(api_projects_post));
+    router.insert(Method::GET, "/projects/{project_id}",
+        api_handler_create(api_projects_get_project));
+    router.insert(Method::DELETE, "/projects/{project_id}",
+        api_handler_create(api_projects_delete_project));
+    router.insert(Method::PUT, "/projects/{project_id}",
+        api_handler_create(api_projects_put_project));
+}
 
 /*
  * API ENDPOINT FUNCTION NAMING CONVENTIONS
@@ -54,9 +71,8 @@ use crate::api_server::ApiServerState;
  *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-/* TODO-cleanup: should not be public */
 #[derive(Deserialize)]
-pub struct ListQueryParams {
+struct ListQueryParams {
     pub marker: Option<String>,
     pub limit: Option<usize>
 }
@@ -64,9 +80,10 @@ pub struct ListQueryParams {
 /*
  * "GET /projects": list all projects
  */
-pub async fn api_projects_get(
+async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<ListQueryParams>)
+    params_raw: Query<ListQueryParams>
+)
     -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &rqctx.server.backend;
@@ -79,28 +96,34 @@ pub async fn api_projects_get(
 
 /*
  * "POST /projects": create a new project
- * TODO-cleanup: none of the endpoints should be public
  */
-pub async fn api_projects_post(
-    server: &ApiServerState,
-    new_project: &ApiProjectCreateParams)
+async fn api_projects_post(
+    rqctx: Arc<RequestContext>,
+    new_project: Json<ApiProjectCreateParams>
+)
     -> Result<Response<Body>, ApiHttpError>
 {
-    let backend = &*server.backend;
-    let project = backend.project_create(&*new_project).await?;
+    let backend = &*rqctx.server.backend;
+    let project = backend.project_create(&new_project.into_inner()).await?;
     api_http_create(project)
 }
 
 /*
  * "GET /project/{project_id}": fetch a specific project
+ * TODO-cleanup: Seeing the code below, it would be kind of nice if we could
+ * take the path parameters as a function argument because it would mean that we
+ * could statically verify here that we had the appropriate path parameters.
+ * (Actually, it would still be a runtime check in that we'd only end up
+ * matching up the path parameters during routing, but we could put the
+ * unwrap()/expect() in one place instead of every handler.  Is there any way to
+ * make it fail at compile time?)
  */
-pub async fn api_projects_get_project(
-    server: &ApiServerState,
-    project_id: String)
+async fn api_projects_get_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
-    let backend = &*server.backend;
-    let project_id = project_id.to_string();
+    let backend = &*rqctx.server.backend;
+    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
+        expect("handler function invoked with route missing project_id");
     let project : Arc<ApiProject> = backend.project_lookup(project_id).await?;
     api_http_emit_one(project)
 }
@@ -108,13 +131,12 @@ pub async fn api_projects_get_project(
 /*
  * "DELETE /project/{project_id}": delete a specific project
  */
-pub async fn api_projects_delete_project(
-    server: &ApiServerState,
-    project_id: String)
+async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
-    let backend = &*server.backend;
-    let project_id = project_id.to_string();
+    let backend = &*rqctx.server.backend;
+    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
+        expect("handler function invoked with route missing project_id");
     backend.project_delete(project_id).await?;
     api_http_delete()
 }
@@ -128,15 +150,16 @@ pub async fn api_projects_delete_project(
  * be a slightly different content-type (e.g., "application/json-patch")?  We
  * should see what other APIs do.
  */
-pub async fn api_projects_put_project(
-    server: &ApiServerState,
-    project_id: String,
-    updated_project: &ApiProjectUpdateParams)
+async fn api_projects_put_project(
+    rqctx: Arc<RequestContext>,
+    updated_project: Json<ApiProjectUpdateParams>
+)
     -> Result<Response<Body>, ApiHttpError>
 {
-    let backend = &*server.backend;
-    let project_id = project_id.to_string();
+    let backend = &*rqctx.server.backend;
+    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
+        expect("handler function invoked with route missing project_id");
     let newproject = backend.project_update(
-        project_id, &*updated_project).await?;
+        project_id, &updated_project.into_inner()).await?;
     api_http_emit_one(newproject)
 }

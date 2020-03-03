@@ -194,11 +194,11 @@ pub type ObjectStream<T> = Pin<Box<
 pub trait ApiBackend: Send + Sync {
     async fn project_create(&self, params: &ApiProjectCreateParams)
         -> CreateResult<ApiProject>;
-    async fn project_lookup(&self, name: String)
+    async fn project_lookup(&self, name: &String)
         -> LookupResult<ApiProject>;
-    async fn project_delete(&self, name: String)
+    async fn project_delete(&self, name: &String)
         -> DeleteResult;
-    async fn project_update(&self, name: String,
+    async fn project_update(&self, name: &String,
         params: &ApiProjectUpdateParams)
         -> UpdateResult<ApiProject>;
     async fn projects_list(&self, marker: Option<String>, limit: usize)

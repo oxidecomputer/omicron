@@ -153,11 +153,11 @@ impl ApiBackend for Simulator {
         Ok(futures::stream::iter(projects).boxed())
     }
 
-    async fn project_lookup(&self, name: String) ->
+    async fn project_lookup(&self, name: &String) ->
         LookupResult<ApiProject>
     {
         let projects = self.projects_by_name.lock().await;
-        let project = projects.get(&name).ok_or_else(||
+        let project = projects.get(name).ok_or_else(||
             ApiError::ObjectNotFound {
                 type_name: ApiResourceType::Project,
                 object_name: name.clone()
@@ -166,11 +166,11 @@ impl ApiBackend for Simulator {
         Ok(rv)
     }
 
-    async fn project_delete(&self, name: String)
+    async fn project_delete(&self, name: &String)
         -> DeleteResult
     {
         let mut projects = self.projects_by_name.lock().await;
-        projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
+        projects.remove(name).ok_or_else(|| ApiError::ObjectNotFound {
             type_name: ApiResourceType::Project,
             object_name: name.clone()
         })?;
@@ -178,14 +178,14 @@ impl ApiBackend for Simulator {
     }
 
     async fn project_update(&self,
-        name: String,
+        name: &String,
         new_params: &ApiProjectUpdateParams)
         -> UpdateResult<ApiProject>
     {
         let mut projects = self.projects_by_name.lock().await;
 
         let oldproject : Arc<ApiProject> =
-            projects.remove(&name).ok_or_else(|| ApiError::ObjectNotFound {
+            projects.remove(name).ok_or_else(|| ApiError::ObjectNotFound {
                 type_name: ApiResourceType::Project,
                 object_name: name.clone()
             })?;
