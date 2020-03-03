@@ -41,16 +41,10 @@ Use `curl` to hit the server:
 
 ## TODO
 
-- Implement a proper routing implementation and eliminate the custom handcoded
-  router function.  This will probably have to incorporate the equivalent of a
-  path extractor (i.e., extracting named parts of URI paths into Strings), but
-  this likely doesn't need to be an argument to the function.  It can be some
-  method invoked on the request.  Both of these pieces are dependencies for
-  getting all of the existing endpoint handler functions into the new
-  handler/router framework.
-- Consider: should the handler functions return a Serialize or a Stream of
-  Serialize?  Otherwise, how will the OpenAPI tooling know what the return types
-  are?
+- Clean up changes from recent router implementation and merge into master.
+- Update the handler functions so that they can return a Serialize or a Stream
+  of Serialize.  (Otherwise, how will the OpenAPI tooling know what the return
+  types are?)
 - Flesh out more endpoints and simulator
 - Write out road map
   - regions, AZs, etc. need to be added per RFD 24
