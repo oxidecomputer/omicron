@@ -19,6 +19,7 @@ use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
 use crate::api_http_util::api_http_emit_stream;
+use crate::api_http_util::http_extract_path_params;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
@@ -110,22 +111,21 @@ async fn api_projects_post(
     api_http_create(project)
 }
 
+#[derive(Deserialize)]
+struct ProjectPathParam {
+    project_id: String
+}
+
 /*
  * "GET /project/{project_id}": fetch a specific project
- * TODO-cleanup: Seeing the code below, it would be kind of nice if we could
- * take the path parameters as a function argument because it would mean that we
- * could statically verify here that we had the appropriate path parameters.
- * (Actually, it would still be a runtime check in that we'd only end up
- * matching up the path parameters during routing, but we could put the
- * unwrap()/expect() in one place instead of every handler.  Is there any way to
- * make it fail at compile time?)
  */
 async fn api_projects_get_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*rqctx.server.backend;
-    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
-        expect("handler function invoked with route missing project_id");
+    let params: ProjectPathParam = http_extract_path_params(
+        &rqctx.path_variables)?;
+    let project_id = &params.project_id;
     let project : Arc<ApiProject> = backend.project_lookup(project_id).await?;
     api_http_emit_one(project)
 }
@@ -137,8 +137,9 @@ async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*rqctx.server.backend;
-    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
-        expect("handler function invoked with route missing project_id");
+    let params: ProjectPathParam = http_extract_path_params(
+        &rqctx.path_variables)?;
+    let project_id = &params.project_id;
     backend.project_delete(project_id).await?;
     api_http_delete()
 }
@@ -146,11 +147,11 @@ async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
 /*
  * "PUT /project/{project_id}": update a specific project
  *
- * TODO: Is it valid for PUT to accept application/json that's a subset of what
- * the resource actually represents?  If not, is that a problem?  (HTTP may
- * require that this be idempotent.)  If so, can we get around that having this
- * be a slightly different content-type (e.g., "application/json-patch")?  We
- * should see what other APIs do.
+ * TODO-correctness: Is it valid for PUT to accept application/json that's a
+ * subset of what the resource actually represents?  If not, is that a problem?
+ * (HTTP may require that this be idempotent.)  If so, can we get around that
+ * having this be a slightly different content-type (e.g.,
+ * "application/json-patch")?  We should see what other APIs do.
  */
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
@@ -159,8 +160,9 @@ async fn api_projects_put_project(
     -> Result<Response<Body>, ApiHttpError>
 {
     let backend = &*rqctx.server.backend;
-    let project_id = &rqctx.path_variables.get(&"project_id".to_string()).
-        expect("handler function invoked with route missing project_id");
+    let params: ProjectPathParam = http_extract_path_params(
+        &rqctx.path_variables)?;
+    let project_id = &params.project_id;
     let newproject = backend.project_update(
         project_id, &updated_project.into_inner()).await?;
     api_http_emit_one(newproject)

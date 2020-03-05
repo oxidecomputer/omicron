@@ -185,6 +185,18 @@ impl ApiHttpError {
         }
     }
 
+    pub fn for_internal_error(
+        message_internal: String
+    ) -> Self
+    {
+        let code = http::StatusCode::INTERNAL_SERVER_ERROR;
+        ApiHttpError {
+            status_code: code,
+            external_message: code.canonical_reason().unwrap().to_string(),
+            internal_message: message_internal.clone(),
+        }
+    }
+
     pub fn into_response(self)
         -> hyper::Response<hyper::Body>
     {

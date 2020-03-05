@@ -43,8 +43,6 @@ Use `curl` to hit the server:
 
 - Clean up changes from recent router implementation.
   - Implement tests for demo handler functions
-  - Document lib.rs
-- Implement path params extractor?  (See `api_projects_get_project`)
 - Restructure files to better separate concerns?
   (e.g., API-agnostic HTTP infrastructure)
   (e.g., OpenAPI input/output types?)

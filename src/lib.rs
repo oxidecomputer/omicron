@@ -1,7 +1,9 @@
 /*!
- * Library functions exposed by this crate.  Note that this is not intended for
- * use a dependency.  These are used only by the test suite.
- * TODO-cleanup clean this up!
+ * Library interfaces for this crate, intended for use only by the automated
+ * test suite.  This crate does not define a Rust library API that's intended to
+ * be consumed from the outside.
+ *
+ * TODO-cleanup is there a better way to do this?
  */
 
 pub mod api_error;
