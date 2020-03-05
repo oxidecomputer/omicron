@@ -317,6 +317,15 @@ where
  */
 #[async_trait]
 pub trait RouteHandler: Debug + Send + Sync {
+    /**
+     * Returns a description of this handler.  This might be a function name,
+     * for example.  This is not guaranteed to be unique.
+     */
+    fn label(&self) -> &String;
+
+    /**
+     * Handle an incoming HTTP request.
+     */
     async fn handle_request(&self, rqctx: RequestContext)
         -> ApiHandlerResult;
 }
@@ -372,6 +381,12 @@ where
     HandlerType: ApiHandler<FuncParams>,
     FuncParams: Derived + 'static,
 {
+    fn label(&self)
+        -> &String
+    {
+        &self.label
+    }
+
     async fn handle_request(&self, rqctx_raw: RequestContext)
         -> ApiHandlerResult
     {

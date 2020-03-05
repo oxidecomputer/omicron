@@ -1,5 +1,5 @@
 /*!
- * Routes requests to handlers
+ * Routes incoming HTTP requests to handler functions
  */
 
 use crate::api_error::ApiHttpError;
@@ -9,7 +9,6 @@ use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use url::Url;
 
 /**
  * `HttpRouter` is a simple data structure for routing incoming HTTP requests to
@@ -187,20 +186,20 @@ impl PathSegment {
     fn from(segment: &String)
         -> PathSegment
     {
-        /*
-         * TODO-cleanup use of percent-encoding here
-         * TODO-correctness figure out if we _should_ be using percent-encoding
-         * here or not -- i.e., is the matching actually correct?
-         */
-        if !segment.starts_with("%7B")
-            || !segment.ends_with("%7D")
-            || segment.chars().count() < 7 {
-            PathSegment::Literal(segment.to_string())
-        } else {
+        if segment.starts_with("{") || segment.ends_with("}") {
+            assert!(segment.starts_with("{"), "HTTP URI path segment \
+                variable missing leading \"{\"");
+            assert!(segment.ends_with("}"), "HTTP URI path segment \
+                variable missing trailing \"}\"");
+            assert!(segment.len() > 2,
+                "HTTP URI path segment variable name cannot be empty");
+
             let segment_chars: Vec<char> = segment.chars().collect();
-            let newlast = segment_chars.len() - 3;
-            let varname_chars = &segment_chars[3..newlast];
+            let newlast = segment_chars.len() - 1;
+            let varname_chars = &segment_chars[1..newlast];
             PathSegment::Varname(varname_chars.iter().collect())
+        } else {
+            PathSegment::Literal(segment.to_string())
         }
     }
 }
@@ -240,26 +239,51 @@ impl HttpRouter {
     fn path_to_segments(path: &str)
         -> Vec<String>
     {
-        /* TODO-cleanup is this really the right way?  Feels like a hack. */
-        let base = Url::parse("http://127.0.0.1/").unwrap();
-        let url = match base.join(path) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                panic!("attempted to create route for invalid URL: {}: \"{}\"",
-                    path, e);
-            }
-        };
-
         /*
-         * TODO-correctness is it possible for bad input to cause this to fail?
-         * If so, we should provide a better error message.
+         * We're given the "path" portion of a URI and we want to construct an
+         * array of the segments of the path.   Relevant references:
+         *
+         *    RFC 7230 HTTP/1.1 Syntax and Routing
+         *             (particularly: 2.7.3 on normalization)
+         *    RFC 3986 Uniform Resource Identifier (URI): Generic Syntax
+         *             (particularly: 6.2.2 on comparison)
+         *
+         * TODO-hardening We should revisit this.  We want to consider a few
+         * things:
+         * - whether our input is already (still?) percent-encoded or not
+         * - whether our returned representation is percent-encoded or not
+         * - what it means (and what we should do) if the path does not begin
+         *   with a leading "/"
+         * - whether we want to collapse consecutive "/" characters
+         *   (presumably we do, both at the start of the path and later)
+         * - how to handle paths that end in "/" (in some cases, ought this send
+         *   a 300-level redirect?)
+         * - are there other normalization considerations? e.g., ".", ".."
+         *
+         * It seems obvious to reach for the Rust "url" crate.  That crate
+         * parses complete URLs, which include a scheme and authority section
+         * that does not apply here.  We could certainly make one up (e.g.,
+         * "http://127.0.0.1") and construct a URL whose path matches the path
+         * we were given.  However, while it seems natural that our internal
+         * representaiton would not be percent-encoded, the "url" crate
+         * percent-encodes any path that it's given.  Further, we probably want
+         * to treat consecutive "/" characters as equivalent to a single "/",
+         * but that crate treats them separately (which is not unreasonable,
+         * since it's not clear that the above RFCs say anything about whether
+         * empty segments should be ignored).  The net result is that that crate
+         * doesn't buy us much here, but it does create more work, so we'll just
+         * split it ourselves.
          */
-        url.path_segments().unwrap().map(String::from).collect()
+        path
+            .split("/")
+            .filter(|segment| segment.len() > 0)
+            .map(String::from)
+            .collect()
     }
 
     /**
      * Configure a route for HTTP requests based on the HTTP `method` and
-     * URL `path`.  See the `HttpRouter` docs for information about how `path`
+     * URI `path`.  See the `HttpRouter` docs for information about how `path`
      * is processed.  Requests matching `path` will be resolved to `handler`.
      */
     pub fn insert(&mut self, method: Method, path: &str,
@@ -282,7 +306,7 @@ impl HttpRouter {
                      */
                     if let Some(HttpRouterEdgeVariable(varname, _)) =
                         &node.edge_varname {
-                        panic!("URL path \"{}\": attempted to register route \
+                        panic!("URI path \"{}\": attempted to register route \
                             for literal path segment \"{}\" when a route \
                             exists for variable path segment (variable name: \
                             \"{}\")", path, lit, varname);
@@ -307,7 +331,7 @@ impl HttpRouter {
                      * variable path segments from the same resource.
                      */
                     if ! node.edges_literals.is_empty() {
-                        panic!("URL path \"{}\": attempted to register route \
+                        panic!("URI path \"{}\": attempted to register route \
                             for variable path segment (variable name: \"{}\") \
                             when a route already exists for a literal path \
                             segment", path, new_varname);
@@ -319,7 +343,7 @@ impl HttpRouter {
                      * some caveats), but it seems more likely to be a mistake.
                      */
                     if varnames.contains(&new_varname) {
-                        panic!("URL path \"{}\": variable name \"{}\" is used \
+                        panic!("URI path \"{}\": variable name \"{}\" is used \
                             more than once", path, new_varname);
                     }
                     varnames.insert(new_varname.clone());
@@ -341,7 +365,7 @@ impl HttpRouter {
                          * supported, but it seems likely to be confusing and
                          * probably a mistake.
                          */
-                        panic!("URL path \"{}\": attempted to use variable \
+                        panic!("URI path \"{}\": attempted to use variable \
                             name \"{}\", but a different name (\"{}\") has \
                             already been used for this", path, new_varname,
                             node.edge_varname.as_ref().unwrap().0);
@@ -354,7 +378,7 @@ impl HttpRouter {
 
         let methodname = method.as_str().to_uppercase();
         if let Some(_) = node.method_handlers.get(&methodname) {
-            panic!("URL path \"{}\": attempted to create duplicate route for \
+            panic!("URI path \"{}\": attempted to create duplicate route for \
                 method \"{}\"", path, method);
         }
 
@@ -363,7 +387,7 @@ impl HttpRouter {
 
     /**
      * Look up the route handler for an HTTP request having method `method` and
-     * URL path `path`.  A successful lookup produces a `LookupResult`, which
+     * URI path `path`.  A successful lookup produces a `LookupResult`, which
      * includes both the handler that can process this request and a map of
      * variables assigned based on the request path as part of the lookup.  On
      * failure, this returns an `ApiHttpError` appropriate for the failure mode.
@@ -390,6 +414,14 @@ impl HttpRouter {
             }
         }
 
+        /*
+         * As a somewhat special case, if one requests a node with no handlers
+         * at all, report a 404.  We could probably treat this as a 405 as well.
+         */
+        if node.method_handlers.is_empty() {
+            return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND))
+        }
+
         let methodname = method.as_str().to_uppercase();
         if let Some(handler) = node.method_handlers.get(&methodname) {
             Ok(LookupResult {
@@ -406,8 +438,10 @@ impl HttpRouter {
 mod test {
     use crate::api_error::ApiHttpError;
     use crate::api_handler::api_handler_create;
+    use crate::api_handler::api_handler_create_named;
     use crate::api_handler::RouteHandler;
     use crate::api_handler::RequestContext;
+    use http::StatusCode;
     use hyper::Response;
     use hyper::Body;
     use std::sync::Arc;
@@ -426,10 +460,43 @@ mod test {
         api_handler_create(test_handler)
     }
 
+    fn new_handler_named(name: &str)
+        -> Box<dyn RouteHandler>
+    {
+        api_handler_create_named(test_handler, name)
+    }
+
     #[test]
-    #[should_panic(expected = "URL path \"/boo\": attempted to create \
+    #[should_panic(expected = "HTTP URI path segment variable name \
+        cannot be empty")]
+    fn test_variable_name_empty()
+    {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/foo/{}", new_handler());
+    }
+
+    #[test]
+    #[should_panic(expected = "HTTP URI path segment variable \
+        missing trailing \"}\"")]
+    fn test_variable_name_bad_end()
+    {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/foo/{asdf/foo", new_handler());
+    }
+
+    #[test]
+    #[should_panic(expected = "HTTP URI path segment variable \
+        missing leading \"{\"")]
+    fn test_variable_name_bad_start()
+    {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/foo/asdf}/foo", new_handler());
+    }
+
+    #[test]
+    #[should_panic(expected = "URI path \"/boo\": attempted to create \
         duplicate route for method \"GET\"")]
-    fn test_duplicate_route()
+    fn test_duplicate_route1()
     {
         let mut router = HttpRouter::new();
         router.insert(Method::GET, "/boo", new_handler());
@@ -437,7 +504,27 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "URL path \"/projects/{id}/insts/{id}\": \
+    #[should_panic(expected = "URI path \"/foo//bar\": attempted to create \
+        duplicate route for method \"GET\"")]
+    fn test_duplicate_route2()
+    {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/foo/bar", new_handler());
+        router.insert(Method::GET, "/foo//bar", new_handler());
+    }
+
+    #[test]
+    #[should_panic(expected = "URI path \"//\": attempted to create \
+        duplicate route for method \"GET\"")]
+    fn test_duplicate_route3()
+    {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/", new_handler());
+        router.insert(Method::GET, "//", new_handler());
+    }
+
+    #[test]
+    #[should_panic(expected = "URI path \"/projects/{id}/insts/{id}\": \
         variable name \"id\" is used more than once")]
     fn test_duplicate_varname()
     {
@@ -446,7 +533,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "URL path \"/projects/{id}\": attempted to use \
+    #[should_panic(expected = "URI path \"/projects/{id}\": attempted to use \
         variable name \"id\", but a different name (\"project_id\") has \
         already been used for this")]
     fn test_inconsistent_varname()
@@ -457,7 +544,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "URL path \"/projects/{id}\": attempted to \
+    #[should_panic(expected = "URI path \"/projects/{id}\": attempted to \
         register route for variable path segment (variable name: \"id\") when \
         a route already exists for a literal path segment")]
     fn test_variable_after_literal()
@@ -468,7 +555,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "URL path \"/projects/default\": attempted to \
+    #[should_panic(expected = "URI path \"/projects/default\": attempted to \
         register route for literal path segment \"default\" when a route \
         exists for variable path segment (variable name: \"id\")")]
     fn test_literal_after_variable()
@@ -479,13 +566,228 @@ mod test {
     }
 
     #[test]
-    fn test_router()
+    fn test_error_cases()
     {
         let mut router = HttpRouter::new();
 
-        eprintln!("router: {:?}", router);
-        router.insert(Method::GET, "/foo/{bar}/baz", new_handler());
-        router.insert(Method::GET, "/boo", new_handler());
-        eprintln!("router: {:?}", router);
+        /*
+         * Check a few initial conditions.
+         */
+        let error = router.lookup_route(&Method::GET, "/").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(&Method::GET, "////").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(&Method::GET, "/foo/bar").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(&Method::GET, "//foo///bar").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+
+        /*
+         * Insert a route into the middle of the tree.  This will let us look at
+         * parent nodes, sibling nodes, and child nodes.
+         */
+        router.insert(Method::GET, "/foo/bar", new_handler());
+        assert!(router.lookup_route(&Method::GET, "/foo/bar").is_ok());
+        assert!(router.lookup_route(&Method::GET, "/foo/bar/").is_ok());
+        assert!(router.lookup_route(&Method::GET, "//foo/bar").is_ok());
+        assert!(router.lookup_route(&Method::GET, "//foo//bar").is_ok());
+        assert!(router.lookup_route(&Method::GET, "//foo//bar//").is_ok());
+        assert!(router.lookup_route(&Method::GET, "///foo///bar///").is_ok());
+
+        /*
+         * TODO-cleanup: consider having a "build" step that constructs a
+         * read-only router and does validation like making sure that there's a
+         * GET route on all nodes?
+         */
+        let error = router.lookup_route(&Method::GET, "/").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(&Method::GET, "/foo").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(&Method::GET, "//foo").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        let error = router.lookup_route(
+            &Method::GET, "/foo/bar/baz").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+
+        let error = router.lookup_route(&Method::PUT, "/foo/bar").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::METHOD_NOT_ALLOWED);
+        let error = router.lookup_route(&Method::PUT, "/foo/bar/").unwrap_err();
+        assert_eq!(error.status_code, StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[test]
+    fn test_router_basic()
+    {
+        let mut router = HttpRouter::new();
+
+        /*
+         * Insert a handler at the root and verify that we get that handler
+         * back, even if we use different names that normalize to "/".
+         * Before we start, sanity-check that there's nothing at the root
+         * already.  Other test cases examine the errors in more detail.
+         */
+        assert!(router.lookup_route(&Method::GET, "/").is_err());
+        router.insert(Method::GET, "/", new_handler_named("h1"));
+        let result = router.lookup_route(&Method::GET, "/").unwrap();
+        assert_eq!(result.handler.label(), "h1");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "//").unwrap();
+        assert_eq!(result.handler.label(), "h1");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "///").unwrap();
+        assert_eq!(result.handler.label(), "h1");
+        assert!(result.variables.is_empty());
+
+        /*
+         * Now insert a handler for a different method at the root.  Verify that
+         * we get both this handler and the previous one if we ask for the
+         * corresponding method and that we get no handler for a different,
+         * third method.
+         */
+        assert!(router.lookup_route(&Method::PUT, "/").is_err());
+        router.insert(Method::PUT, "/", new_handler_named("h2"));
+        let result = router.lookup_route(&Method::PUT, "/").unwrap();
+        assert_eq!(result.handler.label(), "h2");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "/").unwrap();
+        assert_eq!(result.handler.label(), "h1");
+        assert!(router.lookup_route(&Method::DELETE, "/").is_err());
+        assert!(result.variables.is_empty());
+
+        /*
+         * Now insert a handler one level deeper.  Verify that all the previous
+         * handlers behave as we expect, and that we have one handler at the new
+         * path, whichever name we use for it.
+         */
+        assert!(router.lookup_route(&Method::GET, "/foo").is_err());
+        router.insert(Method::GET, "/foo", new_handler_named("h3"));
+        let result = router.lookup_route(&Method::PUT, "/").unwrap();
+        assert_eq!(result.handler.label(), "h2");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "/").unwrap();
+        assert_eq!(result.handler.label(), "h1");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "/foo").unwrap();
+        assert_eq!(result.handler.label(), "h3");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "/foo/").unwrap();
+        assert_eq!(result.handler.label(), "h3");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "//foo//").unwrap();
+        assert_eq!(result.handler.label(), "h3");
+        assert!(result.variables.is_empty());
+        let result = router.lookup_route(&Method::GET, "/foo//").unwrap();
+        assert_eq!(result.handler.label(), "h3");
+        assert!(result.variables.is_empty());
+        assert!(router.lookup_route(&Method::PUT, "/foo").is_err());
+        assert!(router.lookup_route(&Method::PUT, "/foo/").is_err());
+        assert!(router.lookup_route(&Method::PUT, "//foo//").is_err());
+        assert!(router.lookup_route(&Method::PUT, "/foo//").is_err());
+    }
+
+    #[test]
+    fn test_embedded_non_variable()
+    {
+        /*
+         * This isn't an important use case today, but we'd like to know if we
+         * change the behavior, intentionally or otherwise.
+         */
+        let mut router = HttpRouter::new();
+        assert!(router.lookup_route(&Method::GET, "/not{a}variable").is_err());
+        router.insert(Method::GET, "/not{a}variable", new_handler_named("h4"));
+        let result = router.lookup_route(
+            &Method::GET, "/not{a}variable").unwrap();
+        assert_eq!(result.handler.label(), "h4");
+        assert!(result.variables.is_empty());
+        assert!(router.lookup_route(&Method::GET, "/not{b}variable").is_err());
+        assert!(router.lookup_route(&Method::GET, "/notnotavariable").is_err());
+    }
+
+    #[test]
+    fn test_variables_basic()
+    {
+        /*
+         * Basic test using a variable.
+         */
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/projects/{project_id}",
+            new_handler_named("h5"));
+        assert!(router.lookup_route(&Method::GET, "/projects").is_err());
+        assert!(router.lookup_route(&Method::GET, "/projects/").is_err());
+        let result = router.lookup_route(
+            &Method::GET, "/projects/p12345").unwrap();
+        assert_eq!(result.handler.label(), "h5");
+        assert_eq!(
+            result.variables.keys().collect::<Vec<&String>>(),
+            vec!["project_id"]
+        );
+        assert_eq!(result.variables.get("project_id").unwrap(), "p12345");
+        assert!(router.lookup_route(
+            &Method::GET, "/projects/p12345/child").is_err());
+        let result = router.lookup_route(
+            &Method::GET, "/projects/p12345/").unwrap();
+        assert_eq!(result.handler.label(), "h5");
+        assert_eq!(result.variables.get("project_id").unwrap(), "p12345");
+        let result = router.lookup_route(
+            &Method::GET, "/projects///p12345//").unwrap();
+        assert_eq!(result.handler.label(), "h5");
+        assert_eq!(result.variables.get("project_id").unwrap(), "p12345");
+        /* Trick question! */
+        let result = router.lookup_route(
+            &Method::GET, "/projects/{project_id}").unwrap();
+        assert_eq!(result.handler.label(), "h5");
+        assert_eq!(result.variables.get("project_id").unwrap(), "{project_id}");
+    }
+
+    #[test]
+    fn test_variables_multi()
+    {
+        /*
+         * Exercise a case with multiple variables.
+         */
+        let mut router = HttpRouter::new();
+        router.insert(
+            Method::GET,
+            "/projects/{project_id}/instances/{instance_id}/fwrules\
+                /{fwrule_id}/info",
+            new_handler_named("h6"));
+        let result = router.lookup_route(
+            &Method::GET,
+            "/projects/p1/instances/i2/fwrules/fw3/info"
+        ).unwrap();
+        assert_eq!(result.handler.label(), "h6");
+        assert_eq!(
+            result.variables.keys().collect::<Vec<&String>>(),
+            vec!["fwrule_id", "instance_id", "project_id"]
+        );
+        assert_eq!(result.variables.get("project_id").unwrap(), "p1");
+        assert_eq!(result.variables.get("instance_id").unwrap(), "i2");
+        assert_eq!(result.variables.get("fwrule_id").unwrap(), "fw3");
+    }
+
+    #[test]
+    fn test_empty_variable()
+    {
+        /*
+         * Exercise a case where a broken implementation might erroneously
+         * assign a variable to the empty string.
+         */
+        let mut router = HttpRouter::new();
+        router.insert(
+            Method::GET,
+            "/projects/{project_id}/instances",
+            new_handler_named("h7")
+        );
+        assert!(router.lookup_route(
+            &Method::GET, "/projects/instances").is_err());
+        assert!(router.lookup_route(
+            &Method::GET, "/projects//instances").is_err());
+        assert!(router.lookup_route(
+            &Method::GET, "/projects///instances").is_err());
+        let result = router.lookup_route(
+            &Method::GET,
+            "/projects/foo/instances"
+        ).unwrap();
+        assert_eq!(result.handler.label(), "h7");
     }
 }
