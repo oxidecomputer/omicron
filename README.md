@@ -48,8 +48,41 @@ Use `curl` to hit the server:
 - Flesh out more endpoints and simulator
 - Write out road map
   - regions, AZs, etc. need to be added per RFD 24
-
-Longer term:
-
-- Versioning (header? path? translators for older versions?)
-- Pagination? (Opaque token?  What does Stripe do?)
+- General work:
+  - OpenAPI support
+    - Rust macros
+    - Tooling to generate spec
+    - API Docs
+    - Client library/libraries and CLI
+  - Basic configuration
+  - Debugging / monitoring
+    - Request ids
+    - Prometheus?
+    - Server / request logging
+    - OpenTracing
+    - Dynamic tracing?
+    - Core files?
+    - Internal APIs for:
+      - showing connected clients, recent requests, ...?
+  - Rack-Internal API?
+    - Alerts?
+    - Faults?  Support bundles?
+  - Audit logging
+  - Authentication
+  - Authorization
+  - Data storage
+    - What's the scope of these servers?
+    - CAP choices
+    - Active/Active, Active/Passive, Consensus?
+  - TLS
+  - Versioning (header? path? translators for older versions?)
+  - Pagination? (Opaque token?  What does Stripe do?)
+  - Hardening (see RFD 10)
+    - throttling / load shedding
+  - Automated testing
+    - Basic functionality
+    - Performance testing
+    - Stress testing
+    - Fault testing / under load
+    - Fuzz testing
+  - Security review
