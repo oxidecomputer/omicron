@@ -41,7 +41,13 @@ Use `curl` to hit the server:
 
 ## TODO
 
-- Clean up changes from recent router implementation and merge into master.
+- Clean up changes from recent router implementation.
+  - Implement tests for demo handler functions
+  - Document lib.rs
+- Implement path params extractor?  (See `api_projects_get_project`)
+- Restructure files to better separate concerns?
+  (e.g., API-agnostic HTTP infrastructure)
+  (e.g., OpenAPI input/output types?)
 - Update the handler functions so that they can return a Serialize or a Stream
   of Serialize.  (Otherwise, how will the OpenAPI tooling know what the return
   types are?)
