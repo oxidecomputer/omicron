@@ -111,7 +111,7 @@ pub fn api_server_create(bind_address: &SocketAddr)
     let mut router = HttpRouter::new();
     api_http_entrypoints::api_register_entrypoints(&mut router);
 
-    #[cfg(test)]
+    /* TODO-hardening: this should not be built in except under test. */
     test_endpoints::register_test_endpoints(&mut router);
 
     /* TODO-cleanup too many Arcs? */
@@ -196,8 +196,8 @@ async fn http_request_handle(
      */
     let method = request.method();
     let uri = request.uri();
-    let lookup_result = server.router.lookup_route(&method, uri.path())?;
     eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
+    let lookup_result = server.router.lookup_route(&method, uri.path())?;
     let rqctx = RequestContext {
         server: Arc::clone(&server),
         request: Arc::new(Mutex::new(request)),
@@ -325,18 +325,20 @@ impl Service<Request<Body>> for ApiServerRequestHandler
 
 /*
  * Demo handler functions
- * TODO-cleanup document these and cover them in the test suite.  We do want to
- * test these to guarantee that we've covered all the cases that we support but
- * we don't want them exposed in a real server.
+ * TODO-cleanup these should not be registered except in test mode.  They kind
+ * of belong under #[cfg(test)], except that we want to be able to use these
+ * from integration tests.
+ * Maybe instead we should have the unit / integration test instantiate its own
+ * server with handlers like these.
  */
-#[cfg(test)]
-mod test_endpoints {
+pub mod test_endpoints {
     use crate::api_error::ApiHttpError;
     use crate::api_handler::Json;
     use crate::api_handler::Query;
     use crate::api_handler::RequestContext;
     use crate::api_handler::api_handler_create;
     use crate::api_http_router::HttpRouter;
+    use crate::api_http_util::CONTENT_TYPE_JSON;
     use http::StatusCode;
     use hyper::Body;
     use hyper::Method;
@@ -361,14 +363,15 @@ mod test_endpoints {
         -> Result<Response<Body>, ApiHttpError>
     {
         Ok(Response::builder()
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
             .status(StatusCode::OK)
             .body("demo_handler_args_1\n".into())?)
     }
 
     #[derive(Serialize, Deserialize)]
-    struct DemoQueryArgs {
-        test1: String,
-        test2: Option<u32>
+    pub struct DemoQueryArgs {
+        pub test1: String,
+        pub test2: Option<u32>
     }
 
     async fn demo_handler_args_2query(
@@ -377,14 +380,15 @@ mod test_endpoints {
         -> Result<Response<Body>, ApiHttpError>
     {
         Ok(Response::builder()
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
             .status(StatusCode::OK)
             .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
     }
 
-    #[derive(Serialize, Deserialize)]
-    struct DemoJsonBody {
-        test1: String,
-        test2: Option<u32>
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct DemoJsonBody {
+        pub test1: String,
+        pub test2: Option<u32>
     }
 
     async fn demo_handler_args_2json(
@@ -393,14 +397,15 @@ mod test_endpoints {
         -> Result<Response<Body>, ApiHttpError>
     {
         Ok(Response::builder()
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
             .status(StatusCode::OK)
             .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
     }
 
     #[derive(Serialize)]
-    struct DemoJsonAndQuery {
-        query: DemoQueryArgs,
-        json: DemoJsonBody
+    pub struct DemoJsonAndQuery {
+        pub query: DemoQueryArgs,
+        pub json: DemoJsonBody
     }
     async fn demo_handler_args_3(
         _rqctx: Arc<RequestContext>,
@@ -413,6 +418,7 @@ mod test_endpoints {
             json: json.into_inner(),
         };
         Ok(Response::builder()
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
             .status(StatusCode::OK)
             .body(serde_json::to_string(&combined).unwrap().into())?)
     }
