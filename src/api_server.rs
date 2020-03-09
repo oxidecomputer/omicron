@@ -402,7 +402,7 @@ pub mod test_endpoints {
             .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
     }
 
-    #[derive(Serialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct DemoJsonAndQuery {
         pub query: DemoQueryArgs,
         pub json: DemoJsonBody

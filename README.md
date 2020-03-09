@@ -41,8 +41,6 @@ Use `curl` to hit the server:
 
 ## TODO
 
-- Clean up changes from recent router implementation.
-  - Implement tests for demo handler functions
 - Restructure files to better separate concerns?
   (e.g., API-agnostic HTTP infrastructure)
   (e.g., OpenAPI input/output types?)
