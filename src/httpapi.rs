@@ -11,11 +11,18 @@ mod router;
 mod server;
 
 pub use error::HttpError;
+pub use error::HttpErrorResponseBody;
+pub use handler::Derived;
+pub use handler::RouteHandler;
 pub use handler::HttpRouteHandler;
 pub use handler::Json;
 pub use handler::Query;
 pub use handler::RequestContext;
+pub use http_util::CONTENT_TYPE_JSON;
+pub use http_util::CONTENT_TYPE_NDJSON;
 pub use http_util::http_extract_path_params;
 pub use router::HttpRouter;
+pub use router::RouterLookupResult;
 pub use server::HttpServer;
 pub use server::ServerConfig;
+pub use server::test_endpoints;

@@ -13,6 +13,7 @@ use hyper::Request;
 use hyper::Response;
 use hyper::server::conn::AddrStream;
 use hyper::service::Service;
+use std::any::Any;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -27,6 +28,8 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
  * Stores shared state used by the generic HTTP server submodule.
  */
 pub struct ServerState {
+    /** caller-specific state */
+    pub private: Box<dyn Any + Send + Sync + 'static>,
     /** static server configuration parameters */
     pub config: ServerConfig,
     /** request router */
@@ -50,7 +53,6 @@ pub struct ServerConfig {
  * you've called close(), you shouldn't be able to call it again.
  */
 pub struct HttpServer {
-    server_state: Arc<ServerState>,
     server_future: Option<Pin<Box<
         dyn Future<Output=Result<(), hyper::error::Error>> + Send
     >>>,
@@ -94,7 +96,8 @@ impl HttpServer {
      * can call `close()` to begin a graceful shutdown of the server, which will
      * be complete when the `run()` Future is resolved.
      */
-    pub fn new(bind_address: &SocketAddr, mut router: HttpRouter)
+    pub fn new(bind_address: &SocketAddr, mut router: HttpRouter,
+        private: Box<dyn Any + Send + Sync + 'static>)
         -> Result<HttpServer, hyper::error::Error>
     {
         /* TODO-hardening: this should not be built in except under test. */
@@ -102,6 +105,7 @@ impl HttpServer {
 
         /* TODO-cleanup too many Arcs? */
         let app_state = Arc::new(ServerState {
+            private: private,
             config: ServerConfig {
                 /* We start aggressively to ensure test coverage. */
                 request_body_max_bytes: 1024
@@ -119,7 +123,6 @@ impl HttpServer {
         });
 
         Ok(HttpServer {
-            server_state: app_state,
             server_future: Some(graceful.boxed()),
             local_addr: local_addr,
             close_channel: Some(tx),
@@ -336,15 +339,14 @@ pub mod test_endpoints {
 
     pub fn register_test_endpoints(router: &mut HttpRouter)
     {
-        // XXX
-        // router.insert(Method::GET, "/testing/demo1",
-        //     HttpRouteHandler::new(demo_handler_args_1));
-        // router.insert(Method::GET, "/testing/demo2query",
-        //     HttpRouteHandler::new(demo_handler_args_2query));
-        // router.insert(Method::GET, "/testing/demo2json",
-        //     HttpRouteHandler::new(demo_handler_args_2json));
-        // router.insert(Method::GET, "/testing/demo3",
-        //     HttpRouteHandler::new(demo_handler_args_3));
+        router.insert(Method::GET, "/testing/demo1",
+            HttpRouteHandler::new(demo_handler_args_1));
+        router.insert(Method::GET, "/testing/demo2query",
+            HttpRouteHandler::new(demo_handler_args_2query));
+        router.insert(Method::GET, "/testing/demo2json",
+            HttpRouteHandler::new(demo_handler_args_2json));
+        router.insert(Method::GET, "/testing/demo3",
+            HttpRouteHandler::new(demo_handler_args_3));
     }
 
     async fn demo_handler_args_1(_rqctx: Arc<RequestContext>)

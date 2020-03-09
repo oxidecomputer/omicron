@@ -46,7 +46,7 @@ use std::collections::BTreeSet;
  *      router.insert(Method::GET, "/projects",
  *          HttpRouteHandler::new(demo_handler));
  *      router.insert(Method::GET, "/projects/{project_id}",
- *          HttpRouteHandler(demo_handler));
+ *          HttpRouteHandler::new(demo_handler));
  *
  *      // Basic lookup for a literal path.
  *      let lookup: RouterLookupResult = router.lookup_route(
@@ -437,15 +437,16 @@ impl HttpRouter {
 
 #[cfg(test)]
 mod test {
-    use super::error::HttpError;
-    use super::handler::RouteHandler;
-    use super::handler::RequestContext;
-    use http::StatusCode;
-    use hyper::Response;
-    use hyper::Body;
-    use std::sync::Arc;
     use http::Method;
+    use http::StatusCode;
+    use hyper::Body;
+    use hyper::Response;
+    use std::sync::Arc;
     use super::HttpRouter;
+    use super::super::error::HttpError;
+    use super::super::handler::RequestContext;
+    use super::super::handler::RouteHandler;
+    use super::super::handler::HttpRouteHandler;
 
     async fn test_handler(_: Arc<RequestContext>)
         -> Result<Response<Body>, HttpError>
@@ -456,13 +457,13 @@ mod test {
     fn new_handler()
         -> Box<dyn RouteHandler>
     {
-        super::handler::HttpRouteHandler::new(test_handler);
+        HttpRouteHandler::new(test_handler)
     }
 
     fn new_handler_named(name: &str)
         -> Box<dyn RouteHandler>
     {
-        super::handler::HttpRouteHandler::new_handler_named(test_handler, name);
+        HttpRouteHandler::new_with_name(test_handler, name)
     }
 
     #[test]

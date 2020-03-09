@@ -9,6 +9,7 @@ use hyper::Method;
 use hyper::Response;
 use serde::Deserialize;
 
+use crate::api_backend;
 use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
@@ -89,7 +90,7 @@ async fn api_projects_get(
 )
     -> Result<Response<Body>, HttpError>
 {
-    let backend = &rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
     let marker = params.marker.as_ref().map(|s| s.clone());
@@ -106,7 +107,7 @@ async fn api_projects_post(
 )
     -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let project = backend.project_create(&new_project.into_inner()).await?;
     api_http_create(project)
 }
@@ -122,7 +123,7 @@ struct ProjectPathParam {
 async fn api_projects_get_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;
@@ -136,7 +137,7 @@ async fn api_projects_get_project(rqctx: Arc<RequestContext>)
 async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
     -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;
@@ -159,7 +160,7 @@ async fn api_projects_put_project(
 )
     -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;

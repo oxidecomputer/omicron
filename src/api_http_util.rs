@@ -15,10 +15,9 @@ use std::sync::Arc;
 use crate::api_error::ApiError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
+use crate::httpapi::CONTENT_TYPE_JSON;
+use crate::httpapi::CONTENT_TYPE_NDJSON;
 use crate::httpapi::HttpError;
-
-pub const CONTENT_TYPE_JSON: &str = "application/json";
-pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
 
 /**
  * Given a `Result` representing an object in the API, serialize the object to
