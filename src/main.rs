@@ -31,7 +31,7 @@ async fn main()
             },
             Ok(s) => s
         };
-    eprintln!("listening: http://{}", server.local_addr());
+    eprintln!("listening: http://{}", server.http_server.local_addr());
     if let Err(error) = server.http_server.run().await {
         eprintln!("server failed: {}", error);
         std::process::exit(1);

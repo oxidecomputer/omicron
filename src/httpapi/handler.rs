@@ -419,7 +419,7 @@ where
  * Public interfaces
  */
 
-impl<FuncParams, HandlerType> HttpRouteHandler<FuncParams, HandlerType>
+impl<HandlerType, FuncParams> HttpRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived + 'static,
@@ -432,7 +432,7 @@ where
     pub fn new(handler: HandlerType)
         -> Box<dyn RouteHandler>
     {
-        HttpRouteHandler::new_with_name(handler, "<unlabeled handler>");
+        HttpRouteHandler::new_with_name(handler, "<unlabeled handler>")
     }
 
     /**
