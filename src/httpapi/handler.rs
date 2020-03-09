@@ -1,10 +1,10 @@
 /*!
- * Interface for implementing API endpoint handler functions.
+ * Interface for implementing HTTP endpoint handler functions.
  *
  * ## Endpoint function signatures
  *
- * All API endpoint handler functions must be `async` (that is, must return
- * a `Future`) and must return a `Result<Response<Body>, ApiHttpError>`.
+ * All endpoint handler functions must be `async` (that is, must return
+ * a `Future`) and must return a `Result<Response<Body>, HttpError>`.
  * Ignoring the return values, handler functions must have one of the following
  * signatures:
  *
@@ -46,10 +46,10 @@
  * required u32, and "marker", an optional string:
  *
  * ```
- * use oxide_api_prototype::api_error::ApiHttpError;
- * use oxide_api_prototype::api_handler::Json;
- * use oxide_api_prototype::api_handler::Query;
- * use oxide_api_prototype::api_handler::RequestContext;
+ * use oxide_api_prototype::httpapi::HttpError;
+ * use oxide_api_prototype::httpapi::Json;
+ * use oxide_api_prototype::httpapi::Query;
+ * use oxide_api_prototype::httpapi::RequestContext;
  * use http::StatusCode;
  * use hyper::Body;
  * use hyper::Response;
@@ -64,7 +64,7 @@
  * async fn handle_request(
  *     _: Arc<RequestContext>,
  *     query: Query<MyQueryArgs>)
- *     -> Result<Response<Body>, ApiHttpError>
+ *     -> Result<Response<Body>, HttpError>
  * {
  *     let query_args = query.into_inner();
  *     let limit: u32 = query_args.limit;
@@ -88,15 +88,15 @@
  * the OpenAPI spec.
  */
 
-use crate::api_error::ApiHttpError;
-use crate::api_server::ApiServerState;
-use crate::api_http_util::http_read_body;
+use super::error::HttpError;
+use super::http_util::http_read_body;
+use super::server::ServerState;
 
 use async_trait::async_trait;
+use futures::lock::Mutex;
 use hyper::Body;
 use hyper::Request;
 use hyper::Response;
-use futures::lock::Mutex;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -107,9 +107,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 /**
- * Type alias for the result returned by API handler functions.
+ * Type alias for the result returned by HTTP handler functions.
  */
-pub type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
+pub type HttpHandlerResult = Result<Response<Body>, HttpError>;
 
 /**
  * Handle for various interfaces useful during request processing.
@@ -123,7 +123,7 @@ pub type ApiHandlerResult = Result<Response<Body>, ApiHttpError>;
  */
 pub struct RequestContext {
     /** shared server state */
-    pub server: Arc<ApiServerState>,
+    pub server: Arc<ServerState>,
     /** HTTP request details */
     pub request: Arc<Mutex<Request<Body>>>,
     /** HTTP request routing variables */
@@ -142,7 +142,7 @@ pub struct RequestContext {
  *
  * We also define implementations of `Derived` for tuples of types that
  * themselves implement `Derived`.  See the implementation of
- * `ConcreteRouteHandler` for more on why this needed.
+ * `HttpRouteHandler` for more on why this needed.
  */
 #[async_trait]
 pub trait Derived: Send + Sync + Sized
@@ -151,7 +151,7 @@ pub trait Derived: Send + Sync + Sized
      * Construct an instance of this type from a `RequestContext`.
      */
     async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<Self, ApiHttpError>;
+        -> Result<Self, HttpError>;
 }
 
 /*
@@ -162,7 +162,7 @@ pub trait Derived: Send + Sync + Sized
 impl Derived for ()
 {
     async fn from_request(_: Arc<RequestContext>)
-        -> Result<(), ApiHttpError>
+        -> Result<(), HttpError>
     {
         Ok(())
     }
@@ -174,7 +174,7 @@ where
     T: Derived + 'static, /* TODO-cleanup static should not be necessary*/
 {
     async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<(T,), ApiHttpError>
+        -> Result<(T,), HttpError>
     {
         Ok((T::from_request(rqctx).await?,))
     }
@@ -187,7 +187,7 @@ where
     T2: Derived + 'static, /* TODO-cleanup static should not be necessary */
 {
     async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<(T1,T2), ApiHttpError>
+        -> Result<(T1,T2), HttpError>
     {
         let p1 = T1::from_request(Arc::clone(&rqctx)).await?;
         let p2 = T2::from_request(Arc::clone(&rqctx)).await?;
@@ -196,111 +196,111 @@ where
 }
 
 /**
- * `ApiHandler` is a trait providing a single function, `handle_request()`,
+ * `HttpHandlerFunc` is a trait providing a single function, `handle_request()`,
  * which takes an HTTP request and produces an HTTP response (or
- * `ApiHttpError`).
+ * `HttpError`).
  *
  * As described above, handler functions can have a number of different
  * signatures.  They all consume a reference to the current request context.
- * They may also consume some number of extractor arguments.  The `ApiHandler`
- * trait is parametrized by the type `FuncParams`, which is expected to be a
- * tuple describing these extractor arguments.
+ * They may also consume some number of extractor arguments.  The
+ * `HttpHandlerFunc` trait is parametrized by the type `FuncParams`, which is
+ * expected to be a tuple describing these extractor arguments.
  *
- * Below, we define implementations of `ApiHandler` for various function
+ * Below, we define implementations of `HttpHandlerFunc` for various function
  * types.  In this way, we can treat functions with different signatures as
- * different kinds of `ApiHandler`.  However, since the signature shows up in
- * the `FuncParams` type parameter, we'll need additional abstraction to treat
- * different handlers interchangeably.  See `RouteHandler` below.
- * TODO-cleanup This might be better called `ApiHandlerFunctionAdapter` (or
- * something shorter but equivalent).  It's not really a handler itself -- it's
- * an adapter from one invocation to the one needed for this function.
+ * different kinds of `HttpHandlerFunc`.  However, since the signature shows up
+ * in the `FuncParams` type parameter, we'll need additional abstraction to
+ * treat different handlers interchangeably.  See `RouteHandler` below.
  */
 #[async_trait]
-pub trait ApiHandler<FuncParams: Derived>: Send + Sync + 'static
+pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static
 {
     async fn handle_request(&self, rqctx: Arc<RequestContext>, p: FuncParams)
-        -> ApiHandlerResult;
+        -> HttpHandlerResult;
 }
 
 /**
- * Implementation of `ApiHandler` for functions that consume no extractor
+ * Implementation of `HttpHandlerFunc` for functions that consume no extractor
  * arguments (just the `RequestContext`).
  * TODO the implementations below could benefit from a macro.
  */
 #[async_trait]
-impl<FuncType, FutureType> ApiHandler<()> for FuncType
+impl<FuncType, FutureType> HttpHandlerFunc<()> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>) -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
 {
     async fn handle_request(&self, rqctx: Arc<RequestContext>, _p: ())
-        -> ApiHandlerResult
+        -> HttpHandlerResult
     {
         (self)(rqctx).await
     }
 }
 
 /**
- * Implementation of `ApiHandler` for functions that consume a single `Query`
- * extractor argument in addition to the regular `RequestContext` argument.
+ * Implementation of `HttpHandlerFunc` for functions that consume a single
+ * `Query` extractor argument in addition to the regular `RequestContext`
+ * argument.
  */
 #[async_trait]
-impl<FuncType, FutureType, Q> ApiHandler<(Query<Q>,)> for FuncType
+impl<FuncType, FutureType, Q> HttpHandlerFunc<(Query<Q>,)> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Query<Q>)
         -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
     Q: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
         (query,): (Query<Q>,))
-        -> ApiHandlerResult
+        -> HttpHandlerResult
     {
         (self)(rqctx, query).await
     }
 }
 
 /**
- * Implementation of `ApiHandler` for functions that consume a single `Json`
- * extractor argument in addition to the regular `RequestContext` argument.
+ * Implementation of `HttpHandlerFunc` for functions that consume a single
+ * `Json` extractor argument in addition to the regular `RequestContext`
+ * argument.
  */
 #[async_trait]
-impl<FuncType, FutureType, J> ApiHandler<(Json<J>,)> for FuncType
+impl<FuncType, FutureType, J> HttpHandlerFunc<(Json<J>,)> for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Json<J>)
         -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
     J: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
         (json,): (Json<J>,))
-        -> ApiHandlerResult
+        -> HttpHandlerResult
     {
         (self)(rqctx, json).await
     }
 }
 
 /**
- * Implementation of `ApiHandler` for functions that consume both a `Query` and
- * a `Json` extractor argument in addition to the regular `RequestContext`
+ * Implementation of `HttpHandlerFunc` for functions that consume both a `Query`
+ * and a `Json` extractor argument in addition to the regular `RequestContext`
  * argument.  Note that the order of these arguments matters.  Reversing them is
  * not supported.
  */
 #[async_trait]
-impl<FuncType, FutureType, Q, J> ApiHandler<(Query<Q>, Json<J>)> for FuncType
+impl<FuncType, FutureType, Q, J> HttpHandlerFunc<(Query<Q>, Json<J>)>
+for FuncType
 where
     FuncType: Fn(Arc<RequestContext>, Query<Q>, Json<J>)
         -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = ApiHandlerResult> + Send + 'static,
+    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
     Q: DeserializeOwned + Send + Sync + 'static,
     J: DeserializeOwned + Send + Sync + 'static,
 {
     async fn handle_request(&self,
         rqctx: Arc<RequestContext>,
         (query, json): (Query<Q>, Json<J>))
-        -> ApiHandlerResult
+        -> HttpHandlerResult
     {
         (self)(rqctx, query, json).await
     }
@@ -308,8 +308,8 @@ where
 
 
 /**
- * `RouteHandler` abstracts an `ApiHandler<FuncParams>` in a way that allows
- * callers to invoke the handler without knowing the handler's function
+ * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams>` in a way that
+ * allows callers to invoke the handler without knowing the handler's function
  * signature.
  *
  * The "Route" in `RouteHandler` refers to the fact that this structure is used
@@ -327,24 +327,25 @@ pub trait RouteHandler: Debug + Send + Sync {
      * Handle an incoming HTTP request.
      */
     async fn handle_request(&self, rqctx: RequestContext)
-        -> ApiHandlerResult;
+        -> HttpHandlerResult;
 }
 
 /**
- * `ConcreteRouteHandler` is the only type that implements `RouteHandler`.  The
- * reason both exist is that we need `ConcreteRouteHandler::new()` to consume an
- * arbitrary kind of `ApiHandler<FuncParams>` and return an object that's _not_
- * parametrized by `FuncParams`.  In fact, the resulting `ConcreteRouteHandler`
- * _is_ parametrized by `FuncParams`, but we returned it as a `RouteHandler`
- * that does not have those type parameters, allowing the caller to ignore the
- * differences between different handler function type signatures.
+ * `HttpRouteHandler` is the only type that implements `RouteHandler`.  The
+ * reason both exist is that we need `HttpRouteHandler::new()` to consume an
+ * arbitrary kind of `HttpHandlerFunc<FuncParams>` and return an object that's
+ * _not_ parametrized by `FuncParams`.  In fact, the resulting
+ * `HttpRouteHandler` _is_ parametrized by `FuncParams`, but we returned it
+ * as a `RouteHandler` that does not have those type parameters, allowing the
+ * caller to ignore the differences between different handler function type
+ * signatures.
  */
-struct ConcreteRouteHandler<HandlerType, FuncParams>
+pub struct HttpRouteHandler<HandlerType, FuncParams>
 where
-    HandlerType: ApiHandler<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived,
 {
-    /** the actual ApiHandler used to implement this route */
+    /** the actual HttpHandlerFunc used to implement this route */
     handler: HandlerType,
 
     /** debugging label for the handler */
@@ -352,7 +353,7 @@ where
 
     /**
      * In order to define `new()` below, we need a type parameter `HandlerType`
-     * that implements `ApiHandler<FuncParams>`, which means we also need a
+     * that implements `HttpHandlerFunc<FuncParams>`, which means we also need a
      * `FuncParams` type parameter.  However, this type parameter would be
      * unconstrained, which makes Rust upset.  Use of PhantomData<FuncParams>
      * here causes the compiler to behave as though this struct referred to a
@@ -362,9 +363,9 @@ where
 }
 
 impl<HandlerType, FuncParams> Debug for
-    ConcreteRouteHandler<HandlerType, FuncParams>
+    HttpRouteHandler<HandlerType, FuncParams>
 where
-    HandlerType: ApiHandler<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived,
 {
     fn fmt(&self, f: &mut Formatter<'_>)
@@ -376,9 +377,9 @@ where
 
 #[async_trait]
 impl<HandlerType, FuncParams> RouteHandler for
-    ConcreteRouteHandler<HandlerType, FuncParams>
+    HttpRouteHandler<HandlerType, FuncParams>
 where
-    HandlerType: ApiHandler<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived + 'static,
 {
     fn label(&self)
@@ -388,7 +389,7 @@ where
     }
 
     async fn handle_request(&self, rqctx_raw: RequestContext)
-        -> ApiHandlerResult
+        -> HttpHandlerResult
     {
         /*
          * This is where the magic happens: in the code below, `funcparams` has
@@ -399,14 +400,14 @@ where
          * implement `Derived`, which means we can invoke
          * `Derived::from_request()` to construct the argument tuple, generally
          * from information available in the `request` object.  We pass this
-         * down to the `ApiHandler`, for which there's a different
-         * implementation for each value of `FuncParams`.  The `ApiHandler` for
-         * each `FuncParams` just pulls the arguments out of the `funcparams`
-         * tuple and makes them actual function arguments for the actual handler
-         * function.  From this point down, all of this is resolved
-         * statically.makes them actual function arguments for the actual
-         * handler function.  From this point down, all of this is resolved
-         * statically.
+         * down to the `HttpHandlerFunc`, for which there's a different
+         * implementation for each value of `FuncParams`.  The `HttpHandlerFunc`
+         * for each `FuncParams` just pulls the arguments out of the
+         * `funcparams` tuple and makes them actual function arguments for the
+         * actual handler function.  From this point down, all of this is
+         * resolved statically.makes them actual function arguments for the
+         * actual handler function.  From this point down, all of this is
+         * resolved statically.
          */
         let rqctx = Arc::new(rqctx_raw);
         let funcparams = Derived::from_request(Arc::clone(&rqctx)).await?;
@@ -418,39 +419,36 @@ where
  * Public interfaces
  */
 
-/**
- * Given a function matching one of the supported API handler function
- * signatures, return a RouteHandler that can be used to respond to HTTP
- * requests using this function.
- */
-pub fn api_handler_create<FuncParams, HandlerType>(handler: HandlerType)
-    -> Box<dyn RouteHandler>
+impl<FuncParams, HandlerType> HttpRouteHandler<FuncParams, HandlerType>
 where
-    HandlerType: ApiHandler<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived + 'static,
 {
-    api_handler_create_named(handler, "<unlabeled handler>")
-}
+    /**
+     * Given a function matching one of the supported API handler function
+     * signatures, return a RouteHandler that can be used to respond to HTTP
+     * requests using this function.
+     */
+    pub fn new(handler: HandlerType)
+        -> Box<dyn RouteHandler>
+    {
+        HttpRouteHandler::new_with_name(handler, "<unlabeled handler>");
+    }
 
-/**
- * Given a function matching one of the supported API handler function
- * signatures, return a RouteHandler that can be used to respond to HTTP
- * requests using this function.
- */
-pub fn api_handler_create_named<FuncParams, HandlerType>(
-    handler: HandlerType,
-    label: &str
-)
-    -> Box<dyn RouteHandler>
-where
-    HandlerType: ApiHandler<FuncParams>,
-    FuncParams: Derived + 'static,
-{
-    Box::new(ConcreteRouteHandler {
-        label: label.to_string(),
-        handler: handler,
-        phantom: PhantomData
-    })
+    /**
+     * Given a function matching one of the supported API handler function
+     * signatures, return a RouteHandler that can be used to respond to HTTP
+     * requests using this function.
+     */
+    pub fn new_with_name(handler: HandlerType, label: &str)
+        -> Box<dyn RouteHandler>
+    {
+        Box::new(HttpRouteHandler {
+            label: label.to_string(),
+            handler: handler,
+            phantom: PhantomData
+        })
+    }
 }
 
 
@@ -486,7 +484,7 @@ impl<QueryType: Send + Sync> Query<QueryType> {
  * it as an instance of `QueryType`.
  */
 fn http_request_load_query<QueryType: Send + Sync>(request: &Request<Body>)
-    -> Result<Query<QueryType>, ApiHttpError>
+    -> Result<Query<QueryType>, HttpError>
 where
     QueryType: DeserializeOwned
 {
@@ -496,7 +494,7 @@ where
      */
     match serde_urlencoded::from_str(raw_query_string) {
         Ok(q) => Ok(Query { inner: q }),
-        Err(e) => Err(ApiHttpError::for_bad_request(
+        Err(e) => Err(HttpError::for_bad_request(
             format!("unable to parse query string: {}", e)))
     }
 }
@@ -515,7 +513,7 @@ where
     QueryType: DeserializeOwned + Send + Sync + 'static
 {
     async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<Query<QueryType>, ApiHttpError>
+        -> Result<Query<QueryType>, HttpError>
     {
         let request = rqctx.request.lock().await;
         http_request_load_query(&request)
@@ -550,7 +548,7 @@ impl<JsonType: Send + Sync> Json<JsonType> {
  * deserialize an instance of `JsonType` from it.
  */
 async fn http_request_load_json_body<JsonType>(rqctx: Arc<RequestContext>)
-    -> Result<Json<JsonType>, ApiHttpError>
+    -> Result<Json<JsonType>, HttpError>
 where
     JsonType: DeserializeOwned + Send + Sync
 {
@@ -562,7 +560,7 @@ where
         serde_json::from_slice(&body_bytes);
     match value {
         Ok(j) => Ok(Json { inner: j }),
-        Err(e) => Err(ApiHttpError::for_bad_request(
+        Err(e) => Err(HttpError::for_bad_request(
             format!("unable to parse body JSON: {}", e)))
     }
 }
@@ -581,7 +579,7 @@ where
     JsonType: DeserializeOwned + Send + Sync + 'static,
 {
     async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<Json<JsonType>, ApiHttpError>
+        -> Result<Json<JsonType>, HttpError>
     {
         http_request_load_json_body(rqctx).await
     }

@@ -2,8 +2,8 @@
  * Routes incoming HTTP requests to handler functions
  */
 
-use crate::api_error::ApiHttpError;
-use crate::api_handler::RouteHandler;
+use super::error::HttpError;
+use super::handler::RouteHandler;
 
 use http::Method;
 use http::StatusCode;
@@ -21,17 +21,17 @@ use std::collections::BTreeSet;
  * use http::StatusCode;
  * use hyper::Body;
  * use hyper::Response;
- * use oxide_api_prototype::api_error::ApiHttpError;
- * use oxide_api_prototype::api_handler::RequestContext;
- * use oxide_api_prototype::api_handler::api_handler_create;
- * use oxide_api_prototype::api_handler::RouteHandler;
- * use oxide_api_prototype::api_http_router::HttpRouter;
- * use oxide_api_prototype::api_http_router::LookupResult;
+ * use oxide_api_prototype::httpapi::HttpError;
+ * use oxide_api_prototype::httpapi::RequestContext;
+ * use oxide_api_prototype::httpapi::HttpRouteHandler;
+ * use oxide_api_prototype::httpapi::RouteHandler;
+ * use oxide_api_prototype::httpapi::HttpRouter;
+ * use oxide_api_prototype::httpapi::RouterLookupResult;
  * use std::sync::Arc;
  *
  * /// Example HTTP request handler function
  * async fn demo_handler(_: Arc<RequestContext>)
- *     -> Result<Response<Body>, ApiHttpError>
+ *     -> Result<Response<Body>, HttpError>
  * {
  *      Ok(Response::builder()
  *          .status(StatusCode::NO_CONTENT)
@@ -39,17 +39,17 @@ use std::collections::BTreeSet;
  * }
  *
  * fn demo()
- *     -> Result<(), ApiHttpError>
+ *     -> Result<(), HttpError>
  * {
  *      // Create a router and register a few routes.
  *      let mut router = HttpRouter::new();
  *      router.insert(Method::GET, "/projects",
- *          api_handler_create(demo_handler));
+ *          HttpRouteHandler::new(demo_handler));
  *      router.insert(Method::GET, "/projects/{project_id}",
- *          api_handler_create(demo_handler));
+ *          HttpRouteHandler(demo_handler));
  *
  *      // Basic lookup for a literal path.
- *      let lookup: LookupResult = router.lookup_route(
+ *      let lookup: RouterLookupResult = router.lookup_route(
  *          &Method::GET,
  *          "/projects"
  *      )?;
@@ -58,7 +58,7 @@ use std::collections::BTreeSet;
  *      // handler.handle_request(...)
  *
  *      // Basic lookup with path variables
- *      let lookup: LookupResult = router.lookup_route(
+ *      let lookup: RouterLookupResult = router.lookup_route(
  *          &Method::GET,
  *          "/projects/proj123"
  *      )?;
@@ -205,13 +205,13 @@ impl PathSegment {
 }
 
 /**
- * `LookupResult` represents the result of invoking
+ * `RouterLookupResult` represents the result of invoking
  * `HttpRouter::lookup_route()`.  A successful route lookup includes both the
  * handler and a mapping of variables in the configured path to the
  * corresponding values in the actual path.
  */
 #[derive(Debug)]
-pub struct LookupResult<'a> {
+pub struct RouterLookupResult<'a> {
     pub handler: &'a Box<dyn RouteHandler>,
     pub variables: BTreeMap<String, String>,
 }
@@ -387,16 +387,17 @@ impl HttpRouter {
 
     /**
      * Look up the route handler for an HTTP request having method `method` and
-     * URI path `path`.  A successful lookup produces a `LookupResult`, which
-     * includes both the handler that can process this request and a map of
-     * variables assigned based on the request path as part of the lookup.  On
-     * failure, this returns an `ApiHttpError` appropriate for the failure mode.
+     * URI path `path`.  A successful lookup produces a `RouterLookupResult`,
+     * which includes both the handler that can process this request and a map
+     * of variables assigned based on the request path as part of the lookup.
+     * On failure, this returns an `HttpError` appropriate for the failure
+     * mode.
      *
      * TODO-cleanup
      * consider defining a separate struct type for url-encoded vs. not?
      */
     pub fn lookup_route<'a, 'b>(&'a self, method: &'b Method, path: &'b str)
-        -> Result<LookupResult<'a>, ApiHttpError>
+        -> Result<RouterLookupResult<'a>, HttpError>
     {
         let all_segments = HttpRouter::path_to_segments(path);
         let mut node: &Box<HttpRouterNode> = &self.root;
@@ -410,7 +411,7 @@ impl HttpRouter {
                 variables.insert(edge.0.clone(), segment_string);
                 node = &edge.1
             } else {
-                return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND))
+                return Err(HttpError::for_status(StatusCode::NOT_FOUND))
             }
         }
 
@@ -419,28 +420,26 @@ impl HttpRouter {
          * at all, report a 404.  We could probably treat this as a 405 as well.
          */
         if node.method_handlers.is_empty() {
-            return Err(ApiHttpError::for_status(StatusCode::NOT_FOUND))
+            return Err(HttpError::for_status(StatusCode::NOT_FOUND))
         }
 
         let methodname = method.as_str().to_uppercase();
         if let Some(handler) = node.method_handlers.get(&methodname) {
-            Ok(LookupResult {
+            Ok(RouterLookupResult {
                 handler: handler,
                 variables: variables
             })
         } else {
-            Err(ApiHttpError::for_status(StatusCode::METHOD_NOT_ALLOWED))
+            Err(HttpError::for_status(StatusCode::METHOD_NOT_ALLOWED))
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::api_error::ApiHttpError;
-    use crate::api_handler::api_handler_create;
-    use crate::api_handler::api_handler_create_named;
-    use crate::api_handler::RouteHandler;
-    use crate::api_handler::RequestContext;
+    use super::error::HttpError;
+    use super::handler::RouteHandler;
+    use super::handler::RequestContext;
     use http::StatusCode;
     use hyper::Response;
     use hyper::Body;
@@ -449,7 +448,7 @@ mod test {
     use super::HttpRouter;
 
     async fn test_handler(_: Arc<RequestContext>)
-        -> Result<Response<Body>, ApiHttpError>
+        -> Result<Response<Body>, HttpError>
     {
         panic!("test handler is not supposed to run");
     }
@@ -457,13 +456,13 @@ mod test {
     fn new_handler()
         -> Box<dyn RouteHandler>
     {
-        api_handler_create(test_handler)
+        super::handler::HttpRouteHandler::new(test_handler);
     }
 
     fn new_handler_named(name: &str)
         -> Box<dyn RouteHandler>
     {
-        api_handler_create_named(test_handler, name)
+        super::handler::HttpRouteHandler::new_handler_named(test_handler, name);
     }
 
     #[test]
@@ -579,7 +578,8 @@ mod test {
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         let error = router.lookup_route(&Method::GET, "/foo/bar").unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        let error = router.lookup_route(&Method::GET, "//foo///bar").unwrap_err();
+        let error = router.lookup_route(
+            &Method::GET, "//foo///bar").unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
 
         /*

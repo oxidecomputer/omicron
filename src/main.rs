@@ -24,7 +24,7 @@ async fn main()
 {
     let bind_addr: SocketAddr = SERVER_BIND_ADDRESS.parse().unwrap();
     let mut server = 
-        match oxide_api_prototype::api_server::api_server_create(&bind_addr) {
+        match oxide_api_prototype::ApiServer::new(&bind_addr) {
             Err(e) => {
                 eprintln!("failed to set up server: {}", e);
                 std::process::exit(1);
@@ -32,7 +32,7 @@ async fn main()
             Ok(s) => s
         };
     eprintln!("listening: http://{}", server.local_addr());
-    if let Err(error) = server.run().await {
+    if let Err(error) = server.http_server.run().await {
         eprintln!("server failed: {}", error);
         std::process::exit(1);
     }
