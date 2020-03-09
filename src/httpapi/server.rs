@@ -87,12 +87,6 @@ impl HttpServer {
         })
     }
 
-    pub fn router(&mut self)
-        -> &mut HttpRouter
-    {
-        return self.server_state.router;
-    }
-
     /**
      * Set up an HTTP server bound on the specified address that runs registered
      * handlers.  You must invoke `run()` on the returned instance of
@@ -100,11 +94,9 @@ impl HttpServer {
      * can call `close()` to begin a graceful shutdown of the server, which will
      * be complete when the `run()` Future is resolved.
      */
-    pub fn new(bind_address: &SocketAddr)
+    pub fn new(bind_address: &SocketAddr, mut router: HttpRouter)
         -> Result<HttpServer, hyper::error::Error>
     {
-        let mut router = HttpRouter::new();
-
         /* TODO-hardening: this should not be built in except under test. */
         test_endpoints::register_test_endpoints(&mut router);
 
@@ -344,14 +336,15 @@ pub mod test_endpoints {
 
     pub fn register_test_endpoints(router: &mut HttpRouter)
     {
-        router.insert(Method::GET, "/testing/demo1",
-            HttpRouteHandler::new(demo_handler_args_1));
-        router.insert(Method::GET, "/testing/demo2query",
-            HttpRouteHandler::new(demo_handler_args_2query));
-        router.insert(Method::GET, "/testing/demo2json",
-            HttpRouteHandler::new(demo_handler_args_2json));
-        router.insert(Method::GET, "/testing/demo3",
-            HttpRouteHandler::new(demo_handler_args_3));
+        // XXX
+        // router.insert(Method::GET, "/testing/demo1",
+        //     HttpRouteHandler::new(demo_handler_args_1));
+        // router.insert(Method::GET, "/testing/demo2query",
+        //     HttpRouteHandler::new(demo_handler_args_2query));
+        // router.insert(Method::GET, "/testing/demo2json",
+        //     HttpRouteHandler::new(demo_handler_args_2json));
+        // router.insert(Method::GET, "/testing/demo3",
+        //     HttpRouteHandler::new(demo_handler_args_3));
     }
 
     async fn demo_handler_args_1(_rqctx: Arc<RequestContext>)
