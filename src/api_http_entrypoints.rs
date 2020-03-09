@@ -9,36 +9,37 @@ use hyper::Method;
 use hyper::Response;
 use serde::Deserialize;
 
-use crate::api_error::ApiHttpError;
-use crate::api_handler::api_handler_create;
-use crate::api_handler::Json;
-use crate::api_handler::Query;
-use crate::api_handler::RequestContext;
-use crate::api_http_router::HttpRouter;
+use crate::api_backend;
 use crate::api_http_util::api_http_create;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
 use crate::api_http_util::api_http_emit_stream;
-use crate::api_http_util::http_extract_path_params;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+use crate::httpapi::HttpError;
+use crate::httpapi::HttpRouteHandler;
+use crate::httpapi::HttpRouter;
+use crate::httpapi::Json;
+use crate::httpapi::Query;
+use crate::httpapi::RequestContext;
+use crate::httpapi::http_extract_path_params;
 
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 pub fn api_register_entrypoints(router: &mut HttpRouter)
 {
-    router.insert(Method::GET, "/projects",
-        api_handler_create(api_projects_get));
-    router.insert(Method::POST, "/projects",
-        api_handler_create(api_projects_post));
-    router.insert(Method::GET, "/projects/{project_id}",
-        api_handler_create(api_projects_get_project));
-    router.insert(Method::DELETE, "/projects/{project_id}",
-        api_handler_create(api_projects_delete_project));
-    router.insert(Method::PUT, "/projects/{project_id}",
-        api_handler_create(api_projects_put_project));
+     router.insert(Method::GET, "/projects",
+         HttpRouteHandler::new(api_projects_get));
+     router.insert(Method::POST, "/projects",
+         HttpRouteHandler::new(api_projects_post));
+     router.insert(Method::GET, "/projects/{project_id}",
+         HttpRouteHandler::new(api_projects_get_project));
+     router.insert(Method::DELETE, "/projects/{project_id}",
+         HttpRouteHandler::new(api_projects_delete_project));
+     router.insert(Method::PUT, "/projects/{project_id}",
+         HttpRouteHandler::new(api_projects_put_project));
 }
 
 /*
@@ -87,9 +88,9 @@ async fn api_projects_get(
     rqctx: Arc<RequestContext>,
     params_raw: Query<ListQueryParams>
 )
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
-    let backend = &rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
     let marker = params.marker.as_ref().map(|s| s.clone());
@@ -104,9 +105,9 @@ async fn api_projects_post(
     rqctx: Arc<RequestContext>,
     new_project: Json<ApiProjectCreateParams>
 )
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let project = backend.project_create(&new_project.into_inner()).await?;
     api_http_create(project)
 }
@@ -120,9 +121,9 @@ struct ProjectPathParam {
  * "GET /project/{project_id}": fetch a specific project
  */
 async fn api_projects_get_project(rqctx: Arc<RequestContext>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;
@@ -134,9 +135,9 @@ async fn api_projects_get_project(rqctx: Arc<RequestContext>)
  * "DELETE /project/{project_id}": delete a specific project
  */
 async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;
@@ -157,9 +158,9 @@ async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
     updated_project: Json<ApiProjectUpdateParams>
 )
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
-    let backend = &*rqctx.server.backend;
+    let backend = api_backend(&rqctx);
     let params: ProjectPathParam = http_extract_path_params(
         &rqctx.path_variables)?;
     let project_id = &params.project_id;

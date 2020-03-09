@@ -1,14 +1,10 @@
 /*!
- * server-wide state and facilities
+ * Generic server-wide state and facilities
  */
 
-use crate::api_handler::RequestContext;
-use crate::api_error::ApiHttpError;
-use crate::api_model::ApiBackend;
-use crate::api_http_router::HttpRouter;
-use crate::api_http_entrypoints;
-use crate::sim;
-use sim::SimulatorBuilder;
+use super::handler::RequestContext;
+use super::error::HttpError;
+use super::router::HttpRouter;
 
 use futures::FutureExt;
 use futures::lock::Mutex;
@@ -17,6 +13,7 @@ use hyper::Request;
 use hyper::Response;
 use hyper::server::conn::AddrStream;
 use hyper::service::Service;
+use std::any::Any;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -24,17 +21,17 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-/* TODO Replace this with ApiError? */
+/* TODO Replace this with something else? */
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
 /**
- * Stores shared state used by API endpoints
+ * Stores shared state used by the generic HTTP server submodule.
  */
-pub struct ApiServerState {
-    /** the API backend to use for servicing requests */
-    pub backend: Arc<dyn ApiBackend + Send + Sync>,
+pub struct ServerState {
+    /** caller-specific state */
+    pub private: Box<dyn Any + Send + Sync + 'static>,
     /** static server configuration parameters */
-    pub config: ApiServerConfig,
+    pub config: ServerConfig,
     /** request router */
     pub router: HttpRouter,
 }
@@ -42,7 +39,7 @@ pub struct ApiServerState {
 /**
  * Stores static configuration associated with the server
  */
-pub struct ApiServerConfig {
+pub struct ServerConfig {
     /** maximum allowed size of a request body */
     pub request_body_max_bytes: usize
 }
@@ -55,7 +52,7 @@ pub struct ApiServerConfig {
  * (i.e., it should consume self).  But you should be able to close() it.  Once
  * you've called close(), you shouldn't be able to call it again.
  */
-pub struct ApiHttpServer {
+pub struct HttpServer {
     server_future: Option<Pin<Box<
         dyn Future<Output=Result<(), hyper::error::Error>> + Send
     >>>,
@@ -63,7 +60,7 @@ pub struct ApiHttpServer {
     close_channel: Option<tokio::sync::oneshot::Sender<()>>
 }
 
-impl ApiHttpServer {
+impl HttpServer {
     pub fn local_addr(&self)
         -> SocketAddr
     {
@@ -91,53 +88,46 @@ impl ApiHttpServer {
             future.await
         })
     }
-}
 
-/**
- * Set up an HTTP server bound on the specified address that runs the API.  You
- * must invoke `run()` on the returned instance of `ApiHttpServer` (and await
- * the result) to actually start the server.  You can call `close()` to begin a
- * graceful shutdown of the server, which will be complete when the `run()`
- * Future is resolved.
- */
-pub fn api_server_create(bind_address: &SocketAddr)
-    -> Result<ApiHttpServer, hyper::error::Error>
-{
-    let mut simbuilder = SimulatorBuilder::new();
-    simbuilder.project_create("simproject1");
-    simbuilder.project_create("simproject2");
-    simbuilder.project_create("simproject3");
+    /**
+     * Set up an HTTP server bound on the specified address that runs registered
+     * handlers.  You must invoke `run()` on the returned instance of
+     * `HttpServer` (and await the result) to actually start the server.  You
+     * can call `close()` to begin a graceful shutdown of the server, which will
+     * be complete when the `run()` Future is resolved.
+     */
+    pub fn new(bind_address: &SocketAddr, mut router: HttpRouter,
+        private: Box<dyn Any + Send + Sync + 'static>)
+        -> Result<HttpServer, hyper::error::Error>
+    {
+        /* TODO-hardening: this should not be built in except under test. */
+        test_endpoints::register_test_endpoints(&mut router);
 
-    let mut router = HttpRouter::new();
-    api_http_entrypoints::api_register_entrypoints(&mut router);
+        /* TODO-cleanup too many Arcs? */
+        let app_state = Arc::new(ServerState {
+            private: private,
+            config: ServerConfig {
+                /* We start aggressively to ensure test coverage. */
+                request_body_max_bytes: 1024
+            },
+            router: router
+        });
 
-    /* TODO-hardening: this should not be built in except under test. */
-    test_endpoints::register_test_endpoints(&mut router);
+        let make_service = ServerConnectionHandler::new(Arc::clone(&app_state));
+        let builder = hyper::Server::try_bind(bind_address)?;
+        let server = builder.serve(make_service);
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let local_addr = server.local_addr();
+        let graceful = server.with_graceful_shutdown(async {
+            rx.await.ok();
+        });
 
-    /* TODO-cleanup too many Arcs? */
-    let app_state = Arc::new(ApiServerState {
-        backend: Arc::new(simbuilder.build()),
-        config: ApiServerConfig {
-            /* We start aggressively to make sure we cover this in our tests. */
-            request_body_max_bytes: 1024
-        },
-        router: router
-    });
-
-    let make_service = ApiServerConnectionHandler::new(app_state);
-    let builder = hyper::Server::try_bind(bind_address)?;
-    let server = builder.serve(make_service);
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-    let local_addr = server.local_addr();
-    let graceful = server.with_graceful_shutdown(async {
-        rx.await.ok();
-    });
-
-    Ok(ApiHttpServer {
-        server_future: Some(graceful.boxed()),
-        local_addr: local_addr,
-        close_channel: Some(tx),
-    })
+        Ok(HttpServer {
+            server_future: Some(graceful.boxed()),
+            local_addr: local_addr,
+            close_channel: Some(tx),
+        })
+    }
 }
 
 /**
@@ -147,12 +137,12 @@ pub fn api_server_create(bind_address: &SocketAddr)
  * connection.
  */
 async fn http_connection_handle(
-    server: Arc<ApiServerState>,
+    server: Arc<ServerState>,
     remote_addr: SocketAddr)
-    -> Result<ApiServerRequestHandler, GenericError>
+    -> Result<ServerRequestHandler, GenericError>
 {
     eprintln!("accepted connection from: {}", remote_addr);
-    Ok(ApiServerRequestHandler::new(server))
+    Ok(ServerRequestHandler::new(server))
 }
 
 /**
@@ -162,7 +152,7 @@ async fn http_connection_handle(
  * also get turned into an HTTP response).
  */
 async fn http_request_handle_wrap(
-    server: Arc<ApiServerState>,
+    server: Arc<ServerState>,
     request: Request<Body>)
     -> Result<Response<Body>, GenericError>
 {
@@ -179,9 +169,9 @@ async fn http_request_handle_wrap(
 }
 
 async fn http_request_handle(
-    server: Arc<ApiServerState>,
+    server: Arc<ServerState>,
     request: Request<Body>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
     /*
      * TODO-hardening: is it correct to (and do we correctly) read the entire
@@ -207,33 +197,33 @@ async fn http_request_handle(
 }
 
 /**
- * ApiServerConnectionHandler is a Hyper Service implementation that forwards
+ * ServerConnectionHandler is a Hyper Service implementation that forwards
  * incoming connections to `http_connection_handle()`, providing the server
  * state object as an additional argument.  We could use `make_service_fn` here
  * using a closure to capture the state object, but the resulting code is a bit
  * simpler without it.
  */
-pub struct ApiServerConnectionHandler {
+pub struct ServerConnectionHandler {
     /** backend state that will be made available to the connection handler */
-    server: Arc<ApiServerState>
+    server: Arc<ServerState>
 }
 
-impl ApiServerConnectionHandler
+impl ServerConnectionHandler
 {
     /**
-     * Create an ApiServerConnectionHandler with the given state object that
+     * Create an ServerConnectionHandler with the given state object that
      * will be made available to the handler.
      */
-    fn new(server: Arc<ApiServerState>)
+    fn new(server: Arc<ServerState>)
         -> Self
     {
-        ApiServerConnectionHandler {
+        ServerConnectionHandler {
             server: Arc::clone(&server)
         }
     }
 }
 
-impl Service<&AddrStream> for ApiServerConnectionHandler
+impl Service<&AddrStream> for ServerConnectionHandler
 {
     /*
      * Recall that a Service in this context is just something that takes a
@@ -243,7 +233,7 @@ impl Service<&AddrStream> for ApiServerConnectionHandler
      * another Service: one that accepts HTTP requests and produces HTTP
      * responses.
      */
-    type Response = ApiServerRequestHandler;
+    type Response = ServerRequestHandler;
     type Error = GenericError;
     type Future = Pin<Box<
         dyn Future<Output = Result<Self::Response, Self::Error>> + Send
@@ -275,33 +265,33 @@ impl Service<&AddrStream> for ApiServerConnectionHandler
 }
 
 /**
- * ApiServerRequestHandler is a Hyper Service implementation that forwards
+ * ServerRequestHandler is a Hyper Service implementation that forwards
  * incoming requests to `http_request_handle_wrap()`, including as an argument
  * the backend server state object.  We could use `service_fn` here using a
  * closure to capture the server state object, but the resulting code is a bit
  * simpler without all that.
  */
-pub struct ApiServerRequestHandler {
+pub struct ServerRequestHandler {
     /** backend state that will be made available to the request handler */
-    server: Arc<ApiServerState>
+    server: Arc<ServerState>
 }
 
-impl ApiServerRequestHandler
+impl ServerRequestHandler
 {
     /**
-     * Create an ApiServerRequestHandler object with the given state object that
+     * Create a ServerRequestHandler object with the given state object that
      * will be provided to the handler function.
      */
-    fn new(server: Arc<ApiServerState>)
+    fn new(server: Arc<ServerState>)
         -> Self
     {
-        ApiServerRequestHandler {
+        ServerRequestHandler {
             server: Arc::clone(&server)
         }
     }
 }
 
-impl Service<Request<Body>> for ApiServerRequestHandler
+impl Service<Request<Body>> for ServerRequestHandler
 {
     type Response = Response<Body>;
     type Error = GenericError;
@@ -332,13 +322,13 @@ impl Service<Request<Body>> for ApiServerRequestHandler
  * server with handlers like these.
  */
 pub mod test_endpoints {
-    use crate::api_error::ApiHttpError;
-    use crate::api_handler::Json;
-    use crate::api_handler::Query;
-    use crate::api_handler::RequestContext;
-    use crate::api_handler::api_handler_create;
-    use crate::api_http_router::HttpRouter;
-    use crate::api_http_util::CONTENT_TYPE_JSON;
+    use super::super::error::HttpError;
+    use super::super::handler::Json;
+    use super::super::handler::Query;
+    use super::super::handler::RequestContext;
+    use super::super::handler::HttpRouteHandler;
+    use super::super::router::HttpRouter;
+    use super::super::http_util::CONTENT_TYPE_JSON;
     use http::StatusCode;
     use hyper::Body;
     use hyper::Method;
@@ -350,17 +340,17 @@ pub mod test_endpoints {
     pub fn register_test_endpoints(router: &mut HttpRouter)
     {
         router.insert(Method::GET, "/testing/demo1",
-            api_handler_create(demo_handler_args_1));
+            HttpRouteHandler::new(demo_handler_args_1));
         router.insert(Method::GET, "/testing/demo2query",
-            api_handler_create(demo_handler_args_2query));
+            HttpRouteHandler::new(demo_handler_args_2query));
         router.insert(Method::GET, "/testing/demo2json",
-            api_handler_create(demo_handler_args_2json));
+            HttpRouteHandler::new(demo_handler_args_2json));
         router.insert(Method::GET, "/testing/demo3",
-            api_handler_create(demo_handler_args_3));
+            HttpRouteHandler::new(demo_handler_args_3));
     }
 
     async fn demo_handler_args_1(_rqctx: Arc<RequestContext>)
-        -> Result<Response<Body>, ApiHttpError>
+        -> Result<Response<Body>, HttpError>
     {
         Ok(Response::builder()
             .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
@@ -377,7 +367,7 @@ pub mod test_endpoints {
     async fn demo_handler_args_2query(
         _rqctx: Arc<RequestContext>,
         query: Query<DemoQueryArgs>)
-        -> Result<Response<Body>, ApiHttpError>
+        -> Result<Response<Body>, HttpError>
     {
         Ok(Response::builder()
             .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
@@ -394,7 +384,7 @@ pub mod test_endpoints {
     async fn demo_handler_args_2json(
         _rqctx: Arc<RequestContext>,
         json: Json<DemoJsonBody>)
-        -> Result<Response<Body>, ApiHttpError>
+        -> Result<Response<Body>, HttpError>
     {
         Ok(Response::builder()
             .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
@@ -411,7 +401,7 @@ pub mod test_endpoints {
         _rqctx: Arc<RequestContext>,
         query: Query<DemoQueryArgs>,
         json: Json<DemoJsonBody>)
-        -> Result<Response<Body>, ApiHttpError>
+        -> Result<Response<Body>, HttpError>
     {
         let combined = DemoJsonAndQuery {
             query: query.into_inner(),

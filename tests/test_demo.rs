@@ -16,8 +16,8 @@
 
 use http::StatusCode;
 use hyper::Method;
-use oxide_api_prototype::api_server::test_endpoints::DemoJsonBody;
-use oxide_api_prototype::api_server::test_endpoints::DemoJsonAndQuery;
+use oxide_api_prototype::httpapi::test_endpoints::DemoJsonBody;
+use oxide_api_prototype::httpapi::test_endpoints::DemoJsonAndQuery;
 
 pub mod common;
 use common::make_request;

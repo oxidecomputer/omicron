@@ -9,19 +9,15 @@ use futures::stream::StreamExt;
 use http::StatusCode;
 use hyper::Body;
 use hyper::Response;
-use hyper::body::HttpBody;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::sync::Arc;
-use std::collections::BTreeMap;
 
 use crate::api_error::ApiError;
-use crate::api_error::ApiHttpError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
-
-pub const CONTENT_TYPE_JSON: &str = "application/json";
-pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
+use crate::httpapi::CONTENT_TYPE_JSON;
+use crate::httpapi::CONTENT_TYPE_NDJSON;
+use crate::httpapi::HttpError;
 
 /**
  * Given a `Result` representing an object in the API, serialize the object to
@@ -101,7 +97,7 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
  * ApiObject.
  */
 pub fn api_http_create<T>(object: Arc<T>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
     where
         T: ApiObject
 {
@@ -117,7 +113,7 @@ pub fn api_http_create<T>(object: Arc<T>)
  * resource.  This returns an empty 204 "No Content" response.
  */
 pub fn api_http_delete()
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
 {
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -129,7 +125,7 @@ pub fn api_http_delete()
  * returns a 200 "OK" response whose body describes the given ApiObject.
  */
 pub fn api_http_emit_one<T>(object: Arc<T>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
     where T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
@@ -148,7 +144,7 @@ pub fn api_http_emit_one<T>(object: Arc<T>)
  * half-buffered and half-streaming.
  */
 pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
-    -> Result<Response<Body>, ApiHttpError>
+    -> Result<Response<Body>, HttpError>
     where T: ApiObject
 {
     let byte_stream = object_stream
@@ -179,125 +175,4 @@ pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
         .body(bytebuf.freeze().into())?)
-}
-
-/**
- * Reads the rest of the body from the request up to the given number of bytes.
- * If the body fits within the specified cap, a buffer is returned with all the
- * bytes read.  If not, an error is returned.
- */
-pub async fn http_read_body<T>(body: &mut T, cap: usize)
-    -> Result<Bytes, ApiHttpError>
-    where T: HttpBody<Data=Bytes, Error=hyper::error::Error> + std::marker::Unpin,
-{
-    /*
-     * This looks a lot like the implementation of hyper::body::to_bytes(), but
-     * applies the requested cap.  We've skipped the optimization for the
-     * 1-buffer case for now, as it seems likely this implementation will change
-     * anyway.
-     * TODO should this use some Stream interface instead?
-     * TODO why does this look so different in type signature (Data=Bytes,
-     * std::marker::Unpin, &mut T)
-     * TODO Error type shouldn't have to be hyper Error -- Into<ApiError> should
-     * work too?
-     */
-    let mut parts = std::vec::Vec::new();
-    let mut nbytesread: usize = 0;
-    while let Some(maybebuf) = body.data().await {
-        let buf = maybebuf?;
-        let bufsize = buf.len();
-
-        if nbytesread + bufsize > cap {
-            http_dump_body(body).await?;
-            // TODO-correctness check status code
-            return Err(ApiHttpError::for_bad_request(
-                format!("request body exceeded maximum size of {} bytes", cap)));
-        }
-
-        nbytesread += bufsize;
-        parts.put(buf);
-    }
-
-    /*
-     * Read the trailers as well, even though we're not going to do anything
-     * with them.
-     */
-    body.trailers().await?;
-    /*
-     * TODO-correctness why does the is_end_stream() assertion fail and the next
-     * one panic?
-     */
-    // assert!(body.is_end_stream());
-    // assert!(body.data().await.is_none());
-    // assert!(body.trailers().await?.is_none());
-    Ok(parts.into())
-}
-
-/**
- * Reads the rest of the body from the request, dropping all the bytes.  This is
- * useful after encountering error conditions.
- */
-pub async fn http_dump_body<T>(body: &mut T)
-    -> Result<usize, T::Error>
-    where T: HttpBody<Data=Bytes> + std::marker::Unpin
-{
-    /*
-     * TODO should this use some Stream interface instead?
-     * TODO-hardening: does this actually cap the amount of data that will be
-     * read?  What if the underlying implementation chooses to wait for a much
-     * larger number of bytes?
-     * TODO better understand pin_mut!()
-     */
-    let mut nbytesread: usize = 0;
-    while let Some(maybebuf) = body.data().await {
-        let buf = maybebuf?;
-        nbytesread += buf.len();
-    }
-
-    /*
-     * TODO-correctness why does the is_end_stream() assertion fail?
-     */
-    // assert!(body.is_end_stream());
-    Ok(nbytesread)
-}
-
-/**
- * Given a set of variables (most immediately from a RequestContext, likely
- * generated by the HttpRouter when routing an incoming request), extract them
- * into an instance of type T.  This is a convenience function that reports an
- * appropriate error when the extraction fails.
- *
- * Note that if this function fails, that generally means that an HTTP handler
- * function is trying to use a variable from the HTTP request path that wasn't
- * present in the path for which the handler was registered.  Arguably, we
- * should panic in this case, since it's a programmer error and not one we
- * expect to encounter at runtime.  We chicken out and report a 500 error
- * instead.  At least the blast radius is known (i.e., there's no reason to
- * believe that there's corrupt internal state)
- *
- * TODO-cleanup: It would be even better to fail to build in this case.
- * TODO-testing: Add automated tests.
- */
-pub fn http_extract_path_params<T: DeserializeOwned>(
-    path_params: &BTreeMap<String, String>
-)
-    -> Result<T, ApiHttpError>
-{
-    /*
-     * TODO-cleanup This implementation is a bit janky, constructing an untyped
-     * Serde Json value that we can then parse into an instance of T.  It might
-     * be more efficient to implement a Deserializer for a path string.
-     */
-    let mut jmap = serde_json::map::Map::new();
-    for (key, value) in path_params.iter() {
-        jmap.insert(
-            key.clone(),
-            serde_json::value::Value::String(value.clone())
-        );
-    }
-
-    let json_value = serde_json::value::Value::Object(jmap);
-    serde_json::from_value::<T>(json_value).map_err(|e|
-        ApiHttpError::for_internal_error(
-            format!("missing path param: {}", e)))
 }

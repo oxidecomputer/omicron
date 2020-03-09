@@ -39,11 +39,10 @@ Use `curl` to hit the server:
 
     {"name":"project3"}
 
+The tests can be run with `cargo test`.  They are clean and should remain clean.
+
 ## TODO
 
-- Restructure files to better separate concerns?
-  (e.g., API-agnostic HTTP infrastructure)
-  (e.g., OpenAPI input/output types?)
 - Update the handler functions so that they can return a Serialize or a Stream
   of Serialize.  (Otherwise, how will the OpenAPI tooling know what the return
   types are?)
