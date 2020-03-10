@@ -27,9 +27,9 @@ pub struct ApiRequestContext {
 }
 
 impl ApiServer {
-    pub fn new(bind_address: &SocketAddr)
-        -> Result<ApiServer, hyper::error::Error>
-    {
+    pub fn new(
+        bind_address: &SocketAddr,
+    ) -> Result<ApiServer, hyper::error::Error> {
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
         simbuilder.project_create("simproject2");
@@ -41,11 +41,14 @@ impl ApiServer {
 
         let mut router = httpapi::HttpRouter::new();
         api_http_entrypoints::api_register_entrypoints(&mut router);
-        let http_server = httpapi::HttpServer::new(bind_address, router,
-            Box::new(api_state))?;
+        let http_server = httpapi::HttpServer::new(
+            bind_address,
+            router,
+            Box::new(api_state),
+        )?;
 
         Ok(ApiServer {
-            http_server: http_server
+            http_server: http_server,
         })
     }
 }
@@ -58,9 +61,9 @@ impl ApiServer {
  * created with a different type for its private data, which we do not expect.
  * TODO-cleanup: can we make this API statically type-safe?
  */
-pub fn api_backend(rqctx: &Arc<RequestContext>)
-    -> Arc<dyn api_model::ApiBackend>
-{
+pub fn api_backend(
+    rqctx: &Arc<RequestContext>,
+) -> Arc<dyn api_model::ApiBackend> {
     let maybectx: &(dyn Any + Send + Sync) = rqctx.server.private.as_ref();
     let apictx = maybectx
         .downcast_ref::<Arc<ApiRequestContext>>()

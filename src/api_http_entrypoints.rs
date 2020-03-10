@@ -17,29 +17,43 @@ use crate::api_http_util::api_http_emit_stream;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+use crate::httpapi::http_extract_path_params;
 use crate::httpapi::HttpError;
 use crate::httpapi::HttpRouteHandler;
 use crate::httpapi::HttpRouter;
 use crate::httpapi::Json;
 use crate::httpapi::Query;
 use crate::httpapi::RequestContext;
-use crate::httpapi::http_extract_path_params;
 
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
-pub fn api_register_entrypoints(router: &mut HttpRouter)
-{
-     router.insert(Method::GET, "/projects",
-         HttpRouteHandler::new(api_projects_get));
-     router.insert(Method::POST, "/projects",
-         HttpRouteHandler::new(api_projects_post));
-     router.insert(Method::GET, "/projects/{project_id}",
-         HttpRouteHandler::new(api_projects_get_project));
-     router.insert(Method::DELETE, "/projects/{project_id}",
-         HttpRouteHandler::new(api_projects_delete_project));
-     router.insert(Method::PUT, "/projects/{project_id}",
-         HttpRouteHandler::new(api_projects_put_project));
+pub fn api_register_entrypoints(router: &mut HttpRouter) {
+    router.insert(
+        Method::GET,
+        "/projects",
+        HttpRouteHandler::new(api_projects_get),
+    );
+    router.insert(
+        Method::POST,
+        "/projects",
+        HttpRouteHandler::new(api_projects_post),
+    );
+    router.insert(
+        Method::GET,
+        "/projects/{project_id}",
+        HttpRouteHandler::new(api_projects_get_project),
+    );
+    router.insert(
+        Method::DELETE,
+        "/projects/{project_id}",
+        HttpRouteHandler::new(api_projects_delete_project),
+    );
+    router.insert(
+        Method::PUT,
+        "/projects/{project_id}",
+        HttpRouteHandler::new(api_projects_put_project),
+    );
 }
 
 /*
@@ -78,7 +92,7 @@ pub fn api_register_entrypoints(router: &mut HttpRouter)
 #[derive(Deserialize)]
 struct ListQueryParams {
     pub marker: Option<String>,
-    pub limit: Option<usize>
+    pub limit: Option<usize>,
 }
 
 /*
@@ -86,10 +100,8 @@ struct ListQueryParams {
  */
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<ListQueryParams>
-)
-    -> Result<Response<Body>, HttpError>
-{
+    params_raw: Query<ListQueryParams>,
+) -> Result<Response<Body>, HttpError> {
     let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
@@ -103,10 +115,8 @@ async fn api_projects_get(
  */
 async fn api_projects_post(
     rqctx: Arc<RequestContext>,
-    new_project: Json<ApiProjectCreateParams>
-)
-    -> Result<Response<Body>, HttpError>
-{
+    new_project: Json<ApiProjectCreateParams>,
+) -> Result<Response<Body>, HttpError> {
     let backend = api_backend(&rqctx);
     let project = backend.project_create(&new_project.into_inner()).await?;
     api_http_create(project)
@@ -114,32 +124,32 @@ async fn api_projects_post(
 
 #[derive(Deserialize)]
 struct ProjectPathParam {
-    project_id: String
+    project_id: String,
 }
 
 /*
  * "GET /project/{project_id}": fetch a specific project
  */
-async fn api_projects_get_project(rqctx: Arc<RequestContext>)
-    -> Result<Response<Body>, HttpError>
-{
+async fn api_projects_get_project(
+    rqctx: Arc<RequestContext>,
+) -> Result<Response<Body>, HttpError> {
     let backend = api_backend(&rqctx);
-    let params: ProjectPathParam = http_extract_path_params(
-        &rqctx.path_variables)?;
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
     let project_id = &params.project_id;
-    let project : Arc<ApiProject> = backend.project_lookup(project_id).await?;
+    let project: Arc<ApiProject> = backend.project_lookup(project_id).await?;
     api_http_emit_one(project)
 }
 
 /*
  * "DELETE /project/{project_id}": delete a specific project
  */
-async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
-    -> Result<Response<Body>, HttpError>
-{
+async fn api_projects_delete_project(
+    rqctx: Arc<RequestContext>,
+) -> Result<Response<Body>, HttpError> {
     let backend = api_backend(&rqctx);
-    let params: ProjectPathParam = http_extract_path_params(
-        &rqctx.path_variables)?;
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
     let project_id = &params.project_id;
     backend.project_delete(project_id).await?;
     api_http_delete()
@@ -156,15 +166,14 @@ async fn api_projects_delete_project(rqctx: Arc<RequestContext>)
  */
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
-    updated_project: Json<ApiProjectUpdateParams>
-)
-    -> Result<Response<Body>, HttpError>
-{
+    updated_project: Json<ApiProjectUpdateParams>,
+) -> Result<Response<Body>, HttpError> {
     let backend = api_backend(&rqctx);
-    let params: ProjectPathParam = http_extract_path_params(
-        &rqctx.path_variables)?;
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
     let project_id = &params.project_id;
-    let newproject = backend.project_update(
-        project_id, &updated_project.into_inner()).await?;
+    let newproject = backend
+        .project_update(project_id, &updated_project.into_inner())
+        .await?;
     api_http_emit_one(newproject)
 }

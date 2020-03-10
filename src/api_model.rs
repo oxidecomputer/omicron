@@ -69,9 +69,13 @@ pub enum ApiResourceType {
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", match self {
-            ApiResourceType::Project => "project",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                ApiResourceType::Project => "project",
+            }
+        )
     }
 }
 
@@ -107,13 +111,11 @@ pub struct ApiProject {
 
 impl ApiObject for ApiProject {
     type View = ApiProjectView;
-    fn to_view(&self)
-        -> ApiProjectView
-    {
+    fn to_view(&self) -> ApiProjectView {
         ApiProjectView {
             id: self.id.clone(),
             name: self.name.clone(),
-            description: self.description.clone()
+            description: self.description.clone(),
         }
     }
 }
@@ -126,7 +128,7 @@ impl ApiObject for ApiProject {
 pub struct ApiProjectView {
     pub id: String,
     pub name: String,
-    pub description: String
+    pub description: String,
 }
 
 /**
@@ -178,9 +180,8 @@ pub type LookupResult<T> = Result<Arc<T>, ApiError>;
 pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 
 /** A stream of Results, each potentially representing an object in the API. */
-pub type ObjectStream<T> = Pin<Box<
-    dyn Stream<Item = Result<Arc<T>, ApiError>> + Send
->>;
+pub type ObjectStream<T> =
+    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
 
 /**
  * Represents a backend implementation of the API.
@@ -192,15 +193,20 @@ pub type ObjectStream<T> = Pin<Box<
  */
 #[async_trait]
 pub trait ApiBackend: Send + Sync {
-    async fn project_create(&self, params: &ApiProjectCreateParams)
-        -> CreateResult<ApiProject>;
-    async fn project_lookup(&self, name: &String)
-        -> LookupResult<ApiProject>;
-    async fn project_delete(&self, name: &String)
-        -> DeleteResult;
-    async fn project_update(&self, name: &String,
-        params: &ApiProjectUpdateParams)
-        -> UpdateResult<ApiProject>;
-    async fn projects_list(&self, marker: Option<String>, limit: usize)
-        -> ListResult<ApiProject>;
+    async fn project_create(
+        &self,
+        params: &ApiProjectCreateParams,
+    ) -> CreateResult<ApiProject>;
+    async fn project_lookup(&self, name: &String) -> LookupResult<ApiProject>;
+    async fn project_delete(&self, name: &String) -> DeleteResult;
+    async fn project_update(
+        &self,
+        name: &String,
+        params: &ApiProjectUpdateParams,
+    ) -> UpdateResult<ApiProject>;
+    async fn projects_list(
+        &self,
+        marker: Option<String>,
+        limit: usize,
+    ) -> ListResult<ApiProject>;
 }
