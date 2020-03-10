@@ -18,12 +18,9 @@ pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
  * If the body fits within the specified cap, a buffer is returned with all the
  * bytes read.  If not, an error is returned.
  */
-pub async fn http_read_body<T>(
-    body: &mut T,
-    cap: usize,
-) -> Result<Bytes, HttpError>
-where
-    T: HttpBody<Data = Bytes, Error = hyper::error::Error> + std::marker::Unpin,
+pub async fn http_read_body<T>(body: &mut T, cap: usize)
+    -> Result<Bytes, HttpError>
+    where T: HttpBody<Data=Bytes, Error=hyper::error::Error> + std::marker::Unpin,
 {
     /*
      * This looks a lot like the implementation of hyper::body::to_bytes(), but
@@ -45,10 +42,8 @@ where
         if nbytesread + bufsize > cap {
             http_dump_body(body).await?;
             // TODO-correctness check status code
-            return Err(HttpError::for_bad_request(format!(
-                "request body exceeded maximum size of {} bytes",
-                cap
-            )));
+            return Err(HttpError::for_bad_request(
+                format!("request body exceeded maximum size of {} bytes", cap)));
         }
 
         nbytesread += bufsize;
@@ -74,9 +69,9 @@ where
  * Reads the rest of the body from the request, dropping all the bytes.  This is
  * useful after encountering error conditions.
  */
-pub async fn http_dump_body<T>(body: &mut T) -> Result<usize, T::Error>
-where
-    T: HttpBody<Data = Bytes> + std::marker::Unpin,
+pub async fn http_dump_body<T>(body: &mut T)
+    -> Result<usize, T::Error>
+    where T: HttpBody<Data=Bytes> + std::marker::Unpin
 {
     /*
      * TODO should this use some Stream interface instead?
@@ -116,8 +111,10 @@ where
  * TODO-testing: Add automated tests.
  */
 pub fn http_extract_path_params<T: DeserializeOwned>(
-    path_params: &BTreeMap<String, String>,
-) -> Result<T, HttpError> {
+    path_params: &BTreeMap<String, String>
+)
+    -> Result<T, HttpError>
+{
     /*
      * TODO-cleanup This implementation is a bit janky, constructing an untyped
      * Serde Json value that we can then parse into an instance of T.  It might
@@ -127,12 +124,12 @@ pub fn http_extract_path_params<T: DeserializeOwned>(
     for (key, value) in path_params.iter() {
         jmap.insert(
             key.clone(),
-            serde_json::value::Value::String(value.clone()),
+            serde_json::value::Value::String(value.clone())
         );
     }
 
     let json_value = serde_json::value::Value::Object(jmap);
-    serde_json::from_value::<T>(json_value).map_err(|e| {
-        HttpError::for_internal_error(format!("missing path param: {}", e))
-    })
+    serde_json::from_value::<T>(json_value).map_err(|e|
+        HttpError::for_internal_error(
+            format!("missing path param: {}", e)))
 }

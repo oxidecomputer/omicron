@@ -21,26 +21,20 @@ pub enum ApiError {
 }
 
 impl From<ApiError> for HttpError {
-    fn from(error: ApiError) -> HttpError {
+    fn from(error: ApiError)
+        -> HttpError
+    {
         match error {
-            ApiError::ObjectNotFound {
-                type_name: t,
-                object_name: n,
-            } => {
+            ApiError::ObjectNotFound { type_name: t, object_name: n } => {
                 let message = format!("not found: {} \"{}\"", t, n);
                 HttpError::for_client_error(
-                    http::StatusCode::NOT_FOUND,
-                    message,
-                )
-            }
+                    http::StatusCode::NOT_FOUND, message)
+            },
 
-            ApiError::ObjectAlreadyExists {
-                type_name: t,
-                object_name: n,
-            } => {
+            ApiError::ObjectAlreadyExists { type_name: t, object_name: n } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
                 HttpError::for_bad_request(message)
-            }
+            },
         }
     }
 }

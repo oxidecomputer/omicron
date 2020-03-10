@@ -3,18 +3,18 @@
  */
 
 use http::method::Method;
-use hyper::body::to_bytes;
-use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper::Client;
 use hyper::Request;
 use hyper::Response;
 use hyper::StatusCode;
 use hyper::Uri;
-use oxide_api_prototype::httpapi::HttpErrorResponseBody;
+use hyper::body::to_bytes;
+use hyper::client::HttpConnector;
 use oxide_api_prototype::ApiServer;
-use serde::de::DeserializeOwned;
+use oxide_api_prototype::httpapi::HttpErrorResponseBody;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tokio::task::JoinHandle;
@@ -42,7 +42,9 @@ impl TestContext {
      * appends the path to a base URL constructed from the server's IP address
      * and port.
      */
-    pub fn url(&self, path: &str) -> Uri {
+    pub fn url(&self, path: &str)
+        -> Uri
+    {
         Uri::builder()
             .scheme("http")
             .authority(format!("{}", self.bind_address).as_str())
@@ -57,20 +59,20 @@ impl TestContext {
  * to a hardcoded IP address and port, starts the server, and instantiates a
  * client.  The results are encapsulated in the `TestContext` struct.
  */
-pub fn test_setup() -> TestContext {
+pub fn test_setup()
+    -> TestContext
+{
     let bind_address: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
-        "127.0.0.1".parse().unwrap(),
-        0,
-    ));
-    let mut server =
-        ApiServer::new(&bind_address).expect("failed to set up server");
+        "127.0.0.1".parse().unwrap(), 0));
+    let mut server = ApiServer::new(&bind_address)
+        .expect("failed to set up server");
     let task = server.http_server.run();
 
     TestContext {
         bind_address: server.http_server.local_addr(),
         api_server: server,
         api_server_task: task,
-        client: Client::new(),
+        client: Client::new()
     }
 }
 
@@ -78,12 +80,11 @@ pub fn test_setup() -> TestContext {
  * Tear down facilities that were set up during the test.  Currently, this shuts
  * down the test HTTP server and waits for it to exit gracefully.
  */
-pub async fn test_teardown(testctx: TestContext) {
+pub async fn test_teardown(testctx: TestContext)
+{
     testctx.api_server.http_server.close();
-    let join_result = testctx
-        .api_server_task
-        .await
-        .expect("failed to join on test server");
+    let join_result = testctx.api_server_task.await.expect(
+        "failed to join on test server");
     join_result.expect("server closed with an error");
 }
 
@@ -91,8 +92,11 @@ pub async fn test_teardown(testctx: TestContext) {
  * List of allowed HTTP headers in responses.  This is used to make sure we
  * don't leak headers unexpectedly.
  */
-const ALLOWED_HEADER_NAMES: [&str; 3] =
-    ["content-length", "content-type", "date"];
+const ALLOWED_HEADER_NAMES: [&str; 3] = [
+    "content-length",
+    "content-type",
+    "date",
+];
 
 /**
  * Execute an HTTP request against the test server and perform basic validation
@@ -109,11 +113,12 @@ pub async fn make_request<RequestBodyType: Serialize + Debug>(
     method: Method,
     path: &str,
     request_body: Option<RequestBodyType>,
-    expected_status: StatusCode,
-) -> Result<Response<Body>, HttpErrorResponseBody> {
+    expected_status: StatusCode)
+    -> Result<Response<Body>, HttpErrorResponseBody>
+{
     let body: Body = match request_body {
         None => Body::empty(),
-        Some(input) => serde_json::to_string(&input).unwrap().into(),
+        Some(input) => serde_json::to_string(&input).unwrap().into()
     };
 
     make_request_with_body(testctx, method, path, body, expected_status).await
@@ -124,22 +129,20 @@ pub async fn make_request_with_body(
     method: Method,
     path: &str,
     body: Body,
-    expected_status: StatusCode,
-) -> Result<Response<Body>, HttpErrorResponseBody> {
+    expected_status: StatusCode)
+    -> Result<Response<Body>, HttpErrorResponseBody>
+{
     let uri = testctx.url(path);
 
     let time_before = chrono::offset::Utc::now().timestamp();
     eprintln!("client request: {} {}\nbody:\n{:?}", method, uri, &body);
 
-    let mut response = testctx
-        .client
-        .request(
-            Request::builder()
-                .method(method)
-                .uri(testctx.url(path))
-                .body(body)
-                .expect("attempted to construct invalid request"),
-        )
+    let mut response = testctx.client.request(
+        Request::builder()
+            .method(method)
+            .uri(testctx.url(path))
+            .body(body)
+            .expect("attempted to construct invalid request"))
         .await
         .expect("failed to make request to server");
 
@@ -183,16 +186,12 @@ pub async fn make_request_with_body(
      */
     let time_after = chrono::offset::Utc::now().timestamp();
     let date_header = headers
-        .get(http::header::DATE)
-        .expect("missing Date header")
-        .to_str()
-        .expect("non-ASCII characters in Date header");
+        .get(http::header::DATE).expect("missing Date header")
+        .to_str().expect("non-ASCII characters in Date header");
     let time_request = chrono::DateTime::parse_from_rfc2822(date_header)
         .expect("unable to parse server's Date header");
-    assert!(
-        time_before <= time_after,
-        "time obviously went backwards during the test"
-    );
+    assert!(time_before <= time_after,
+        "time obviously went backwards during the test");
     assert!(time_request.timestamp() >= time_before - 1);
     assert!(time_request.timestamp() <= time_after + 1);
 
@@ -201,8 +200,7 @@ pub async fn make_request_with_body(
      * body.
      */
     if status == StatusCode::NO_CONTENT {
-        let body_bytes = to_bytes(response.body_mut())
-            .await
+        let body_bytes = to_bytes(response.body_mut()).await
             .expect("error reading body");
         assert_eq!(0, body_bytes.len());
     }
@@ -224,24 +222,20 @@ pub async fn make_request_with_body(
     Err(error_body)
 }
 
+
 /**
  * Given a Hyper Response whose body is expected to represent newline-separated
  * JSON, each of which is expected to be parseable via Serde as type T,
  * asynchronously read the body of the response and parse it accordingly,
  * returning a vector of T.
  */
-pub async fn read_ndjson<T: DeserializeOwned>(
-    response: &mut Response<Body>,
-) -> Vec<T> {
+pub async fn read_ndjson<T: DeserializeOwned>(response: &mut Response<Body>)
+    -> Vec<T>
+{
     let headers = response.headers();
-    assert_eq!(
-        oxide_api_prototype::httpapi::CONTENT_TYPE_NDJSON,
-        headers
-            .get(http::header::CONTENT_TYPE)
-            .expect("missing content-type")
-    );
-    let body_bytes = to_bytes(response.body_mut())
-        .await
+    assert_eq!(oxide_api_prototype::httpapi::CONTENT_TYPE_NDJSON,
+        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
+    let body_bytes = to_bytes(response.body_mut()).await
         .expect("error reading body");
     let body_string = String::from_utf8(body_bytes.as_ref().into())
         .expect("response contained non-UTF-8 bytes");
@@ -254,10 +248,8 @@ pub async fn read_ndjson<T: DeserializeOwned>(
     body_string
         .split("\n")
         .filter(|line| line.len() > 0)
-        .map(|line| {
-            serde_json::from_str(line)
-                .expect("failed to parse server body as expected type")
-        })
+        .map(|line| serde_json::from_str(line).expect(
+            "failed to parse server body as expected type"))
         .collect::<Vec<T>>()
 }
 
@@ -266,30 +258,26 @@ pub async fn read_ndjson<T: DeserializeOwned>(
  * be parseable via Serde as type T, asynchronously read the body of the
  * response and parse it, returning an instance of T.
  */
-pub async fn read_json<T: DeserializeOwned>(
-    response: &mut Response<Body>,
-) -> T {
+pub async fn read_json<T: DeserializeOwned>(response: &mut Response<Body>)
+    -> T
+{
     let headers = response.headers();
-    assert_eq!(
-        oxide_api_prototype::httpapi::CONTENT_TYPE_JSON,
-        headers
-            .get(http::header::CONTENT_TYPE)
-            .expect("missing content-type")
-    );
-    let body_bytes = to_bytes(response.body_mut())
-        .await
+    assert_eq!(oxide_api_prototype::httpapi::CONTENT_TYPE_JSON,
+        headers.get(http::header::CONTENT_TYPE).expect("missing content-type"));
+    let body_bytes = to_bytes(response.body_mut()).await
         .expect("error reading body");
-    serde_json::from_slice(body_bytes.as_ref())
-        .expect("failed to parse server body as expected type")
+    serde_json::from_slice(body_bytes.as_ref()).expect(
+        "failed to parse server body as expected type")
 }
 
 /**
  * Given a Hyper Response whose body is expected to be a UTF-8-encoded string,
  * asynchronously read the body.
  */
-pub async fn read_string(response: &mut Response<Body>) -> String {
-    let body_bytes = to_bytes(response.body_mut())
-        .await
+pub async fn read_string(response: &mut Response<Body>)
+    -> String
+{
+    let body_bytes = to_bytes(response.body_mut()).await
         .expect("error reading body");
     String::from_utf8(body_bytes.as_ref().into())
         .expect("response contained non-UTF-8 bytes")

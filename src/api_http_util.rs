@@ -15,9 +15,9 @@ use std::sync::Arc;
 use crate::api_error::ApiError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
-use crate::httpapi::HttpError;
 use crate::httpapi::CONTENT_TYPE_JSON;
 use crate::httpapi::CONTENT_TYPE_NDJSON;
+use crate::httpapi::HttpError;
 
 /**
  * Given a `Result` representing an object in the API, serialize the object to
@@ -32,8 +32,9 @@ use crate::httpapi::CONTENT_TYPE_NDJSON;
  * and then use the right one.
  */
 pub fn api_http_serialize_for_stream<T: Serialize>(
-    maybe_object: &Result<T, ApiError>,
-) -> Result<Bytes, ApiError> {
+    maybe_object: &Result<T, ApiError>)
+    -> Result<Bytes, ApiError>
+{
     /*
      * This function is invoked for each item in a stream.  Each item is a
      * Result.  In the simple case of an ok result, we serialize the object via
@@ -71,9 +72,9 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
     let mut object_json_bytes = match maybe_object {
         Ok(object) => match serde_json::to_vec(object) {
             Ok(json_bytes) => json_bytes,
-            Err(_) => vec![],
+            Err(_) => vec![]
         },
-        Err(_) => vec![],
+        Err(_) => vec![]
     };
 
     /*
@@ -95,9 +96,10 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
  * resource.  The status code is 201 "Created" and the body describes the given
  * ApiObject.
  */
-pub fn api_http_create<T>(object: Arc<T>) -> Result<Response<Body>, HttpError>
-where
-    T: ApiObject,
+pub fn api_http_create<T>(object: Arc<T>)
+    -> Result<Response<Body>, HttpError>
+    where
+        T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
     Ok(Response::builder()
@@ -110,7 +112,9 @@ where
  * Return an HTTP response appropriate for having successfully deleted a
  * resource.  This returns an empty 204 "No Content" response.
  */
-pub fn api_http_delete() -> Result<Response<Body>, HttpError> {
+pub fn api_http_delete()
+    -> Result<Response<Body>, HttpError>
+{
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
         .body(Body::empty())?)
@@ -120,9 +124,9 @@ pub fn api_http_delete() -> Result<Response<Body>, HttpError> {
  * Returns an HTTP response appropriate for fetching a single resource.  This
  * returns a 200 "OK" response whose body describes the given ApiObject.
  */
-pub fn api_http_emit_one<T>(object: Arc<T>) -> Result<Response<Body>, HttpError>
-where
-    T: ApiObject,
+pub fn api_http_emit_one<T>(object: Arc<T>)
+    -> Result<Response<Body>, HttpError>
+    where T: ApiObject
 {
     let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
     Ok(Response::builder()
@@ -139,11 +143,9 @@ where
  * TODO It's weird that this is async and the other ones are not.  This is like
  * half-buffered and half-streaming.
  */
-pub async fn api_http_emit_stream<T: 'static>(
-    object_stream: ObjectStream<T>,
-) -> Result<Response<Body>, HttpError>
-where
-    T: ApiObject,
+pub async fn api_http_emit_stream<T: 'static>(object_stream: ObjectStream<T>)
+    -> Result<Response<Body>, HttpError>
+    where T: ApiObject
 {
     let byte_stream = object_stream
         .map(|maybe_object| maybe_object.map(|object| object.to_view()))

@@ -1,0 +1,10 @@
+max_width = 80
+use_small_heuristics = "max"
+unstable_features = true
+
+# Unstable features
+comment_width = 80
+format_strings = true
+overflow_delimited_expr = true
+struct_lit_single_line = false
+wrap_comments = true

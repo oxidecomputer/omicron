@@ -98,11 +98,13 @@ pub struct HttpError {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HttpErrorResponseBody {
-    pub message: String,
+    pub message: String
 }
 
 impl From<SerdeError> for HttpError {
-    fn from(error: SerdeError) -> Self {
+    fn from(error: SerdeError)
+        -> Self
+    {
         /*
          * TODO-polish it would really be much better to annotate this with
          * context about what we were parsing.
@@ -112,43 +114,49 @@ impl From<SerdeError> for HttpError {
 }
 
 impl From<HyperError> for HttpError {
-    fn from(error: HyperError) -> Self {
+    fn from(error: HyperError)
+        -> Self
+    {
         /*
          * TODO-correctness dig deeper into the various cases to make sure this
          * is a valid way to represent it.
          */
         HttpError::for_bad_request(format!(
-            "error processing request: {}",
-            error
-        ))
+            "error processing request: {}", error))
     }
 }
 
 impl From<http::Error> for HttpError {
-    fn from(error: http::Error) -> Self {
+    fn from(error: http::Error)
+        -> Self
+    {
         /*
          * TODO-correctness dig deeper into the various cases to make sure this
          * is a valid way to represent it.
          */
         HttpError::for_bad_request(format!(
-            "error processing request: {}",
-            error
-        ))
+            "error processing request: {}", error))
     }
 }
 
 impl HttpError {
-    pub fn for_bad_request(message: String) -> Self {
+    pub fn for_bad_request(message: String)
+        -> Self
+    {
         HttpError::for_client_error(http::StatusCode::BAD_REQUEST, message)
     }
 
-    pub fn for_status(code: http::StatusCode) -> Self {
+    pub fn for_status(code: http::StatusCode)
+        -> Self
+    {
         /* TODO-polish This should probably be our own message. */
         let message = code.canonical_reason().unwrap().to_string();
         HttpError::for_client_error(code, message)
     }
 
-    pub fn for_client_error(code: http::StatusCode, message: String) -> Self {
+    pub fn for_client_error(code: http::StatusCode, message: String)
+        -> Self
+    {
         assert!(code.is_client_error());
         HttpError {
             status_code: code,
@@ -157,7 +165,10 @@ impl HttpError {
         }
     }
 
-    pub fn for_internal_error(message_internal: String) -> Self {
+    pub fn for_internal_error(
+        message_internal: String
+    ) -> Self
+    {
         let code = http::StatusCode::INTERNAL_SERVER_ERROR;
         HttpError {
             status_code: code,
@@ -166,7 +177,9 @@ impl HttpError {
         }
     }
 
-    pub fn into_response(self) -> hyper::Response<hyper::Body> {
+    pub fn into_response(self)
+        -> hyper::Response<hyper::Body>
+    {
         /*
          * TODO-hardening: consider handling the operational errors that the
          * Serde serialization fails or the response construction fails.  In
@@ -181,15 +194,9 @@ impl HttpError {
             .status(self.status_code)
             .header(
                 http::header::CONTENT_TYPE,
-                super::http_util::CONTENT_TYPE_JSON,
-            )
-            .body(
-                serde_json::to_string_pretty(&HttpErrorResponseBody {
-                    message: self.external_message,
-                })
-                .unwrap()
-                .into(),
-            )
-            .unwrap()
+                super::http_util::CONTENT_TYPE_JSON)
+            .body(serde_json::to_string_pretty(&HttpErrorResponseBody {
+                message: self.external_message
+            }).unwrap().into()).unwrap()
     }
 }

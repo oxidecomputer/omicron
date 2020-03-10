@@ -127,7 +127,7 @@ pub struct RequestContext {
     /** HTTP request details */
     pub request: Arc<Mutex<Request<Body>>>,
     /** HTTP request routing variables */
-    pub path_variables: BTreeMap<String, String>,
+    pub path_variables: BTreeMap<String, String>
 }
 
 /**
@@ -145,13 +145,13 @@ pub struct RequestContext {
  * `HttpRouteHandler` for more on why this needed.
  */
 #[async_trait]
-pub trait Derived: Send + Sync + Sized {
+pub trait Derived: Send + Sync + Sized
+{
     /**
      * Construct an instance of this type from a `RequestContext`.
      */
-    async fn from_request(
-        rqctx: Arc<RequestContext>,
-    ) -> Result<Self, HttpError>;
+    async fn from_request(rqctx: Arc<RequestContext>)
+        -> Result<Self, HttpError>;
 }
 
 /**
@@ -192,12 +192,10 @@ impl_derived_for_tuple!(T1, T2);
  * treat different handlers interchangeably.  See `RouteHandler` below.
  */
 #[async_trait]
-pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static {
-    async fn handle_request(
-        &self,
-        rqctx: Arc<RequestContext>,
-        p: FuncParams,
-    ) -> HttpHandlerResult;
+pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static
+{
+    async fn handle_request(&self, rqctx: Arc<RequestContext>, p: FuncParams)
+        -> HttpHandlerResult;
 }
 
 /*
@@ -250,7 +248,8 @@ pub trait RouteHandler: Debug + Send + Sync {
     /**
      * Handle an incoming HTTP request.
      */
-    async fn handle_request(&self, rqctx: RequestContext) -> HttpHandlerResult;
+    async fn handle_request(&self, rqctx: RequestContext)
+        -> HttpHandlerResult;
 }
 
 /**
@@ -282,35 +281,38 @@ where
      * here causes the compiler to behave as though this struct referred to a
      * `FuncParams`, which allows us to use the type parameter below.
      */
-    phantom: PhantomData<FuncParams>,
+    phantom: PhantomData<FuncParams>
 }
 
-impl<HandlerType, FuncParams> Debug
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams> Debug for
+    HttpRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived,
 {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter<'_>)
+        -> FmtResult
+    {
         write!(f, "handler: {}", self.label)
     }
 }
 
 #[async_trait]
-impl<HandlerType, FuncParams> RouteHandler
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams> RouteHandler for
+    HttpRouteHandler<HandlerType, FuncParams>
 where
     HandlerType: HttpHandlerFunc<FuncParams>,
     FuncParams: Derived + 'static,
 {
-    fn label(&self) -> &String {
+    fn label(&self)
+        -> &String
+    {
         &self.label
     }
 
-    async fn handle_request(
-        &self,
-        rqctx_raw: RequestContext,
-    ) -> HttpHandlerResult {
+    async fn handle_request(&self, rqctx_raw: RequestContext)
+        -> HttpHandlerResult
+    {
         /*
          * This is where the magic happens: in the code below, `funcparams` has
          * type `FuncParams`, which is a tuple type describing the extractor
@@ -349,7 +351,9 @@ where
      * signatures, return a RouteHandler that can be used to respond to HTTP
      * requests using this function.
      */
-    pub fn new(handler: HandlerType) -> Box<dyn RouteHandler> {
+    pub fn new(handler: HandlerType)
+        -> Box<dyn RouteHandler>
+    {
         HttpRouteHandler::new_with_name(handler, "<unlabeled handler>")
     }
 
@@ -358,17 +362,17 @@ where
      * signatures, return a RouteHandler that can be used to respond to HTTP
      * requests using this function.
      */
-    pub fn new_with_name(
-        handler: HandlerType,
-        label: &str,
-    ) -> Box<dyn RouteHandler> {
+    pub fn new_with_name(handler: HandlerType, label: &str)
+        -> Box<dyn RouteHandler>
+    {
         Box::new(HttpRouteHandler {
             label: label.to_string(),
             handler: handler,
-            phantom: PhantomData,
+            phantom: PhantomData
         })
     }
 }
+
 
 /*
  * Extractors
@@ -385,7 +389,7 @@ where
  * documentation for more information.
  */
 pub struct Query<QueryType: Send + Sync> {
-    inner: QueryType,
+    inner: QueryType
 }
 
 impl<QueryType: Send + Sync> Query<QueryType> {
@@ -401,11 +405,10 @@ impl<QueryType: Send + Sync> Query<QueryType> {
  * Given an HTTP request, pull out the query string and attempt to deserialize
  * it as an instance of `QueryType`.
  */
-fn http_request_load_query<QueryType: Send + Sync>(
-    request: &Request<Body>,
-) -> Result<Query<QueryType>, HttpError>
+fn http_request_load_query<QueryType: Send + Sync>(request: &Request<Body>)
+    -> Result<Query<QueryType>, HttpError>
 where
-    QueryType: DeserializeOwned,
+    QueryType: DeserializeOwned
 {
     let raw_query_string = request.uri().query().unwrap_or("");
     /*
@@ -413,10 +416,8 @@ where
      */
     match serde_urlencoded::from_str(raw_query_string) {
         Ok(q) => Ok(Query { inner: q }),
-        Err(e) => Err(HttpError::for_bad_request(format!(
-            "unable to parse query string: {}",
-            e
-        ))),
+        Err(e) => Err(HttpError::for_bad_request(
+            format!("unable to parse query string: {}", e)))
     }
 }
 
@@ -431,11 +432,11 @@ where
 #[async_trait]
 impl<QueryType> Derived for Query<QueryType>
 where
-    QueryType: DeserializeOwned + Send + Sync + 'static,
+    QueryType: DeserializeOwned + Send + Sync + 'static
 {
-    async fn from_request(
-        rqctx: Arc<RequestContext>,
-    ) -> Result<Query<QueryType>, HttpError> {
+    async fn from_request(rqctx: Arc<RequestContext>)
+        -> Result<Query<QueryType>, HttpError>
+    {
         let request = rqctx.request.lock().await;
         http_request_load_query(&request)
     }
@@ -452,7 +453,7 @@ where
  * more information.
  */
 pub struct Json<JsonType: Send + Sync> {
-    inner: JsonType,
+    inner: JsonType
 }
 
 impl<JsonType: Send + Sync> Json<JsonType> {
@@ -468,27 +469,21 @@ impl<JsonType: Send + Sync> Json<JsonType> {
  * Given an HTTP request, attempt to read the body, parse it as JSON, and
  * deserialize an instance of `JsonType` from it.
  */
-async fn http_request_load_json_body<JsonType>(
-    rqctx: Arc<RequestContext>,
-) -> Result<Json<JsonType>, HttpError>
+async fn http_request_load_json_body<JsonType>(rqctx: Arc<RequestContext>)
+    -> Result<Json<JsonType>, HttpError>
 where
-    JsonType: DeserializeOwned + Send + Sync,
+    JsonType: DeserializeOwned + Send + Sync
 {
     let server = &rqctx.server;
     let mut request = rqctx.request.lock().await;
     let body_bytes = http_read_body(
-        request.body_mut(),
-        server.config.request_body_max_bytes,
-    )
-    .await?;
+        request.body_mut(), server.config.request_body_max_bytes).await?;
     let value: Result<JsonType, serde_json::Error> =
         serde_json::from_slice(&body_bytes);
     match value {
         Ok(j) => Ok(Json { inner: j }),
-        Err(e) => Err(HttpError::for_bad_request(format!(
-            "unable to parse body JSON: {}",
-            e
-        ))),
+        Err(e) => Err(HttpError::for_bad_request(
+            format!("unable to parse body JSON: {}", e)))
     }
 }
 
@@ -505,9 +500,9 @@ impl<JsonType> Derived for Json<JsonType>
 where
     JsonType: DeserializeOwned + Send + Sync + 'static,
 {
-    async fn from_request(
-        rqctx: Arc<RequestContext>,
-    ) -> Result<Json<JsonType>, HttpError> {
+    async fn from_request(rqctx: Arc<RequestContext>)
+        -> Result<Json<JsonType>, HttpError>
+    {
         http_request_load_json_body(rqctx).await
     }
 }
