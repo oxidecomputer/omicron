@@ -198,93 +198,36 @@ pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static
         -> HttpHandlerResult;
 }
 
-/**
- * Implementation of `HttpHandlerFunc` for functions that consume no extractor
- * arguments (just the `RequestContext`).
- * TODO the implementations below could benefit from a macro.
+/*
+ * Note: the second element in the tuple below (the type parameter, `$T:tt`)
+ * ought to be an "ident".  However, that causes us to run straight into
+ * issue dtolnay/async-trait#46.
  */
-#[async_trait]
-impl<FuncType, FutureType> HttpHandlerFunc<()> for FuncType
-where
-    FuncType: Fn(Arc<RequestContext>) -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
-{
-    async fn handle_request(&self, rqctx: Arc<RequestContext>, _p: ())
-        -> HttpHandlerResult
-    {
-        (self)(rqctx).await
-    }
-}
+macro_rules! impl_HttpHandlerFunc_for_func_with_params
+    ( { $(($i:tt, $T:tt)),* } => {
 
-/**
- * Implementation of `HttpHandlerFunc` for functions that consume a single
- * `Query` extractor argument in addition to the regular `RequestContext`
- * argument.
- */
-#[async_trait]
-impl<FuncType, FutureType, Q> HttpHandlerFunc<(Query<Q>,)> for FuncType
-where
-    FuncType: Fn(Arc<RequestContext>, Query<Q>)
-        -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
-    Q: DeserializeOwned + Send + Sync + 'static,
-{
-    async fn handle_request(&self,
-        rqctx: Arc<RequestContext>,
-        (query,): (Query<Q>,))
-        -> HttpHandlerResult
+    #[async_trait]
+    impl<FuncType, FutureType, $($T,)*> HttpHandlerFunc<($($T,)*)> for FuncType
+    where
+        FuncType: Fn(Arc<RequestContext>, $($T,)*)
+            -> FutureType + Send + Sync + 'static,
+        FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
+        $($T: Derived + Send + Sync + 'static,)*
     {
-        (self)(rqctx, query).await
+        async fn handle_request(
+            &self,
+            rqctx: Arc<RequestContext>,
+            _param_tuple: ($($T,)*)
+        ) -> HttpHandlerResult
+        {
+            (self)(rqctx, $(_param_tuple.$i,)*).await
+        }
     }
-}
+});
 
-/**
- * Implementation of `HttpHandlerFunc` for functions that consume a single
- * `Json` extractor argument in addition to the regular `RequestContext`
- * argument.
- */
-#[async_trait]
-impl<FuncType, FutureType, J> HttpHandlerFunc<(Json<J>,)> for FuncType
-where
-    FuncType: Fn(Arc<RequestContext>, Json<J>)
-        -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
-    J: DeserializeOwned + Send + Sync + 'static,
-{
-    async fn handle_request(&self,
-        rqctx: Arc<RequestContext>,
-        (json,): (Json<J>,))
-        -> HttpHandlerResult
-    {
-        (self)(rqctx, json).await
-    }
-}
-
-/**
- * Implementation of `HttpHandlerFunc` for functions that consume both a `Query`
- * and a `Json` extractor argument in addition to the regular `RequestContext`
- * argument.  Note that the order of these arguments matters.  Reversing them is
- * not supported.
- */
-#[async_trait]
-impl<FuncType, FutureType, Q, J> HttpHandlerFunc<(Query<Q>, Json<J>)>
-for FuncType
-where
-    FuncType: Fn(Arc<RequestContext>, Query<Q>, Json<J>)
-        -> FutureType + Send + Sync + 'static,
-    FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
-    Q: DeserializeOwned + Send + Sync + 'static,
-    J: DeserializeOwned + Send + Sync + 'static,
-{
-    async fn handle_request(&self,
-        rqctx: Arc<RequestContext>,
-        (query, json): (Query<Q>, Json<J>))
-        -> HttpHandlerResult
-    {
-        (self)(rqctx, query, json).await
-    }
-}
-
+impl_HttpHandlerFunc_for_func_with_params!();
+impl_HttpHandlerFunc_for_func_with_params!((0, T0));
+impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2));
 
 /**
  * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams>` in a way that
