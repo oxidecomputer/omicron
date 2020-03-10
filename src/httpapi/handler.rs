@@ -154,46 +154,25 @@ pub trait Derived: Send + Sync + Sized
         -> Result<Self, HttpError>;
 }
 
-/*
- * TODO-cleanup The next three implementations could benefit from a macro.
+/**
+ * `impl_derived_for_tuple!` defines implementations of `Derived` for tuples
+ * whose elements themselves implement `Derived`.
  */
-
-#[async_trait]
-impl Derived for ()
-{
-    async fn from_request(_: Arc<RequestContext>)
-        -> Result<(), HttpError>
+macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
+    #[async_trait]
+    impl< $($T: Derived + 'static,)* > Derived for ($($T,)*)
     {
-        Ok(())
+        async fn from_request(_rqctx: Arc<RequestContext>)
+            -> Result<( $($T,)* ), HttpError>
+        {
+            Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
+        }
     }
-}
+});
 
-#[async_trait]
-impl<T> Derived for (T,)
-where
-    T: Derived + 'static, /* TODO-cleanup static should not be necessary*/
-{
-    async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<(T,), HttpError>
-    {
-        Ok((T::from_request(rqctx).await?,))
-    }
-}
-
-#[async_trait]
-impl<T1, T2> Derived for (T1, T2)
-where
-    T1: Derived + 'static, /* TODO-cleanup static should not be necessary */
-    T2: Derived + 'static, /* TODO-cleanup static should not be necessary */
-{
-    async fn from_request(rqctx: Arc<RequestContext>)
-        -> Result<(T1,T2), HttpError>
-    {
-        let p1 = T1::from_request(Arc::clone(&rqctx)).await?;
-        let p2 = T2::from_request(Arc::clone(&rqctx)).await?;
-        Ok((p1, p2))
-    }
-}
+impl_derived_for_tuple!();
+impl_derived_for_tuple!(T1);
+impl_derived_for_tuple!(T1, T2);
 
 /**
  * `HttpHandlerFunc` is a trait providing a single function, `handle_request()`,
