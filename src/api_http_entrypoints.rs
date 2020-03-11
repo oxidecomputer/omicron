@@ -130,6 +130,19 @@ struct ProjectPathParam {
 /*
  * "GET /project/{project_id}": fetch a specific project
  */
+/*
+#[endpoint {
+    hi there,
+    method = GET,
+    path = "/projects/{project_id}",
+    parameters = [
+        {
+            name = project_id,
+            in = path,
+        }
+    ]
+}]
+*/
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
 ) -> Result<Response<Body>, HttpError> {
