@@ -36,66 +36,94 @@ use common::test_teardown;
  * server to bind to an arbitrary port.
  */
 #[tokio::test]
-async fn smoke_test()
-{
+async fn smoke_test() {
     let testctx = test_setup();
 
     /*
      * Error case: GET /nonexistent (a path with no route at all)
      */
-    let error = make_request(&testctx, Method::GET, "/nonexistent",
-        None as Option<()>, StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected error");
+    let error = make_request(
+        &testctx,
+        Method::GET,
+        "/nonexistent",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected error");
     assert_eq!("Not Found", error.message);
 
     /*
      * Error case: GET /projects/nonexistent (a possible value that does not
      * exist inside a collection that does exist)
      */
-    let error = make_request(&testctx, Method::GET, "/projects/nonexistent",
-        None as Option<()>, StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected error");
+    let error = make_request(
+        &testctx,
+        Method::GET,
+        "/projects/nonexistent",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected error");
     assert_eq!("not found: project \"nonexistent\"", error.message);
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
      * exist beneath a resource that does exist)
      */
-    let error = make_request(&testctx, Method::GET,
-        "/projects/simproject1/nonexistent", None as Option<()>,
-        StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected error");
+    let error = make_request(
+        &testctx,
+        Method::GET,
+        "/projects/simproject1/nonexistent",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected error");
     assert_eq!("Not Found", error.message);
 
     /*
      * Error case: PUT /projects
      */
-    let error = make_request(&testctx, Method::PUT, "/projects",
-        None as Option<()>, StatusCode::METHOD_NOT_ALLOWED)
-        .await
-        .expect_err("expected error");
+    let error = make_request(
+        &testctx,
+        Method::PUT,
+        "/projects",
+        None as Option<()>,
+        StatusCode::METHOD_NOT_ALLOWED,
+    )
+    .await
+    .expect_err("expected error");
     assert_eq!("Method Not Allowed", error.message);
 
     /*
      * Error case: DELETE /projects
      */
-    let error = make_request(&testctx, Method::DELETE, "/projects",
-        None as Option<()>, StatusCode::METHOD_NOT_ALLOWED)
-        .await
-        .expect_err("expected error");
+    let error = make_request(
+        &testctx,
+        Method::DELETE,
+        "/projects",
+        None as Option<()>,
+        StatusCode::METHOD_NOT_ALLOWED,
+    )
+    .await
+    .expect_err("expected error");
     assert_eq!("Method Not Allowed", error.message);
 
     /*
      * Basic test of out-of-the-box GET /projects
      * TODO-coverage: pagination
      */
-    let mut response = make_request(&testctx, Method::GET, "/projects",
-        None as Option<()>, StatusCode::OK)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::GET,
+        "/projects",
+        None as Option<()>,
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
     assert_eq!(initial_projects.len(), 3);
@@ -112,10 +140,15 @@ async fn smoke_test()
     /*
      * Basic test of out-of-the-box GET /projects/simproject2
      */
-    let mut response = make_request(&testctx, Method::GET,
-        "/projects/simproject2", None as Option<()>, StatusCode::OK)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::GET,
+        "/projects/simproject2",
+        None as Option<()>,
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     let expected = &initial_projects[1];
     assert_eq!(project.id, "simproject2");
@@ -128,42 +161,65 @@ async fn smoke_test()
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    make_request(&testctx, Method::DELETE, "/projects/simproject2",
-        None as Option<()>, StatusCode::NO_CONTENT)
-        .await
-        .expect("expected success");
+    make_request(
+        &testctx,
+        Method::DELETE,
+        "/projects/simproject2",
+        None as Option<()>,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+    .expect("expected success");
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/projects/simproject2".
      */
-    make_request(&testctx, Method::GET, "/projects/simproject2",
-        None as Option<()>, StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected failure");
-    make_request(&testctx, Method::DELETE, "/projects/simproject2",
-        None as Option<()>, StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected failure");
-    make_request(&testctx, Method::PUT, "/projects/simproject2",
+    make_request(
+        &testctx,
+        Method::GET,
+        "/projects/simproject2",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected failure");
+    make_request(
+        &testctx,
+        Method::DELETE,
+        "/projects/simproject2",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected failure");
+    make_request(
+        &testctx,
+        Method::PUT,
+        "/projects/simproject2",
         Some(ApiProjectUpdateParams {
             name: None,
             description: None,
-        }), StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected failure");
+        }),
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected failure");
 
     /*
      * Similarly, verify "GET /projects"
      */
-    let mut response = make_request(&testctx, Method::GET, "/projects",
-        None as Option<()>, StatusCode::OK)
-        .await
-        .expect("expected success");
-    let expected_projects: Vec<&ApiProjectView> = initial_projects
-        .iter()
-        .filter(|p| p.name != "simproject2")
-        .collect();
+    let mut response = make_request(
+        &testctx,
+        Method::GET,
+        "/projects",
+        None as Option<()>,
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
+    let expected_projects: Vec<&ApiProjectView> =
+        initial_projects.iter().filter(|p| p.name != "simproject2").collect();
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
     assert_eq!(new_projects[0].id, expected_projects[0].id);
@@ -179,22 +235,31 @@ async fn smoke_test()
      */
     let project_update = ApiProjectUpdateParams {
         name: None,
-        description: Some("Li'l lightnin'".to_string())
+        description: Some("Li'l lightnin'".to_string()),
     };
-    let mut response = make_request(&testctx, Method::PUT,
-        "/projects/simproject3", Some(project_update), StatusCode::OK)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::PUT,
+        "/projects/simproject3",
+        Some(project_update),
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "simproject3");
     assert_eq!(project.name, "simproject3");
     assert_eq!(project.description, "Li'l lightnin'");
 
-    let mut response = make_request(&testctx, Method::GET,
-        "/projects/simproject3", None as Option<()>,
-        StatusCode::OK)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::GET,
+        "/projects/simproject3",
+        None as Option<()>,
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
     let expected = project;
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, expected.id);
@@ -211,31 +276,46 @@ async fn smoke_test()
         name: Some("lil_lightnin".to_string()),
         description: Some("little lightning".to_string()),
     };
-    let mut response = make_request(&testctx, Method::PUT,
-        "/projects/simproject3", Some(project_update), StatusCode::OK)
-        .await
-        .expect("failed to make request to server");
+    let mut response = make_request(
+        &testctx,
+        Method::PUT,
+        "/projects/simproject3",
+        Some(project_update),
+        StatusCode::OK,
+    )
+    .await
+    .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "simproject3");
     assert_eq!(project.name, "lil_lightnin");
     assert_eq!(project.description, "little lightning");
 
-    make_request(&testctx, Method::GET,
-        "/projects/simproject3", None as Option<()>, StatusCode::NOT_FOUND)
-        .await
-        .expect_err("expected failure");
+    make_request(
+        &testctx,
+        Method::GET,
+        "/projects/simproject3",
+        None as Option<()>,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+    .expect_err("expected failure");
 
     /*
      * Try to create a project with a name that conflicts with an existing one.
      */
     let project_create = ApiProjectCreateParams {
         name: "simproject1".to_string(),
-        description: "a duplicate of simproject1".to_string()
+        description: "a duplicate of simproject1".to_string(),
     };
-    let error = make_request(&testctx, Method::POST, "/projects",
-        Some(project_create), StatusCode::BAD_REQUEST)
-        .await
-        .expect_err("expected failure");
+    let error = make_request(
+        &testctx,
+        Method::POST,
+        "/projects",
+        Some(project_create),
+        StatusCode::BAD_REQUEST,
+    )
+    .await
+    .expect_err("expected failure");
     assert_eq!("already exists: project \"simproject1\"", error.message);
 
     /*
@@ -245,10 +325,15 @@ async fn smoke_test()
         name: "honor roller".to_string(),
         description: "a soapbox racer".to_string(),
     };
-    let mut response = make_request(&testctx, Method::POST, "/projects",
-        Some(project_create), StatusCode::CREATED)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::POST,
+        "/projects",
+        Some(project_create),
+        StatusCode::CREATED,
+    )
+    .await
+    .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.id, "honor roller");
     assert_eq!(project.name, "honor roller");
@@ -261,10 +346,15 @@ async fn smoke_test()
      * - "lil_lightnin" with description "little lightning"
      * - "simproject1", same as out-of-the-box
      */
-    let mut response = make_request(&testctx, Method::GET, "/projects",
-        None as Option<()>, StatusCode::OK)
-        .await
-        .expect("expected success");
+    let mut response = make_request(
+        &testctx,
+        Method::GET,
+        "/projects",
+        None as Option<()>,
+        StatusCode::OK,
+    )
+    .await
+    .expect("expected success");
     let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(projects.len(), 3);
     assert_eq!(projects[0].id, "honor roller");
