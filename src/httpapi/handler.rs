@@ -551,8 +551,42 @@ where
 
 /*
  * Response handler types
- * TODO document me
+ *
+ * As described in the module-level documentation above, we would like to
+ * support HTTP endpoint functions that return a variety of different return
+ * types that are ultimately converted into `Result<Response<Body>, HttpError>`.
+ * The more specific a type returned by the handler function, the more can be
+ * validated at build-time, and the more specific an OpenAPI schema can be
+ * generated from the source alone.  For example, a POST to an endpoint
+ * "/projects" might return `Result<HttpResponseCreated<Project>, HttpError>`.
+ * As you might expect, on success, this turns into an HTTP 201 "Created"
+ * response whose body is constructed by serializing the `Project`.
+ * In this example, OpenAPI tooling can identify at build time that this
+ * function produces a 201 "Created" response on success with a body whose
+ * schema matches `Project` (which we already said implements `Serialize`), and
+ * there would be no way to violate this contract at runtime.  If the function
+ * just returned `Response<Body>`, it would be harder to tell what it actually
+ * produces (for generating the OpenAPI spec), and no way to validate that it
+ * really does that.
+ *
+ * To support handler functions that return a variety of different types, the
+ * trait bounds related to these functions say that the function must
+ * (asynchronously) produce a `Result<ResponseType, HttpError>` where
+ * `ResponseType` is a type that implements `Into<HttpResponseWrap> + Send +
+ * Sync + 'static`.  See the macro `impl_HttpHandlerFunc_for_func_with_params`
+ * for details.
+ *
+ * Now, why `Into<HttpResponseWrap>` instead of just `Into<Response<Body>>`?
+ * One reason is that we want to allow the conversion from specific types into
+ * `Response<Body>` to be able to fail, producing an HttpError.  That's not
+ * possible if the conversion must produce a `Response<Body>`.  Another reason
+ * is that we'd like to allow handler functions to return other types that may
+ * not already have conversions to `Response<Body>`, but that we could ourselves
+ * convert to `Response<Body>`.  If those types are in other crates, we can't
+ * implement such a translation.  However, we can implement translations to
+ * HttpResponseWrap.
  */
+
 pub struct HttpResponseWrap {
     wrapped: Result<Response<Body>, HttpError>,
 }
