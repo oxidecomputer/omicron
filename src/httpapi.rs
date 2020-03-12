@@ -18,7 +18,6 @@ pub use handler::Json;
 pub use handler::Query;
 pub use handler::RequestContext;
 pub use handler::RouteHandler;
-pub use handler::HttpResponseWrap;
 pub use handler::HttpResponse;
 pub use handler::HttpResponseCreated;
 pub use http_util::http_extract_path_params;
