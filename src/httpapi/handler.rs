@@ -244,7 +244,7 @@ where
  *    this point because we require that one of the arguments be a tuple whose
  *    types correspond to the argument types for the function, so we just need
  *    to unpack them from the tuple into function arguments.
- * 
+ *
  * 2. Converts a call to the `handle_request()` method into a call to the
  *    underlying function.
  *
@@ -254,6 +254,77 @@ where
  *    `Into<HttpResponseWrap>` and we have a converter from that into the final
  *    return type.
  *
+ * As mentioned above, we're implementing the trait `HttpHandlerFunc` on _any_
+ * type `FuncType` that matches the trait bounds below.  In particular, it must
+ * take a request context argument and whatever other type parameters have been
+ * passed to this macro.
+ *
+ * The function's return type deserves further explanation.  (Actually, these
+ * functions all return a `Future`, but for convenience when we say "return
+ * type" in the comments here we're referring to the output type of the returned
+ * future.)  Again, as described above, we'd like to allow HTTP endpoint
+ * functions to return a variety of different return types that are ultimately
+ * converted into `Result<Response<Body>, HttpError>`.  To do that, the trait
+ * bounds below say that the function must produce a `Result<ResponseType,
+ * HttpError>` where `ResponseType` is a type that implements
+ * `Into<HttpResponseWrap>`.  In turn, `Into<Result<Response<Body>, HttpError>`
+ * is implemented for `HttpResponseWrap`.  This probably all sounds more
+ * complicated than it needs to be.  It looks like this:
+ *
+ *      1. Handler function
+ *            |
+ *            | returns:
+ *            v
+ *      2. Result<ResponseType, HttpError>
+ *            |
+ *            | On success, this will be Ok(ResponseType) for some specific
+ *            | ResponseType that provides Into<HttpResponseWrap>.  It
+ *            | likely provides this by providing
+ *            | Into<Result<Response<Body>, HttpError>.  We'll end up
+ *            | invoking:
+ *            v
+ *      3. ResponseType::into<Result<Response<Body>, HttpError>>()
+ *            |
+ *            | This is a type-specific conversion from `ResponseType` into
+ *            | `Response<Body>` that's allowed to fail with an `HttpError`.
+ *            v
+ *      4. Result<Response<Body>, HttpError>
+ *            |
+ *            | Now, for reasons explained below, we'll wind up invoking:
+ *            v
+ *      5. HttpResponseWrap::from<Result<Response<Body>, HttpError>>
+ *            |
+ *            | As the name implies, `HttpResponseWrap` just wraps the object
+ *            | it's given, producing:
+ *            v
+ *      6. HttpResponseWrap
+ *            |
+ *            | Finally, we perform a conversion:
+ *            v
+ *      7. HttpResponseWrap::into<Result<Response<Body>, HttpError>>
+ *            |
+ *            | giving us what we really wanted:
+ *            v
+ *      8. Result<Response<Body>, HttpError>
+ *
+ * A fair observation might be: we already had what we wanted at step 4.  Why
+ * have `HttpResponseWrap` and the extra conversions at all?  To skip that, we
+ * might like to have the handler function's return type be something like
+ * `Result<ResponseType, HttpError>` with `ResponseType: Into<Response<Body>>`.
+ * The problem with this: the conversion from `ResponseType` to `Response<Body>`
+ * is allowed to fail (with an `HttpError`, primarily because
+ * `serde_json::to_string()` is allowed to fail).  Okay, so let's make it return
+ * `Result<ResponseType, HttpError>` with `ResponseType:
+ * Into<Result<Response<Body>>, HttpError>`.  Note that we'd have an extra level
+ * of `Result` here, but that's okay.  Now comes the real problem: that means
+ * we'd have to define conversions from `Result<ResponseType, HttpError>` to
+ * `Result<Response<Body>, HttpError>` -- and that actually matches what we
+ * really want to do from first principles -- but we're not allowed to do that
+ * because both the source and target types (`Result`) are foreign to this
+ * crate.  So instead, we define conversions to our intermediate type
+ * `HttpResponseWrap` and trust that the compiler optimizes most of these steps
+ * away anyway.
+ *
  * Note: the second element in the tuple below (the type parameter, `$T:tt`)
  * ought to be an "ident".  However, that causes us to run afoul of issue
  * dtolnay/async-trait#46.
@@ -261,82 +332,6 @@ where
 macro_rules! impl_HttpHandlerFunc_for_func_with_params
     ( { $(($i:tt, $T:tt)),* } => {
 
-    /*
-     * As mentioned above, we're implementing the trait `HttpHandlerFunc` on
-     * _any_ type `FuncType` that matches the trait bounds below.  In
-     * particular, it must take a request context argument and whatever other
-     * type parameters have been passed to this macro.
-     *
-     * The function's return type deserves further explanation.  (Actually,
-     * these functions all return a `Future`, but for convenience when we say
-     * "return type" in the comments here we're referring to the output type of
-     * the returned future.)  Again, as described above, we'd like to allow
-     * HTTP endpoint functions to return a variety of different return types
-     * that are ultimately converted into `Result<Response<Body>, HttpError>`.
-     * To do that, the trait bounds below say that the function must
-     * produce a `Result<ResponseType, HttpError>` where `ResponseType` is a
-     * type that implements `Into<HttpResponseWrap>`.  In turn,
-     * `Into<Result<Response<Body>, HttpError>` is implemented for
-     * `HttpResponseWrap`.  This probably all sounds more complicated than it
-     * needs to be.  It looks like this:
-     *
-     *      1. Handler function
-     *            |
-     *            | returns:
-     *            v
-     *      2. Result<ResponseType, HttpError>
-     *            |
-     *            | On success, this will be Ok(ResponseType) for some specific
-     *            | ResponseType that provides Into<HttpResponseWrap>.  It
-     *            | likely provides this by providing
-     *            | Into<Result<Response<Body>, HttpError>.  We'll end up
-     *            | invoking:
-     *            v
-     *      3. ResponseType::into<Result<Response<Body>, HttpError>>()
-     *            |
-     *            | This is a type-specific conversion from `ResponseType` into 
-     *            | `Response<Body>` that's allowed to fail with an `HttpError`.
-     *            v
-     *      4. Result<Response<Body>, HttpError>
-     *            |
-     *            | Now, for reasons explained below, we'll wind up invoking:
-     *            v
-     *      5. HttpResponseWrap::from<Result<Response<Body>, HttpError>>
-     *            |
-     *            | As the name implies, `HttpResponseWrap` just wraps the object
-     *            | it's given, producing:
-     *            v
-     *      6. HttpResponseWrap
-     *            |
-     *            | Finally, we perform a conversion:
-     *            v
-     *      7. HttpResponseWrap::into<Result<Response<Body>, HttpError>>
-     *            |
-     *            | giving us what we really wanted:
-     *            v
-     *      8. Result<Response<Body>, HttpError>
-     *
-     * A fair question might be: we already had what we wanted at step 4.  Why
-     * have `HttpResponseWrap` and the extra conversions at all?  To skip that,
-     * we'd like to have the function's return type trait bound be
-     * `Into<Result<Response<Body>, HttpError>>` instead of
-     * `Into<HttpResponseWrap>`.
-     *
-     * To do that,
-     * the function's return type would have to use the trait bound
-     * `Into<Response<Body>>` instead of `Into<HttpResponseWrap>`.  For one, we
-     * want to allow the conversion from specific types into `Response<Body>` to
-     * be able to fail, producing an HttpError.  That's not possible if the
-     * conversion must produce a `Response<Body>`.  Now, we could instead define
-     * conversions from `Result<T, HttpError>` to `Result<Response<Body>,
-     * HttpError>` for various `T`, but we're not allowed to define those
-     * conversions because it's between two `Result` types that are not in this
-     * crate.  We have to use this intermediate type `HttpResponseWrap` and
-     * perform conversions through it.  Even then, we still can't define a
-     * conversion between `Result<HttpResponseWrap, HttpError>` and
-     * `Result<Response<Body>, HttpError>` for the same reason.  Instead, we
-     * have two levels of `Result` indirection.
-     */
     #[async_trait]
     impl<FuncType, FutureType, ResponseType, $($T,)*>
         HttpHandlerFunc<($($T,)*), ResponseType> for FuncType
