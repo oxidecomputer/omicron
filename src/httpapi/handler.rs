@@ -591,7 +591,7 @@ pub trait HttpResponse: Into<Result<Response<Body>, HttpError>> {}
  * field having type T::View).
  */
 pub struct HttpResponseCreated<T: Serialize>(pub T);
-
+impl<T: Serialize> HttpResponse for HttpResponseCreated<T> {}
 impl<T: Serialize> From<HttpResponseCreated<T>>
 for Result<Response<Body>, HttpError>
 {
@@ -603,12 +603,5 @@ for Result<Response<Body>, HttpError>
             .status(StatusCode::CREATED)
             .header(http::header::CONTENT_TYPE, "application/json") // XXX
             .body(serialized.into())?)
-    }
-}
-
-/* XXX make generic with macro? */
-impl<T: Serialize> From<HttpResponseCreated<T>> for HttpResponseWrap {
-    fn from(response: HttpResponseCreated<T>) -> HttpResponseWrap {
-        HttpResponseWrap::new(response.into())
     }
 }
