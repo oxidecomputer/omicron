@@ -10,12 +10,12 @@ use hyper::Response;
 use serde::Deserialize;
 
 use crate::api_backend;
-use crate::api_http_util::ApiResponseType;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
 use crate::api_http_util::api_http_emit_stream;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
+use crate::api_model::ApiProjectView;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::httpapi::http_extract_path_params;
@@ -25,6 +25,7 @@ use crate::httpapi::HttpRouter;
 use crate::httpapi::Json;
 use crate::httpapi::Query;
 use crate::httpapi::RequestContext;
+use crate::httpapi::HttpResponseCreated;
 
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;
@@ -117,10 +118,10 @@ async fn api_projects_get(
 async fn api_projects_post(
     rqctx: Arc<RequestContext>,
     new_project: Json<ApiProjectCreateParams>,
-) -> Result<ApiResponseType<ApiProject>, HttpError> {
+) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let project = backend.project_create(&new_project.into_inner()).await?;
-    Ok(ApiResponseType::Created(project.to_view()))
+    Ok(HttpResponseCreated(project.to_view()))
 }
 
 #[derive(Deserialize)]

@@ -108,10 +108,12 @@ use super::server::ServerState;
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
+use http::StatusCode;
 use hyper::Body;
 use hyper::Request;
 use hyper::Response;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -572,5 +574,41 @@ impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
 impl From<Response<Body>> for HttpResponseWrap {
     fn from(response: Response<Body>) -> HttpResponseWrap {
         HttpResponseWrap::new(Ok(response))
+    }
+}
+
+impl<T: HttpResponse> From<T> for HttpResponseWrap {
+    fn from(t: T) -> HttpResponseWrap {
+        HttpResponseWrap::new(t.into())
+    }
+}
+
+pub trait HttpResponse: Into<Result<Response<Body>, HttpError>> {}
+
+/*
+ * TODO-cleanup should ApiObject move into this submodule?  It'd be nice if we
+ * could restrict this to an ApiObject::View (by having T: ApiObject and the
+ * field having type T::View).
+ */
+pub struct HttpResponseCreated<T: Serialize>(pub T);
+
+impl<T: Serialize> From<HttpResponseCreated<T>>
+for Result<Response<Body>, HttpError>
+{
+    fn from(
+        HttpResponseCreated(body_object): HttpResponseCreated<T>,
+    ) -> Result<Response<Body>, HttpError> {
+        let serialized = serde_json::to_string(&body_object)?;
+        Ok(Response::builder()
+            .status(StatusCode::CREATED)
+            .header(http::header::CONTENT_TYPE, "application/json") // XXX
+            .body(serialized.into())?)
+    }
+}
+
+/* XXX make generic with macro? */
+impl<T: Serialize> From<HttpResponseCreated<T>> for HttpResponseWrap {
+    fn from(response: HttpResponseCreated<T>) -> HttpResponseWrap {
+        HttpResponseWrap::new(response.into())
     }
 }
