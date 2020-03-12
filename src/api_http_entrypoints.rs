@@ -10,10 +10,11 @@ use hyper::Response;
 use serde::Deserialize;
 
 use crate::api_backend;
-use crate::api_http_util::api_http_create;
+use crate::api_http_util::ApiResponseType;
 use crate::api_http_util::api_http_delete;
 use crate::api_http_util::api_http_emit_one;
 use crate::api_http_util::api_http_emit_stream;
+use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
@@ -116,10 +117,10 @@ async fn api_projects_get(
 async fn api_projects_post(
     rqctx: Arc<RequestContext>,
     new_project: Json<ApiProjectCreateParams>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<ApiResponseType<ApiProject>, HttpError> {
     let backend = api_backend(&rqctx);
     let project = backend.project_create(&new_project.into_inner()).await?;
-    api_http_create(project)
+    Ok(ApiResponseType::Created(project.to_view()))
 }
 
 #[derive(Deserialize)]

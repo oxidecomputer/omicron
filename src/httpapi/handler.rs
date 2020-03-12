@@ -555,18 +555,22 @@ pub struct HttpResponseWrap {
     wrapped: Result<Response<Body>, HttpError>,
 }
 
-impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
-    fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+impl HttpResponseWrap {
+    pub fn new(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
         HttpResponseWrap {
             wrapped: result,
         }
     }
 }
 
+impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
+    fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+        HttpResponseWrap::new(result)
+    }
+}
+
 impl From<Response<Body>> for HttpResponseWrap {
     fn from(response: Response<Body>) -> HttpResponseWrap {
-        HttpResponseWrap {
-            wrapped: Ok(response),
-        }
+        HttpResponseWrap::new(Ok(response))
     }
 }

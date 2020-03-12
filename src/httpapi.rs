@@ -18,6 +18,7 @@ pub use handler::Json;
 pub use handler::Query;
 pub use handler::RequestContext;
 pub use handler::RouteHandler;
+pub use handler::HttpResponseWrap;
 pub use http_util::http_extract_path_params;
 pub use http_util::CONTENT_TYPE_JSON;
 pub use http_util::CONTENT_TYPE_NDJSON;

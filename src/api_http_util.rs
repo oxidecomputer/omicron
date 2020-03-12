@@ -173,9 +173,24 @@ where
         .body(bytebuf.freeze().into())?)
 }
 
+/*
+ * TODO-document
+ * TODO-cleanup in the limit, this will wind up duplicating the hyper::Response
+ * object.  It would be nice to just re-use that, but we can implement
+ * `From<Response<T: ApiObject>> for Response<Body>` anyway.
+ */
 pub enum ApiResponseType<T: ApiObject> {
-    Created(T),
-    Object(T),
+    Created(T::View),
+    Object(T::View),
+}
+
+use crate::httpapi::HttpResponseWrap;
+
+impl<T: ApiObject> From<ApiResponseType<T>> for HttpResponseWrap
+{
+    fn from(art: ApiResponseType<T>) -> HttpResponseWrap {
+        HttpResponseWrap::new(art.into())
+    }
 }
 
 impl<T: ApiObject> From<ApiResponseType<T>>
@@ -184,12 +199,12 @@ impl<T: ApiObject> From<ApiResponseType<T>>
     fn from(
         response_type: ApiResponseType<T>,
     ) -> Result<Response<Body>, HttpError> {
-        let (object, status_code): (T, StatusCode) = match response_type {
+        let (object, status_code): (T::View, StatusCode) = match response_type {
             ApiResponseType::Created(o) => (o, StatusCode::CREATED),
             ApiResponseType::Object(o) => (o, StatusCode::OK),
         };
 
-        let serialized = serde_json::to_string(&object.to_view())?;
+        let serialized = serde_json::to_string(&object)?;
 
         Ok(Response::builder()
             .status(status_code)
