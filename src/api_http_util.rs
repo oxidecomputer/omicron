@@ -172,3 +172,28 @@ where
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
         .body(bytebuf.freeze().into())?)
 }
+
+pub enum ApiResponseType<T: ApiObject> {
+    Created(T),
+    Object(T),
+}
+
+impl<T: ApiObject> From<ApiResponseType<T>>
+    for Result<Response<Body>, HttpError>
+{
+    fn from(
+        response_type: ApiResponseType<T>,
+    ) -> Result<Response<Body>, HttpError> {
+        let (object, status_code): (T, StatusCode) = match response_type {
+            ApiResponseType::Created(o) => (o, StatusCode::CREATED),
+            ApiResponseType::Object(o) => (o, StatusCode::OK),
+        };
+
+        let serialized = serde_json::to_string(&object.to_view())?;
+
+        Ok(Response::builder()
+            .status(status_code)
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+            .body(serialized.into())?)
+    }
+}

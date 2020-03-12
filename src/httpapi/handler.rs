@@ -4,9 +4,9 @@
  * ## Endpoint function signatures
  *
  * All endpoint handler functions must be `async` (that is, must return
- * a `Future`) and must return a `Result<Response<Body>, HttpError>`.
- * Ignoring the return values, handler functions must have one of the following
- * signatures:
+ * a `Future`) and must return something that can be turned into a
+ * `Result<Response<Body>, HttpError>`.  Ignoring the return values for a
+ * minute, handler functions must have one of the following signatures:
  *
  * 1. `f(rqctx: Arc<RequestContext>)`
  * 2. `f(rqctx: Arc<RequestContext>, query: Query<Q>)`
@@ -15,7 +15,7 @@
  *
  * See "Extractors" below for more on the types `Query` and `Json`.
  *
- * We allow for variation in these signatures not so much for programmer
+ * We allow for variation in the function arguments not so much for programmer
  * convenience (since parsing the query string or JSON body could be implemented
  * in line or two of code each, with the right helper functions) but rather so
  * that the type signature of the handler function can be programmatically
@@ -23,6 +23,7 @@
  * treating the server implementation as the source of truth for the API
  * specification ensures that at least in many important ways, the
  * implementation cannot diverge from the spec without us knowing it.
+ *
  *
  * ## Extractors
  *
@@ -74,6 +75,19 @@
  *         .body(format!("limit = {}, marker = {:?}\n", limit, marker).into())?)
  * }
  * ```
+ *
+ *
+ * ## Endpoint function return types
+ *
+ * Just like we want API input types to be represented in function arguments, we
+ * want API response types to be represented in function return values so that
+ * OpenAPI tooling can identify them at build time.  Ultimately, a handler
+ * function's return value needs to become a `Result<Response<Body>,
+ * HttpError>`.  However, handler functions may return `Result<T, HttpError>`
+ * for any `T` that implements `Into<Result<Response<Body>, HttpError>>`.  Note
+ * that there's an extra level of `Result` there to account for the possibility
+ * that the conversion may fail.
+ *
  *
  * ## Implementation notes
  *
@@ -192,12 +206,17 @@ impl_derived_for_tuple!(T1, T2);
  * treat different handlers interchangeably.  See `RouteHandler` below.
  */
 #[async_trait]
-pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static {
+pub trait HttpHandlerFunc<FuncParams, ResponseType>:
+    Send + Sync + 'static
+where
+    FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+{
     async fn handle_request(
         &self,
         rqctx: Arc<RequestContext>,
         p: FuncParams,
-    ) -> HttpHandlerResult;
+    ) -> Result<ResponseType, HttpError>;
 }
 
 /*
@@ -209,18 +228,21 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params
     ( { $(($i:tt, $T:tt)),* } => {
 
     #[async_trait]
-    impl<FuncType, FutureType, $($T,)*> HttpHandlerFunc<($($T,)*)> for FuncType
+    impl<FuncType, FutureType, ResponseType, $($T,)*>
+        HttpHandlerFunc<($($T,)*), ResponseType> for FuncType
     where
         FuncType: Fn(Arc<RequestContext>, $($T,)*)
             -> FutureType + Send + Sync + 'static,
-        FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
+        FutureType: Future<Output = Result<ResponseType, HttpError>>
+            + Send + 'static,
+        ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
         $($T: Derived + Send + Sync + 'static,)*
     {
         async fn handle_request(
             &self,
             rqctx: Arc<RequestContext>,
             _param_tuple: ($($T,)*)
-        ) -> HttpHandlerResult
+        ) -> Result<ResponseType, HttpError>
         {
             (self)(rqctx, $(_param_tuple.$i,)*).await
         }
@@ -232,9 +254,9 @@ impl_HttpHandlerFunc_for_func_with_params!((0, T0));
 impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2));
 
 /**
- * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams>` in a way that
- * allows callers to invoke the handler without knowing the handler's function
- * signature.
+ * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams, ResponseType>` in a
+ * way that allows callers to invoke the handler without knowing the handler's
+ * function signature.
  *
  * The "Route" in `RouteHandler` refers to the fact that this structure is used
  * to record that a specific handler has been attached to a specific HTTP route.
@@ -263,10 +285,11 @@ pub trait RouteHandler: Debug + Send + Sync {
  * caller to ignore the differences between different handler function type
  * signatures.
  */
-pub struct HttpRouteHandler<HandlerType, FuncParams>
+pub struct HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /** the actual HttpHandlerFunc used to implement this route */
     handler: HandlerType,
@@ -282,14 +305,15 @@ where
      * here causes the compiler to behave as though this struct referred to a
      * `FuncParams`, which allows us to use the type parameter below.
      */
-    phantom: PhantomData<FuncParams>,
+    phantom: PhantomData<(FuncParams, ResponseType)>,
 }
 
-impl<HandlerType, FuncParams> Debug
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType> Debug
+    for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "handler: {}", self.label)
@@ -297,11 +321,12 @@ where
 }
 
 #[async_trait]
-impl<HandlerType, FuncParams> RouteHandler
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType> RouteHandler
+    for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived + 'static,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn label(&self) -> &String {
         &self.label
@@ -331,7 +356,11 @@ where
          */
         let rqctx = Arc::new(rqctx_raw);
         let funcparams = Derived::from_request(Arc::clone(&rqctx)).await?;
-        self.handler.handle_request(rqctx, funcparams).await
+        let future = self.handler.handle_request(rqctx, funcparams);
+        let response_responsetype: ResponseType = future.await?;
+        let response_as_wrap: HttpResponseWrap = response_responsetype.into();
+        let response_as_response: Response<Body> = response_as_wrap.wrapped?;
+        Ok(response_as_response)
     }
 }
 
@@ -339,10 +368,12 @@ where
  * Public interfaces
  */
 
-impl<HandlerType, FuncParams> HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType>
+    HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived + 'static,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /**
      * Given a function matching one of the supported API handler function
@@ -513,5 +544,29 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Json<JsonType>, HttpError> {
         http_request_load_json_body(rqctx).await
+    }
+}
+
+/*
+ * Response handler types
+ * TODO document me
+ */
+pub struct HttpResponseWrap {
+    wrapped: Result<Response<Body>, HttpError>,
+}
+
+impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
+    fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+        HttpResponseWrap {
+            wrapped: result,
+        }
+    }
+}
+
+impl From<Response<Body>> for HttpResponseWrap {
+    fn from(response: Response<Body>) -> HttpResponseWrap {
+        HttpResponseWrap {
+            wrapped: Ok(response),
+        }
     }
 }
