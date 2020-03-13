@@ -10,13 +10,11 @@ use http::StatusCode;
 use hyper::Body;
 use hyper::Response;
 use serde::Serialize;
-use std::sync::Arc;
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiObject;
 use crate::api_model::ObjectStream;
 use crate::httpapi::HttpError;
-use crate::httpapi::CONTENT_TYPE_JSON;
 use crate::httpapi::CONTENT_TYPE_NDJSON;
 
 /**
@@ -91,42 +89,11 @@ pub fn api_http_serialize_for_stream<T: Serialize>(
  */
 
 /**
- * Return an HTTP response appropriate for having successfully created a
- * resource.  The status code is 201 "Created" and the body describes the given
- * ApiObject.
- */
-pub fn api_http_create<T>(object: Arc<T>) -> Result<Response<Body>, HttpError>
-where
-    T: ApiObject,
-{
-    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-    Ok(Response::builder()
-        .status(StatusCode::CREATED)
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .body(serialized.into())?)
-}
-
-/**
  * Return an HTTP response appropriate for having successfully deleted a
  * resource.  This returns an empty 204 "No Content" response.
  */
 pub fn api_http_delete() -> Result<Response<Body>, HttpError> {
     Ok(Response::builder().status(StatusCode::NO_CONTENT).body(Body::empty())?)
-}
-
-/**
- * Returns an HTTP response appropriate for fetching a single resource.  This
- * returns a 200 "OK" response whose body describes the given ApiObject.
- */
-pub fn api_http_emit_one<T>(object: Arc<T>) -> Result<Response<Body>, HttpError>
-where
-    T: ApiObject,
-{
-    let serialized = api_http_serialize_for_stream(&Ok(object.to_view()))?;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .body(serialized.into())?)
 }
 
 /**
