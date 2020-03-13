@@ -237,7 +237,7 @@ where
         &self,
         rqctx: Arc<RequestContext>,
         p: FuncParams,
-    ) -> Result<Response<Body>, HttpError>;
+    ) -> HttpHandlerResult;
 }
 
 /**
@@ -696,11 +696,11 @@ where
  * because it's part of trait bounds.
  */
 pub struct HttpResponseWrap {
-    wrapped: Result<Response<Body>, HttpError>,
+    wrapped: HttpHandlerResult,
 }
 
 impl HttpResponseWrap {
-    fn new(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+    fn new(result: HttpHandlerResult) -> HttpResponseWrap {
         HttpResponseWrap {
             wrapped: result,
         }
@@ -711,8 +711,8 @@ impl HttpResponseWrap {
  * This conversion is necessary for the last stage of the return type
  * conversion: ultimately, we need to provide this Result type.
  */
-impl From<HttpResponseWrap> for Result<Response<Body>, HttpError> {
-    fn from(wrap: HttpResponseWrap) -> Result<Response<Body>, HttpError> {
+impl From<HttpResponseWrap> for HttpHandlerResult {
+    fn from(wrap: HttpResponseWrap) -> HttpHandlerResult {
         wrap.wrapped
     }
 }
@@ -722,15 +722,15 @@ impl From<HttpResponseWrap> for Result<Response<Body>, HttpError> {
  * types implement conversions to this Result type rather than
  * `HttpResponseWrap`, but that means we have to do this conversion ourselves.
  */
-impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
-    fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+impl From<HttpHandlerResult> for HttpResponseWrap {
+    fn from(result: HttpHandlerResult) -> HttpResponseWrap {
         HttpResponseWrap::new(result)
     }
 }
 
 /**
  * This conversion is necessary for handler functions that return
- * `Result<Response<Body>, HttpError>` because the `Respose<Body>` itself needs
+ * `HttpHandlerResult` because the `Respose<Body>` itself needs
  * to be convertible into `HttpResponseWrap.
  */
 impl From<Response<Body>> for HttpResponseWrap {
@@ -763,7 +763,7 @@ impl<T: HttpResponse> From<T> for HttpResponseWrap {
  * for marking these related types.
  */
 pub trait HttpResponse:
-    Into<Result<Response<Body>, HttpError>> + Send + Sync + 'static
+    Into<HttpHandlerResult> + Send + Sync + 'static
 {
 }
 
@@ -783,11 +783,11 @@ impl<T: Serialize + Send + Sync + 'static> HttpResponse
 {
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
-    for Result<Response<Body>, HttpError>
+    for HttpHandlerResult
 {
     fn from(
         HttpResponseCreated(body_object): HttpResponseCreated<T>,
-    ) -> Result<Response<Body>, HttpError> {
+    ) -> HttpHandlerResult {
         /* TODO-correctness (or polish?): add Location header */
         response_for_object(body_object, StatusCode::CREATED)
     }
@@ -804,11 +804,11 @@ impl<T: Serialize + Send + Sync + 'static> HttpResponse
 {
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
-    for Result<Response<Body>, HttpError>
+    for HttpHandlerResult
 {
     fn from(
         HttpResponseOkObject(body_object): HttpResponseOkObject<T>,
-    ) -> Result<Response<Body>, HttpError> {
+    ) -> HttpHandlerResult {
         response_for_object(body_object, StatusCode::OK)
     }
 }
@@ -829,11 +829,9 @@ impl<T: Serialize + Send + Sync + 'static> HttpResponse
 {
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
-    for Result<Response<Body>, HttpError>
+    for HttpHandlerResult
 {
-    fn from(
-        list_wrap: HttpResponseOkObjectList<T>,
-    ) -> Result<Response<Body>, HttpError> {
+    fn from(list_wrap: HttpResponseOkObjectList<T>) -> HttpHandlerResult {
         let list = list_wrap.0;
         let buffer_list = list.iter().map(serialize_json_stream_element);
         let mut bytebuf = BytesMut::new();
@@ -855,8 +853,8 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
  */
 pub struct HttpResponseDeleted();
 impl HttpResponse for HttpResponseDeleted {}
-impl From<HttpResponseDeleted> for Result<Response<Body>, HttpError> {
-    fn from(_: HttpResponseDeleted) -> Result<Response<Body>, HttpError> {
+impl From<HttpResponseDeleted> for HttpHandlerResult {
+    fn from(_: HttpResponseDeleted) -> HttpHandlerResult {
         Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
             .body(Body::empty())?)
@@ -866,7 +864,7 @@ impl From<HttpResponseDeleted> for Result<Response<Body>, HttpError> {
 fn response_for_object<T: Serialize>(
     body_object: T,
     status_code: StatusCode,
-) -> Result<Response<Body>, HttpError> {
+) -> HttpHandlerResult {
     let serialized = serde_json::to_string(&body_object)?;
     Ok(Response::builder()
         .status(status_code)
