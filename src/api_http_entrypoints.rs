@@ -25,6 +25,8 @@ use crate::httpapi::Json;
 use crate::httpapi::Query;
 use crate::httpapi::RequestContext;
 
+use openapi::endpoint;
+
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
@@ -39,11 +41,15 @@ pub fn api_register_entrypoints(router: &mut HttpRouter) {
         "/projects",
         HttpRouteHandler::new(api_projects_post),
     );
+    // TODO: rethink this interface and convert all to use openapi::endpoint
+    /*
     router.insert(
         Method::GET,
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_get_project),
     );
+    */
+    api_projects_get_project::register(router);
     router.insert(
         Method::DELETE,
         "/projects/{project_id}",
@@ -130,6 +136,16 @@ struct ProjectPathParam {
 /*
  * "GET /project/{project_id}": fetch a specific project
  */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_id}",
+    parameters = [
+        {
+            name = project_id,
+            in = path,
+        }
+    ]
+}]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
 ) -> Result<Response<Body>, HttpError> {
