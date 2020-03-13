@@ -43,9 +43,6 @@ The tests can be run with `cargo test`.  They are clean and should remain clean.
 
 ## TODO
 
-- Update the handler functions so that they can return a Serialize or a Stream
-  of Serialize.  (Otherwise, how will the OpenAPI tooling know what the return
-  types are?)
 - Flesh out more endpoints and simulator
 - Write out road map
   - regions, AZs, etc. need to be added per RFD 24
