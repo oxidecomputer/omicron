@@ -81,12 +81,26 @@
  *
  * Just like we want API input types to be represented in function arguments, we
  * want API response types to be represented in function return values so that
- * OpenAPI tooling can identify them at build time.  Ultimately, a handler
- * function's return value needs to become a `Result<Response<Body>,
- * HttpError>`.  However, handler functions may return `Result<T, HttpError>`
- * for any `T` that implements `Into<Result<Response<Body>, HttpError>>`.  Note
- * that there's an extra level of `Result` there to account for the possibility
- * that the conversion may fail.
+ * OpenAPI tooling can identify them at build time.  The more specific a type
+ * returned by the handler function, the more can be validated at build-time,
+ * and the more specific an OpenAPI schema can be generated from the source
+ * alone.  For example, a POST to an endpoint "/projects" might return
+ * `Result<HttpResponseCreated<Project>, HttpError>`.  As you might expect, on
+ * success, this turns into an HTTP 201 "Created" response whose body is
+ * constructed by serializing the `Project`.  In this example, OpenAPI tooling
+ * can identify at build time that this function produces a 201 "Created"
+ * response on success with a body whose schema matches `Project` (which we
+ * already said implements `Serialize`), and there would be no way to violate
+ * this contract at runtime.  If the function just returned `Response<Body>`, it
+ * would be harder to tell what it actually produces (for generating the OpenAPI
+ * spec), and no way to validate that it really does that.
+ *
+ * Ultimately, a handler function's return value needs to become a
+ * `Result<Response<Body>, HttpError>`.  However, handler functions may return
+ * `Result<T, HttpError>` for any `T` that implements
+ * `Into<Result<Response<Body>, HttpError>>`.  Note that there's an extra level
+ * of `Result` there to account for the possibility that the conversion may
+ * fail.
  *
  *
  * ## Implementation notes
@@ -653,46 +667,17 @@ where
 }
 
 /*
- * Response handler types
+ * Response Type Conversion
  *
- * As described in the module-level documentation above, we would like to
- * support HTTP endpoint functions that return a variety of different return
- * types that are ultimately converted into `Result<Response<Body>, HttpError>`.
- * The more specific a type returned by the handler function, the more can be
- * validated at build-time, and the more specific an OpenAPI schema can be
- * generated from the source alone.  For example, a POST to an endpoint
- * "/projects" might return `Result<HttpResponseCreated<Project>, HttpError>`.
- * As you might expect, on success, this turns into an HTTP 201 "Created"
- * response whose body is constructed by serializing the `Project`.
- * In this example, OpenAPI tooling can identify at build time that this
- * function produces a 201 "Created" response on success with a body whose
- * schema matches `Project` (which we already said implements `Serialize`), and
- * there would be no way to violate this contract at runtime.  If the function
- * just returned `Response<Body>`, it would be harder to tell what it actually
- * produces (for generating the OpenAPI spec), and no way to validate that it
- * really does that.
- *
- * To support handler functions that return a variety of different types, the
- * trait bounds related to these functions say that the function must
- * (asynchronously) produce a `Result<ResponseType, HttpError>` where
- * `ResponseType` is a type that implements `Into<HttpResponseWrap> + Send +
- * Sync + 'static`.  See the macro `impl_HttpHandlerFunc_for_func_with_params`
- * for details.
- *
- * Now, why `Into<HttpResponseWrap>` instead of just `Into<Response<Body>>`?
- * For one, we want to allow the conversion from specific types into
- * `Response<Body>` to be able to fail, producing an HttpError.  That's not
- * possible if the conversion must produce a `Response<Body>`.  Now, we could
- * instead define conversions from `Result<T, HttpError>` to
- * `Result<Response<Body>, HttpError>` for various `T`, but we're not allowed to
- * define those conversions because it's between two `Result` types that are not
- * in this crate.  We have to use this intermediate type `HttpResponseWrap` and
- * perform conversions through it.  Even then, we still can't define a
- * conversion between `Result<HttpResponseWrap, HttpError>` and
- * `Result<Response<Body>, HttpError>` for the same reason.  Instead, we have
- * two levels of `Result` indirection.
+ * See the discussion on macro `impl_HttpHandlerFunc_for_func_with_params` for a
+ * great deal of context on this.
  */
 
+/**
+ * HttpResponseWrap just wraps a `Result<Response<Body>, HttpError>`.  It should
+ * not be outside the module in which it's defined, but it must be made public
+ * because it's part of trait bounds.
+ */
 pub struct HttpResponseWrap {
     wrapped: Result<Response<Body>, HttpError>,
 }
