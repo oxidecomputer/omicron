@@ -1,3 +1,7 @@
+//! This crate defines attributes associated with HTTP handlers. These
+//! attributes are used both to define an HTTP API and to generate an OpenAPI
+//! Spec (OAS) v3 document that describes the API.
+
 extern crate proc_macro;
 
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
@@ -5,6 +9,10 @@ use quote::quote;
 
 use std::collections::HashMap;
 
+// We use the `abort` macro to identify known, aberrant conditions while
+// processing macro parameters. This is based on `proc_macro_error::abort`
+// but modified to be useable in testing contexts where a `proc_macro2::Span`
+// cannot be used in an error context.
 macro_rules! abort {
     ($span:expr, $($tts:tt)*) => {
         if cfg!(test) {
@@ -15,29 +23,29 @@ macro_rules! abort {
     };
 }
 
+/// Attribute to apply to an HTTP endpoint.
+/// TODO(doc) explain intended use
 #[proc_macro_attribute]
 pub fn endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    //treeify(0, &attr.clone().into());
-    let a = attr.into();
-    let mm = to_map(&a);
-    //emit(0, MapEntry::Struct(mm.clone()));
+    let attr2 = TokenStream::from(attr);
+    let metadata = to_map(&attr2);
 
-    let method = match mm.get("method") {
+    let method = match metadata.get("method") {
         Some(MapEntry::Value(method)) => match method.as_str() {
             "DELETE" | "GET" | "PATCH" | "POST" | "PUT" => method,
-            _ => abort!(a, r#"invlid method "{}""#, method),
+            _ => abort!(attr2, r#"invalid method "{}""#, method),
         },
         None => abort!(
-            a,
+            attr2,
             r#""method" is a required field; valid values are DELETE, GET, PATCH, POST, and PUT"#
         ),
         _ => panic!("not done"),
     };
 
-    let path = match mm.get("path") {
+    let path = match metadata.get("path") {
         Some(MapEntry::Value(path)) => path,
         _ => panic!("not done"),
     };
@@ -67,9 +75,10 @@ enum MapEntry {
     Array(Vec<MapEntry>),
 }
 
+// Print out a MapEntry structure.
 #[allow(dead_code)]
-fn emit(depth: usize, mm: MapEntry) {
-    match mm {
+fn emit(depth: usize, metadata: MapEntry) {
+    match metadata {
         MapEntry::Value(s) => println!("{}", s),
         MapEntry::Struct(m) => {
             println!("{}", '{');
@@ -90,7 +99,7 @@ fn emit(depth: usize, mm: MapEntry) {
     }
 }
 
-fn parse(tt: &TokenStream) -> MapEntry {
+fn parse_kv(tt: &TokenStream) -> MapEntry {
     MapEntry::Struct(to_map(tt))
 }
 
@@ -104,13 +113,13 @@ fn to_map(tt: &TokenStream) -> HashMap<String, MapEntry> {
             None => break,
             Some(ident @ TokenTree::Ident(_)) => ident,
             Some(token) => {
-                abort!(token, "expected a identifier, but found `{}`", token)
+                abort!(token, "expected an identifier, but found `{}`", token)
             }
         };
 
         // Verify we have an '=' delimiter.
         let eq = match iter.next() {
-            Some(TokenTree::Punct(punct)) if punct.as_char() != '=' => punct,
+            Some(TokenTree::Punct(punct)) if punct.as_char() == '=' => punct,
 
             Some(token) => abort!(token, "expected `=`, but found `{}`", token),
             None => abort!(key, "expected `=` following `{}`", key),
@@ -121,7 +130,7 @@ fn to_map(tt: &TokenStream) -> HashMap<String, MapEntry> {
                 Delimiter::Parenthesis => {
                     abort!(group, "parentheses not allowed")
                 }
-                Delimiter::Brace => parse(&group.stream()),
+                Delimiter::Brace => parse_kv(&group.stream()),
                 Delimiter::Bracket => MapEntry::Array(to_vec(&group.stream())),
                 Delimiter::None => abort!(group, "invalid grouping"),
             },
@@ -131,7 +140,7 @@ fn to_map(tt: &TokenStream) -> HashMap<String, MapEntry> {
                     Ok(syn::ExprLit {
                         lit: syn::Lit::Str(s), ..
                     }) => MapEntry::Value(s.value()),
-                    _ => abort!(lit, "expected a string but found `{}`", lit),
+                    _ => abort!(lit, "expected a value, but found `{}`", lit),
                 }
             }
 
@@ -171,9 +180,13 @@ fn to_vec(tt: &TokenStream) -> Vec<MapEntry> {
         let item = match iter.next() {
             None => break,
             Some(TokenTree::Group(group)) if is_object(&group) => {
-                parse(&group.stream())
+                parse_kv(&group.stream())
             }
-            Some(token) => abort!(token, "expected to find an object {...}"),
+            Some(token) => abort!(
+                token,
+                "expected an object {{...}}, but found `{}`",
+                token
+            ),
         };
 
         vec.push(item);
@@ -182,13 +195,14 @@ fn to_vec(tt: &TokenStream) -> Vec<MapEntry> {
         match iter.next() {
             None => break,
             Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => continue,
-            Some(token) => abort!(token, "sadface"),
+            Some(token) => abort!(token, "expected `,`, but found `{}`", token),
         }
     }
 
     vec
 }
 
+// print out the raw tree of TokenStream structures.
 #[allow(dead_code)]
 fn treeify(depth: usize, tt: &TokenStream) {
     for i in tt.clone().into_iter() {
@@ -217,18 +231,20 @@ mod tests {
     use quote::quote;
 
     #[test]
-    #[should_panic(expected = r#"expected a identifier, but found `"potato"`"#)]
+    #[should_panic(
+        expected = r#"expected an identifier, but found `"potato"`"#
+    )]
     fn bad_ident() {
         let _ = super::to_map(
             &quote! {
-                "potato"
+                "potato" = potato
             }
             .into(),
         );
     }
 
     #[test]
-    #[should_panic(expected = r#"expected `=` following `howdy`"#)]
+    #[should_panic(expected = "expected `=` following `howdy`")]
     fn just_ident() {
         let _ = super::to_map(
             &quote! {
@@ -239,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"expected `=`, but found `there`"#)]
+    #[should_panic(expected = "expected `=`, but found `there`")]
     fn no_equals() {
         let _ = super::to_map(
             &quote! {
@@ -250,7 +266,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"expected a value following `=`"#)]
+    #[should_panic(expected = "parentheses not allowed")]
+    fn paren_grouping() {
+        let _ = super::to_map(
+            &quote! {
+                hi = (a, b, c)
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "expected a value following `=`")]
     fn no_value() {
         let _ = super::to_map(
             &quote! {
@@ -291,7 +318,7 @@ mod tests {
         assert!(message.is_some());
 
         match message.unwrap() {
-            crate::MapEntry::Value(s) => assert_eq!(s, r#""hi there""#),
+            crate::MapEntry::Value(s) => assert_eq!(s, r#"hi there"#),
             _ => panic!("unexpected value"),
         }
     }
@@ -315,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"expected a identifier, but found `,`"#)]
+    #[should_panic(expected = "expected an identifier, but found `,`")]
     fn double_comma() {
         let m = super::to_map(
             &quote! {
@@ -334,11 +361,74 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"expected a value, but found `?`"#)]
+    #[should_panic(expected = "expected a value, but found `?`")]
     fn bad_value() {
         let _ = super::to_map(
             &quote! {
                 wat = ?
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "expected a value, but found `42`")]
+    fn bad_value2() {
+        let _ = super::to_map(
+            &quote! {
+                the_meaning_of_life_the_universe_and_everything = 42
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "expected an object {...}, but found `1`")]
+    fn bad_array() {
+        let _ = super::to_map(
+            &quote! {
+                array = [1, 2, 3]
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    fn simple_array() {
+        let _ = super::to_map(
+            &quote! {
+                array = []
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    fn simple_array2() {
+        let _ = super::to_map(
+            &quote! {
+                array = [{}, {}]
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    fn simple_array3() {
+        let _ = super::to_map(
+            &quote! {
+                array = [{}, {},]
+            }
+            .into(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "expected `,`, but found `<`")]
+    fn bad_array2() {
+        let _ = super::to_map(
+            &quote! {
+                array = [{}<-]
             }
             .into(),
         );

@@ -41,6 +41,7 @@ pub fn api_register_entrypoints(router: &mut HttpRouter) {
         "/projects",
         HttpRouteHandler::new(api_projects_post),
     );
+    // TODO: rethink this interface and convert all to use openapi::endpoint
     /*
     router.insert(
         Method::GET,
