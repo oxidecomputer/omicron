@@ -2,15 +2,12 @@
  * Handler functions (entrypoints) for HTTP APIs
  */
 
+use hyper::Method;
+use serde::Deserialize;
 use std::sync::Arc;
 
-use hyper::Body;
-use hyper::Method;
-use hyper::Response;
-use serde::Deserialize;
-
 use crate::api_backend;
-use crate::api_http_util::api_http_emit_stream;
+use crate::api_model::to_view_list;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -20,7 +17,8 @@ use crate::httpapi::http_extract_path_params;
 use crate::httpapi::HttpError;
 use crate::httpapi::HttpResponseCreated;
 use crate::httpapi::HttpResponseDeleted;
-use crate::httpapi::HttpResponseOkOneObject;
+use crate::httpapi::HttpResponseOkObject;
+use crate::httpapi::HttpResponseOkObjectList;
 use crate::httpapi::HttpRouteHandler;
 use crate::httpapi::HttpRouter;
 use crate::httpapi::Json;
@@ -103,13 +101,14 @@ struct ListQueryParams {
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
     params_raw: Query<ListQueryParams>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
     let marker = params.marker.as_ref().map(|s| s.clone());
     let project_stream = backend.projects_list(marker, limit).await?;
-    api_http_emit_stream(project_stream).await
+    let view_list = to_view_list(project_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
 }
 
 /*
@@ -134,13 +133,13 @@ struct ProjectPathParam {
  */
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
-) -> Result<HttpResponseOkOneObject<ApiProjectView>, HttpError> {
+) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params: ProjectPathParam =
         http_extract_path_params(&rqctx.path_variables)?;
     let project_id = &params.project_id;
     let project: Arc<ApiProject> = backend.project_lookup(project_id).await?;
-    Ok(HttpResponseOkOneObject(project.to_view()))
+    Ok(HttpResponseOkObject(project.to_view()))
 }
 
 /*
@@ -154,7 +153,7 @@ async fn api_projects_delete_project(
         http_extract_path_params(&rqctx.path_variables)?;
     let project_id = &params.project_id;
     backend.project_delete(project_id).await?;
-    Ok(HttpResponseDeleted {})
+    Ok(HttpResponseDeleted())
 }
 
 /*
@@ -169,7 +168,7 @@ async fn api_projects_delete_project(
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
     updated_project: Json<ApiProjectUpdateParams>,
-) -> Result<HttpResponseOkOneObject<ApiProjectView>, HttpError> {
+) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params: ProjectPathParam =
         http_extract_path_params(&rqctx.path_variables)?;
@@ -177,5 +176,5 @@ async fn api_projects_put_project(
     let newproject = backend
         .project_update(project_id, &updated_project.into_inner())
         .await?;
-    Ok(HttpResponseOkOneObject(newproject.to_view()))
+    Ok(HttpResponseOkObject(newproject.to_view()))
 }

@@ -5,7 +5,9 @@
  */
 
 use async_trait::async_trait;
+use futures::future::ready;
 use futures::stream::Stream;
+use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
@@ -63,6 +65,7 @@ pub trait ApiObject {
 /**
  * List of API resource types
  */
+#[derive(Debug)]
 pub enum ApiResourceType {
     Project,
 }
@@ -178,6 +181,22 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 /** A stream of Results, each potentially representing an object in the API. */
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+
+/**
+ * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
+ * return a vector of the objects' views.  Any failures are ignored.
+ * TODO-hardening: Consider how to better deal with these failures.  We should
+ * probably at least log something.
+ */
+pub async fn to_view_list<T: ApiObject>(
+    object_stream: ObjectStream<T>,
+) -> Vec<T::View> {
+    object_stream
+        .filter(|maybe_object| ready(maybe_object.is_ok()))
+        .map(|maybe_object| maybe_object.unwrap().to_view())
+        .collect::<Vec<T::View>>()
+        .await
+}
 
 /**
  * Represents a backend implementation of the API.

@@ -8,7 +8,6 @@
 
 pub mod api_error;
 mod api_http_entrypoints;
-pub mod api_http_util;
 pub mod api_model;
 pub mod httpapi;
 mod sim;
