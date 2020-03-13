@@ -28,7 +28,7 @@
  * * We'd like to take advantage of Rust's built-in error handling control flow
  *   tools, like Results and the '?' operator.
  *
- * To achive this, we first define `HttpError`, which provides a status code,
+ * To achieve this, we first define `HttpError`, which provides a status code,
  * error code (via an Enum), external message (for sending in the response),
  * optional metadata, and an internal message (for the log file or other
  * instrumentation).  The HTTP layers of the request-handling stack may use this

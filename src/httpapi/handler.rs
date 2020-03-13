@@ -4,9 +4,9 @@
  * ## Endpoint function signatures
  *
  * All endpoint handler functions must be `async` (that is, must return
- * a `Future`) and must return a `Result<Response<Body>, HttpError>`.
- * Ignoring the return values, handler functions must have one of the following
- * signatures:
+ * a `Future`) and must return something that can be turned into a
+ * `Result<Response<Body>, HttpError>`.  Ignoring the return values for a
+ * minute, handler functions must have one of the following signatures:
  *
  * 1. `f(rqctx: Arc<RequestContext>)`
  * 2. `f(rqctx: Arc<RequestContext>, query: Query<Q>)`
@@ -15,7 +15,7 @@
  *
  * See "Extractors" below for more on the types `Query` and `Json`.
  *
- * We allow for variation in these signatures not so much for programmer
+ * We allow for variation in the function arguments not so much for programmer
  * convenience (since parsing the query string or JSON body could be implemented
  * in line or two of code each, with the right helper functions) but rather so
  * that the type signature of the handler function can be programmatically
@@ -23,6 +23,7 @@
  * treating the server implementation as the source of truth for the API
  * specification ensures that at least in many important ways, the
  * implementation cannot diverge from the spec without us knowing it.
+ *
  *
  * ## Extractors
  *
@@ -75,6 +76,33 @@
  * }
  * ```
  *
+ *
+ * ## Endpoint function return types
+ *
+ * Just like we want API input types to be represented in function arguments, we
+ * want API response types to be represented in function return values so that
+ * OpenAPI tooling can identify them at build time.  The more specific a type
+ * returned by the handler function, the more can be validated at build-time,
+ * and the more specific an OpenAPI schema can be generated from the source
+ * alone.  For example, a POST to an endpoint "/projects" might return
+ * `Result<HttpResponseCreated<Project>, HttpError>`.  As you might expect, on
+ * success, this turns into an HTTP 201 "Created" response whose body is
+ * constructed by serializing the `Project`.  In this example, OpenAPI tooling
+ * can identify at build time that this function produces a 201 "Created"
+ * response on success with a body whose schema matches `Project` (which we
+ * already said implements `Serialize`), and there would be no way to violate
+ * this contract at runtime.  If the function just returned `Response<Body>`, it
+ * would be harder to tell what it actually produces (for generating the OpenAPI
+ * spec), and no way to validate that it really does that.
+ *
+ * Ultimately, a handler function's return value needs to become a
+ * `Result<Response<Body>, HttpError>`.  However, handler functions may return
+ * `Result<T, HttpError>` for any `T` that implements
+ * `Into<Result<Response<Body>, HttpError>>`.  Note that there's an extra level
+ * of `Result` there to account for the possibility that the conversion may
+ * fail.
+ *
+ *
  * ## Implementation notes
  *
  * We go through considerable effort below to make this interface possible.
@@ -90,14 +118,21 @@
 
 use super::error::HttpError;
 use super::http_util::http_read_body;
+use super::http_util::CONTENT_TYPE_JSON;
+use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::ServerState;
 
 use async_trait::async_trait;
+use bytes::BufMut;
+use bytes::Bytes;
+use bytes::BytesMut;
 use futures::lock::Mutex;
+use http::StatusCode;
 use hyper::Body;
 use hyper::Request;
 use hyper::Response;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -192,28 +227,151 @@ impl_derived_for_tuple!(T1, T2);
  * treat different handlers interchangeably.  See `RouteHandler` below.
  */
 #[async_trait]
-pub trait HttpHandlerFunc<FuncParams: Derived>: Send + Sync + 'static {
+pub trait HttpHandlerFunc<FuncParams, ResponseType>:
+    Send + Sync + 'static
+where
+    FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+{
     async fn handle_request(
         &self,
         rqctx: Arc<RequestContext>,
         p: FuncParams,
-    ) -> HttpHandlerResult;
+    ) -> Result<Response<Body>, HttpError>;
 }
 
+/**
+ * Defines an implementation of the `HttpHandlerFunc` trait for functions
+ * matching one of the supported signatures for HTTP endpoint handler functions.
+ * We use a macro to do this because we need to provide different
+ * implementations for functions that take 0 arguments, 1 arugment, 2 arguments,
+ * etc., but the implementations are almost identical.
+ */
 /*
+ * For background: as the module-level documentation explains, we want to
+ * support API endpoint handler functions that vary in their signature so that
+ * the signature can accurately reflect details about their expected input and
+ * output instead of a generic `Request -> Response` description.  The
+ * `HttpHandlerFunc` trait defines an interface for invoking one of these
+ * functions.  This macro defines an implementation of `HttpHandlerFunc` that
+ * says how to take any of these HTTP endpoint handler function and provide that
+ * uniform interface for callers.  The implementation essentially does three
+ * things:
+ *
+ * 1. Converts the uniform arguments of `handle_request()` into the appropriate
+ *    arguments for the underlying function.  This is easier than it sounds at
+ *    this point because we require that one of the arguments be a tuple whose
+ *    types correspond to the argument types for the function, so we just need
+ *    to unpack them from the tuple into function arguments.
+ *
+ * 2. Converts a call to the `handle_request()` method into a call to the
+ *    underlying function.
+ *
+ * 3. Converts the return type of the underlying function into the uniform
+ *    return type expected by callers of `handle_request()`.  This, too, is
+ *    easier than it sounds because we require that the return value implement
+ *    `Into<HttpResponseWrap>` and we have a converter from that into the final
+ *    return type.
+ *
+ * As mentioned above, we're implementing the trait `HttpHandlerFunc` on _any_
+ * type `FuncType` that matches the trait bounds below.  In particular, it must
+ * take a request context argument and whatever other type parameters have been
+ * passed to this macro.
+ *
+ * The function's return type deserves further explanation.  (Actually, these
+ * functions all return a `Future`, but for convenience when we say "return
+ * type" in the comments here we're referring to the output type of the returned
+ * future.)  Again, as described above, we'd like to allow HTTP endpoint
+ * functions to return a variety of different return types that are ultimately
+ * converted into `Result<Response<Body>, HttpError>`.  To do that, the trait
+ * bounds below say that the function must produce a `Result<ResponseType,
+ * HttpError>` where `ResponseType` is a type that implements
+ * `Into<HttpResponseWrap>`.  In turn, `Into<Result<Response<Body>, HttpError>`
+ * is implemented for `HttpResponseWrap`.  This probably all sounds more
+ * complicated than it needs to be.  It looks like this:
+ *
+ *      1. Handler function
+ *            |
+ *            | returns:
+ *            v
+ *      2. Result<ResponseType, HttpError>
+ *            |
+ *            | On success, this will be Ok(ResponseType) for some specific
+ *            | ResponseType that provides Into<HttpResponseWrap>.  It
+ *            | likely provides this by providing
+ *            | Into<Result<Response<Body>, HttpError>.  We'll end up
+ *            | invoking:
+ *            v
+ *      3. ResponseType::into<Result<Response<Body>, HttpError>>()
+ *            |
+ *            | This is a type-specific conversion from `ResponseType` into
+ *            | `Response<Body>` that's allowed to fail with an `HttpError`.
+ *            v
+ *      4. Result<Response<Body>, HttpError>
+ *            |
+ *            | Now, for reasons explained below, we'll wind up invoking:
+ *            v
+ *      5. HttpResponseWrap::from<Result<Response<Body>, HttpError>>
+ *            |
+ *            | As the name implies, `HttpResponseWrap` just wraps the object
+ *            | it's given, producing:
+ *            v
+ *      6. HttpResponseWrap
+ *            |
+ *            | Finally, we perform a conversion:
+ *            v
+ *      7. HttpResponseWrap::into<Result<Response<Body>, HttpError>>
+ *            |
+ *            | giving us what we really wanted:
+ *            v
+ *      8. Result<Response<Body>, HttpError>
+ *
+ * A fair observation might be: we already had what we wanted at step 4.  Why
+ * have `HttpResponseWrap` and the extra conversions at all?  To skip that, we
+ * might like to have the handler function's return type be something like
+ * `Result<ResponseType, HttpError>` with `ResponseType: Into<Response<Body>>`.
+ * The problem with this: the conversion from `ResponseType` to `Response<Body>`
+ * is allowed to fail (with an `HttpError`, primarily because
+ * `serde_json::to_string()` is allowed to fail).  Okay, so let's make it return
+ * `Result<ResponseType, HttpError>` with `ResponseType:
+ * Into<Result<Response<Body>>, HttpError>`.  Note that we'd have an extra level
+ * of `Result` here, but that's okay.  Now comes the real problem: that means
+ * we'd have to define a conversion from `Response<Body>` (an important
+ * `ResponseType` to `Result<Response<Body>, HttpError>`.  That's trivial, of
+ * course, but we're not allowed to do that because both `Response` and `Result`
+ * are foreign to this crate.  So instead, we define conversions to our
+ * intermediate type `HttpResponseWrap` and trust that the compiler optimizes
+ * most of these steps away anyway.  (Another approach might be to define a
+ * different implementation of `HttpHandlerFunc` for the special case of
+ * functions that return `Response<Body>` and drop `ResponseType` altogether in
+ * that implementation.  However, that implementation would conflict with the
+ * more generic one because our two implementations would differ only in their
+ * type bounds, which are not considered when determining conflicts.
+ *
+ * Another way to think about it is that if you just follow the trait bounds,
+ * you would go straight from step 2 to step 6 via a conversion from
+ * `ResponseType` into `HttpResponseWrap`.  That doesn't look so silly.  It's
+ * just that in order to avoid `ResponseType` implementors having to know about
+ * our extra type, we allow them to instead define conversions to
+ * `Result<Response<Body>, HttpError>` and we provide our own converter from
+ * that to `HttpResponseWrap` (which ends up looking silly, as shown above).
+ *
  * Note: the second element in the tuple below (the type parameter, `$T:tt`)
- * ought to be an "ident".  However, that causes us to run straight into
- * issue dtolnay/async-trait#46.
+ * ought to be an "ident".  However, that causes us to run afoul of issue
+ * dtolnay/async-trait#46.
  */
 macro_rules! impl_HttpHandlerFunc_for_func_with_params
     ( { $(($i:tt, $T:tt)),* } => {
 
     #[async_trait]
-    impl<FuncType, FutureType, $($T,)*> HttpHandlerFunc<($($T,)*)> for FuncType
+    impl<FuncType, FutureType, ResponseType, $($T,)*>
+        HttpHandlerFunc<($($T,)*), ResponseType> for FuncType
     where
         FuncType: Fn(Arc<RequestContext>, $($T,)*)
             -> FutureType + Send + Sync + 'static,
-        FutureType: Future<Output = HttpHandlerResult> + Send + 'static,
+        FutureType: Future<Output = Result<ResponseType, HttpError>>
+            + Send + 'static,
+        ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
         $($T: Derived + Send + Sync + 'static,)*
     {
         async fn handle_request(
@@ -222,7 +380,10 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params
             _param_tuple: ($($T,)*)
         ) -> HttpHandlerResult
         {
-            (self)(rqctx, $(_param_tuple.$i,)*).await
+            let response: ResponseType =
+                (self)(rqctx, $(_param_tuple.$i,)*).await?;
+            let response_as_wrap: HttpResponseWrap = response.into();
+            response_as_wrap.into()
         }
     }
 });
@@ -232,9 +393,9 @@ impl_HttpHandlerFunc_for_func_with_params!((0, T0));
 impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2));
 
 /**
- * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams>` in a way that
- * allows callers to invoke the handler without knowing the handler's function
- * signature.
+ * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams, ResponseType>` in a
+ * way that allows callers to invoke the handler without knowing the handler's
+ * function signature.
  *
  * The "Route" in `RouteHandler` refers to the fact that this structure is used
  * to record that a specific handler has been attached to a specific HTTP route.
@@ -263,10 +424,11 @@ pub trait RouteHandler: Debug + Send + Sync {
  * caller to ignore the differences between different handler function type
  * signatures.
  */
-pub struct HttpRouteHandler<HandlerType, FuncParams>
+pub struct HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /** the actual HttpHandlerFunc used to implement this route */
     handler: HandlerType,
@@ -282,14 +444,15 @@ where
      * here causes the compiler to behave as though this struct referred to a
      * `FuncParams`, which allows us to use the type parameter below.
      */
-    phantom: PhantomData<FuncParams>,
+    phantom: PhantomData<(FuncParams, ResponseType)>,
 }
 
-impl<HandlerType, FuncParams> Debug
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType> Debug
+    for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "handler: {}", self.label)
@@ -297,11 +460,12 @@ where
 }
 
 #[async_trait]
-impl<HandlerType, FuncParams> RouteHandler
-    for HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType> RouteHandler
+    for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived + 'static,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn label(&self) -> &String {
         &self.label
@@ -331,7 +495,8 @@ where
          */
         let rqctx = Arc::new(rqctx_raw);
         let funcparams = Derived::from_request(Arc::clone(&rqctx)).await?;
-        self.handler.handle_request(rqctx, funcparams).await
+        let future = self.handler.handle_request(rqctx, funcparams);
+        future.await
     }
 }
 
@@ -339,10 +504,12 @@ where
  * Public interfaces
  */
 
-impl<HandlerType, FuncParams> HttpRouteHandler<HandlerType, FuncParams>
+impl<HandlerType, FuncParams, ResponseType>
+    HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
-    HandlerType: HttpHandlerFunc<FuncParams>,
+    HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Derived + 'static,
+    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /**
      * Given a function matching one of the supported API handler function
@@ -514,4 +681,210 @@ where
     ) -> Result<Json<JsonType>, HttpError> {
         http_request_load_json_body(rqctx).await
     }
+}
+
+/*
+ * Response Type Conversion
+ *
+ * See the discussion on macro `impl_HttpHandlerFunc_for_func_with_params` for a
+ * great deal of context on this.
+ */
+
+/**
+ * HttpResponseWrap just wraps a `Result<Response<Body>, HttpError>`.  It should
+ * not be outside the module in which it's defined, but it must be made public
+ * because it's part of trait bounds.
+ */
+pub struct HttpResponseWrap {
+    wrapped: Result<Response<Body>, HttpError>,
+}
+
+impl HttpResponseWrap {
+    fn new(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+        HttpResponseWrap {
+            wrapped: result,
+        }
+    }
+}
+
+/**
+ * This conversion is necessary for the last stage of the return type
+ * conversion: ultimately, we need to provide this Result type.
+ */
+impl From<HttpResponseWrap> for Result<Response<Body>, HttpError> {
+    fn from(wrap: HttpResponseWrap) -> Result<Response<Body>, HttpError> {
+        wrap.wrapped
+    }
+}
+
+/**
+ * This conversion is necessary because it's clearer to let custom response
+ * types implement conversions to this Result type rather than
+ * `HttpResponseWrap`, but that means we have to do this conversion ourselves.
+ */
+impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
+    fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
+        HttpResponseWrap::new(result)
+    }
+}
+
+/**
+ * This conversion is necessary for handler functions that return
+ * `Result<Response<Body>, HttpError>` because the `Respose<Body>` itself needs
+ * to be convertible into `HttpResponseWrap.
+ */
+impl From<Response<Body>> for HttpResponseWrap {
+    fn from(response: Response<Body>) -> HttpResponseWrap {
+        HttpResponseWrap::new(Ok(response))
+    }
+}
+
+/**
+ * This conversion is necessary for handler functions that return any of our
+ * specific types that implement `HttpResponse`.
+ */
+impl<T: HttpResponse> From<T> for HttpResponseWrap {
+    fn from(t: T) -> HttpResponseWrap {
+        HttpResponseWrap::new(t.into())
+    }
+}
+
+/*
+ * Specific Response Types
+ *
+ * The `HttpResponse` trait and the concrete types below are provided so that
+ * handler functions can return types that indicate at compile time the kind of
+ * HTTP response body they produce.
+ */
+
+/**
+ * The `HttpResponse` trait is used for all of the specific response types that
+ * we provide.  It doesn't provide any functionality on its own but is useful
+ * for marking these related types.
+ */
+pub trait HttpResponse:
+    Into<Result<Response<Body>, HttpError>> + Send + Sync + 'static
+{
+}
+
+/**
+ * `HttpResponseCreated<T: Serialize>` wraps an object of any serializable type.
+ * It denotes an HTTP 201 "Created" response whose body is generated by
+ * serializing the object.
+ */
+/*
+ * TODO-cleanup should ApiObject move into this submodule?  It'd be nice if we
+ * could restrict this to an ApiObject::View (by having T: ApiObject and the
+ * field having type T::View).
+ */
+pub struct HttpResponseCreated<T: Serialize + Send + Sync + 'static>(pub T);
+impl<T: Serialize + Send + Sync + 'static> HttpResponse
+    for HttpResponseCreated<T>
+{
+}
+impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
+    for Result<Response<Body>, HttpError>
+{
+    fn from(
+        HttpResponseCreated(body_object): HttpResponseCreated<T>,
+    ) -> Result<Response<Body>, HttpError> {
+        /* TODO-correctness (or polish?): add Location header */
+        response_for_object(body_object, StatusCode::CREATED)
+    }
+}
+
+/**
+ * `HttpResponseOkOneObject<T: Serialize>` wraps an object of any serializable
+ * type.  It denotes an HTTP 200 "OK" response whose body is generated by
+ * serializing the object.
+ */
+pub struct HttpResponseOkObject<T: Serialize + Send + Sync + 'static>(pub T);
+impl<T: Serialize + Send + Sync + 'static> HttpResponse
+    for HttpResponseOkObject<T>
+{
+}
+impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
+    for Result<Response<Body>, HttpError>
+{
+    fn from(
+        HttpResponseOkObject(body_object): HttpResponseOkObject<T>,
+    ) -> Result<Response<Body>, HttpError> {
+        response_for_object(body_object, StatusCode::OK)
+    }
+}
+
+/**
+ * `HttpResponseOkObjectList<T: Serialize>` wraps a collection of serializable
+ * types.  It denotes an HTTP 200 "OK" response whose body is generated by
+ * serializing the sequence of objects.
+ * TODO-polish We will probably want to add headers for the total result set
+ * size and the number of results that we're returning here, plus the marker.
+ * TODO-cleanup move/copy the type aliases from src/api_model.rs?
+ */
+pub struct HttpResponseOkObjectList<T: Serialize + Send + Sync + 'static>(
+    pub Vec<T>,
+);
+impl<T: Serialize + Send + Sync + 'static> HttpResponse
+    for HttpResponseOkObjectList<T>
+{
+}
+impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
+    for Result<Response<Body>, HttpError>
+{
+    fn from(
+        list_wrap: HttpResponseOkObjectList<T>,
+    ) -> Result<Response<Body>, HttpError> {
+        let list = list_wrap.0;
+        let buffer_list = list.iter().map(serialize_json_stream_element);
+        let mut bytebuf = BytesMut::new();
+        for maybe_buffer in buffer_list {
+            let buffer = maybe_buffer?;
+            bytebuf.put(buffer);
+        }
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
+            .body(bytebuf.freeze().into())?)
+    }
+}
+
+/**
+ * `HttpResponseDeleted` represents an HTTP 204 "No Content" response, intended
+ * for use when an API operation has successfully deleted an object.
+ */
+pub struct HttpResponseDeleted();
+impl HttpResponse for HttpResponseDeleted {}
+impl From<HttpResponseDeleted> for Result<Response<Body>, HttpError> {
+    fn from(_: HttpResponseDeleted) -> Result<Response<Body>, HttpError> {
+        Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .body(Body::empty())?)
+    }
+}
+
+fn response_for_object<T: Serialize>(
+    body_object: T,
+    status_code: StatusCode,
+) -> Result<Response<Body>, HttpError> {
+    let serialized = serde_json::to_string(&body_object)?;
+    Ok(Response::builder()
+        .status(status_code)
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+        .body(serialized.into())?)
+}
+
+/**
+ * Given a Rust object representing an object in the API, serialize the object
+ * to JSON bytes for inclusion in a newline-delimited-JSON ("ndjson") payload.
+ * TODO-hardening: consider proceeding with the response even if one or more of
+ * the objects fails to be serialized.  Otherwise, one bad database record (for
+ * example) could cause us to be unable to list a whole class of items.
+ */
+fn serialize_json_stream_element<T: Serialize>(
+    object: &T,
+) -> Result<Bytes, HttpError> {
+    let mut object_json_bytes = serde_json::to_vec(object)?;
+    object_json_bytes.push(b'\n');
+    Ok(object_json_bytes.into())
 }
