@@ -331,13 +331,17 @@ where
  * `Result<ResponseType, HttpError>` with `ResponseType:
  * Into<Result<Response<Body>>, HttpError>`.  Note that we'd have an extra level
  * of `Result` here, but that's okay.  Now comes the real problem: that means
- * we'd have to define conversions from `Result<ResponseType, HttpError>` to
- * `Result<Response<Body>, HttpError>` -- and that actually matches what we
- * really want to do from first principles -- but we're not allowed to do that
- * because both the source and target types (`Result`) are foreign to this
- * crate.  So instead, we define conversions to our intermediate type
- * `HttpResponseWrap` and trust that the compiler optimizes most of these steps
- * away anyway.
+ * we'd have to define a conversion from `Response<Body>` (an important
+ * `ResponseType` to `Result<Response<Body>, HttpError>`.  That's trivial, of
+ * course, but we're not allowed to do that because both `Response` and `Result`
+ * are foreign to this crate.  So instead, we define conversions to our
+ * intermediate type `HttpResponseWrap` and trust that the compiler optimizes
+ * most of these steps away anyway.  (Another approach might be to define a
+ * different implementation of `HttpHandlerFunc` for the special case of
+ * functions that return `Response<Body>` and drop `ResponseType` altogether in
+ * that implementation.  However, that implementation would conflict with the
+ * more generic one because our two implementations would differ only in their
+ * type bounds, which are not considered when determining conflicts.
  *
  * Another way to think about it is that if you just follow the trait bounds,
  * you would go straight from step 2 to step 6 via a conversion from
