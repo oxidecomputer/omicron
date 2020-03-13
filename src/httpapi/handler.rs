@@ -339,6 +339,14 @@ where
  * `HttpResponseWrap` and trust that the compiler optimizes most of these steps
  * away anyway.
  *
+ * Another way to think about it is that if you just follow the trait bounds,
+ * you would go straight from step 2 to step 6 via a conversion from
+ * `ResponseType` into `HttpResponseWrap`.  That doesn't look so silly.  It's
+ * just that in order to avoid `ResponseType` implementors having to know about
+ * our extra type, we allow them to instead define conversions to
+ * `Result<Response<Body>, HttpError>` and we provide our own converter from
+ * that to `HttpResponseWrap` (which ends up looking silly, as shown above).
+ *
  * Note: the second element in the tuple below (the type parameter, `$T:tt`)
  * ought to be an "ident".  However, that causes us to run afoul of issue
  * dtolnay/async-trait#46.
@@ -690,32 +698,68 @@ impl HttpResponseWrap {
     }
 }
 
+/**
+ * This conversion is necessary for the last stage of the return type
+ * conversion: ultimately, we need to provide this Result type.
+ */
 impl From<HttpResponseWrap> for Result<Response<Body>, HttpError> {
     fn from(wrap: HttpResponseWrap) -> Result<Response<Body>, HttpError> {
         wrap.wrapped
     }
 }
 
+/**
+ * This conversion is necessary because it's clearer to let custom response
+ * types implement conversions to this Result type rather than
+ * `HttpResponseWrap`, but that means we have to do this conversion ourselves.
+ */
 impl From<Result<Response<Body>, HttpError>> for HttpResponseWrap {
     fn from(result: Result<Response<Body>, HttpError>) -> HttpResponseWrap {
         HttpResponseWrap::new(result)
     }
 }
 
+/**
+ * This conversion is necessary for handler functions that return
+ * `Result<Response<Body>, HttpError>` because the `Respose<Body>` itself needs
+ * to be convertible into `HttpResponseWrap.
+ */
 impl From<Response<Body>> for HttpResponseWrap {
     fn from(response: Response<Body>) -> HttpResponseWrap {
         HttpResponseWrap::new(Ok(response))
     }
 }
 
+/**
+ * This conversion is necessary for handler functions that return any of our
+ * specific types that implement `HttpResponse`.
+ */
 impl<T: HttpResponse> From<T> for HttpResponseWrap {
     fn from(t: T) -> HttpResponseWrap {
         HttpResponseWrap::new(t.into())
     }
 }
 
+/*
+ * Specific Response Types
+ *
+ * The `HttpResponse` trait and the concrete types below are provided so that
+ * handler functions can return types that indicate at compile time the kind of
+ * HTTP response body they produce.
+ */
+
+/**
+ * The `HttpResponse` trait is used for all of the specific response types that
+ * we provide.  It doesn't provide any functionality on its own but is useful
+ * for marking these related types.
+ */
 pub trait HttpResponse: Into<Result<Response<Body>, HttpError>> {}
 
+/**
+ * `HttpResponseCreated<T: Serialize>` wraps an object of any serializable type.
+ * It denotes an HTTP 201 "Created" response whose body is derived from
+ * serializing the object.
+ */
 /*
  * TODO-cleanup should ApiObject move into this submodule?  It'd be nice if we
  * could restrict this to an ApiObject::View (by having T: ApiObject and the
