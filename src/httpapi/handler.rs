@@ -690,10 +690,8 @@ impl HttpResponseWrap {
     }
 }
 
-impl From<HttpResponseWrap> for Result<Response<Body>, HttpError>
-{
-    fn from(wrap: HttpResponseWrap) -> Result<Response<Body>, HttpError>
-    {
+impl From<HttpResponseWrap> for Result<Response<Body>, HttpError> {
+    fn from(wrap: HttpResponseWrap) -> Result<Response<Body>, HttpError> {
         wrap.wrapped
     }
 }
@@ -726,11 +724,11 @@ pub trait HttpResponse: Into<Result<Response<Body>, HttpError>> {}
 pub struct HttpResponseCreated<T: Serialize>(pub T);
 impl<T: Serialize> HttpResponse for HttpResponseCreated<T> {}
 impl<T: Serialize> From<HttpResponseCreated<T>>
-for Result<Response<Body>, HttpError>
+    for Result<Response<Body>, HttpError>
 {
-    fn from(HttpResponseCreated(body_object): HttpResponseCreated<T>)
-        -> Result<Response<Body>, HttpError>
-    {
+    fn from(
+        HttpResponseCreated(body_object): HttpResponseCreated<T>,
+    ) -> Result<Response<Body>, HttpError> {
         let serialized = serde_json::to_string(&body_object)?;
         Ok(Response::builder()
             .status(StatusCode::CREATED)
