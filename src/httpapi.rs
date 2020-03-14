@@ -25,6 +25,7 @@ pub use handler::RouteHandler;
 pub use http_util::http_extract_path_params;
 pub use http_util::CONTENT_TYPE_JSON;
 pub use http_util::CONTENT_TYPE_NDJSON;
+pub use http_util::HEADER_REQUEST_ID;
 pub use router::HttpRouter;
 pub use router::RouterLookupResult;
 pub use server::test_endpoints;

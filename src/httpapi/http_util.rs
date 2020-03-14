@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use super::error::HttpError;
 
+pub const HEADER_REQUEST_ID: &str = "x-request-id";
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
 

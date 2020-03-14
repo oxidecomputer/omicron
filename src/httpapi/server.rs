@@ -4,6 +4,7 @@
 
 use super::error::HttpError;
 use super::handler::RequestContext;
+use super::http_util::HEADER_REQUEST_ID;
 use super::router::HttpRouter;
 
 use futures::lock::Mutex;
@@ -20,6 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use uuid::Uuid;
 
 /* TODO Replace this with something else? */
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
@@ -157,15 +159,17 @@ async fn http_request_handle_wrap(
      * with an error and we'll treat it like an error from any of the endpoints
      * themselves.
      */
-    match http_request_handle(server, request).await {
+    let request_id = generate_request_id();
+    match http_request_handle(server, request, &request_id).await {
         Ok(response) => Ok(response),
-        Err(e) => Ok(e.into_response()),
+        Err(e) => Ok(e.into_response(&request_id)),
     }
 }
 
 async fn http_request_handle(
     server: Arc<ServerState>,
     request: Request<Body>,
+    request_id: &str,
 ) -> Result<Response<Body>, HttpError> {
     /*
      * TODO-hardening: is it correct to (and do we correctly) read the entire
@@ -186,8 +190,25 @@ async fn http_request_handle(
         server: Arc::clone(&server),
         request: Arc::new(Mutex::new(request)),
         path_variables: lookup_result.variables,
+        request_id: request_id.to_string(),
     };
-    return lookup_result.handler.handle_request(rqctx).await;
+    let mut response = lookup_result.handler.handle_request(rqctx).await?;
+    response.headers_mut().insert(
+        HEADER_REQUEST_ID,
+        http::header::HeaderValue::from_str(&request_id).unwrap(),
+    );
+    Ok(response)
+}
+
+/*
+ * This function should probably be parametrized by some name of the service
+ * that is expected to be unique within an organization.  That way, it would be
+ * possible to determine from a given request id which service it was from.
+ * TODO should we encode more information here?  Service?  Instance?  Time up to
+ * the hour?
+ */
+fn generate_request_id() -> String {
+    format!("{}", Uuid::new_v4())
 }
 
 /**

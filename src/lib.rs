@@ -13,6 +13,7 @@ pub mod httpapi;
 mod sim;
 
 use httpapi::RequestContext;
+pub use httpapi::HEADER_REQUEST_ID;
 use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;

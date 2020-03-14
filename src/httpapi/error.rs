@@ -99,6 +99,7 @@ pub struct HttpError {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HttpErrorResponseBody {
     pub message: String,
+    pub request_id: String,
 }
 
 impl From<SerdeError> for HttpError {
@@ -166,7 +167,10 @@ impl HttpError {
         }
     }
 
-    pub fn into_response(self) -> hyper::Response<hyper::Body> {
+    pub fn into_response(
+        self,
+        request_id: &str,
+    ) -> hyper::Response<hyper::Body> {
         /*
          * TODO-hardening: consider handling the operational errors that the
          * Serde serialization fails or the response construction fails.  In
@@ -183,9 +187,11 @@ impl HttpError {
                 http::header::CONTENT_TYPE,
                 super::http_util::CONTENT_TYPE_JSON,
             )
+            .header(super::http_util::HEADER_REQUEST_ID, request_id)
             .body(
                 serde_json::to_string_pretty(&HttpErrorResponseBody {
                     message: self.external_message,
+                    request_id: request_id.to_string(),
                 })
                 .unwrap()
                 .into(),

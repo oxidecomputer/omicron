@@ -163,6 +163,8 @@ pub struct RequestContext {
     pub request: Arc<Mutex<Request<Body>>>,
     /** HTTP request routing variables */
     pub path_variables: BTreeMap<String, String>,
+    /** unique id assigned to this request */
+    pub request_id: String,
 }
 
 /**
@@ -359,6 +361,11 @@ where
  * Note: the second element in the tuple below (the type parameter, `$T:tt`)
  * ought to be an "ident".  However, that causes us to run afoul of issue
  * dtolnay/async-trait#46.
+ *
+ * TODO-cleanup: could this all be a lot simpler if we made callers that want to
+ * use `Response<Body>` wrap it in our own type?  That'd be nice anyway because
+ * we want that to be the uncommon case.  We could even generate a warning that
+ * has to be gagged or something.
  */
 macro_rules! impl_HttpHandlerFunc_for_func_with_params
     ( { $(($i:tt, $T:tt)),* } => {

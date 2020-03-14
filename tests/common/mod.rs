@@ -89,8 +89,8 @@ pub async fn test_teardown(testctx: TestContext) {
  * List of allowed HTTP headers in responses.  This is used to make sure we
  * don't leak headers unexpectedly.
  */
-const ALLOWED_HEADER_NAMES: [&str; 3] =
-    ["content-length", "content-type", "date"];
+const ALLOWED_HEADER_NAMES: [&str; 4] =
+    ["content-length", "content-type", "date", "x-request-id"];
 
 /**
  * Execute an HTTP request against the test server and perform basic validation
@@ -195,6 +195,17 @@ pub async fn make_request_with_body(
     assert!(time_request.timestamp() <= time_after + 1);
 
     /*
+     * Validate that we have a request id header.
+     * TODO-coverage check that it's unique among requests we've issued
+     */
+    let request_id_header = headers
+        .get(oxide_api_prototype::HEADER_REQUEST_ID)
+        .expect("missing request id header")
+        .to_str()
+        .expect("non-ASCII characters in request id")
+        .to_string();
+
+    /*
      * For "204 No Content" responses, validate that we got no content in the
      * body.
      */
@@ -218,6 +229,7 @@ pub async fn make_request_with_body(
      */
     let error_body: HttpErrorResponseBody = read_json(&mut response).await;
     eprintln!("client error: {:?}", error_body);
+    assert_eq!(error_body.request_id, request_id_header);
     Err(error_body)
 }
 
