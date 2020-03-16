@@ -20,6 +20,10 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
+#[macro_use] extern crate slog;
+use slog::Drain;
+use slog::Logger;
+
 /**
  * Represents configuration for the whole API server.
  */
@@ -43,6 +47,7 @@ pub fn api_load_config_from_file(
  */
 pub struct ApiServer {
     pub http_server: httpapi::HttpServer,
+    pub log: Logger,
 }
 
 /**
@@ -67,15 +72,19 @@ impl ApiServer {
         });
 
         let mut router = httpapi::HttpRouter::new();
+
+        let log = create_logger(&config);
         api_http_entrypoints::api_register_entrypoints(&mut router);
         let http_server = httpapi::HttpServer::new(
             &config.bind_address,
             router,
             Box::new(api_state),
+            log.new(slog::o!()),
         )?;
 
         Ok(ApiServer {
-            http_server: http_server,
+            http_server,
+            log,
         })
     }
 }
@@ -96,4 +105,23 @@ pub fn api_backend(
         .downcast_ref::<Arc<ApiRequestContext>>()
         .expect("api_backend(): wrong type for private data");
     return Arc::clone(&apictx.backend);
+}
+
+/**
+ * Create the root logger based on the requested configuration.
+ */
+fn create_logger(config: &ApiServerConfig) -> Logger
+{
+    /*
+     * TODO-hardening
+     * We use an async drain for the terminal logger to take care of
+     * synchronization.  That's mainly because the other two options use a
+     * std::sync::Mutex, which is not futures-aware and is likely to foul up our
+     * executor.  However, we have not verified that the async implementation
+     * behaves reasonably under backpressure.
+     */
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    slog::Logger::root(drain, o!())
 }

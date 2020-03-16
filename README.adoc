@@ -87,6 +87,11 @@ general, servers can bind to more than one IP address and port, but this is not
 
 == TODO
 
+* Currently adding logging
+** remove remaining uses of `eprintln!` (in test suite)
+** add support for LOG_LEVEL
+** then change one message to `trace!` (see XXX)
+** add support for config file -- setting stdout or file (bunyan) output
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24
@@ -95,7 +100,6 @@ general, servers can bind to more than one IP address and port, but this is not
 *** Rust macros
 *** Tooling to generate spec - API Docs
 *** Client library/libraries and CLI
-** Basic configuration
 ** Debugging / monitoring
 *** Prometheus?
 *** Server / request logging

@@ -133,6 +133,7 @@ use hyper::Request;
 use hyper::Response;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -165,6 +166,8 @@ pub struct RequestContext {
     pub path_variables: BTreeMap<String, String>,
     /** unique id assigned to this request */
     pub request_id: String,
+    /** logger for this specific request */
+    pub log: Logger,
 }
 
 /**
