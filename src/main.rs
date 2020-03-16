@@ -14,24 +14,38 @@
  * - Move even more of the server setup into api_server.rs
  */
 
-use std::net::SocketAddr;
-
-/** TCP IP address and port on which to bind */
-const SERVER_BIND_ADDRESS: &str = "127.0.0.1:12220";
+use oxide_api_prototype::api_load_config_from_file;
 
 #[tokio::main]
 async fn main() {
-    let bind_addr: SocketAddr = SERVER_BIND_ADDRESS.parse().unwrap();
-    let mut server = match oxide_api_prototype::ApiServer::new(&bind_addr) {
+    let cmd_args = std::env::args().collect::<Vec<String>>();
+
+    if cmd_args.len() != 2 {
+        eprintln!("usage: {} CONFIG_FILE_PATH", cmd_args[0]);
+        eprintln!("See README.adoc for more information.");
+        std::process::exit(2);
+    }
+
+    let config_file_path = std::path::Path::new(&cmd_args[1]);
+    let config = match api_load_config_from_file(config_file_path) {
+        Ok(c) => c,
+        Err(error) => {
+            eprintln!("{}: {}", cmd_args[0], error);
+            std::process::exit(1);
+        }
+    };
+
+    let mut server = match oxide_api_prototype::ApiServer::new(&config) {
         Err(e) => {
-            eprintln!("failed to set up server: {}", e);
+            eprintln!("{}: {}", cmd_args[0], e);
             std::process::exit(1);
         }
         Ok(s) => s,
     };
+
     eprintln!("listening: http://{}", server.http_server.local_addr());
     if let Err(error) = server.http_server.run().await {
-        eprintln!("server failed: {}", error);
+        eprintln!("{}: {}", cmd_args[0], error);
         std::process::exit(1);
     }
 }

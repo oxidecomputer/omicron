@@ -13,6 +13,7 @@ use hyper::StatusCode;
 use hyper::Uri;
 use oxide_api_prototype::httpapi::HttpErrorResponseBody;
 use oxide_api_prototype::ApiServer;
+use oxide_api_prototype::ApiServerConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fmt::Debug;
@@ -58,12 +59,14 @@ impl TestContext {
  * client.  The results are encapsulated in the `TestContext` struct.
  */
 pub fn test_setup() -> TestContext {
-    let bind_address: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
+    let bind_address = SocketAddr::V4(std::net::SocketAddrV4::new(
         "127.0.0.1".parse().unwrap(),
         0,
     ));
-    let mut server =
-        ApiServer::new(&bind_address).expect("failed to set up server");
+    let config = ApiServerConfig {
+        bind_address: bind_address,
+    };
+    let mut server = ApiServer::new(&config).expect("failed to set up server");
     let task = server.http_server.run();
 
     TestContext {

@@ -8,18 +8,14 @@ edition = "2018"
 async-trait = "0.1.24"
 bytes = "0.5.4"
 chrono = "0.4"
-hyper = "0.13"
-http = "0.2.0"
-tokio = { version = "0.2", features = [ "full" ] }
 futures = "0.3.1"
-serde = { version = "1.0", features = [ "derive" ] }
-serde_urlencoded = "0.6"
-#serde_derive = "1.0"
-serde_json = "1.0"
-url = "^2.1"
-#log = "0.3.0"
-#url = {version = "1.5", optional = true}
-#percent-encoding = {version = "1.0.0", optional = true}
-#clap = "2.25"
-uuid = { version = "0.8", features = [ "serde", "v4" ] }
+http = "0.2.0"
+hyper = "0.13"
 openapi = { path = "lib/openapi" }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+serde_urlencoded = "0.6"
+tokio = { version = "0.2", features = [ "full" ] }
+toml = "0.5.6"
+url = "^2.1"
+uuid = { version = "0.8", features = [ "serde", "v4" ] }

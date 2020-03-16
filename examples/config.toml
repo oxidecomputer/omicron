@@ -1,0 +1,6 @@
+#
+# Oxide API: example configuration file
+#
+
+# IP address and TCP port on which to listen for connections
+bind_address = "127.0.0.1:12220"

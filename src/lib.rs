@@ -14,21 +14,48 @@ mod sim;
 
 use httpapi::RequestContext;
 pub use httpapi::HEADER_REQUEST_ID;
+use serde::Deserialize;
 use std::any::Any;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
+/**
+ * Represents configuration for the whole API server.
+ */
+#[derive(Deserialize)]
+pub struct ApiServerConfig {
+    pub bind_address: SocketAddr,
+}
+
+pub fn api_load_config_from_file(
+    path: &Path,
+) -> Result<ApiServerConfig, String> {
+    let config_contents = std::fs::read_to_string(path)
+        .map_err(|error| format!("read \"{}\": {}", path.display(), error))?;
+    let config_parsed: ApiServerConfig = toml::from_str(&config_contents)
+        .map_err(|error| format!("parse \"{}\": {}", path.display(), error))?;
+    Ok(config_parsed)
+}
+
+/**
+ * Consumer handle for the API server.
+ */
 pub struct ApiServer {
     pub http_server: httpapi::HttpServer,
 }
 
+/**
+ * API-specific state that we'll associate with the server and make available to
+ * API request handler functions.  See `api_backend()`.
+ */
 pub struct ApiRequestContext {
     pub backend: Arc<dyn api_model::ApiBackend>,
 }
 
 impl ApiServer {
     pub fn new(
-        bind_address: &SocketAddr,
+        config: &ApiServerConfig,
     ) -> Result<ApiServer, hyper::error::Error> {
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
@@ -42,7 +69,7 @@ impl ApiServer {
         let mut router = httpapi::HttpRouter::new();
         api_http_entrypoints::api_register_entrypoints(&mut router);
         let http_server = httpapi::HttpServer::new(
-            bind_address,
+            &config.bind_address,
             router,
             Box::new(api_state),
         )?;
