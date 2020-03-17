@@ -17,6 +17,8 @@ use common::read_ndjson;
 use common::test_setup;
 use common::test_teardown;
 
+#[macro_use] extern crate slog;
+
 /*
  * Most of our tests wind up in this one test function primarily because they
  * depend on each other and Rust is allowed to parallelize execution of separate

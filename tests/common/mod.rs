@@ -19,6 +19,7 @@ use serde::Serialize;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tokio::task::JoinHandle;
+use slog::Logger;
 
 /**
  * TestContext encapsulates several pieces needed for these basic tests.
@@ -34,6 +35,8 @@ pub struct TestContext {
     pub api_server_task: JoinHandle<Result<(), hyper::error::Error>>,
     /** HTTP client, used for making requests against the test server */
     pub client: Client<HttpConnector>,
+    /** logger for the test suite HTTP client */
+    pub client_log: Logger,
 }
 
 impl TestContext {
@@ -69,11 +72,15 @@ pub fn test_setup() -> TestContext {
     let mut server = ApiServer::new(&config).expect("failed to set up server");
     let task = server.http_server.run();
 
+    let server_addr = server.http_server.local_addr();
+    let client_log = server.log.new(o!("http_client" => "test suite"));
+
     TestContext {
-        bind_address: server.http_server.local_addr(),
+        bind_address: server_addr,
         api_server: server,
         api_server_task: task,
         client: Client::new(),
+        client_log: client_log,
     }
 }
 
@@ -130,7 +137,11 @@ pub async fn make_request_with_body(
     let uri = testctx.url(path);
 
     let time_before = chrono::offset::Utc::now().timestamp();
-    eprintln!("client request: {} {}\nbody:\n{:?}", method, uri, &body);
+    info!(testctx.client_log, "client request";
+        "method" => %method,
+        "uri" => %uri,
+        "body" => ?&body,
+    );
 
     let mut response = testctx
         .client
@@ -146,7 +157,7 @@ pub async fn make_request_with_body(
 
     /* Check that we got the expected response code. */
     let status = response.status();
-    eprintln!("client received response: status {}", status);
+    info!(testctx.client_log, "client received response"; "status" => ?status);
     assert_eq!(expected_status, status);
 
     /*
@@ -231,7 +242,7 @@ pub async fn make_request_with_body(
      * then return that.
      */
     let error_body: HttpErrorResponseBody = read_json(&mut response).await;
-    eprintln!("client error: {:?}", error_body);
+    info!(testctx.client_log, "client error"; "error_body" => ?error_body);
     assert_eq!(error_body.request_id, request_id_header);
     Err(error_body)
 }

@@ -103,7 +103,7 @@ general, servers can bind to more than one IP address and port, but this is not
 ** Debugging / monitoring
 *** Prometheus?
 *** Server / request logging
-*** OpenTracing
+*** OpenTracing?  OpenTelemetry?
 *** Dynamic tracing?
 *** Core files?
 *** Internal APIs for:
