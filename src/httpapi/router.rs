@@ -148,10 +148,16 @@ pub struct HttpRouter {
 struct HttpRouterNode {
     /** Handlers for each of the HTTP methods defined for this node. */
     method_handlers: BTreeMap<String, Box<dyn RouteHandler>>,
-    /** Outgoing edges for different literal paths. */
-    edges_literals: BTreeMap<String, Box<HttpRouterNode>>,
+    /** Edges linking to child nodes. */
+    edges: HttpRouterEdges,
+}
+
+#[derive(Debug)]
+enum HttpRouterEdges {
+    /** Outgoing edges for literal paths. */
+    Literals(BTreeMap<String, Box<HttpRouterNode>>),
     /** Outgoing edges for variable-named paths. */
-    edge_varname: Option<HttpRouterEdgeVariable>,
+    Variable((String, Box<HttpRouterNode>)),
 }
 
 /**
