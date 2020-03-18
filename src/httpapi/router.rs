@@ -157,7 +157,7 @@ enum HttpRouterEdges {
     /** Outgoing edges for literal paths. */
     Literals(BTreeMap<String, Box<HttpRouterNode>>),
     /** Outgoing edges for variable-named paths. */
-    Variable((String, Box<HttpRouterNode>)),
+    Variable(String, Box<HttpRouterNode>),
 }
 
 /**
@@ -276,7 +276,7 @@ impl HttpRouter {
          * that does not apply here.  We could certainly make one up (e.g.,
          * "http://127.0.0.1") and construct a URL whose path matches the path
          * we were given.  However, while it seems natural that our internal
-         * representaiton would not be percent-encoded, the "url" crate
+         * representation would not be percent-encoded, the "url" crate
          * percent-encodes any path that it's given.  Further, we probably want
          * to treat consecutive "/" characters as equivalent to a single "/",
          * but that crate treats them separately (which is not unreasonable,
@@ -311,16 +311,17 @@ impl HttpRouter {
 
             node = match segment {
                 PathSegment::Literal(lit) => {
-                    match node.edges.get_or_insert(HttpRouterEdges::Literals(
-                        BTreeMap::new(),
-                    )) {
+                    let edges = node.edges.get_or_insert(
+                        HttpRouterEdges::Literals(BTreeMap::new()),
+                    );
+                    match edges {
                         /*
                          * We do not allow both literal and variable edges from the
                          * same node.  This could be supported (with some caveats
                          * about how matching would work), but it seems more likely
                          * to be a mistake.
                          */
-                        HttpRouterEdges::Variable((varname, _)) => {
+                        HttpRouterEdges::Variable(varname, _) => {
                             panic!(
                                 "URI path \"{}\": attempted to register route \
                                  for literal path segment \"{}\" when a route \
@@ -331,7 +332,7 @@ impl HttpRouter {
                         }
                         HttpRouterEdges::Literals(ref mut literals) => literals
                             .entry(lit)
-                            .or_insert(Box::new(HttpRouterNode::new())),
+                            .or_insert_with(|| Box::new(HttpRouterNode::new())),
                     }
                 }
 
@@ -350,10 +351,12 @@ impl HttpRouter {
                     }
                     varnames.insert(new_varname.clone());
 
-                    match node.edges.get_or_insert(HttpRouterEdges::Variable((
-                        new_varname.clone(),
-                        Box::new(HttpRouterNode::new()),
-                    ))) {
+                    let edges =
+                        node.edges.get_or_insert(HttpRouterEdges::Variable(
+                            new_varname.clone(),
+                            Box::new(HttpRouterNode::new()),
+                        ));
+                    match edges {
                         /*
                          * See the analogous check above about combining literal and
                          * variable path segments from the same resource.
@@ -366,7 +369,7 @@ impl HttpRouter {
                             path, new_varname
                         ),
 
-                        HttpRouterEdges::Variable((varname, ref mut node)) => {
+                        HttpRouterEdges::Variable(varname, ref mut node) => {
                             if *new_varname != *varname {
                                 /*
                                  * Don't allow people to use different names for the
@@ -391,7 +394,7 @@ impl HttpRouter {
         }
 
         let methodname = method.as_str().to_uppercase();
-        if let Some(_) = node.method_handlers.get(&methodname) {
+        if node.method_handlers.get(&methodname).is_some() {
             panic!(
                 "URI path \"{}\": attempted to create duplicate route for \
                  method \"{}\"",
@@ -430,12 +433,12 @@ impl HttpRouter {
                 Some(HttpRouterEdges::Literals(edges)) => {
                     edges.get(&segment_string)
                 }
-                Some(HttpRouterEdges::Variable((varname, ref node))) => {
+                Some(HttpRouterEdges::Variable(varname, ref node)) => {
                     variables.insert(varname.clone(), segment_string);
                     Some(node)
                 }
             }
-            .ok_or(HttpError::for_status(StatusCode::NOT_FOUND))?;
+            .ok_or_else(|| HttpError::for_status(StatusCode::NOT_FOUND))?;
         }
 
         /*
@@ -453,7 +456,9 @@ impl HttpRouter {
                 handler,
                 variables,
             })
-            .ok_or(HttpError::for_status(StatusCode::METHOD_NOT_ALLOWED))
+            .ok_or_else(|| {
+                HttpError::for_status(StatusCode::METHOD_NOT_ALLOWED)
+            })
     }
 }
 
