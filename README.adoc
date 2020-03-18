@@ -88,13 +88,7 @@ general, servers can bind to more than one IP address and port, but this is not
 == TODO
 
 * Currently adding logging
-** add support for config file -- setting stdout or file (bunyan) output
-*** fix test suite
-**** XXX current status: built "test suite mode", but it needs to use a random identifier instead of pid, it seems.  The pids are all the same.  Also need to go review the code I just wrote and retest the "stdout" and "file" modes.
-*** add level to config file
-** figure out why logs are coming out of the test suite -- aren't they supposed to be captured?
 ** add support for LOG_LEVEL override
-** then change one message to `trace!` (see XXX)
 ** add tests for all of this
 * Flesh out more endpoints and simulator
 * Write out road map

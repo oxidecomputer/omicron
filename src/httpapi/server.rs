@@ -175,8 +175,7 @@ async fn http_request_handle_wrap(
         "method" => request.method().as_str().to_string(),
         "uri" => format!("{}", request.uri()),
     ));
-    // XXX should be trace!
-    debug!(request_log, "incoming request");
+    trace!(request_log, "incoming request");
     let maybe_response = http_request_handle(
         Arc::clone(&server),
         request,

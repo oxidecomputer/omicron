@@ -28,6 +28,7 @@ use std::sync::Arc;
 extern crate slog;
 use slog::Drain;
 use slog::Logger;
+use slog::Level;
 
 /**
  * Represents configuration for the whole API server.
@@ -149,9 +150,13 @@ pub fn api_backend(
 #[serde(tag = "mode")]
 pub enum ApiServerConfigLogging {
     #[serde(rename = "stdout-terminal")]
-    StdoutTerminal,
+    StdoutTerminal { level: ApiServerConfigLoggingLevel },
     #[serde(rename = "file")]
-    File { path: String, if_exists: ApiServerConfigLoggingIfExists },
+    File {
+        level: ApiServerConfigLoggingLevel,
+        path: String,
+        if_exists: ApiServerConfigLoggingIfExists,
+    },
     /*
      * "test-suite" mode generates log files in a particular directory that are
      * named with both the program name and process id.  It would be nice to
@@ -167,7 +172,7 @@ pub enum ApiServerConfigLogging {
      * "append"`.
      */
     #[serde(rename = "test-suite")]
-    TestSuite { directory: String },
+    TestSuite { level: ApiServerConfigLoggingLevel, directory: String },
 }
 
 #[derive(Deserialize)]
@@ -178,6 +183,35 @@ pub enum ApiServerConfigLoggingIfExists {
     Truncate,
     #[serde(rename = "append")]
     Append,
+}
+
+#[derive(Deserialize)]
+pub enum ApiServerConfigLoggingLevel {
+    #[serde(rename = "trace")]
+    Trace,
+    #[serde(rename = "debug")]
+    Debug,
+    #[serde(rename = "info")]
+    Info,
+    #[serde(rename = "warn")]
+    Warn,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "critical")]
+    Critical,
+}
+
+impl From<&ApiServerConfigLoggingLevel> for Level {
+    fn from(config_level: &ApiServerConfigLoggingLevel) -> Level {
+        match config_level {
+            ApiServerConfigLoggingLevel::Trace => Level::Trace,
+            ApiServerConfigLoggingLevel::Debug => Level::Debug,
+            ApiServerConfigLoggingLevel::Info => Level::Info,
+            ApiServerConfigLoggingLevel::Warn => Level::Warning,
+            ApiServerConfigLoggingLevel::Error => Level::Error,
+            ApiServerConfigLoggingLevel::Critical => Level::Critical,
+        }
+    }
 }
 
 static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
@@ -199,14 +233,18 @@ fn create_logger(
      */
     let pid = std::process::id();
     match &config.log {
-        ApiServerConfigLogging::StdoutTerminal => {
+        ApiServerConfigLogging::StdoutTerminal {
+            level,
+        } => {
             let decorator = slog_term::TermDecorator::new().build();
             let drain = slog_term::FullFormat::new(decorator).build().fuse();
-            let async_drain = slog_async::Async::new(drain).build().fuse();
+            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain = slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
 
         ApiServerConfigLogging::File {
+            level,
             path,
             if_exists,
         } => {
@@ -227,11 +265,13 @@ fn create_logger(
             }
 
             let drain = log_drain_for_file(&open_options, Path::new(path))?;
-            let async_drain = slog_async::Async::new(drain).build().fuse();
+            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain = slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
 
         ApiServerConfigLogging::TestSuite {
+            level,
             directory,
         } => {
             let mut open_options = std::fs::OpenOptions::new();
@@ -250,7 +290,8 @@ fn create_logger(
             pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
 
             let drain = log_drain_for_file(&open_options, pathbuf.as_path())?;
-            let async_drain = slog_async::Async::new(drain).build().fuse();
+            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain = slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
     }
