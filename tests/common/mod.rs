@@ -16,10 +16,11 @@ use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use slog::Logger;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::path::Path;
 use tokio::task::JoinHandle;
-use slog::Logger;
 
 /**
  * TestContext encapsulates several pieces needed for these basic tests.
@@ -62,13 +63,18 @@ impl TestContext {
  * client.  The results are encapsulated in the `TestContext` struct.
  */
 pub fn test_setup() -> TestContext {
-    let bind_address = SocketAddr::V4(std::net::SocketAddrV4::new(
-        "127.0.0.1".parse().unwrap(),
-        0,
-    ));
-    let config = ApiServerConfig {
-        bind_address: bind_address,
-    };
+    /*
+     * We load as much configuration as we can from the test suite configuration
+     * file.  However, we override the TCP port for the server to 0, indicating
+     * that we wish to bind to any available port.  This is necessary because
+     * we'll run multiple servers concurrently, so there's no one port that we
+     * could reasonably pick.
+     */
+    let config_file_path = Path::new("tests/config.test.toml");
+    let mut config = ApiServerConfig::from_file(config_file_path)
+        .expect("failed to load config.test.toml");
+    config.bind_address.set_port(0);
+
     let mut server = ApiServer::new(&config).expect("failed to set up server");
     let task = server.http_server.run();
 

@@ -34,14 +34,19 @@ pub struct ApiServerConfig {
     pub log: ApiServerConfigLogging,
 }
 
-pub fn api_load_config_from_file(
-    path: &Path,
-) -> Result<ApiServerConfig, String> {
-    let config_contents = std::fs::read_to_string(path)
-        .map_err(|error| format!("read \"{}\": {}", path.display(), error))?;
-    let config_parsed: ApiServerConfig = toml::from_str(&config_contents)
-        .map_err(|error| format!("parse \"{}\": {}", path.display(), error))?;
-    Ok(config_parsed)
+impl ApiServerConfig {
+    /**
+     * Load an `ApiServerConfig` from the given TOML file.  The format is
+     * described in the README.  This config object can then be used to create a
+     * new `ApiServer`.
+     */
+    pub fn from_file(path: &Path) -> Result<ApiServerConfig, String> {
+        let config_contents = std::fs::read_to_string(path)
+            .map_err(|error| format!("read \"{}\": {}", path.display(), error))?;
+        let config_parsed: ApiServerConfig = toml::from_str(&config_contents)
+            .map_err(|error| format!("parse \"{}\": {}", path.display(), error))?;
+        Ok(config_parsed)
+    }
 }
 
 /**
@@ -57,6 +62,7 @@ pub struct ApiServer {
  * useful, this could become an enum with specific failure modes, but for now
  * the caller is just going to print the message and bail anyway.
  */
+#[derive(Debug)]
 pub struct ApiServerCreateError(String);
 
 impl From<hyper::error::Error> for ApiServerCreateError {
@@ -178,6 +184,7 @@ fn create_logger(
         } => {
             let mut open_options = std::fs::OpenOptions::new();
             open_options.write(true);
+            open_options.create(true);
 
             match if_exists {
                 ApiServerConfigLoggingIfExists::Fail => {
@@ -201,7 +208,7 @@ fn create_logger(
             let drain = slog_bunyan::with_name("oxide-api", file).build().fuse();
             let async_drain = slog_async::Async::new(drain).build().fuse();
             eprintln!("note: configured to log to \"{}\"", path);
-            Ok(slog::Logger::root(async_drain, o!()))
+            Ok(slog::Logger::root(async_drain, o!("pid" => std::process::id())))
         }
     }
 }

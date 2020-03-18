@@ -2,3 +2,4 @@
 **/*.rs.bk
 rusty-tags.vi
 README.html
+test-suite.log
