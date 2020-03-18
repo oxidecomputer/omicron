@@ -198,9 +198,9 @@ fn create_logger(
                     return Err(ApiServerCreateError(message));
                 }
             };
-            let decorator = slog_term::PlainDecorator::new(file);
-            let drain = slog_term::FullFormat::new(decorator).build().fuse();
+            let drain = slog_bunyan::with_name("oxide-api", file).build().fuse();
             let async_drain = slog_async::Async::new(drain).build().fuse();
+            eprintln!("note: configured to log to \"{}\"", path);
             Ok(slog::Logger::root(async_drain, o!()))
         }
     }

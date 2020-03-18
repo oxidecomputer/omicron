@@ -18,6 +18,7 @@ serde_urlencoded = "0.6"
 slog = "2.5"
 slog-async = "2.4"
 slog-term = "2.5"
+slog-bunyan = "2.2"
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 url = "^2.1"
