@@ -10,6 +10,5 @@
 bind_address = "127.0.0.1:0"
 
 [log]
-mode = "file"
-path = "test-suite.log"
-if_exists = "append"
+mode = "test-suite"
+directory = "logs"

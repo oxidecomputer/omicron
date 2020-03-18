@@ -16,8 +16,12 @@ use httpapi::RequestContext;
 pub use httpapi::HEADER_REQUEST_ID;
 use serde::Deserialize;
 use std::any::Any;
+use std::fs::OpenOptions;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 #[macro_use]
@@ -41,10 +45,14 @@ impl ApiServerConfig {
      * new `ApiServer`.
      */
     pub fn from_file(path: &Path) -> Result<ApiServerConfig, String> {
-        let config_contents = std::fs::read_to_string(path)
-            .map_err(|error| format!("read \"{}\": {}", path.display(), error))?;
+        let config_contents =
+            std::fs::read_to_string(path).map_err(|error| {
+                format!("read \"{}\": {}", path.display(), error)
+            })?;
         let config_parsed: ApiServerConfig = toml::from_str(&config_contents)
-            .map_err(|error| format!("parse \"{}\": {}", path.display(), error))?;
+            .map_err(|error| {
+            format!("parse \"{}\": {}", path.display(), error)
+        })?;
         Ok(config_parsed)
     }
 }
@@ -144,6 +152,22 @@ pub enum ApiServerConfigLogging {
     StdoutTerminal,
     #[serde(rename = "file")]
     File { path: String, if_exists: ApiServerConfigLoggingIfExists },
+    /*
+     * "test-suite" mode generates log files in a particular directory that are
+     * named with both the program name and process id.  It would be nice to
+     * allow some kinds of expansions in the "file" mode instead (e.g., for
+     * `{program_name}` and `{pid}`).  Then we wouldn't need a special mode
+     * here.  There's the `runtime-fmt` crate that could be used for this, but
+     * it requires nightly rust.  For now, we punt -- and don't pretend that
+     * this is any more generic than it is -- a mode for configuring logging for
+     * the test suite.
+     *
+     * Note that neither of the other two modes is suitable for multiple
+     * processes logging to the same file, even when setting `if_exists =
+     * "append"`.
+     */
+    #[serde(rename = "test-suite")]
+    TestSuite { directory: String },
 }
 
 #[derive(Deserialize)]
@@ -155,6 +179,8 @@ pub enum ApiServerConfigLoggingIfExists {
     #[serde(rename = "append")]
     Append,
 }
+
+static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
 
 /**
  * Create the root logger based on the requested configuration.
@@ -171,13 +197,15 @@ fn create_logger(
      * behaves reasonably under backpressure.
      * TODO-cleanup can we commonize the common lines below?
      */
+    let pid = std::process::id();
     match &config.log {
         ApiServerConfigLogging::StdoutTerminal => {
             let decorator = slog_term::TermDecorator::new().build();
             let drain = slog_term::FullFormat::new(decorator).build().fuse();
             let async_drain = slog_async::Async::new(drain).build().fuse();
-            Ok(slog::Logger::root(async_drain, o!()))
+            Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
+
         ApiServerConfigLogging::File {
             path,
             if_exists,
@@ -198,17 +226,54 @@ fn create_logger(
                 }
             }
 
-            let file = match open_options.open(path) {
-                Ok(file) => file,
-                Err(e) => {
-                    let message = format!("open log file \"{}\": {}", path, e);
-                    return Err(ApiServerCreateError(message));
-                }
-            };
-            let drain = slog_bunyan::with_name("oxide-api", file).build().fuse();
+            let drain = log_drain_for_file(&open_options, Path::new(path))?;
             let async_drain = slog_async::Async::new(drain).build().fuse();
-            eprintln!("note: configured to log to \"{}\"", path);
-            Ok(slog::Logger::root(async_drain, o!("pid" => std::process::id())))
+            Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
+        }
+
+        ApiServerConfigLogging::TestSuite {
+            directory,
+        } => {
+            let mut open_options = std::fs::OpenOptions::new();
+            open_options.write(true).create_new(true);
+
+            let arg0path =
+                std::env::args().next().expect("expected process arg0");
+            let arg0 = Path::new(&arg0path)
+                .file_name()
+                .expect("expected arg0 filename")
+                .to_str()
+                .expect("expected arg0 filename to be valid Unicode");
+            let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
+            let mut pathbuf = PathBuf::new();
+            pathbuf.push(directory);
+            pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
+
+            let drain = log_drain_for_file(&open_options, pathbuf.as_path())?;
+            let async_drain = slog_async::Async::new(drain).build().fuse();
+            Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
     }
+}
+
+fn log_drain_for_file(
+    open_options: &OpenOptions,
+    path: &Path,
+) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, ApiServerCreateError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            let p = path.display();
+            let message = format!("open log file \"{}\": {}", p, e);
+            ApiServerCreateError(message)
+        })?;
+    }
+
+    let file = open_options.open(path).map_err(|e| {
+        let p = path.display();
+        let message = format!("open log file \"{}\": {}", p, e);
+        ApiServerCreateError(message)
+    })?;
+
+    eprintln!("note: configured to log to \"{}\"", path.display());
+    Ok(slog_bunyan::with_name("oxide-api", file).build().fuse())
 }
