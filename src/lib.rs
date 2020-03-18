@@ -27,8 +27,8 @@ use std::sync::Arc;
 #[macro_use]
 extern crate slog;
 use slog::Drain;
-use slog::Logger;
 use slog::Level;
+use slog::Logger;
 
 /**
  * Represents configuration for the whole API server.
@@ -238,8 +238,10 @@ fn create_logger(
         } => {
             let decorator = slog_term::TermDecorator::new().build();
             let drain = slog_term::FullFormat::new(decorator).build().fuse();
-            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
-            let async_drain = slog_async::Async::new(level_drain).build().fuse();
+            let level_drain =
+                slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain =
+                slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
 
@@ -265,8 +267,10 @@ fn create_logger(
             }
 
             let drain = log_drain_for_file(&open_options, Path::new(path))?;
-            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
-            let async_drain = slog_async::Async::new(level_drain).build().fuse();
+            let level_drain =
+                slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain =
+                slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
 
@@ -290,8 +294,10 @@ fn create_logger(
             pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
 
             let drain = log_drain_for_file(&open_options, pathbuf.as_path())?;
-            let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
-            let async_drain = slog_async::Async::new(level_drain).build().fuse();
+            let level_drain =
+                slog::LevelFilter(drain, Level::from(level)).fuse();
+            let async_drain =
+                slog_async::Async::new(level_drain).build().fuse();
             Ok(slog::Logger::root(async_drain, o!("pid" => pid)))
         }
     }

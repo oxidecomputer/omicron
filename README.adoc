@@ -88,8 +88,8 @@ general, servers can bind to more than one IP address and port, but this is not
 == TODO
 
 * Currently adding logging
-** add support for LOG_LEVEL override
 ** add tests for all of this
+** document new config properties
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

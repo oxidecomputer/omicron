@@ -198,7 +198,7 @@ async fn http_request_handle_wrap(
             );
 
             r
-        },
+        }
 
         Ok(response) => {
             /* TODO-debug: add request and response headers here */
