@@ -88,10 +88,13 @@ general, servers can bind to more than one IP address and port, but this is not
 == TODO
 
 * Currently adding logging
-** remove remaining uses of `eprintln!` (in test suite)
-** add support for LOG_LEVEL
-** then change one message to `trace!` (see XXX)
 ** add support for config file -- setting stdout or file (bunyan) output
+*** file output should be bunyan instead of what it is now
+*** add level to config file
+** figure out why logs are coming out of the test suite -- aren't they supposed to be captured?
+** add support for LOG_LEVEL override
+** then change one message to `trace!` (see XXX)
+** add tests for all of this
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

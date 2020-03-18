@@ -20,7 +20,8 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-#[macro_use] extern crate slog;
+#[macro_use]
+extern crate slog;
 use slog::Drain;
 use slog::Logger;
 
@@ -30,6 +31,7 @@ use slog::Logger;
 #[derive(Deserialize)]
 pub struct ApiServerConfig {
     pub bind_address: SocketAddr,
+    pub log: ApiServerConfigLogging,
 }
 
 pub fn api_load_config_from_file(
@@ -51,17 +53,28 @@ pub struct ApiServer {
 }
 
 /**
- * API-specific state that we'll associate with the server and make available to
- * API request handler functions.  See `api_backend()`.
+ * Represents an error that can happen while initializing the server.  If
+ * useful, this could become an enum with specific failure modes, but for now
+ * the caller is just going to print the message and bail anyway.
  */
-pub struct ApiRequestContext {
-    pub backend: Arc<dyn api_model::ApiBackend>,
+pub struct ApiServerCreateError(String);
+
+impl From<hyper::error::Error> for ApiServerCreateError {
+    fn from(error: hyper::error::Error) -> ApiServerCreateError {
+        ApiServerCreateError(format!("{}", error))
+    }
+}
+
+impl std::fmt::Display for ApiServerCreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "error creating API server: {}", self.0)
+    }
 }
 
 impl ApiServer {
     pub fn new(
         config: &ApiServerConfig,
-    ) -> Result<ApiServer, hyper::error::Error> {
+    ) -> Result<ApiServer, ApiServerCreateError> {
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
         simbuilder.project_create("simproject2");
@@ -73,7 +86,7 @@ impl ApiServer {
 
         let mut router = httpapi::HttpRouter::new();
 
-        let log = create_logger(&config);
+        let log = create_logger(&config)?;
         api_http_entrypoints::api_register_entrypoints(&mut router);
         let http_server = httpapi::HttpServer::new(
             &config.bind_address,
@@ -87,6 +100,14 @@ impl ApiServer {
             log,
         })
     }
+}
+
+/**
+ * API-specific state that we'll associate with the server and make available to
+ * API request handler functions.  See `api_backend()`.
+ */
+pub struct ApiRequestContext {
+    pub backend: Arc<dyn api_model::ApiBackend>,
 }
 
 /**
@@ -108,10 +129,33 @@ pub fn api_backend(
 }
 
 /**
+ * Represents the logging configuration for a server.
+ */
+#[derive(Deserialize)]
+#[serde(tag = "mode")]
+pub enum ApiServerConfigLogging {
+    #[serde(rename = "stdout-terminal")]
+    StdoutTerminal,
+    #[serde(rename = "file")]
+    File { path: String, if_exists: ApiServerConfigLoggingIfExists },
+}
+
+#[derive(Deserialize)]
+pub enum ApiServerConfigLoggingIfExists {
+    #[serde(rename = "fail")]
+    Fail,
+    #[serde(rename = "truncate")]
+    Truncate,
+    #[serde(rename = "append")]
+    Append,
+}
+
+/**
  * Create the root logger based on the requested configuration.
  */
-fn create_logger(config: &ApiServerConfig) -> Logger
-{
+fn create_logger(
+    config: &ApiServerConfig,
+) -> Result<Logger, ApiServerCreateError> {
     /*
      * TODO-hardening
      * We use an async drain for the terminal logger to take care of
@@ -119,9 +163,45 @@ fn create_logger(config: &ApiServerConfig) -> Logger
      * std::sync::Mutex, which is not futures-aware and is likely to foul up our
      * executor.  However, we have not verified that the async implementation
      * behaves reasonably under backpressure.
+     * TODO-cleanup can we commonize the common lines below?
      */
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, o!())
+    match &config.log {
+        ApiServerConfigLogging::StdoutTerminal => {
+            let decorator = slog_term::TermDecorator::new().build();
+            let drain = slog_term::FullFormat::new(decorator).build().fuse();
+            let async_drain = slog_async::Async::new(drain).build().fuse();
+            Ok(slog::Logger::root(async_drain, o!()))
+        }
+        ApiServerConfigLogging::File {
+            path,
+            if_exists,
+        } => {
+            let mut open_options = std::fs::OpenOptions::new();
+            open_options.write(true);
+
+            match if_exists {
+                ApiServerConfigLoggingIfExists::Fail => {
+                    open_options.create_new(true);
+                }
+                ApiServerConfigLoggingIfExists::Append => {
+                    open_options.append(true);
+                }
+                ApiServerConfigLoggingIfExists::Truncate => {
+                    open_options.truncate(true);
+                }
+            }
+
+            let file = match open_options.open(path) {
+                Ok(file) => file,
+                Err(e) => {
+                    let message = format!("open log file \"{}\": {}", path, e);
+                    return Err(ApiServerCreateError(message));
+                }
+            };
+            let decorator = slog_term::PlainDecorator::new(file);
+            let drain = slog_term::FullFormat::new(decorator).build().fuse();
+            let async_drain = slog_async::Async::new(drain).build().fuse();
+            Ok(slog::Logger::root(async_drain, o!()))
+        }
+    }
 }

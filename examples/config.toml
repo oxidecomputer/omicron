@@ -4,3 +4,12 @@
 
 # IP address and TCP port on which to listen for connections
 bind_address = "127.0.0.1:12220"
+
+[log]
+# Example output to a terminal (with colors)
+#mode = "stdout-terminal"
+
+# Example output to a file, appending if it already exists.
+mode = "file"
+path = "log.out"
+if_exists = "append"
