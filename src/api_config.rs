@@ -525,7 +525,7 @@ mod test {
             bind_ip_str, bind_port, CONFIG_VALID_LOG
         );
         let config = read_config("bind_address", &config_text).unwrap();
-        let mut server = super::super::ApiServer::new(&config).unwrap();
+        let mut server = super::super::ApiServer::new(&config, false).unwrap();
         let task = server.http_server.run();
         client.request(cons_request(bind_port)).await.unwrap();
         server.http_server.close();
@@ -549,7 +549,7 @@ mod test {
             CONFIG_VALID_LOG
         );
         let config = read_config("bind_address", &config_text).unwrap();
-        let mut server = super::super::ApiServer::new(&config).unwrap();
+        let mut server = super::super::ApiServer::new(&config, false).unwrap();
         let task = server.http_server.run();
         client.request(cons_request(bind_port + 1)).await.unwrap();
         let error = client.request(cons_request(bind_port)).await.unwrap_err();

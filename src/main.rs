@@ -14,37 +14,45 @@
  * - Move even more of the server setup into api_server.rs
  */
 
+use clap::{App, Arg};
 use oxide_api_prototype::ApiServerConfig;
 
 #[tokio::main]
 async fn main() {
-    let cmd_args = std::env::args().collect::<Vec<String>>();
+    let matches = App::new("oxide-api-prototype")
+        .after_help("See README.adoc for more information")
+        .arg(
+            Arg::with_name("openapi")
+                .short("O")
+                .long("openapi")
+                .help("Print the OpenAPI Spec document and exit"),
+        )
+        .arg(Arg::with_name("CONFIG_FILE_PATH").required(true).index(1))
+        .get_matches();
 
-    if cmd_args.len() != 2 {
-        eprintln!("usage: {} CONFIG_FILE_PATH", cmd_args[0]);
-        eprintln!("See README.adoc for more information.");
-        std::process::exit(2);
-    }
-
-    let config_file_path = std::path::Path::new(&cmd_args[1]);
+    let config_file = matches.value_of("CONFIG_FILE_PATH").unwrap();
+    let config_file_path = std::path::Path::new(config_file);
     let config = match ApiServerConfig::from_file(config_file_path) {
         Ok(c) => c,
         Err(error) => {
-            eprintln!("{}: {}", cmd_args[0], error);
+            eprintln!("{}: {}", config_file, error);
             std::process::exit(1);
         }
     };
 
-    let mut server = match oxide_api_prototype::ApiServer::new(&config) {
+    let mut server = match oxide_api_prototype::ApiServer::new(
+        &config,
+        matches.is_present("openapi"),
+    ) {
         Err(e) => {
-            eprintln!("{}: {}", cmd_args[0], e);
+            eprintln!("{}: {}", config_file, e);
             std::process::exit(1);
         }
         Ok(s) => s,
     };
 
     if let Err(error) = server.http_server.run().await {
-        eprintln!("{}: {}", cmd_args[0], error);
+        eprintln!("{}: {}", config_file, error);
         std::process::exit(1);
     }
 }

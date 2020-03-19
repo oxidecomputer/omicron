@@ -35,7 +35,20 @@ pub struct ApiServer {
 impl ApiServer {
     pub fn new(
         config: &ApiServerConfig,
+        openapi: bool,
     ) -> Result<ApiServer, api_error::InitError> {
+        let mut router = httpapi::HttpRouter::new();
+        api_http_entrypoints::api_register_entrypoints(&mut router);
+        if openapi {
+            router.print_openapi();
+            std::process::exit(0);
+        }
+
+        let log = config.log.to_logger()?;
+        for (path, method) in router.iter() {
+            debug!(log, "{:width$} {}", method, path, width = 10)
+        }
+
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
         simbuilder.project_create("simproject2");
@@ -45,10 +58,6 @@ impl ApiServer {
             backend: Arc::new(simbuilder.build()),
         });
 
-        let mut router = httpapi::HttpRouter::new();
-
-        let log = config.log.to_logger()?;
-        api_http_entrypoints::api_register_entrypoints(&mut router);
         let http_server = httpapi::HttpServer::new(
             &config.bind_address,
             router,
