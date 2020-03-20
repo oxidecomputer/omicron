@@ -89,11 +89,9 @@ general, servers can bind to more than one IP address and port, but this is not
 
 * Currently adding logging
 ** add tests for all of this
-*** config file parsing (invalid cases)
-*** config file parsing (valid cases)
+*** currently working on tests for config file parsing and logging.  See
+    src/api_config.rs.  There's a bunch of cleanup, TODOs, and XXXs in there.
 *** that setting "bind_address" does what we expect
-*** that setting log level does what we expect (all three cases?)
-*** that setting log mode does what we expect (all three cases?)
 ** restructure code a bit:
 *** move bulk of config into httpapi (so that we could have a top-level section
     in the config file for httpapi config, which would all be implemented
