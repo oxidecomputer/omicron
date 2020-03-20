@@ -51,6 +51,7 @@ mod test {
     use super::ApiServerConfig;
     use slog::Logger;
     use std::fs;
+    use std::net::IpAddr;
     use std::path::Path;
 
     /*
@@ -59,7 +60,7 @@ mod test {
      * on the known invalid chunk.
      */
     const CONFIG_VALID_BIND_ADDRESS: &str = r##"
-            bind_address = "127.0.0.1:1234
+            bind_address = "127.0.0.1:1234"
         "##;
     const CONFIG_VALID_LOG: &str = r##"
             [log]
@@ -160,6 +161,84 @@ mod test {
         assert!(error.starts_with("parse \""));
         assert!(error.contains("\": invalid IP address syntax for key \
             `bind_address`"));
+    }
+
+    /*
+     * Bad value for "log_mode"
+     */
+
+    #[test]
+    pub fn test_config_bad_log_mode() {
+        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+            r##"
+            [log]
+            mode = "bonkers"
+            "##);
+        let error = read_config("bad_log_mode", &bad_config)
+            .expect_err("expected failure");
+        assert!(error.starts_with("parse \""));
+        assert!(error.contains("\": unknown variant `bonkers`, expected one \
+            of `stderr-terminal`, `file`, `test-suite` for key `log.mode`"));
+    }
+
+    /*
+     * Bad "mode = stderr-terminal" config
+     *
+     * TODO-coverage: consider adding tests for all variants of missing or
+     * invalid properties for all log modes
+     */
+
+    #[test]
+    pub fn test_config_bad_terminal_no_level() {
+        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+            r##"
+            [log]
+            mode = "stderr-terminal"
+            "##);
+        let error = read_config("bad_terminal_no_level", &bad_config)
+            .expect_err("expected failure");
+        assert!(error.starts_with("parse \""));
+        assert!(error.contains("\": missing field `level` for key `log`"));
+    }
+
+    #[test]
+    pub fn test_config_bad_terminal_bad_level() {
+        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+            r##"
+            [log]
+            mode = "stderr-terminal"
+            level = "everything"
+            "##);
+        let error = read_config("bad_terminal_bad_level", &bad_config)
+            .expect_err("expected failure");
+        assert!(error.starts_with("parse \""));
+        assert!(error.contains("\": unknown variant `everything`, expected one \
+            of `trace`, `debug`, `info`"));
+    }
+
+    /*
+     * Working "mode = stderr-terminal" config
+     *
+     * TODO-coverage: should use the logger and redirect stderr to a file and
+     * test its contents.
+     * TODO-coverage: other tests:
+     * - failed to create file logger (filesystem failure of some kind)
+     * - successful file logger, all three modes?
+     */
+    #[test]
+    pub fn test_config_stderr_terminal() {
+        let config = r##"
+            bind_address = "127.1.2.3:4567"
+            [log]
+            mode = "stderr-terminal"
+            level = "warn"
+        "##;
+        let config = read_config("stderr-terminal", &config)
+            .expect("expected success");
+        assert_eq!(config.bind_address.ip(), "127.1.2.3".parse::<IpAddr>().unwrap());
+        assert_eq!(config.bind_address.port(), 4567);
+
+        config.log.to_logger().expect("expected logger");
     }
 }
 
