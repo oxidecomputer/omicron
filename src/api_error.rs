@@ -41,7 +41,7 @@ impl From<ApiError> for HttpError {
             } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
                 HttpError::for_bad_request(message)
-            },
+            }
         }
     }
 }

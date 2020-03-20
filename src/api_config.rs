@@ -129,38 +129,50 @@ mod test {
 
     #[test]
     pub fn test_config_bad_bind_address_port_too_small() {
-        let bad_config = format!("{}{}", r###"
+        let bad_config = format!(
+            "{}{}",
+            r###"
             bind_address = "127.0.0.1:-3"
-            "###, CONFIG_VALID_LOG);
+            "###,
+            CONFIG_VALID_LOG
+        );
         let error = read_config("bad_bind_address_port_too_small", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": invalid IP address syntax for key \
-            `bind_address`"));
+        assert!(error
+            .contains("\": invalid IP address syntax for key `bind_address`"));
     }
 
     #[test]
     pub fn test_config_bad_bind_address_port_too_large() {
-        let bad_config = format!("{}{}", r###"
+        let bad_config = format!(
+            "{}{}",
+            r###"
             bind_address = "127.0.0.1:65536"
-            "###, CONFIG_VALID_LOG);
+            "###,
+            CONFIG_VALID_LOG
+        );
         let error = read_config("bad_bind_address_port_too_large", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": invalid IP address syntax for key \
-            `bind_address`"));
+        assert!(error
+            .contains("\": invalid IP address syntax for key `bind_address`"));
     }
 
     #[test]
     pub fn test_config_bad_bind_address_garbage() {
-        let bad_config = format!("{}{}", r###"
+        let bad_config = format!(
+            "{}{}",
+            r###"
             bind_address = "foobar"
-            "###, CONFIG_VALID_LOG);
+            "###,
+            CONFIG_VALID_LOG
+        );
         let error = read_config("bad_bind_address_garbage", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": invalid IP address syntax for key \
-            `bind_address`"));
+        assert!(error
+            .contains("\": invalid IP address syntax for key `bind_address`"));
     }
 
     /*
@@ -169,16 +181,21 @@ mod test {
 
     #[test]
     pub fn test_config_bad_log_mode() {
-        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+        let bad_config = format!(
+            "{}{}",
+            CONFIG_VALID_BIND_ADDRESS,
             r##"
             [log]
             mode = "bonkers"
-            "##);
+            "##
+        );
         let error = read_config("bad_log_mode", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": unknown variant `bonkers`, expected one \
-            of `stderr-terminal`, `file`, `test-suite` for key `log.mode`"));
+        assert!(error.contains(
+            "\": unknown variant `bonkers`, expected one of \
+             `stderr-terminal`, `file`, `test-suite` for key `log.mode`"
+        ));
     }
 
     /*
@@ -190,11 +207,14 @@ mod test {
 
     #[test]
     pub fn test_config_bad_terminal_no_level() {
-        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+        let bad_config = format!(
+            "{}{}",
+            CONFIG_VALID_BIND_ADDRESS,
             r##"
             [log]
             mode = "stderr-terminal"
-            "##);
+            "##
+        );
         let error = read_config("bad_terminal_no_level", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
@@ -203,17 +223,22 @@ mod test {
 
     #[test]
     pub fn test_config_bad_terminal_bad_level() {
-        let bad_config = format!("{}{}", CONFIG_VALID_BIND_ADDRESS,
+        let bad_config = format!(
+            "{}{}",
+            CONFIG_VALID_BIND_ADDRESS,
             r##"
             [log]
             mode = "stderr-terminal"
             level = "everything"
-            "##);
+            "##
+        );
         let error = read_config("bad_terminal_bad_level", &bad_config)
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": unknown variant `everything`, expected one \
-            of `trace`, `debug`, `info`"));
+        assert!(error.contains(
+            "\": unknown variant `everything`, expected one of `trace`, \
+             `debug`, `info`"
+        ));
     }
 
     /*
@@ -233,9 +258,12 @@ mod test {
             mode = "stderr-terminal"
             level = "warn"
         "##;
-        let config = read_config("stderr-terminal", &config)
-            .expect("expected success");
-        assert_eq!(config.bind_address.ip(), "127.1.2.3".parse::<IpAddr>().unwrap());
+        let config =
+            read_config("stderr-terminal", &config).expect("expected success");
+        assert_eq!(
+            config.bind_address.ip(),
+            "127.1.2.3".parse::<IpAddr>().unwrap()
+        );
         assert_eq!(config.bind_address.port(), 4567);
 
         config.log.to_logger().expect("expected logger");

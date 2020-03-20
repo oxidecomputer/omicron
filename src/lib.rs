@@ -53,7 +53,8 @@ impl ApiServer {
             router,
             Box::new(api_state),
             log.new(slog::o!()),
-        ).map_err(|error| api_error::InitError(format!("{}", error)))?;
+        )
+        .map_err(|error| api_error::InitError(format!("{}", error)))?;
 
         Ok(ApiServer {
             http_server,
