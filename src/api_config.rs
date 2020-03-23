@@ -46,14 +46,209 @@ impl ApiServerConfig {
     }
 }
 
+/*
+ * Logging configuration
+ *
+ * The following types and functions could be separated out into a much more
+ * generic "logging configuration" module.
+ */
+
+/**
+ * Represents the logging configuration for a server (the "log" top-level object
+ * in the server configuration).
+ */
+#[derive(Debug, Deserialize)]
+#[serde(tag = "mode")]
+pub enum ConfigLogging {
+    #[serde(rename = "stderr-terminal")]
+    StderrTerminal { level: ConfigLoggingLevel },
+
+    #[serde(rename = "file")]
+    File {
+        level: ConfigLoggingLevel,
+        path: String,
+        if_exists: ConfigLoggingIfExists,
+    },
+
+    /*
+     * "test-suite" mode generates log files in a particular directory that are
+     * named with both the program name and process id.  It would be nice to
+     * allow some kinds of expansions in the "file" mode instead (e.g., for
+     * `{program_name}` and `{pid}`).  Then we wouldn't need a special mode
+     * here.  There's the `runtime-fmt` crate that could be used for this, but
+     * it requires nightly rust.  For now, we punt -- and don't pretend that
+     * this is any more generic than it is -- a mode for configuring logging for
+     * the test suite.
+     *
+     * Note that neither of the other two modes is suitable for multiple
+     * processes logging to the same file, even when setting `if_exists =
+     * "append"`.
+     */
+    #[serde(rename = "test-suite")]
+    TestSuite { level: ConfigLoggingLevel, directory: String },
+}
+
+#[derive(Debug, Deserialize)]
+pub enum ConfigLoggingIfExists {
+    #[serde(rename = "fail")]
+    Fail,
+    #[serde(rename = "truncate")]
+    Truncate,
+    #[serde(rename = "append")]
+    Append,
+}
+
+#[derive(Debug, Deserialize)]
+pub enum ConfigLoggingLevel {
+    #[serde(rename = "trace")]
+    Trace,
+    #[serde(rename = "debug")]
+    Debug,
+    #[serde(rename = "info")]
+    Info,
+    #[serde(rename = "warn")]
+    Warn,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "critical")]
+    Critical,
+}
+
+impl From<&ConfigLoggingLevel> for Level {
+    fn from(config_level: &ConfigLoggingLevel) -> Level {
+        match config_level {
+            ConfigLoggingLevel::Trace => Level::Trace,
+            ConfigLoggingLevel::Debug => Level::Debug,
+            ConfigLoggingLevel::Info => Level::Info,
+            ConfigLoggingLevel::Warn => Level::Warning,
+            ConfigLoggingLevel::Error => Level::Error,
+            ConfigLoggingLevel::Critical => Level::Critical,
+        }
+    }
+}
+
+static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
+
+impl ConfigLogging {
+    /**
+     * Create the root logger based on the requested configuration.
+     */
+    pub fn to_logger(&self) -> Result<Logger, InitError> {
+        let pid = std::process::id();
+        match self {
+            ConfigLogging::StderrTerminal {
+                level,
+            } => {
+                let decorator = slog_term::TermDecorator::new().build();
+                let drain =
+                    slog_term::FullFormat::new(decorator).build().fuse();
+                Ok(async_root_logger(level, drain))
+            }
+
+            ConfigLogging::File {
+                level,
+                path,
+                if_exists,
+            } => {
+                let mut open_options = std::fs::OpenOptions::new();
+                open_options.write(true);
+                open_options.create(true);
+
+                match if_exists {
+                    ConfigLoggingIfExists::Fail => {
+                        open_options.create_new(true);
+                    }
+                    ConfigLoggingIfExists::Append => {
+                        open_options.append(true);
+                    }
+                    ConfigLoggingIfExists::Truncate => {
+                        open_options.truncate(true);
+                    }
+                }
+
+                let drain = log_drain_for_file(&open_options, Path::new(path))?;
+                Ok(async_root_logger(level, drain))
+            }
+
+            ConfigLogging::TestSuite {
+                level,
+                directory,
+            } => {
+                let mut open_options = std::fs::OpenOptions::new();
+                open_options.write(true).create_new(true);
+
+                let arg0path =
+                    std::env::args().next().expect("expected process arg0");
+                let arg0 = Path::new(&arg0path)
+                    .file_name()
+                    .expect("expected arg0 filename")
+                    .to_str()
+                    .expect("expected arg0 filename to be valid Unicode");
+                let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
+                let mut pathbuf = PathBuf::new();
+                pathbuf.push(directory);
+                pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
+
+                let path = pathbuf.as_path();
+                let drain = log_drain_for_file(&open_options, path)?;
+                Ok(async_root_logger(level, drain))
+            }
+        }
+    }
+}
+
+/*
+ * TODO-hardening
+ * We use an async drain for the terminal logger to take care of
+ * synchronization.  That's mainly because the other two options use a
+ * std::sync::Mutex, which is not futures-aware and is likely to foul up
+ * our executor.  However, we have not verified that the async
+ * implementation behaves reasonably under backpressure.
+ */
+fn async_root_logger<T>(level: &ConfigLoggingLevel, drain: T) -> slog::Logger
+where
+    T: slog::Drain + Send + 'static,
+    <T as slog::Drain>::Err: std::fmt::Debug,
+{
+    let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
+    let async_drain = slog_async::Async::new(level_drain).build().fuse();
+    slog::Logger::root(async_drain, o!())
+}
+
+fn log_drain_for_file(
+    open_options: &OpenOptions,
+    path: &Path,
+) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, InitError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            let p = path.display();
+            let message = format!("open log file \"{}\": {}", p, e);
+            InitError(message)
+        })?;
+    }
+
+    let file = open_options.open(path).map_err(|e| {
+        let p = path.display();
+        let message = format!("open log file \"{}\": {}", p, e);
+        InitError(message)
+    })?;
+
+    /*
+     * Record a message to the stderr so that a reader who doesn't already know
+     * how logging is configured knows where the rest of the log messages went.
+     */
+    eprintln!("note: configured to log to \"{}\"", path.display());
+    Ok(slog_bunyan::with_name("oxide-api", file).build().fuse())
+}
+
 #[cfg(test)]
 mod test {
+    use super::ApiServerConfig;
     use serde::Deserialize;
     use std::fs;
     use std::net::IpAddr;
     use std::path::Path;
     use std::path::PathBuf;
-    use super::ApiServerConfig;
 
     /*
      * Chunks of valid config file.  These are put together with invalid chunks
@@ -535,199 +730,4 @@ mod test {
         fs::remove_file(path).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
-}
-
-/*
- * Logging configuration
- *
- * The following types and functions could be separated out into a much more
- * generic "logging configuration" module.
- */
-
-/**
- * Represents the logging configuration for a server (the "log" top-level object
- * in the server configuration).
- */
-#[derive(Debug, Deserialize)]
-#[serde(tag = "mode")]
-pub enum ConfigLogging {
-    #[serde(rename = "stderr-terminal")]
-    StderrTerminal { level: ConfigLoggingLevel },
-
-    #[serde(rename = "file")]
-    File {
-        level: ConfigLoggingLevel,
-        path: String,
-        if_exists: ConfigLoggingIfExists,
-    },
-
-    /*
-     * "test-suite" mode generates log files in a particular directory that are
-     * named with both the program name and process id.  It would be nice to
-     * allow some kinds of expansions in the "file" mode instead (e.g., for
-     * `{program_name}` and `{pid}`).  Then we wouldn't need a special mode
-     * here.  There's the `runtime-fmt` crate that could be used for this, but
-     * it requires nightly rust.  For now, we punt -- and don't pretend that
-     * this is any more generic than it is -- a mode for configuring logging for
-     * the test suite.
-     *
-     * Note that neither of the other two modes is suitable for multiple
-     * processes logging to the same file, even when setting `if_exists =
-     * "append"`.
-     */
-    #[serde(rename = "test-suite")]
-    TestSuite { level: ConfigLoggingLevel, directory: String },
-}
-
-#[derive(Debug, Deserialize)]
-pub enum ConfigLoggingIfExists {
-    #[serde(rename = "fail")]
-    Fail,
-    #[serde(rename = "truncate")]
-    Truncate,
-    #[serde(rename = "append")]
-    Append,
-}
-
-#[derive(Debug, Deserialize)]
-pub enum ConfigLoggingLevel {
-    #[serde(rename = "trace")]
-    Trace,
-    #[serde(rename = "debug")]
-    Debug,
-    #[serde(rename = "info")]
-    Info,
-    #[serde(rename = "warn")]
-    Warn,
-    #[serde(rename = "error")]
-    Error,
-    #[serde(rename = "critical")]
-    Critical,
-}
-
-impl From<&ConfigLoggingLevel> for Level {
-    fn from(config_level: &ConfigLoggingLevel) -> Level {
-        match config_level {
-            ConfigLoggingLevel::Trace => Level::Trace,
-            ConfigLoggingLevel::Debug => Level::Debug,
-            ConfigLoggingLevel::Info => Level::Info,
-            ConfigLoggingLevel::Warn => Level::Warning,
-            ConfigLoggingLevel::Error => Level::Error,
-            ConfigLoggingLevel::Critical => Level::Critical,
-        }
-    }
-}
-
-static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
-
-impl ConfigLogging {
-    /**
-     * Create the root logger based on the requested configuration.
-     */
-    pub fn to_logger(&self) -> Result<Logger, InitError> {
-        let pid = std::process::id();
-        match self {
-            ConfigLogging::StderrTerminal {
-                level,
-            } => {
-                let decorator = slog_term::TermDecorator::new().build();
-                let drain =
-                    slog_term::FullFormat::new(decorator).build().fuse();
-                Ok(async_root_logger(level, drain))
-            }
-
-            ConfigLogging::File {
-                level,
-                path,
-                if_exists,
-            } => {
-                let mut open_options = std::fs::OpenOptions::new();
-                open_options.write(true);
-                open_options.create(true);
-
-                match if_exists {
-                    ConfigLoggingIfExists::Fail => {
-                        open_options.create_new(true);
-                    }
-                    ConfigLoggingIfExists::Append => {
-                        open_options.append(true);
-                    }
-                    ConfigLoggingIfExists::Truncate => {
-                        open_options.truncate(true);
-                    }
-                }
-
-                let drain = log_drain_for_file(&open_options, Path::new(path))?;
-                Ok(async_root_logger(level, drain))
-            }
-
-            ConfigLogging::TestSuite {
-                level,
-                directory,
-            } => {
-                let mut open_options = std::fs::OpenOptions::new();
-                open_options.write(true).create_new(true);
-
-                let arg0path =
-                    std::env::args().next().expect("expected process arg0");
-                let arg0 = Path::new(&arg0path)
-                    .file_name()
-                    .expect("expected arg0 filename")
-                    .to_str()
-                    .expect("expected arg0 filename to be valid Unicode");
-                let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
-                let mut pathbuf = PathBuf::new();
-                pathbuf.push(directory);
-                pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
-
-                let path = pathbuf.as_path();
-                let drain = log_drain_for_file(&open_options, path)?;
-                Ok(async_root_logger(level, drain))
-            }
-        }
-    }
-}
-
-/*
- * TODO-hardening
- * We use an async drain for the terminal logger to take care of
- * synchronization.  That's mainly because the other two options use a
- * std::sync::Mutex, which is not futures-aware and is likely to foul up
- * our executor.  However, we have not verified that the async
- * implementation behaves reasonably under backpressure.
- */
-fn async_root_logger<T>(level: &ConfigLoggingLevel, drain: T) -> slog::Logger
-where
-    T: slog::Drain + Send + 'static,
-    <T as slog::Drain>::Err: std::fmt::Debug,
-{
-    let level_drain = slog::LevelFilter(drain, Level::from(level)).fuse();
-    let async_drain = slog_async::Async::new(level_drain).build().fuse();
-    slog::Logger::root(async_drain, o!())
-}
-
-fn log_drain_for_file(
-    open_options: &OpenOptions,
-    path: &Path,
-) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, InitError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            let p = path.display();
-            let message = format!("open log file \"{}\": {}", p, e);
-            InitError(message)
-        })?;
-    }
-
-    let file = open_options.open(path).map_err(|e| {
-        let p = path.display();
-        let message = format!("open log file \"{}\": {}", p, e);
-        InitError(message)
-    })?;
-
-    /*
-     * Record a message to the stderr so that a reader who doesn't already know
-     * how logging is configured knows where the rest of the log messages went.
-     */
-    eprintln!("note: configured to log to \"{}\"", path.display());
-    Ok(slog_bunyan::with_name("oxide-api", file).build().fuse())
 }
