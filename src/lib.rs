@@ -12,6 +12,7 @@ mod api_http_entrypoints;
 pub mod api_model;
 pub mod httpapi;
 mod sim;
+pub mod test_common;
 
 pub use api_config::ApiServerConfig;
 use httpapi::RequestContext;

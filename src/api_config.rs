@@ -244,11 +244,14 @@ fn log_drain_for_file(
 #[cfg(test)]
 mod test {
     use super::ApiServerConfig;
-    use serde::Deserialize;
     use std::fs;
     use std::net::IpAddr;
     use std::path::Path;
     use std::path::PathBuf;
+    use super::super::test_common::read_bunyan_log;
+    use super::super::test_common::verify_bunyan_records;
+    use super::super::test_common::verify_bunyan_records_sequential;
+    use super::super::test_common::BunyanLogRecordSpec;
 
     /*
      * Chunks of valid config file.  These are put together with invalid chunks
@@ -264,6 +267,9 @@ mod test {
             mode = "stderr-terminal"
         "##;
 
+    /**
+     * Generates a temporary filesystem path unique for the given label.
+     */
     fn temp_path(label: &str) -> PathBuf {
         let arg0str = std::env::args().next().expect("expected process arg0");
         let arg0 = Path::new(&arg0str)
@@ -277,6 +283,13 @@ mod test {
         pathbuf
     }
 
+    /**
+     * Load an ApiServerConfig with the given string `contents`.  To exercise
+     * the full path, this function writes the contents to a file first, then
+     * loads the config from that file, then removes the file.  `label` is used
+     * as a unique string for the filename and error messages.  It should be
+     * unique for each test.
+     */
     fn read_config(
         label: &str,
         contents: &str,
@@ -292,12 +305,105 @@ mod test {
         result
     }
 
+    /**
+     * `LogTest` and `LogTestCleanup` are used for the tests that create various
+     * files on the filesystem to commonize code and make sure everything gets
+     * cleaned up as expected.
+     */
+    struct LogTest {
+        directory: PathBuf,
+        cleanup_list: Vec<LogTestCleanup>,
+    }
+
+    #[derive(Debug)]
+    enum LogTestCleanup {
+        Directory(PathBuf),
+        File(PathBuf),
+    }
+
+    impl LogTest {
+        /**
+         * The setup for a logger test creates a temporary directory with the
+         * given label and returns a `LogTest` with that directory in the
+         * cleanup list so that on teardown the temporary directory will be
+         * removed.  The temporary directory must be empty by the time the
+         * `LogTest` is torn down except for files and directories created with
+         * `will_create_dir()` and `will_create_file()`.
+         */
+        fn setup(label: &str) -> LogTest
+        {
+            let directory_path = temp_path(label);
+
+            if let Err(e) = fs::create_dir_all(&directory_path) {
+                panic!("unexpected failure creating directories leading up \
+                    to {}: {}", directory_path.as_path().display(), e);
+            }
+
+            LogTest {
+                directory: directory_path.clone(),
+                cleanup_list: vec![
+                    LogTestCleanup::Directory(directory_path)
+                ]
+            }
+        }
+
+        /**
+         * Records that the caller intends to create a directory with relative
+         * path "path" underneath the root directory for this log test.  Returns
+         * a String representing the path to this directory.  This directory
+         * will be removed during teardown.  Directories and files must be
+         * recorded in the order they would be created so that the order can be
+         * reversed at teardown (without needing any kind of recursive removal).
+         */
+        fn will_create_dir(&mut self, path: &str) -> String
+        {
+            let mut pathbuf = self.directory.clone();
+            pathbuf.push(path);
+            let rv = pathbuf.as_path().display().to_string();
+            self.cleanup_list.push(LogTestCleanup::Directory(pathbuf));
+            rv
+        }
+
+        /**
+         * Records that the caller intends to create a file with relative path
+         * "path" underneath the root directory for this log test.  Returns a
+         * String representing the path to this file.  This file will be removed
+         * during teardown.  Directories and files must be recorded in the order
+         * they would be created so that the order can be reversed at teardown
+         * (without needing any kind of recursive removal).
+         */
+        fn will_create_file(&mut self, path: &str) -> String
+        {
+            let mut pathbuf = self.directory.clone();
+            pathbuf.push(path);
+            let rv = pathbuf.as_path().display().to_string();
+            self.cleanup_list.push(LogTestCleanup::File(pathbuf));
+            rv
+        }
+    }
+
+    impl Drop for LogTest {
+        fn drop(&mut self)
+        {
+            for path in self.cleanup_list.iter().rev() {
+                let maybe_error = match path {
+                    LogTestCleanup::Directory(p) => fs::remove_dir(p),
+                    LogTestCleanup::File(p) => fs::remove_file(p),
+                };
+
+                if let Err(e) = maybe_error {
+                    panic!("unexpected failure removing {:?}", e);
+                }
+            }
+        }
+    }
+
     /*
      * Totally bogus config files (nonexistent, bad TOML syntax)
      */
 
     #[test]
-    pub fn test_config_nonexistent() {
+    fn test_config_nonexistent() {
         let error = ApiServerConfig::from_file(Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
         assert!(error
@@ -305,7 +411,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_toml() {
+    fn test_config_bad_toml() {
         let error =
             read_config("bad_toml", "foo =").expect_err("expected failure");
         assert!(error.starts_with("parse \""));
@@ -318,7 +424,7 @@ mod test {
      */
 
     #[test]
-    pub fn test_config_empty() {
+    fn test_config_empty() {
         let error = read_config("empty", "").expect_err("expected failure");
         assert!(error.starts_with("parse \""));
         assert!(error.contains("\": missing field"));
@@ -329,7 +435,7 @@ mod test {
      */
 
     #[test]
-    pub fn test_config_bad_bind_address_port_too_small() {
+    fn test_config_bad_bind_address_port_too_small() {
         let bad_config = format!(
             "{}{}",
             r###"
@@ -345,7 +451,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_bind_address_port_too_large() {
+    fn test_config_bad_bind_address_port_too_large() {
         let bad_config = format!(
             "{}{}",
             r###"
@@ -361,7 +467,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_bind_address_garbage() {
+    fn test_config_bad_bind_address_garbage() {
         let bad_config = format!(
             "{}{}",
             r###"
@@ -381,7 +487,7 @@ mod test {
      */
 
     #[test]
-    pub fn test_config_bad_log_mode() {
+    fn test_config_bad_log_mode() {
         let bad_config = format!(
             "{}{}",
             CONFIG_VALID_BIND_ADDRESS,
@@ -407,7 +513,7 @@ mod test {
      */
 
     #[test]
-    pub fn test_config_bad_terminal_no_level() {
+    fn test_config_bad_terminal_no_level() {
         let bad_config = format!(
             "{}{}",
             CONFIG_VALID_BIND_ADDRESS,
@@ -423,7 +529,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_terminal_bad_level() {
+    fn test_config_bad_terminal_bad_level() {
         let bad_config = format!(
             "{}{}",
             CONFIG_VALID_BIND_ADDRESS,
@@ -458,7 +564,7 @@ mod test {
      * - successful file logger, all three modes?
      */
     #[test]
-    pub fn test_config_stderr_terminal() {
+    fn test_config_stderr_terminal() {
         let config = r##"
             bind_address = "127.1.2.3:4567"
             [log]
@@ -481,7 +587,7 @@ mod test {
      */
 
     #[test]
-    pub fn test_config_bad_file_no_file() {
+    fn test_config_bad_file_no_file() {
         let bad_config = format!(
             "{}{}",
             CONFIG_VALID_BIND_ADDRESS,
@@ -498,7 +604,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_file_no_level() {
+    fn test_config_bad_file_no_level() {
         let bad_config = format!(
             "{}{}",
             CONFIG_VALID_BIND_ADDRESS,
@@ -515,16 +621,14 @@ mod test {
     }
 
     #[test]
-    pub fn test_config_bad_file_bad_path_type() {
+    fn test_config_bad_file_bad_path_type() {
         /*
          * We create a path as a directory so that when we subsequently try to
          * use it a file, we won't be able to.
          */
-        let mut pathbuf = temp_path("bad_file_bad_path_type_dir");
-        pathbuf.push("dummy");
-
-        let path = pathbuf.as_path();
-        fs::create_dir_all(path).expect("create dummy directory");
+        let mut logtest = LogTest::setup("bad_file_bad_path_type_dir");
+        let path = logtest.will_create_dir("log_file_as_dir");
+        fs::create_dir(&path).unwrap();
 
         let bad_config = format!(
             "{}{}\"{}\"\n",
@@ -535,32 +639,25 @@ mod test {
             level = "warn"
             if_exists = "append"
             path = "##,
-            path.display()
+            &path
         );
 
         let config = read_config("bad_file_bad_path_type", &bad_config)
-            .expect("expected success");
-        let error = config.log.to_logger().expect_err("expected failure");
+            .unwrap();
+        let error = config.log.to_logger().unwrap_err();
         let message = format!("{}", error);
         eprintln!("error message: {}", message);
         assert!(message.starts_with(&format!(
             "error creating API server: open log file \"{}\": Is a directory",
-            path.display()
+            &path
         )));
-
-        fs::remove_dir(path).expect("remove dummy directory");
-        fs::remove_dir(path.parent().expect("expected parent"))
-            .expect("remove test directory");
     }
 
     #[test]
-    pub fn test_config_bad_file_path_exists_fail() {
-        let mut pathbuf = temp_path("bad_file_path_exists_fail_dir");
-        pathbuf.push("log.out");
-
-        let path = pathbuf.as_path();
-        fs::create_dir_all(path.parent().unwrap()).expect("creating parent");
-        fs::write(path, "").expect("writing empty file");
+    fn test_config_bad_file_path_exists_fail() {
+        let mut logtest = LogTest::setup("bad_file_path_exists_fail_dir");
+        let logpath = logtest.will_create_file("log.out");
+        fs::write(&logpath, "").expect("writing empty file");
 
         let bad_config = format!(
             "{}{}\"{}\"\n",
@@ -571,7 +668,7 @@ mod test {
             level = "warn"
             if_exists = "fail"
             path = "##,
-            path.display()
+            &logpath
         );
 
         let config = read_config("bad_file_bad_path_exists_fail", &bad_config)
@@ -581,27 +678,21 @@ mod test {
         eprintln!("error message: {}", message);
         assert!(message.starts_with(&format!(
             "error creating API server: open log file \"{}\": File exists",
-            path.display()
+            &logpath
         )));
-
-        fs::remove_file(path).expect("remove dummy directory");
-        fs::remove_dir(path.parent().expect("expected parent"))
-            .expect("remove test directory");
     }
 
     /*
      * Working "mode = file" configuration.  The following test exercises
      * successful file-based configurations for all three values of "if_exists",
      * different log levels, and the bunyan log format.
-     * XXX refactor tests to avoid duplicating so much code?
      */
 
     #[test]
-    pub fn test_config_file() {
-        let mut pathbuf = temp_path("file_dir");
-        /* Use an extra level of directory to make sure that gets created. */
-        pathbuf.push("log.out");
-        let path = pathbuf.as_path();
+    fn test_config_file() {
+        let mut logtest = LogTest::setup("file_dir");
+        let logpath = logtest.will_create_file("log.out");
+        let time_before = chrono::offset::Utc::now();
 
         /* The first attempt should succeed.  The log file doesn't exist yet. */
         let bad_config = format!(
@@ -613,7 +704,7 @@ mod test {
             level = "warn"
             if_exists = "fail"
             path = "##,
-            path.display()
+            &logpath
         );
 
         let config =
@@ -639,7 +730,7 @@ mod test {
             level = "warn"
             if_exists = "append"
             path = "##,
-            path.display()
+            &logpath
         );
 
         let config =
@@ -650,37 +741,19 @@ mod test {
             warn!(log, "message2");
         }
 
-        let log_contents_before = fs::read_to_string(path).unwrap();
+        /* XXX verify hostname, here and below */
+        let time_after = chrono::offset::Utc::now();
+        let log_records = read_bunyan_log(&logpath);
+        verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
+            name: Some("oxide-api".to_string()),
+            hostname: None,
+            v: Some(0),
+            pid: Some(std::process::id()),
+        });
+        verify_bunyan_records_sequential(log_records.iter(), Some(&time_before),
+            Some(&time_after));
 
-        /*
-         * TODO-cleanup log parsing code should be elsewhere and more general.
-         * TODO-coverage check hostname, timestamps, and level
-         */
-        #[derive(Deserialize)]
-        struct BunyanLogRecord {
-            name: String,
-            hostname: String,
-            pid: u32,
-            level: usize,
-            msg: String,
-            time: String,
-            v: usize,
-        }
-
-        let log_records = log_contents_before
-            .split("\n")
-            .filter(|line| line.len() > 0)
-            .map(|line| {
-                serde_json::from_str::<BunyanLogRecord>(line)
-                    .expect("invalid log record")
-            })
-            .collect::<Vec<BunyanLogRecord>>();
         assert_eq!(log_records.len(), 3);
-        for record in log_records.iter() {
-            assert_eq!(record.name, "oxide-api");
-            assert_eq!(record.pid, std::process::id());
-            assert_eq!(record.v, 0);
-        }
         for record in log_records.iter().skip(1) {
             assert_eq!(log_records[0].hostname, record.hostname);
         }
@@ -692,6 +765,8 @@ mod test {
          * Try again with if_exists = "truncate".  This should also work, but
          * remove the contents that's already there.
          */
+        let time_before = time_after;
+        let time_after = chrono::offset::Utc::now();
         let bad_config = format!(
             "{}{}\"{}\"\n",
             CONFIG_VALID_BIND_ADDRESS,
@@ -701,7 +776,7 @@ mod test {
             level = "trace"
             if_exists = "truncate"
             path = "##,
-            path.display()
+            &logpath
         );
 
         let config = read_config("file", &bad_config).unwrap();
@@ -713,21 +788,18 @@ mod test {
             error!(log, "message3_error");
         }
 
-        let log_contents_after = fs::read_to_string(path).unwrap();
-        let log_records = log_contents_after
-            .split("\n")
-            .filter(|line| line.len() > 0)
-            .map(|line| {
-                serde_json::from_str::<BunyanLogRecord>(line)
-                    .expect("invalid log record")
-            })
-            .collect::<Vec<BunyanLogRecord>>();
+        let log_records = read_bunyan_log(&logpath);
+        verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
+            name: Some("oxide-api".to_string()),
+            hostname: None,
+            v: Some(0),
+            pid: Some(std::process::id()),
+        });
+        verify_bunyan_records_sequential(log_records.iter(), Some(&time_before),
+            Some(&time_after));
         assert_eq!(log_records.len(), 3);
         assert_eq!(log_records[0].msg, "message3_debug");
         assert_eq!(log_records[1].msg, "message3_warn");
         assert_eq!(log_records[2].msg, "message3_error");
-
-        fs::remove_file(path).unwrap();
-        fs::remove_dir(path.parent().unwrap()).unwrap();
     }
 }
