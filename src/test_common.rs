@@ -107,8 +107,8 @@ mod test {
     const T1_STR: &str = "2020-03-24T00:00:00Z";
     const T2_STR: &str = "2020-03-25T00:00:00Z";
 
-    use super::verify_bunyan_records_sequential;
     use super::verify_bunyan_records;
+    use super::verify_bunyan_records_sequential;
     use super::BunyanLogRecord;
     use super::BunyanLogRecordSpec;
     use chrono::DateTime;
@@ -141,51 +141,51 @@ mod test {
             hostname: "h2".to_string(),
             pid: 1,
             msg: "msg2".to_string(),
-            v: 1
+            v: 1,
         };
 
         /* Test case: nothing to check. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
             hostname: None,
             pid: None,
-            v: None
+            v: None,
         });
 
         /* Test case: check name, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: Some("n1".to_string()),
             hostname: None,
             pid: None,
-            v: None
+            v: None,
         });
 
         /* Test case: check hostname, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
             hostname: Some("h1".to_string()),
             pid: None,
-            v: None
+            v: None,
         });
 
         /* Test case: check pid, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
             hostname: None,
             pid: Some(1),
-            v: None
+            v: None,
         });
 
         /* Test case: check hostname, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
@@ -195,7 +195,7 @@ mod test {
         });
 
         /* Test case: check all, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: Some("n1".to_string()),
@@ -205,7 +205,7 @@ mod test {
         });
 
         /* Test case: check multiple records, no problem. */
-        let records: Vec<&BunyanLogRecord> = vec![ &r1, &r2 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1, &r2];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: Some("n1".to_string()),
@@ -223,7 +223,7 @@ mod test {
     #[should_panic(expected = "assertion failed")]
     fn test_bunyan_bad_name() {
         let r1 = make_dummy_record();
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: Some("n2".to_string()),
@@ -237,7 +237,7 @@ mod test {
     #[should_panic(expected = "assertion failed")]
     fn test_bunyan_bad_hostname() {
         let r1 = make_dummy_record();
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
@@ -251,7 +251,7 @@ mod test {
     #[should_panic(expected = "assertion failed")]
     fn test_bunyan_bad_pid() {
         let r1 = make_dummy_record();
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,
@@ -265,7 +265,7 @@ mod test {
     #[should_panic(expected = "assertion failed")]
     fn test_bunyan_bad_v() {
         let r1 = make_dummy_record();
-        let records: Vec<&BunyanLogRecord> = vec![ &r1 ];
+        let records: Vec<&BunyanLogRecord> = vec![&r1];
         let iter = records.iter().map(|x| *x);
         verify_bunyan_records(iter, &BunyanLogRecordSpec {
             name: None,

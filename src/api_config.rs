@@ -243,15 +243,15 @@ fn log_drain_for_file(
 
 #[cfg(test)]
 mod test {
+    use super::super::test_common::read_bunyan_log;
+    use super::super::test_common::verify_bunyan_records;
+    use super::super::test_common::verify_bunyan_records_sequential;
+    use super::super::test_common::BunyanLogRecordSpec;
     use super::ApiServerConfig;
     use std::fs;
     use std::net::IpAddr;
     use std::path::Path;
     use std::path::PathBuf;
-    use super::super::test_common::read_bunyan_log;
-    use super::super::test_common::verify_bunyan_records;
-    use super::super::test_common::verify_bunyan_records_sequential;
-    use super::super::test_common::BunyanLogRecordSpec;
 
     /*
      * Chunks of valid config file.  These are put together with invalid chunks
@@ -330,20 +330,21 @@ mod test {
          * `LogTest` is torn down except for files and directories created with
          * `will_create_dir()` and `will_create_file()`.
          */
-        fn setup(label: &str) -> LogTest
-        {
+        fn setup(label: &str) -> LogTest {
             let directory_path = temp_path(label);
 
             if let Err(e) = fs::create_dir_all(&directory_path) {
-                panic!("unexpected failure creating directories leading up \
-                    to {}: {}", directory_path.as_path().display(), e);
+                panic!(
+                    "unexpected failure creating directories leading up to \
+                     {}: {}",
+                    directory_path.as_path().display(),
+                    e
+                );
             }
 
             LogTest {
                 directory: directory_path.clone(),
-                cleanup_list: vec![
-                    LogTestCleanup::Directory(directory_path)
-                ]
+                cleanup_list: vec![LogTestCleanup::Directory(directory_path)],
             }
         }
 
@@ -355,8 +356,7 @@ mod test {
          * recorded in the order they would be created so that the order can be
          * reversed at teardown (without needing any kind of recursive removal).
          */
-        fn will_create_dir(&mut self, path: &str) -> String
-        {
+        fn will_create_dir(&mut self, path: &str) -> String {
             let mut pathbuf = self.directory.clone();
             pathbuf.push(path);
             let rv = pathbuf.as_path().display().to_string();
@@ -372,8 +372,7 @@ mod test {
          * they would be created so that the order can be reversed at teardown
          * (without needing any kind of recursive removal).
          */
-        fn will_create_file(&mut self, path: &str) -> String
-        {
+        fn will_create_file(&mut self, path: &str) -> String {
             let mut pathbuf = self.directory.clone();
             pathbuf.push(path);
             let rv = pathbuf.as_path().display().to_string();
@@ -383,8 +382,7 @@ mod test {
     }
 
     impl Drop for LogTest {
-        fn drop(&mut self)
-        {
+        fn drop(&mut self) {
             for path in self.cleanup_list.iter().rev() {
                 let maybe_error = match path {
                     LogTestCleanup::Directory(p) => fs::remove_dir(p),
@@ -642,8 +640,8 @@ mod test {
             &path
         );
 
-        let config = read_config("bad_file_bad_path_type", &bad_config)
-            .unwrap();
+        let config =
+            read_config("bad_file_bad_path_type", &bad_config).unwrap();
         let error = config.log.to_logger().unwrap_err();
         let message = format!("{}", error);
         eprintln!("error message: {}", message);
@@ -750,8 +748,11 @@ mod test {
             v: Some(0),
             pid: Some(std::process::id()),
         });
-        verify_bunyan_records_sequential(log_records.iter(), Some(&time_before),
-            Some(&time_after));
+        verify_bunyan_records_sequential(
+            log_records.iter(),
+            Some(&time_before),
+            Some(&time_after),
+        );
 
         assert_eq!(log_records.len(), 3);
         for record in log_records.iter().skip(1) {
@@ -795,8 +796,11 @@ mod test {
             v: Some(0),
             pid: Some(std::process::id()),
         });
-        verify_bunyan_records_sequential(log_records.iter(), Some(&time_before),
-            Some(&time_after));
+        verify_bunyan_records_sequential(
+            log_records.iter(),
+            Some(&time_before),
+            Some(&time_after),
+        );
         assert_eq!(log_records.len(), 3);
         assert_eq!(log_records[0].msg, "message3_debug");
         assert_eq!(log_records[1].msg, "message3_warn");
