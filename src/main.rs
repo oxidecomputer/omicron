@@ -35,7 +35,7 @@ async fn main() {
     let config = match ApiServerConfig::from_file(config_file_path) {
         Ok(c) => c,
         Err(error) => {
-            eprintln!("{}: {}", config_file, error);
+            eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             std::process::exit(1);
         }
     };
@@ -44,15 +44,15 @@ async fn main() {
         &config,
         matches.is_present("openapi"),
     ) {
-        Err(e) => {
-            eprintln!("{}: {}", config_file, e);
+        Err(error) => {
+            eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             std::process::exit(1);
         }
         Ok(s) => s,
     };
 
     if let Err(error) = server.http_server.run().await {
-        eprintln!("{}: {}", config_file, error);
+        eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
         std::process::exit(1);
     }
 }

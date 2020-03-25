@@ -190,25 +190,26 @@ impl PathSegment {
      * it's a variable or a literal.
      */
     fn from(segment: &String) -> PathSegment {
-        match (segment.starts_with("{"), segment.ends_with("}")) {
-            (false, true) => {
-                panic!("HTTP URI path segment variable missing leading \"{\"")
-            }
-            (true, false) => {
-                panic!("HTTP URI path segment variable missing trailing \"}\"")
-            }
-            (true, true) => {
-                assert!(
-                    segment.len() > 2,
-                    "HTTP URI path segment variable name cannot be empty"
-                );
+        if segment.starts_with("{") || segment.ends_with("}") {
+            assert!(
+                segment.starts_with("{"),
+                "HTTP URI path segment variable missing leading \"{\""
+            );
+            assert!(
+                segment.ends_with("}"),
+                "HTTP URI path segment variable missing trailing \"}\""
+            );
+            assert!(
+                segment.len() > 2,
+                "HTTP URI path segment variable name cannot be empty"
+            );
 
-                let segment_chars: Vec<char> = segment.chars().collect();
-                let newlast = segment_chars.len() - 1;
-                let varname_chars = &segment_chars[1..newlast];
-                PathSegment::Varname(varname_chars.iter().collect())
-            }
-            (false, false) => PathSegment::Literal(segment.to_string()),
+            let segment_chars: Vec<char> = segment.chars().collect();
+            let newlast = segment_chars.len() - 1;
+            let varname_chars = &segment_chars[1..newlast];
+            PathSegment::Varname(varname_chars.iter().collect())
+        } else {
+            PathSegment::Literal(segment.to_string())
         }
     }
 }
