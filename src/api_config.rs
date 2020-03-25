@@ -259,11 +259,11 @@ mod test {
      * on the known invalid chunk.
      */
     const CONFIG_VALID_BIND_ADDRESS: &str = r##"
-            bind_address = "127.0.0.1:1234"
+            bind_address = "127.0.0.1:12221"
         "##;
     const CONFIG_VALID_LOG: &str = r##"
             [log]
-            level = "trace"
+            level = "critical"
             mode = "stderr-terminal"
         "##;
 
@@ -480,6 +480,90 @@ mod test {
             .contains("\": invalid IP address syntax for key `bind_address`"));
     }
 
+    #[tokio::test]
+    async fn test_config_bind_address() {
+        let client = hyper::Client::new();
+        let bind_ip_str = "127.0.0.1";
+        let bind_port: u16 = 12221;
+
+        /*
+         * This helper constructs a GET HTTP request to
+         * http://$bind_ip_str:$port/, where $port is the argument to the
+         * closure.
+         */
+        let cons_request = |port: u16| {
+            let uri = hyper::Uri::builder()
+                .scheme("http")
+                .authority(format!("{}:{}", bind_ip_str, port).as_str())
+                .path_and_query("/")
+                .build()
+                .unwrap();
+            hyper::Request::builder()
+                .method(http::method::Method::GET)
+                .uri(&uri)
+                .body(hyper::Body::empty())
+                .unwrap()
+        };
+
+        /*
+         * Make sure there is not currently a server running on our expected
+         * port so that when we subsequently create a server and run it we know
+         * we're getting the one we configured.
+         */
+        let error = client.request(cons_request(bind_port)).await.unwrap_err();
+        assert!(error.is_connect());
+
+        /*
+         * Now start a server with our configuration and make the request again.
+         * This should succeed in terms of making the request.  (The request
+         * itself might fail with a 400-level or 500-level response code -- we
+         * don't want to depend on too much from the ApiServer here -- but we
+         * should have successfully made the request.)
+         */
+        let config_text = format!(
+            "bind_address = \"{}:{}\"\n{}",
+            bind_ip_str, bind_port, CONFIG_VALID_LOG
+        );
+        let config = read_config("bind_address", &config_text).unwrap();
+        let mut server = super::super::ApiServer::new(&config).unwrap();
+        let task = server.http_server.run();
+        client.request(cons_request(bind_port)).await.unwrap();
+        server.http_server.close();
+        task.await.unwrap().unwrap();
+
+        /*
+         * Make another request to make sure it fails now that we've shut down
+         * the server.
+         */
+        let error = client.request(cons_request(bind_port)).await.unwrap_err();
+        assert!(error.is_connect());
+
+        /*
+         * Start a server on another TCP port and make sure we can reach that
+         * one (and NOT the one we just shut down).
+         */
+        let config_text = format!(
+            "bind_address = \"{}:{}\"\n{}",
+            bind_ip_str,
+            bind_port + 1,
+            CONFIG_VALID_LOG
+        );
+        let config = read_config("bind_address", &config_text).unwrap();
+        let mut server = super::super::ApiServer::new(&config).unwrap();
+        let task = server.http_server.run();
+        client.request(cons_request(bind_port + 1)).await.unwrap();
+        let error = client.request(cons_request(bind_port)).await.unwrap_err();
+        assert!(error.is_connect());
+        server.http_server.close();
+        task.await.unwrap().unwrap();
+
+        let error = client.request(cons_request(bind_port)).await.unwrap_err();
+        assert!(error.is_connect());
+        let error =
+            client.request(cons_request(bind_port + 1)).await.unwrap_err();
+        assert!(error.is_connect());
+    }
+
     /*
      * Bad value for "log_mode"
      */
@@ -556,10 +640,6 @@ mod test {
      * stderr, there's no exposed function for doing that, nor is there a way to
      * provide a specific stream to a terminal logger.  (We could always
      * implement our own.)
-     *
-     * TODO-coverage: other tests:
-     * - failed to create file logger (filesystem failure of some kind)
-     * - successful file logger, all three modes?
      */
     #[test]
     fn test_config_stderr_terminal() {
@@ -739,12 +819,12 @@ mod test {
             warn!(log, "message2");
         }
 
-        /* XXX verify hostname, here and below */
         let time_after = chrono::offset::Utc::now();
         let log_records = read_bunyan_log(&logpath);
+        let expected_hostname = hostname::get().unwrap().into_string().unwrap();
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
             name: Some("oxide-api".to_string()),
-            hostname: None,
+            hostname: Some(expected_hostname.clone()),
             v: Some(0),
             pid: Some(std::process::id()),
         });
@@ -755,9 +835,6 @@ mod test {
         );
 
         assert_eq!(log_records.len(), 3);
-        for record in log_records.iter().skip(1) {
-            assert_eq!(log_records[0].hostname, record.hostname);
-        }
         assert_eq!(log_records[0].msg, "message1_warn");
         assert_eq!(log_records[1].msg, "message1_error");
         assert_eq!(log_records[2].msg, "message2");
@@ -792,7 +869,7 @@ mod test {
         let log_records = read_bunyan_log(&logpath);
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
             name: Some("oxide-api".to_string()),
-            hostname: None,
+            hostname: Some(expected_hostname),
             v: Some(0),
             pid: Some(std::process::id()),
         });
