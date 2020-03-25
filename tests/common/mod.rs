@@ -75,7 +75,8 @@ pub fn test_setup() -> TestContext {
         .expect("failed to load config.test.toml");
     config.bind_address.set_port(0);
 
-    let mut server = ApiServer::new(&config).expect("failed to set up server");
+    let mut server =
+        ApiServer::new(&config, false).expect("failed to set up server");
     let task = server.http_server.run();
 
     let server_addr = server.http_server.local_addr();

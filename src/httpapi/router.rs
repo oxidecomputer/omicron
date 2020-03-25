@@ -460,6 +460,154 @@ impl HttpRouter {
                 HttpError::for_status(StatusCode::METHOD_NOT_ALLOWED)
             })
     }
+
+    pub fn iter(&self) -> HttpRouterIter {
+        HttpRouterIter::new(self)
+    }
+
+    pub fn print_openapi(&self) {
+        let mut openapi = openapiv3::OpenAPI::default();
+
+        for (path, method) in self.iter() {
+            let path = openapi.paths.entry(path).or_insert(
+                openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()),
+            );
+
+            let pathitem = match path {
+                openapiv3::ReferenceOr::Item(ref mut item) => item,
+                _ => panic!("reference not expected"),
+            };
+
+            let method_ref = match &method[..] {
+                "GET" => &mut pathitem.get,
+                "PUT" => &mut pathitem.put,
+                "POST" => &mut pathitem.post,
+                "DELETE" => &mut pathitem.delete,
+                "OPTIONS" => &mut pathitem.options,
+                "HEAD" => &mut pathitem.head,
+                "PATCH" => &mut pathitem.patch,
+                "TRACE" => &mut pathitem.trace,
+                other => panic!("unexpected method `{}`", other),
+            };
+
+            method_ref.replace(openapiv3::Operation::default());
+        }
+
+        println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
+    }
+}
+
+/**
+ * Route Interator implementation. We perform a preorder, depth first traversal
+ * of the tree starting from the root node. For each node, we enumerate the
+ * methods and then descend into its chilren (or single child in the case of
+ * path parameter variables). `method` holds the iterator over the current
+ * node's `method_handlers`; `path` is a stack that represents the current
+ * collection of path segments and the iterators at each corresponding node.
+ *
+ * We start with the root node's `method_handlers` iterator and a stack
+ * consisting of a blank string and an iterator over the root node's
+ * children.
+ */
+pub struct HttpRouterIter<'a> {
+    method: Box<
+        dyn Iterator<Item = (&'a String, &'a Box<dyn RouteHandler + 'a>)> + 'a,
+    >,
+    path: Vec<(
+        PathSegment,
+        Box<dyn Iterator<Item = (PathSegment, &'a Box<HttpRouterNode>)> + 'a>,
+    )>,
+}
+
+impl<'a> HttpRouterIter<'a> {
+    fn new(router: &'a HttpRouter) -> Self {
+        HttpRouterIter {
+            method: Box::new(router.root.method_handlers.iter()),
+            path: vec![(
+                PathSegment::Literal("".to_string()),
+                HttpRouterIter::iter_node(&router.root),
+            )],
+        }
+    }
+
+    /**
+     * Produce an iterator over `node`'s children. This is the null (empty)
+     * iterator if there are no children, a single (once) iterator for a
+     * path parameter variable, and a modified iterator in the case of
+     * literal, explicit path segments.
+     */
+    fn iter_node(
+        node: &'a HttpRouterNode,
+    ) -> Box<dyn Iterator<Item = (PathSegment, &'a Box<HttpRouterNode>)> + 'a>
+    {
+        match &node.edges {
+            Some(HttpRouterEdges::Literals(map)) => Box::new(
+                map.iter()
+                    .map(|(s, node)| (PathSegment::Literal(s.clone()), node)),
+            ),
+            Some(HttpRouterEdges::Variable(ref varname, ref node)) => Box::new(
+                std::iter::once((PathSegment::Varname(varname.clone()), node)),
+            ),
+            None => Box::new(std::iter::empty()),
+        }
+    }
+
+    /**
+     * Produce a human-readible path from the current vector of path segments.
+     */
+    fn path(&self) -> String {
+        // Ignore the leading element as that's just a placeholder.
+        let components: Vec<String> = self.path[1..]
+            .iter()
+            .map(|(c, _)| match c {
+                PathSegment::Literal(s) => s.clone(),
+                PathSegment::Varname(s) => format!("{{{}}}", s),
+            })
+            .collect();
+
+        // Prepend "/" to the "/"-delimited path.
+        format!("/{}", components.join("/"))
+    }
+}
+
+impl<'a> Iterator for HttpRouterIter<'a> {
+    type Item = (String, String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If there are no path components left then we've reached the end of
+        // our traversal. Making this case explicit isn't strictly required,
+        // but is added for clarity.
+        if self.path.is_empty() {
+            return None;
+        }
+
+        loop {
+            match self.method.next() {
+                Some((m, _)) => break Some((self.path(), m.clone())),
+                None => {
+                    // We've iterated fully through the method in this node so it's
+                    // time to find the next node.
+                    match self.path.last_mut() {
+                        None => break None,
+                        Some((_, ref mut last)) => match last.next() {
+                            None => {
+                                self.path.pop();
+                                assert!(self.method.next().is_none());
+                            }
+                            Some((path_component, node)) => {
+                                self.path.push((
+                                    path_component,
+                                    HttpRouterIter::iter_node(node),
+                                ));
+                                self.method =
+                                    Box::new(node.method_handlers.iter());
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -813,5 +961,49 @@ mod test {
             .lookup_route(&Method::GET, "/projects/foo/instances")
             .unwrap();
         assert_eq!(result.handler.label(), "h7");
+    }
+
+    #[test]
+    fn test_iter_null() {
+        let router = HttpRouter::new();
+        let ret: Vec<_> = router.iter().collect();
+        assert_eq!(ret, vec![]);
+    }
+
+    #[test]
+    fn test_iter() {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/", new_handler_named("root"));
+        router.insert(
+            Method::GET,
+            "/projects/{project_id}/instances",
+            new_handler_named("i"),
+        );
+        let ret: Vec<_> = router.iter().collect();
+        assert_eq!(ret, vec![
+            ("/".to_string(), "GET".to_string(),),
+            ("/projects/{project_id}/instances".to_string(), "GET".to_string(),),
+        ]);
+    }
+
+    #[test]
+    fn test_iter2() {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/", new_handler_named("root_get"));
+        router.insert(Method::POST, "/", new_handler_named("root_post"));
+        let ret: Vec<_> = router.iter().collect();
+        assert_eq!(ret, vec![
+            ("/".to_string(), "GET".to_string(),),
+            ("/".to_string(), "POST".to_string(),),
+        ]);
+    }
+
+    #[test]
+    fn test_openapi() {
+        let mut router = HttpRouter::new();
+        router.insert(Method::GET, "/", new_handler_named("root_get"));
+        router.insert(Method::POST, "/", new_handler_named("root_post"));
+
+        router.print_openapi();
     }
 }
