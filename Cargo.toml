@@ -6,18 +6,16 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1.24"
-bytes = "0.5.4"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = "2"
 futures = "0.3.1"
 hostname = "0.3.0"
 http = "0.2.0"
+httpapi = { path = "lib/httpapi" }
 hyper = "0.13"
 openapi = { path = "lib/openapi" }
-openapiv3 = "0.3.0"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-serde_urlencoded = "0.6"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.4"
 slog-bunyan = "2.2"
@@ -25,9 +23,7 @@ slog-json = "2.3"
 slog-term = "2.5"
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
-url = "^2.1"
-uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
 [workspace]
-members = [".", "lib/openapi"]
-default-members = [".", "lib/openapi"]
+members = [".", "lib/httpapi", "lib/openapi"]
+default-members = [".", "lib/httpapi", "lib/openapi"]

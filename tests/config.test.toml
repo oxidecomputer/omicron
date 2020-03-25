@@ -9,7 +9,12 @@
 #
 bind_address = "127.0.0.1:0"
 
+#
+# NOTE: for the test suite, if mode = "file", the file path will be overridden
+# to a unique path for each test.
+#
 [log]
 level = "debug"
-mode = "test-suite"
-directory = "logs"
+mode = "file"
+if_exists = "fail"
+path = "UNUSED"

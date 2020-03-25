@@ -100,13 +100,10 @@ impl HttpServer {
      */
     pub fn new(
         bind_address: &SocketAddr,
-        mut router: HttpRouter,
+        router: HttpRouter,
         private: Box<dyn Any + Send + Sync + 'static>,
-        log: Logger,
+        log: &Logger,
     ) -> Result<HttpServer, hyper::error::Error> {
-        /* TODO-hardening: this should not be built in except under test. */
-        test_endpoints::register_test_endpoints(&mut router);
-
         /* TODO-cleanup too many Arcs? */
         let log_close = log.new(o!());
         let app_state = Arc::new(ServerState {
@@ -123,7 +120,7 @@ impl HttpServer {
         let builder = hyper::Server::try_bind(bind_address)?;
         let server = builder.serve(make_service);
         let local_addr = server.local_addr();
-        info!(log, "listening"; "local_addr" => %local_addr);
+        info!(app_state.log, "listening"; "local_addr" => %local_addr);
 
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let graceful = server.with_graceful_shutdown(async move {
@@ -363,114 +360,5 @@ impl Service<Request<Body>> for ServerRequestHandler {
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         Box::pin(http_request_handle_wrap(Arc::clone(&self.server), req))
-    }
-}
-
-/*
- * Demo handler functions
- * TODO-cleanup these should not be registered except in test mode.  They kind
- * of belong under #[cfg(test)], except that we want to be able to use these
- * from integration tests.
- * Maybe instead we should have the unit / integration test instantiate its own
- * server with handlers like these.
- */
-pub mod test_endpoints {
-    use super::super::error::HttpError;
-    use super::super::handler::HttpRouteHandler;
-    use super::super::handler::Json;
-    use super::super::handler::Query;
-    use super::super::handler::RequestContext;
-    use super::super::http_util::CONTENT_TYPE_JSON;
-    use super::super::router::HttpRouter;
-    use http::StatusCode;
-    use hyper::Body;
-    use hyper::Method;
-    use hyper::Response;
-    use serde::Deserialize;
-    use serde::Serialize;
-    use std::sync::Arc;
-
-    pub fn register_test_endpoints(router: &mut HttpRouter) {
-        router.insert(
-            Method::GET,
-            "/testing/demo1",
-            HttpRouteHandler::new(demo_handler_args_1),
-        );
-        router.insert(
-            Method::GET,
-            "/testing/demo2query",
-            HttpRouteHandler::new(demo_handler_args_2query),
-        );
-        router.insert(
-            Method::GET,
-            "/testing/demo2json",
-            HttpRouteHandler::new(demo_handler_args_2json),
-        );
-        router.insert(
-            Method::GET,
-            "/testing/demo3",
-            HttpRouteHandler::new(demo_handler_args_3),
-        );
-    }
-
-    async fn demo_handler_args_1(
-        _rqctx: Arc<RequestContext>,
-    ) -> Result<Response<Body>, HttpError> {
-        Ok(Response::builder()
-            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-            .status(StatusCode::OK)
-            .body("demo_handler_args_1\n".into())?)
-    }
-
-    #[derive(Serialize, Deserialize)]
-    pub struct DemoQueryArgs {
-        pub test1: String,
-        pub test2: Option<u32>,
-    }
-
-    async fn demo_handler_args_2query(
-        _rqctx: Arc<RequestContext>,
-        query: Query<DemoQueryArgs>,
-    ) -> Result<Response<Body>, HttpError> {
-        Ok(Response::builder()
-            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-            .status(StatusCode::OK)
-            .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct DemoJsonBody {
-        pub test1: String,
-        pub test2: Option<u32>,
-    }
-
-    async fn demo_handler_args_2json(
-        _rqctx: Arc<RequestContext>,
-        json: Json<DemoJsonBody>,
-    ) -> Result<Response<Body>, HttpError> {
-        Ok(Response::builder()
-            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-            .status(StatusCode::OK)
-            .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
-    }
-
-    #[derive(Deserialize, Serialize)]
-    pub struct DemoJsonAndQuery {
-        pub query: DemoQueryArgs,
-        pub json: DemoJsonBody,
-    }
-    async fn demo_handler_args_3(
-        _rqctx: Arc<RequestContext>,
-        query: Query<DemoQueryArgs>,
-        json: Json<DemoJsonBody>,
-    ) -> Result<Response<Body>, HttpError> {
-        let combined = DemoJsonAndQuery {
-            query: query.into_inner(),
-            json: json.into_inner(),
-        };
-        Ok(Response::builder()
-            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-            .status(StatusCode::OK)
-            .body(serde_json::to_string(&combined).unwrap().into())?)
     }
 }

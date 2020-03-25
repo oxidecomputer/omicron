@@ -3,7 +3,7 @@
  */
 
 use crate::api_model;
-use crate::httpapi::HttpError;
+use httpapi::HttpError;
 
 /**
  * ApiError represents errors that can be generated within the API server.  See
