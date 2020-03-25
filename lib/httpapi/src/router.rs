@@ -19,14 +19,14 @@ use std::collections::BTreeSet;
  * ```
  * use http::Method;
  * use http::StatusCode;
+ * use httpapi::HttpError;
+ * use httpapi::HttpRouteHandler;
+ * use httpapi::HttpRouter;
+ * use httpapi::RequestContext;
+ * use httpapi::RouteHandler;
+ * use httpapi::RouterLookupResult;
  * use hyper::Body;
  * use hyper::Response;
- * use oxide_api_prototype::httpapi::HttpError;
- * use oxide_api_prototype::httpapi::RequestContext;
- * use oxide_api_prototype::httpapi::HttpRouteHandler;
- * use oxide_api_prototype::httpapi::RouteHandler;
- * use oxide_api_prototype::httpapi::HttpRouter;
- * use oxide_api_prototype::httpapi::RouterLookupResult;
  * use std::sync::Arc;
  *
  * /// Example HTTP request handler function

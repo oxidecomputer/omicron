@@ -3,6 +3,7 @@
  */
 
 use http::method::Method;
+use httpapi::HttpErrorResponseBody;
 use hyper::body::to_bytes;
 use hyper::client::HttpConnector;
 use hyper::Body;
@@ -11,7 +12,6 @@ use hyper::Request;
 use hyper::Response;
 use hyper::StatusCode;
 use hyper::Uri;
-use oxide_api_prototype::httpapi::HttpErrorResponseBody;
 use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
 use serde::de::DeserializeOwned;
@@ -264,7 +264,7 @@ pub async fn read_ndjson<T: DeserializeOwned>(
 ) -> Vec<T> {
     let headers = response.headers();
     assert_eq!(
-        oxide_api_prototype::httpapi::CONTENT_TYPE_NDJSON,
+        httpapi::CONTENT_TYPE_NDJSON,
         headers.get(http::header::CONTENT_TYPE).expect("missing content-type")
     );
     let body_bytes =
@@ -297,7 +297,7 @@ pub async fn read_json<T: DeserializeOwned>(
 ) -> T {
     let headers = response.headers();
     assert_eq!(
-        oxide_api_prototype::httpapi::CONTENT_TYPE_JSON,
+        httpapi::CONTENT_TYPE_JSON,
         headers.get(http::header::CONTENT_TYPE).expect("missing content-type")
     );
     let body_bytes =

@@ -10,11 +10,11 @@ pub mod api_config;
 pub mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
-pub mod httpapi;
 mod sim;
 pub mod test_common;
 
 pub use api_config::ApiServerConfig;
+pub use httpapi;
 use httpapi::RequestContext;
 pub use httpapi::HEADER_REQUEST_ID;
 use std::any::Any;

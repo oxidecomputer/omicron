@@ -10,6 +10,9 @@ mod http_util;
 mod router;
 mod server;
 
+#[macro_use]
+extern crate slog;
+
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::Derived;

@@ -47,11 +47,11 @@
  * required u32, and "marker", an optional string:
  *
  * ```
- * use oxide_api_prototype::httpapi::HttpError;
- * use oxide_api_prototype::httpapi::Json;
- * use oxide_api_prototype::httpapi::Query;
- * use oxide_api_prototype::httpapi::RequestContext;
  * use http::StatusCode;
+ * use httpapi::HttpError;
+ * use httpapi::Json;
+ * use httpapi::Query;
+ * use httpapi::RequestContext;
  * use hyper::Body;
  * use hyper::Response;
  * use std::sync::Arc;

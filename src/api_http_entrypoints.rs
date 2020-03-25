@@ -13,17 +13,17 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
-use crate::httpapi::http_extract_path_params;
-use crate::httpapi::HttpError;
-use crate::httpapi::HttpResponseCreated;
-use crate::httpapi::HttpResponseDeleted;
-use crate::httpapi::HttpResponseOkObject;
-use crate::httpapi::HttpResponseOkObjectList;
-use crate::httpapi::HttpRouteHandler;
-use crate::httpapi::HttpRouter;
-use crate::httpapi::Json;
-use crate::httpapi::Query;
-use crate::httpapi::RequestContext;
+use httpapi::http_extract_path_params;
+use httpapi::HttpError;
+use httpapi::HttpResponseCreated;
+use httpapi::HttpResponseDeleted;
+use httpapi::HttpResponseOkObject;
+use httpapi::HttpResponseOkObjectList;
+use httpapi::HttpRouteHandler;
+use httpapi::HttpRouter;
+use httpapi::Json;
+use httpapi::Query;
+use httpapi::RequestContext;
 
 use openapi::endpoint;
 

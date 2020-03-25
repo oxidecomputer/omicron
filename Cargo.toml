@@ -27,5 +27,5 @@ url = "^2.1"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
 [workspace]
-members = [".", "lib/openapi"]
-default-members = [".", "lib/openapi"]
+members = [".", "lib/httpapi", "lib/openapi"]
+default-members = [".", "lib/httpapi", "lib/openapi"]
