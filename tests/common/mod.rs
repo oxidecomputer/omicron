@@ -16,8 +16,10 @@ use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use slog::Logger;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::path::Path;
 use tokio::task::JoinHandle;
 
 /**
@@ -34,6 +36,8 @@ pub struct TestContext {
     pub api_server_task: JoinHandle<Result<(), hyper::error::Error>>,
     /** HTTP client, used for making requests against the test server */
     pub client: Client<HttpConnector>,
+    /** logger for the test suite HTTP client */
+    pub client_log: Logger,
 }
 
 impl TestContext {
@@ -59,21 +63,30 @@ impl TestContext {
  * client.  The results are encapsulated in the `TestContext` struct.
  */
 pub fn test_setup() -> TestContext {
-    let bind_address = SocketAddr::V4(std::net::SocketAddrV4::new(
-        "127.0.0.1".parse().unwrap(),
-        0,
-    ));
-    let config = ApiServerConfig {
-        bind_address: bind_address,
-    };
+    /*
+     * We load as much configuration as we can from the test suite configuration
+     * file.  However, we override the TCP port for the server to 0, indicating
+     * that we wish to bind to any available port.  This is necessary because
+     * we'll run multiple servers concurrently, so there's no one port that we
+     * could reasonably pick.
+     */
+    let config_file_path = Path::new("tests/config.test.toml");
+    let mut config = ApiServerConfig::from_file(config_file_path)
+        .expect("failed to load config.test.toml");
+    config.bind_address.set_port(0);
+
     let mut server = ApiServer::new(&config).expect("failed to set up server");
     let task = server.http_server.run();
 
+    let server_addr = server.http_server.local_addr();
+    let client_log = server.log.new(o!("http_client" => "test suite"));
+
     TestContext {
-        bind_address: server.http_server.local_addr(),
+        bind_address: server_addr,
         api_server: server,
         api_server_task: task,
         client: Client::new(),
+        client_log: client_log,
     }
 }
 
@@ -130,7 +143,11 @@ pub async fn make_request_with_body(
     let uri = testctx.url(path);
 
     let time_before = chrono::offset::Utc::now().timestamp();
-    eprintln!("client request: {} {}\nbody:\n{:?}", method, uri, &body);
+    info!(testctx.client_log, "client request";
+        "method" => %method,
+        "uri" => %uri,
+        "body" => ?&body,
+    );
 
     let mut response = testctx
         .client
@@ -146,7 +163,7 @@ pub async fn make_request_with_body(
 
     /* Check that we got the expected response code. */
     let status = response.status();
-    eprintln!("client received response: status {}", status);
+    info!(testctx.client_log, "client received response"; "status" => ?status);
     assert_eq!(expected_status, status);
 
     /*
@@ -231,7 +248,7 @@ pub async fn make_request_with_body(
      * then return that.
      */
     let error_body: HttpErrorResponseBody = read_json(&mut response).await;
-    eprintln!("client error: {:?}", error_body);
+    info!(testctx.client_log, "client error"; "error_body" => ?error_body);
     assert_eq!(error_body.request_id, request_id_header);
     Err(error_body)
 }

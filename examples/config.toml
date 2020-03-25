@@ -4,3 +4,15 @@
 
 # IP address and TCP port on which to listen for connections
 bind_address = "127.0.0.1:12220"
+
+[log]
+# Show log messages of this level and more severe
+level = "trace"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

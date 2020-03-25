@@ -23,6 +23,8 @@ use std::task::Context;
 use std::task::Poll;
 use uuid::Uuid;
 
+use slog::Logger;
+
 /* TODO Replace this with something else? */
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -36,6 +38,8 @@ pub struct ServerState {
     pub config: ServerConfig,
     /** request router */
     pub router: HttpRouter,
+    /** server-wide log handle */
+    pub log: Logger,
 }
 
 /**
@@ -98,11 +102,13 @@ impl HttpServer {
         bind_address: &SocketAddr,
         mut router: HttpRouter,
         private: Box<dyn Any + Send + Sync + 'static>,
+        log: Logger,
     ) -> Result<HttpServer, hyper::error::Error> {
         /* TODO-hardening: this should not be built in except under test. */
         test_endpoints::register_test_endpoints(&mut router);
 
         /* TODO-cleanup too many Arcs? */
+        let log_close = log.new(o!());
         let app_state = Arc::new(ServerState {
             private: private,
             config: ServerConfig {
@@ -110,15 +116,19 @@ impl HttpServer {
                 request_body_max_bytes: 1024,
             },
             router: router,
+            log: log.new(o!()),
         });
 
         let make_service = ServerConnectionHandler::new(Arc::clone(&app_state));
         let builder = hyper::Server::try_bind(bind_address)?;
         let server = builder.serve(make_service);
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let local_addr = server.local_addr();
-        let graceful = server.with_graceful_shutdown(async {
+        info!(log, "listening"; "local_addr" => %local_addr);
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let graceful = server.with_graceful_shutdown(async move {
             rx.await.ok();
+            info!(log_close, "received request to begin graceful shutdown");
         });
 
         Ok(HttpServer {
@@ -139,7 +149,7 @@ async fn http_connection_handle(
     server: Arc<ServerState>,
     remote_addr: SocketAddr,
 ) -> Result<ServerRequestHandler, GenericError> {
-    eprintln!("accepted connection from: {}", remote_addr);
+    info!(server.log, "accepted connection"; "remote_addr" => %remote_addr);
     Ok(ServerRequestHandler::new(server))
 }
 
@@ -160,16 +170,54 @@ async fn http_request_handle_wrap(
      * themselves.
      */
     let request_id = generate_request_id();
-    match http_request_handle(server, request, &request_id).await {
-        Ok(response) => Ok(response),
-        Err(e) => Ok(e.into_response(&request_id)),
-    }
+    let request_log = server.log.new(o!(
+        "req_id" => request_id.clone(),
+        "method" => request.method().as_str().to_string(),
+        "uri" => format!("{}", request.uri()),
+    ));
+    trace!(request_log, "incoming request");
+    let maybe_response = http_request_handle(
+        Arc::clone(&server),
+        request,
+        &request_id,
+        request_log.new(o!()),
+    )
+    .await;
+
+    let response = match maybe_response {
+        Err(error) => {
+            let message_external = error.external_message.clone();
+            let message_internal = error.internal_message.clone();
+            let r = error.into_response(&request_id);
+
+            /* TODO-debug: add request and response headers here */
+            info!(request_log, "request completed";
+                "response_code" => r.status().as_str().to_string(),
+                "error_message_internal" => message_internal,
+                "error_message_external" => message_external,
+            );
+
+            r
+        }
+
+        Ok(response) => {
+            /* TODO-debug: add request and response headers here */
+            info!(request_log, "request completed";
+                "response_code" => response.status().as_str().to_string()
+            );
+
+            response
+        }
+    };
+
+    Ok(response)
 }
 
 async fn http_request_handle(
     server: Arc<ServerState>,
     request: Request<Body>,
     request_id: &str,
+    request_log: Logger,
 ) -> Result<Response<Body>, HttpError> {
     /*
      * TODO-hardening: is it correct to (and do we correctly) read the entire
@@ -184,13 +232,13 @@ async fn http_request_handle(
      */
     let method = request.method();
     let uri = request.uri();
-    eprintln!("handling request: method = {}, uri = {}", method.as_str(), uri);
     let lookup_result = server.router.lookup_route(&method, uri.path())?;
     let rqctx = RequestContext {
         server: Arc::clone(&server),
         request: Arc::new(Mutex::new(request)),
         path_variables: lookup_result.variables,
         request_id: request_id.to_string(),
+        log: request_log,
     };
     let mut response = lookup_result.handler.handle_request(rqctx).await?;
     response.headers_mut().insert(

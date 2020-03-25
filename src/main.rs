@@ -14,7 +14,7 @@
  * - Move even more of the server setup into api_server.rs
  */
 
-use oxide_api_prototype::api_load_config_from_file;
+use oxide_api_prototype::ApiServerConfig;
 
 #[tokio::main]
 async fn main() {
@@ -27,7 +27,7 @@ async fn main() {
     }
 
     let config_file_path = std::path::Path::new(&cmd_args[1]);
-    let config = match api_load_config_from_file(config_file_path) {
+    let config = match ApiServerConfig::from_file(config_file_path) {
         Ok(c) => c,
         Err(error) => {
             eprintln!("{}: {}", cmd_args[0], error);
@@ -43,7 +43,6 @@ async fn main() {
         Ok(s) => s,
     };
 
-    eprintln!("listening: http://{}", server.http_server.local_addr());
     if let Err(error) = server.http_server.run().await {
         eprintln!("{}: {}", cmd_args[0], error);
         std::process::exit(1);

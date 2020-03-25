@@ -27,6 +27,9 @@ use common::read_string;
 use common::test_setup;
 use common::test_teardown;
 
+#[macro_use]
+extern crate slog;
+
 /*
  * The "demo1" handler consumes neither query nor JSON body parameters.  Here we
  * test that such handlers work.  There are no error cases for us to induce.

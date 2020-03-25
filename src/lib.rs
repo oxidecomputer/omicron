@@ -6,57 +6,36 @@
  * TODO-cleanup is there a better way to do this?
  */
 
+pub mod api_config;
 pub mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
 pub mod httpapi;
 mod sim;
+pub mod test_common;
 
+pub use api_config::ApiServerConfig;
 use httpapi::RequestContext;
 pub use httpapi::HEADER_REQUEST_ID;
-use serde::Deserialize;
 use std::any::Any;
-use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 
-/**
- * Represents configuration for the whole API server.
- */
-#[derive(Deserialize)]
-pub struct ApiServerConfig {
-    pub bind_address: SocketAddr,
-}
-
-pub fn api_load_config_from_file(
-    path: &Path,
-) -> Result<ApiServerConfig, String> {
-    let config_contents = std::fs::read_to_string(path)
-        .map_err(|error| format!("read \"{}\": {}", path.display(), error))?;
-    let config_parsed: ApiServerConfig = toml::from_str(&config_contents)
-        .map_err(|error| format!("parse \"{}\": {}", path.display(), error))?;
-    Ok(config_parsed)
-}
+#[macro_use]
+extern crate slog;
+use slog::Logger;
 
 /**
  * Consumer handle for the API server.
  */
 pub struct ApiServer {
     pub http_server: httpapi::HttpServer,
-}
-
-/**
- * API-specific state that we'll associate with the server and make available to
- * API request handler functions.  See `api_backend()`.
- */
-pub struct ApiRequestContext {
-    pub backend: Arc<dyn api_model::ApiBackend>,
+    pub log: Logger,
 }
 
 impl ApiServer {
     pub fn new(
         config: &ApiServerConfig,
-    ) -> Result<ApiServer, hyper::error::Error> {
+    ) -> Result<ApiServer, api_error::InitError> {
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
         simbuilder.project_create("simproject2");
@@ -67,17 +46,30 @@ impl ApiServer {
         });
 
         let mut router = httpapi::HttpRouter::new();
+
+        let log = config.log.to_logger()?;
         api_http_entrypoints::api_register_entrypoints(&mut router);
         let http_server = httpapi::HttpServer::new(
             &config.bind_address,
             router,
             Box::new(api_state),
-        )?;
+            log.new(slog::o!()),
+        )
+        .map_err(|error| api_error::InitError(format!("{}", error)))?;
 
         Ok(ApiServer {
-            http_server: http_server,
+            http_server,
+            log,
         })
     }
+}
+
+/**
+ * API-specific state that we'll associate with the server and make available to
+ * API request handler functions.  See `api_backend()`.
+ */
+pub struct ApiRequestContext {
+    pub backend: Arc<dyn api_model::ApiBackend>,
 }
 
 /**
