@@ -153,14 +153,16 @@ impl DemoTestContext {
 #[tokio::test]
 async fn test_demo1() {
     let testctx = DemoTestContext::new("demo1").await;
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo1",
-        None as Option<()>,
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo1",
+            None as Option<()>,
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let body = read_string(&mut response).await;
     assert_eq!(body, "demo_handler_args_1\n");
     testctx.teardown().await;
@@ -178,68 +180,78 @@ async fn test_demo2query() {
     let testctx = DemoTestContext::new("demo2query").await;
 
     /* Test case: optional field missing */
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2query?test1=foo",
-        None as Option<()>,
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2query?test1=foo",
+            None as Option<()>,
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let json: DemoJsonBody = read_json(&mut response).await;
     assert_eq!(json.test1, "foo");
     assert_eq!(json.test2, None);
 
     /* Test case: both fields specified */
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2query?test1=foo&test2=10",
-        None as Option<()>,
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2query?test1=foo&test2=10",
+            None as Option<()>,
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let json: DemoJsonBody = read_json(&mut response).await;
     assert_eq!(json.test1, "foo");
     assert_eq!(json.test2, Some(10));
 
     /* Test case: required field missing */
-    let error = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2query",
-        None as Option<()>,
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2query",
+            None as Option<()>,
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert_eq!(
         error.message,
         "unable to parse query string: missing field `test1`"
     );
 
     /* Test case: typed field has bad value */
-    let error = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2query?test1=foo&test2=bar",
-        None as Option<()>,
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2query?test1=foo&test2=bar",
+            None as Option<()>,
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert_eq!(
         error.message,
         "unable to parse query string: invalid digit found in string"
     );
 
     /* Test case: duplicated field name */
-    let error = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2query?test1=foo&test1=bar",
-        None as Option<()>,
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2query?test1=foo&test1=bar",
+            None as Option<()>,
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert_eq!(
         error.message,
         "unable to parse query string: duplicate field `test1`"
@@ -262,14 +274,16 @@ async fn test_demo2json() {
         test1: "bar".to_string(),
         test2: None,
     };
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2json",
-        Some(input),
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2json",
+            Some(input),
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let json: DemoJsonBody = read_json(&mut response).await;
     assert_eq!(json.test1, "bar");
     assert_eq!(json.test2, None);
@@ -279,50 +293,58 @@ async fn test_demo2json() {
         test1: "bar".to_string(),
         test2: Some(15),
     };
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2json",
-        Some(input),
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2json",
+            Some(input),
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let json: DemoJsonBody = read_json(&mut response).await;
     assert_eq!(json.test1, "bar");
     assert_eq!(json.test2, Some(15));
 
     /* Test case: no input specified */
-    let error = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo2json",
-        None as Option<()>,
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo2json",
+            None as Option<()>,
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert!(error.message.starts_with("unable to parse body JSON"));
 
     /* Test case: invalid JSON */
-    let error = testctx.client_testctx.make_request_with_body(
-        Method::GET,
-        "/testing/demo2json",
-        "}".into(),
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/testing/demo2json",
+            "}".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert!(error.message.starts_with("unable to parse body JSON"));
 
     /* Test case: bad type */
     let json_bad_type = "{ \"test1\": \"oops\", \"test2\": \"oops\" }";
-    let error = testctx.client_testctx.make_request_with_body(
-        Method::GET,
-        "/testing/demo2json",
-        json_bad_type.into(),
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected failure");
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/testing/demo2json",
+            json_bad_type.into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
     assert!(error.message.starts_with(
         "unable to parse body JSON: invalid type: string \"oops\", expected \
          u32"
@@ -347,14 +369,16 @@ async fn test_demo3json() {
         test2: Some(0),
     };
 
-    let mut response = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo3?test1=martin&test2=2",
-        Some(json_input),
-        StatusCode::OK,
-    )
-    .await
-    .expect("expected success");
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo3?test1=martin&test2=2",
+            Some(json_input),
+            StatusCode::OK,
+        )
+        .await
+        .expect("expected success");
     let json: DemoJsonAndQuery = read_json(&mut response).await;
     assert_eq!(json.json.test1, "bart");
     assert_eq!(json.json.test2.unwrap(), 0);
@@ -366,28 +390,32 @@ async fn test_demo3json() {
         test1: "bart".to_string(),
         test2: Some(0),
     };
-    let error = testctx.client_testctx.make_request(
-        Method::GET,
-        "/testing/demo3?test2=2",
-        Some(json_input),
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected error");
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/testing/demo3?test2=2",
+            Some(json_input),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
     assert_eq!(
         error.message,
         "unable to parse query string: missing field `test1`"
     );
 
     /* Test case: error parsing body */
-    let error = testctx.client_testctx.make_request_with_body(
-        Method::GET,
-        "/testing/demo3?test1=martin&test2=2",
-        "}".into(),
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-    .expect_err("expected error");
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/testing/demo3?test1=martin&test2=2",
+            "}".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
     assert!(error.message.starts_with("unable to parse body JSON"));
 
     testctx.teardown().await;
