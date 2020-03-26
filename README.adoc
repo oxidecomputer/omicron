@@ -132,7 +132,6 @@ directory containing uniquely-named log files.
 * Move "httpapi" into its own crate in the same workspace
 ** The non-test path works.  I'm working on the test suites.
 *** The httpapi test suite works.
-*** Figure out why I get output from the server log even without --nocapture?
 *** I may need to move more tests from oxide-api-prototype into httpapi.
 ** cleanup: consider making some of the functions in test_util.rs methods of
    ClientTestContext.  There's a TODO about this already.

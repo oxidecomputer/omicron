@@ -34,7 +34,12 @@ use hyper::Response;
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
@@ -46,10 +51,13 @@ struct DemoTestContext {
     client_testctx: ClientTestContext,
     server: HttpServer,
     server_task: JoinHandle<Result<(), hyper::error::Error>>,
+    log_path: PathBuf,
 }
 
+static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
+
 impl DemoTestContext {
-    async fn new() -> DemoTestContext {
+    async fn new(test_name: &str) -> DemoTestContext {
         /*
          * The IP address to which we bind can be any local IP, but we use
          * 127.0.0.1 because we know it's present, it shouldn't expose this
@@ -62,12 +70,41 @@ impl DemoTestContext {
         let bind_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         /*
-         * Set up a simple logger.
+         * Set up a simple logger.  It sucks to have to re-run the test suite to
+         * get debug output, especially when test failures are non-reproducible,
+         * so we create a separate bunyan log file for each test.  If the test
+         * succeeds, we remove the log file.
          */
+        let arg0 = {
+            let arg0path = std::env::args().next().unwrap();
+            Path::new(&arg0path)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+
+        let log_path = {
+            let mut pathbuf = std::env::temp_dir();
+            let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            pathbuf.push(format!("{}-{}.{}.{}.log", arg0, test_name, pid, id));
+            pathbuf
+        };
+
+        eprintln!("log file: {:?}", log_path);
         let log = {
-            let plain = slog_term::PlainDecorator::new(std::io::stdout());
-            let formatter = slog_term::FullFormat::new(plain).build().fuse();
-            let drain = slog_async::Async::new(formatter).build().fuse();
+            let file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .unwrap();
+            let bunyan = slog_bunyan::with_name("httpapi_test_demo", file)
+                .build()
+                .fuse();
+            let drain = slog_async::Async::new(bunyan).build().fuse();
             slog::Logger::root(drain, o!())
         };
 
@@ -96,6 +133,7 @@ impl DemoTestContext {
             client_testctx,
             server,
             server_task,
+            log_path,
         }
     }
 
@@ -106,6 +144,7 @@ impl DemoTestContext {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
         join_result.expect("server closed with an error");
+        fs::remove_file(self.log_path).unwrap();
     }
 }
 
@@ -115,7 +154,7 @@ impl DemoTestContext {
  */
 #[tokio::test]
 async fn test_demo1() {
-    let testctx = DemoTestContext::new().await;
+    let testctx = DemoTestContext::new("demo1").await;
     let mut response = make_request(
         &testctx.client_testctx,
         Method::GET,
@@ -139,7 +178,7 @@ async fn test_demo1() {
  */
 #[tokio::test]
 async fn test_demo2query() {
-    let testctx = DemoTestContext::new().await;
+    let testctx = DemoTestContext::new("demo2query").await;
 
     /* Test case: optional field missing */
     let mut response = make_request(
@@ -224,7 +263,7 @@ async fn test_demo2query() {
  */
 #[tokio::test]
 async fn test_demo2json() {
-    let testctx = DemoTestContext::new().await;
+    let testctx = DemoTestContext::new("demo2json").await;
 
     /* Test case: optional field */
     let input = DemoJsonBody {
@@ -313,7 +352,7 @@ async fn test_demo2json() {
  */
 #[tokio::test]
 async fn test_demo3json() {
-    let testctx = DemoTestContext::new().await;
+    let testctx = DemoTestContext::new("demo3json").await;
 
     /* Test case: everything filled in. */
     let json_input = DemoJsonBody {
