@@ -15,20 +15,99 @@
  */
 
 use http::StatusCode;
+use httpapi::test_util::make_request;
+use httpapi::test_util::make_request_with_body;
+use httpapi::test_util::read_json;
+use httpapi::test_util::read_string;
+use httpapi::test_util::ClientTestContext;
+use httpapi::HttpError;
+use httpapi::HttpRouteHandler;
+use httpapi::HttpRouter;
+use httpapi::HttpServer;
+use httpapi::Json;
+use httpapi::Query;
+use httpapi::RequestContext;
+use httpapi::CONTENT_TYPE_JSON;
+use hyper::Body;
 use hyper::Method;
-use httpapi::test_endpoints::DemoJsonAndQuery;
-use httpapi::test_endpoints::DemoJsonBody;
-
-pub mod common;
-use common::make_request;
-use common::make_request_with_body;
-use common::read_json;
-use common::read_string;
-use common::test_setup;
-use common::test_teardown;
+use hyper::Response;
+use serde::Deserialize;
+use serde::Serialize;
+use std::any::Any;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 #[macro_use]
 extern crate slog;
+use slog::Drain;
+
+struct DemoTestContext {
+    client_testctx: ClientTestContext,
+    server: HttpServer,
+    server_task: JoinHandle<Result<(), hyper::error::Error>>,
+}
+
+impl DemoTestContext {
+    async fn new() -> DemoTestContext {
+        /*
+         * The IP address to which we bind can be any local IP, but we use
+         * 127.0.0.1 because we know it's present, it shouldn't expose this
+         * server on any external network, and we don't have to go looking for
+         * some other local IP (likely in a platform-specific way).  We specify
+         * port 0 to request any available port.  This is important because we
+         * may run multiple concurrent tests, so any fixed port could result in
+         * spurious failures due to port conflicts.
+         */
+        let bind_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        /*
+         * Set up a simple logger.
+         */
+        let log = {
+            let plain = slog_term::PlainDecorator::new(std::io::stdout());
+            let formatter = slog_term::FullFormat::new(plain).build().fuse();
+            let drain = slog_async::Async::new(formatter).build().fuse();
+            slog::Logger::root(drain, o!())
+        };
+
+        /*
+         * Package up our test endpoints into a router.
+         */
+        let mut router = httpapi::HttpRouter::new();
+        register_test_endpoints(&mut router);
+
+        /*
+         * Set up the server itself.
+         */
+        let mut server = httpapi::HttpServer::new(
+            &bind_address,
+            router,
+            Box::new(0) as Box<dyn Any + Send + Sync + 'static>,
+            &log,
+        )
+        .unwrap();
+        let server_task = server.run();
+
+        let server_addr = server.local_addr();
+        let client_testctx = ClientTestContext::new(server_addr, &log);
+
+        DemoTestContext {
+            client_testctx,
+            server,
+            server_task,
+        }
+    }
+
+    /*
+     * TODO-cleanup: is there an async analog to Drop?
+     */
+    async fn teardown(self) {
+        self.server.close();
+        let join_result = self.server_task.await.unwrap();
+        join_result.expect("server closed with an error");
+    }
+}
 
 /*
  * The "demo1" handler consumes neither query nor JSON body parameters.  Here we
@@ -36,9 +115,9 @@ extern crate slog;
  */
 #[tokio::test]
 async fn test_demo1() {
-    let testctx = test_setup();
+    let testctx = DemoTestContext::new().await;
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo1",
         None as Option<()>,
@@ -48,7 +127,7 @@ async fn test_demo1() {
     .expect("expected success");
     let body = read_string(&mut response).await;
     assert_eq!(body, "demo_handler_args_1\n");
-    test_teardown(testctx).await;
+    testctx.teardown().await;
 }
 
 /*
@@ -60,11 +139,11 @@ async fn test_demo1() {
  */
 #[tokio::test]
 async fn test_demo2query() {
-    let testctx = test_setup();
+    let testctx = DemoTestContext::new().await;
 
     /* Test case: optional field missing */
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2query?test1=foo",
         None as Option<()>,
@@ -78,7 +157,7 @@ async fn test_demo2query() {
 
     /* Test case: both fields specified */
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2query?test1=foo&test2=10",
         None as Option<()>,
@@ -92,7 +171,7 @@ async fn test_demo2query() {
 
     /* Test case: required field missing */
     let error = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2query",
         None as Option<()>,
@@ -107,7 +186,7 @@ async fn test_demo2query() {
 
     /* Test case: typed field has bad value */
     let error = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2query?test1=foo&test2=bar",
         None as Option<()>,
@@ -122,7 +201,7 @@ async fn test_demo2query() {
 
     /* Test case: duplicated field name */
     let error = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2query?test1=foo&test1=bar",
         None as Option<()>,
@@ -135,7 +214,7 @@ async fn test_demo2query() {
         "unable to parse query string: duplicate field `test1`"
     );
 
-    test_teardown(testctx).await;
+    testctx.teardown().await;
 }
 
 /*
@@ -145,7 +224,7 @@ async fn test_demo2query() {
  */
 #[tokio::test]
 async fn test_demo2json() {
-    let testctx = test_setup();
+    let testctx = DemoTestContext::new().await;
 
     /* Test case: optional field */
     let input = DemoJsonBody {
@@ -153,7 +232,7 @@ async fn test_demo2json() {
         test2: None,
     };
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2json",
         Some(input),
@@ -171,7 +250,7 @@ async fn test_demo2json() {
         test2: Some(15),
     };
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2json",
         Some(input),
@@ -185,7 +264,7 @@ async fn test_demo2json() {
 
     /* Test case: no input specified */
     let error = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2json",
         None as Option<()>,
@@ -197,7 +276,7 @@ async fn test_demo2json() {
 
     /* Test case: invalid JSON */
     let error = make_request_with_body(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2json",
         "}".into(),
@@ -210,7 +289,7 @@ async fn test_demo2json() {
     /* Test case: bad type */
     let json_bad_type = "{ \"test1\": \"oops\", \"test2\": \"oops\" }";
     let error = make_request_with_body(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo2json",
         json_bad_type.into(),
@@ -223,7 +302,7 @@ async fn test_demo2json() {
          u32"
     ));
 
-    test_teardown(testctx).await;
+    testctx.teardown().await;
 }
 
 /*
@@ -234,7 +313,7 @@ async fn test_demo2json() {
  */
 #[tokio::test]
 async fn test_demo3json() {
-    let testctx = test_setup();
+    let testctx = DemoTestContext::new().await;
 
     /* Test case: everything filled in. */
     let json_input = DemoJsonBody {
@@ -243,7 +322,7 @@ async fn test_demo3json() {
     };
 
     let mut response = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo3?test1=martin&test2=2",
         Some(json_input),
@@ -263,7 +342,7 @@ async fn test_demo3json() {
         test2: Some(0),
     };
     let error = make_request(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo3?test2=2",
         Some(json_input),
@@ -278,7 +357,7 @@ async fn test_demo3json() {
 
     /* Test case: error parsing body */
     let error = make_request_with_body(
-        &testctx,
+        &testctx.client_testctx,
         Method::GET,
         "/testing/demo3?test1=martin&test2=2",
         "}".into(),
@@ -288,5 +367,93 @@ async fn test_demo3json() {
     .expect_err("expected error");
     assert!(error.message.starts_with("unable to parse body JSON"));
 
-    test_teardown(testctx).await;
+    testctx.teardown().await;
+}
+
+/*
+ * Demo handler functions
+ * XXX cleanup
+ */
+pub fn register_test_endpoints(router: &mut HttpRouter) {
+    router.insert(
+        Method::GET,
+        "/testing/demo1",
+        HttpRouteHandler::new(demo_handler_args_1),
+    );
+    router.insert(
+        Method::GET,
+        "/testing/demo2query",
+        HttpRouteHandler::new(demo_handler_args_2query),
+    );
+    router.insert(
+        Method::GET,
+        "/testing/demo2json",
+        HttpRouteHandler::new(demo_handler_args_2json),
+    );
+    router.insert(
+        Method::GET,
+        "/testing/demo3",
+        HttpRouteHandler::new(demo_handler_args_3),
+    );
+}
+
+async fn demo_handler_args_1(
+    _rqctx: Arc<RequestContext>,
+) -> Result<Response<Body>, HttpError> {
+    Ok(Response::builder()
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+        .status(StatusCode::OK)
+        .body("demo_handler_args_1\n".into())?)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DemoQueryArgs {
+    pub test1: String,
+    pub test2: Option<u32>,
+}
+
+async fn demo_handler_args_2query(
+    _rqctx: Arc<RequestContext>,
+    query: Query<DemoQueryArgs>,
+) -> Result<Response<Body>, HttpError> {
+    Ok(Response::builder()
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DemoJsonBody {
+    pub test1: String,
+    pub test2: Option<u32>,
+}
+
+async fn demo_handler_args_2json(
+    _rqctx: Arc<RequestContext>,
+    json: Json<DemoJsonBody>,
+) -> Result<Response<Body>, HttpError> {
+    Ok(Response::builder()
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DemoJsonAndQuery {
+    pub query: DemoQueryArgs,
+    pub json: DemoJsonBody,
+}
+async fn demo_handler_args_3(
+    _rqctx: Arc<RequestContext>,
+    query: Query<DemoQueryArgs>,
+    json: Json<DemoJsonBody>,
+) -> Result<Response<Body>, HttpError> {
+    let combined = DemoJsonAndQuery {
+        query: query.into_inner(),
+        json: json.into_inner(),
+    };
+    Ok(Response::builder()
+        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+        .status(StatusCode::OK)
+        .body(serde_json::to_string(&combined).unwrap().into())?)
 }

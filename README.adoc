@@ -130,8 +130,18 @@ directory containing uniquely-named log files.
 == TODO
 
 * Move "httpapi" into its own crate in the same workspace
-** will need to move test suite stuff too -- take this opportunity to flesh out
-   tests?
+** The non-test path works.  I'm working on the test suites.
+*** The httpapi test suite works.
+*** Figure out why I get output from the server log even without --nocapture?
+*** I may need to move more tests from oxide-api-prototype into httpapi.
+** cleanup: consider making some of the functions in test_util.rs methods of
+   ClientTestContext.  There's a TODO about this already.
+** take this opportunity to flesh out tests?
+** rename "httpapi" subcrate to something else?
+** rename "lib" to something else (e.g., "local_deps")?
+** incorporate openapi directly into this subcrate?
+** compare "cargo test" output before and after to make sure I haven't lost tests
+** check for XXXs, TODOs
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 async-trait = "0.1.24"
 bytes = "0.5.4"
+chrono = { version = "0.4", features = [ "serde" ] }
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.13"
@@ -19,3 +20,7 @@ uuid = { version = "0.8", features = [ "serde", "v4" ] }
 [dependencies.slog]
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dev-dependencies]
+slog-async = "2.4"
+slog-term = "2.5"

@@ -10,6 +10,8 @@ mod http_util;
 mod router;
 mod server;
 
+pub mod test_util;
+
 #[macro_use]
 extern crate slog;
 
@@ -31,6 +33,5 @@ pub use http_util::CONTENT_TYPE_NDJSON;
 pub use http_util::HEADER_REQUEST_ID;
 pub use router::HttpRouter;
 pub use router::RouterLookupResult;
-pub use server::test_endpoints;
 pub use server::HttpServer;
 pub use server::ServerConfig;
