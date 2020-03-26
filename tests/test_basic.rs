@@ -10,12 +10,11 @@ use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 
+use httpapi::test_util::read_json;
+use httpapi::test_util::read_ndjson;
+
 pub mod common;
-use common::make_request;
-use common::read_json;
-use common::read_ndjson;
-use common::test_setup;
-use common::test_teardown;
+use common::ApiTestContext;
 
 #[macro_use]
 extern crate slog;
@@ -40,13 +39,12 @@ extern crate slog;
  */
 #[tokio::test]
 async fn smoke_test() {
-    let testctx = test_setup();
+    let testctx = ApiTestContext::new("smoke_test").await;
 
     /*
      * Error case: GET /nonexistent (a path with no route at all)
      */
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/nonexistent",
         None as Option<()>,
@@ -60,8 +58,7 @@ async fn smoke_test() {
      * Error case: GET /projects/nonexistent (a possible value that does not
      * exist inside a collection that does exist)
      */
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/projects/nonexistent",
         None as Option<()>,
@@ -75,8 +72,7 @@ async fn smoke_test() {
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
      * exist beneath a resource that does exist)
      */
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/projects/simproject1/nonexistent",
         None as Option<()>,
@@ -89,8 +85,7 @@ async fn smoke_test() {
     /*
      * Error case: PUT /projects
      */
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::PUT,
         "/projects",
         None as Option<()>,
@@ -103,8 +98,7 @@ async fn smoke_test() {
     /*
      * Error case: DELETE /projects
      */
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::DELETE,
         "/projects",
         None as Option<()>,
@@ -118,8 +112,7 @@ async fn smoke_test() {
      * Basic test of out-of-the-box GET /projects
      * TODO-coverage: pagination
      */
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/projects",
         None as Option<()>,
@@ -143,8 +136,7 @@ async fn smoke_test() {
     /*
      * Basic test of out-of-the-box GET /projects/simproject2
      */
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/projects/simproject2",
         None as Option<()>,
@@ -164,8 +156,7 @@ async fn smoke_test() {
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    make_request(
-        &testctx,
+    testctx.client_testctx.make_request(
         Method::DELETE,
         "/projects/simproject2",
         None as Option<()>,
@@ -178,8 +169,7 @@ async fn smoke_test() {
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/projects/simproject2".
      */
-    make_request(
-        &testctx,
+    testctx.client_testctx.make_request(
         Method::GET,
         "/projects/simproject2",
         None as Option<()>,
@@ -187,8 +177,7 @@ async fn smoke_test() {
     )
     .await
     .expect_err("expected failure");
-    make_request(
-        &testctx,
+    testctx.client_testctx.make_request(
         Method::DELETE,
         "/projects/simproject2",
         None as Option<()>,
@@ -196,8 +185,7 @@ async fn smoke_test() {
     )
     .await
     .expect_err("expected failure");
-    make_request(
-        &testctx,
+    testctx.client_testctx.make_request(
         Method::PUT,
         "/projects/simproject2",
         Some(ApiProjectUpdateParams {
@@ -212,8 +200,7 @@ async fn smoke_test() {
     /*
      * Similarly, verify "GET /projects"
      */
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/projects",
         None as Option<()>,
@@ -240,8 +227,7 @@ async fn smoke_test() {
         name: None,
         description: Some("Li'l lightnin'".to_string()),
     };
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::PUT,
         "/projects/simproject3",
         Some(project_update),
@@ -254,8 +240,7 @@ async fn smoke_test() {
     assert_eq!(project.name, "simproject3");
     assert_eq!(project.description, "Li'l lightnin'");
 
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/projects/simproject3",
         None as Option<()>,
@@ -279,8 +264,7 @@ async fn smoke_test() {
         name: Some("lil_lightnin".to_string()),
         description: Some("little lightning".to_string()),
     };
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::PUT,
         "/projects/simproject3",
         Some(project_update),
@@ -293,8 +277,7 @@ async fn smoke_test() {
     assert_eq!(project.name, "lil_lightnin");
     assert_eq!(project.description, "little lightning");
 
-    make_request(
-        &testctx,
+    testctx.client_testctx.make_request(
         Method::GET,
         "/projects/simproject3",
         None as Option<()>,
@@ -310,8 +293,7 @@ async fn smoke_test() {
         name: "simproject1".to_string(),
         description: "a duplicate of simproject1".to_string(),
     };
-    let error = make_request(
-        &testctx,
+    let error = testctx.client_testctx.make_request(
         Method::POST,
         "/projects",
         Some(project_create),
@@ -328,8 +310,7 @@ async fn smoke_test() {
         name: "honor roller".to_string(),
         description: "a soapbox racer".to_string(),
     };
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::POST,
         "/projects",
         Some(project_create),
@@ -349,8 +330,7 @@ async fn smoke_test() {
      * - "lil_lightnin" with description "little lightning"
      * - "simproject1", same as out-of-the-box
      */
-    let mut response = make_request(
-        &testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/projects",
         None as Option<()>,
@@ -370,5 +350,5 @@ async fn smoke_test() {
     assert_eq!(projects[2].name, "simproject1");
     assert!(projects[2].description.len() > 0);
 
-    test_teardown(testctx).await;
+    testctx.teardown().await;
 }

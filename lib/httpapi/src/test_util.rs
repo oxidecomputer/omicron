@@ -44,11 +44,11 @@ impl ClientTestContext {
     /**
      * Set up a `ClientTestContext` for running tests against an API server.
      */
-    pub fn new(server_addr: SocketAddr, log: &Logger) -> ClientTestContext {
+    pub fn new(server_addr: SocketAddr, log: Logger) -> ClientTestContext {
         ClientTestContext {
             bind_address: server_addr,
             client: Client::new(),
-            client_log: log.new(o!("http_client" => "httpapi test suite")),
+            client_log: log,
         }
     }
 

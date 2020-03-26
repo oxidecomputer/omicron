@@ -103,7 +103,7 @@ impl DemoTestContext {
                 .build()
                 .fuse();
             let drain = slog_async::Async::new(bunyan).build().fuse();
-            slog::Logger::root(drain, o!())
+            slog::Logger::root(drain, o!("test_name" => test_name.to_string()))
         };
 
         /*
@@ -125,7 +125,8 @@ impl DemoTestContext {
         let server_task = server.run();
 
         let server_addr = server.local_addr();
-        let client_testctx = ClientTestContext::new(server_addr, &log);
+        let client_log = log.new(o!("http_client" => "httpapi test suite"));
+        let client_testctx = ClientTestContext::new(server_addr, client_log);
 
         DemoTestContext {
             client_testctx,
