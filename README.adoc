@@ -120,14 +120,10 @@ the server to exit immediately with an error).
 
 == TODO
 
-* Move "httpapi" into its own crate in the same workspace
-** Everything currently works, as of the last commit (both test suites)
-** See XXXs -- currently cleaning up some of the test suite logging stuff
-** rename "httpapi" subcrate to something else?
-** rename "lib" to something else (e.g., "local_deps")?
-** incorporate openapi directly into this subcrate?
-** compare "cargo test" output before and after to make sure I haven't lost tests
-** check for XXXs, TODOs
+* Repo cleanup
+** incorporate openapi directly into this subcrate
+** rename "httpapi" subcrate to something else
+** rename "lib" to something else (e.g., "local_deps")
 * Clean up the httpapi::HttpServer interface.  See the common boilerplate for
   setting up a TestContext in DemoTestContext and ApiTestContext.
 * Flesh out more endpoints and simulator
