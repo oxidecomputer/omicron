@@ -21,9 +21,15 @@ use std::net::SocketAddr;
 use crate::error::HttpErrorResponseBody;
 
 /**
+ * List of allowed HTTP headers in responses.  This is used to make sure we
+ * don't leak headers unexpectedly.
+ */
+const ALLOWED_HEADER_NAMES: [&str; 4] =
+    ["content-length", "content-type", "date", "x-request-id"];
+
+/**
  * ClientTestContext encapsulates several facilities associated with using an
  * HTTP client for testing.
- * TODO-cleanup should the make_request() functions be methods on this struct?
  */
 pub struct ClientTestContext {
     /** actual bind address of the HTTP server under test */
@@ -60,158 +66,153 @@ impl ClientTestContext {
             .build()
             .expect("attempted to construct invalid URI")
     }
-}
 
-/**
- * List of allowed HTTP headers in responses.  This is used to make sure we
- * don't leak headers unexpectedly.
- */
-const ALLOWED_HEADER_NAMES: [&str; 4] =
-    ["content-length", "content-type", "date", "x-request-id"];
-
-/**
- * Execute an HTTP request against the test server and perform basic validation
- * of the result, including:
- *
- * - the expected status code
- * - the expected Date header (within reason)
- * - for error responses: the expected body content
- * - header names are in allowed list
- * - any other semantics that can be verified in general
- */
-pub async fn make_request<RequestBodyType: Serialize + Debug>(
-    testctx: &ClientTestContext,
-    method: Method,
-    path: &str,
-    request_body: Option<RequestBodyType>,
-    expected_status: StatusCode,
-) -> Result<Response<Body>, HttpErrorResponseBody> {
-    let body: Body = match request_body {
-        None => Body::empty(),
-        Some(input) => serde_json::to_string(&input).unwrap().into(),
-    };
-
-    make_request_with_body(testctx, method, path, body, expected_status).await
-}
-
-pub async fn make_request_with_body(
-    testctx: &ClientTestContext,
-    method: Method,
-    path: &str,
-    body: Body,
-    expected_status: StatusCode,
-) -> Result<Response<Body>, HttpErrorResponseBody> {
-    let uri = testctx.url(path);
-
-    let time_before = chrono::offset::Utc::now().timestamp();
-    info!(testctx.client_log, "client request";
-        "method" => %method,
-        "uri" => %uri,
-        "body" => ?&body,
-    );
-
-    let mut response = testctx
-        .client
-        .request(
-            Request::builder()
-                .method(method)
-                .uri(testctx.url(path))
-                .body(body)
-                .expect("attempted to construct invalid request"),
-        )
-        .await
-        .expect("failed to make request to server");
-
-    /* Check that we got the expected response code. */
-    let status = response.status();
-    info!(testctx.client_log, "client received response"; "status" => ?status);
-    assert_eq!(expected_status, status);
-
-    /*
-     * Check that we didn't have any unexpected headers.  This could be more
-     * efficient by putting the allowed headers into a BTree or Hash, but right
-     * now the structure is tiny and it's convenient to have it
-     * statically-defined above.
+    /**
+     * Execute an HTTP request against the test server and perform basic
+     * validation of the result, including:
+     *
+     * - the expected status code
+     * - the expected Date header (within reason)
+     * - for error responses: the expected body content
+     * - header names are in allowed list
+     * - any other semantics that can be verified in general
      */
-    let headers = response.headers();
-    for header_name in headers.keys() {
-        let mut okay = false;
-        for allowed_name in ALLOWED_HEADER_NAMES.iter() {
-            if header_name == allowed_name {
-                okay = true;
-                break;
+    pub async fn make_request<RequestBodyType: Serialize + Debug>(
+        &self,
+        method: Method,
+        path: &str,
+        request_body: Option<RequestBodyType>,
+        expected_status: StatusCode,
+    ) -> Result<Response<Body>, HttpErrorResponseBody> {
+        let body: Body = match request_body {
+            None => Body::empty(),
+            Some(input) => serde_json::to_string(&input).unwrap().into(),
+        };
+
+        self.make_request_with_body(method, path, body, expected_status).await
+    }
+
+    pub async fn make_request_with_body(
+        &self,
+        method: Method,
+        path: &str,
+        body: Body,
+        expected_status: StatusCode,
+    ) -> Result<Response<Body>, HttpErrorResponseBody> {
+        let uri = self.url(path);
+
+        let time_before = chrono::offset::Utc::now().timestamp();
+        info!(self.client_log, "client request";
+            "method" => %method,
+            "uri" => %uri,
+            "body" => ?&body,
+        );
+
+        let mut response = self
+            .client
+            .request(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(body)
+                    .expect("attempted to construct invalid request"),
+            )
+            .await
+            .expect("failed to make request to server");
+
+        /* Check that we got the expected response code. */
+        let status = response.status();
+        info!(self.client_log, "client received response"; "status" => ?status);
+        assert_eq!(expected_status, status);
+
+        /*
+         * Check that we didn't have any unexpected headers.  This could be more
+         * efficient by putting the allowed headers into a BTree or Hash, but
+         * right now the structure is tiny and it's convenient to have it
+         * statically-defined above.
+         */
+        let headers = response.headers();
+        for header_name in headers.keys() {
+            let mut okay = false;
+            for allowed_name in ALLOWED_HEADER_NAMES.iter() {
+                if header_name == allowed_name {
+                    okay = true;
+                    break;
+                }
+            }
+
+            if !okay {
+                panic!("header name not in allowed list: \"{}\"", header_name);
             }
         }
 
-        if !okay {
-            panic!("header name not in allowed list: \"{}\"", header_name);
+        /*
+         * Sanity check the Date header in the response.  Note that this
+         * assertion will fail spuriously in the unlikely event that the system
+         * clock is adjusted backwards in between when we sent the request and
+         * when we received the response, but we consider that case unlikely
+         * enough to be worth doing this check anyway.  (We'll try to check for
+         * the clock reset condition, too, but we cannot catch all cases that
+         * would cause the Date header check to be incorrect.)
+         *
+         * Note that the Date header typically only has precision down to one
+         * second, so we don't want to try to do a more precise comparison.
+         */
+        let time_after = chrono::offset::Utc::now().timestamp();
+        let date_header = headers
+            .get(http::header::DATE)
+            .expect("missing Date header")
+            .to_str()
+            .expect("non-ASCII characters in Date header");
+        let time_request = chrono::DateTime::parse_from_rfc2822(date_header)
+            .expect("unable to parse server's Date header");
+        assert!(
+            time_before <= time_after,
+            "time obviously went backwards during the test"
+        );
+        assert!(time_request.timestamp() >= time_before - 1);
+        assert!(time_request.timestamp() <= time_after + 1);
+
+        /*
+         * Validate that we have a request id header.
+         * TODO-coverage check that it's unique among requests we've issued
+         */
+        let request_id_header = headers
+            .get(crate::HEADER_REQUEST_ID)
+            .expect("missing request id header")
+            .to_str()
+            .expect("non-ASCII characters in request id")
+            .to_string();
+
+        /*
+         * For "204 No Content" responses, validate that we got no content in the
+         * body.
+         */
+        if status == StatusCode::NO_CONTENT {
+            let body_bytes = to_bytes(response.body_mut())
+                .await
+                .expect("error reading body");
+            assert_eq!(0, body_bytes.len());
         }
+
+        /*
+         * If this was a successful response, there's nothing else to check
+         * here.  Return the response so the caller can validate the content if
+         * they want.
+         */
+        if !status.is_client_error() && !status.is_server_error() {
+            return Ok(response);
+        }
+
+        /*
+         * We got an error.  Parse the response body to make sure it's valid and
+         * then return that.
+         */
+        let error_body: HttpErrorResponseBody = read_json(&mut response).await;
+        info!(self.client_log, "client error"; "error_body" => ?error_body);
+        assert_eq!(error_body.request_id, request_id_header);
+        Err(error_body)
     }
-
-    /*
-     * Sanity check the Date header in the response.  Note that this assertion
-     * will fail spuriously in the unlikely event that the system clock is
-     * adjusted backwards in between when we sent the request and when we
-     * received the response, but we consider that case unlikely enough to be
-     * worth doing this check anyway.  (We'll try to check for the clock reset
-     * condition, too, but we cannot catch all cases that would cause the Date
-     * header check to be incorrect.)
-     *
-     * Note that the Date header typically only has precision down to one
-     * second, so we don't want to try to do a more precise comparison.
-     */
-    let time_after = chrono::offset::Utc::now().timestamp();
-    let date_header = headers
-        .get(http::header::DATE)
-        .expect("missing Date header")
-        .to_str()
-        .expect("non-ASCII characters in Date header");
-    let time_request = chrono::DateTime::parse_from_rfc2822(date_header)
-        .expect("unable to parse server's Date header");
-    assert!(
-        time_before <= time_after,
-        "time obviously went backwards during the test"
-    );
-    assert!(time_request.timestamp() >= time_before - 1);
-    assert!(time_request.timestamp() <= time_after + 1);
-
-    /*
-     * Validate that we have a request id header.
-     * TODO-coverage check that it's unique among requests we've issued
-     */
-    let request_id_header = headers
-        .get(crate::HEADER_REQUEST_ID)
-        .expect("missing request id header")
-        .to_str()
-        .expect("non-ASCII characters in request id")
-        .to_string();
-
-    /*
-     * For "204 No Content" responses, validate that we got no content in the
-     * body.
-     */
-    if status == StatusCode::NO_CONTENT {
-        let body_bytes =
-            to_bytes(response.body_mut()).await.expect("error reading body");
-        assert_eq!(0, body_bytes.len());
-    }
-
-    /*
-     * If this was a successful response, there's nothing else to check here.
-     * Return the response so the caller can validate the content if they want.
-     */
-    if !status.is_client_error() && !status.is_server_error() {
-        return Ok(response);
-    }
-
-    /*
-     * We got an error.  Parse the response body to make sure it's valid and
-     * then return that.
-     */
-    let error_body: HttpErrorResponseBody = read_json(&mut response).await;
-    info!(testctx.client_log, "client error"; "error_body" => ?error_body);
-    assert_eq!(error_body.request_id, request_id_header);
-    Err(error_body)
 }
 
 /**

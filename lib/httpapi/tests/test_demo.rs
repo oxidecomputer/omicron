@@ -15,8 +15,6 @@
  */
 
 use http::StatusCode;
-use httpapi::test_util::make_request;
-use httpapi::test_util::make_request_with_body;
 use httpapi::test_util::read_json;
 use httpapi::test_util::read_string;
 use httpapi::test_util::ClientTestContext;
@@ -155,8 +153,7 @@ impl DemoTestContext {
 #[tokio::test]
 async fn test_demo1() {
     let testctx = DemoTestContext::new("demo1").await;
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo1",
         None as Option<()>,
@@ -181,8 +178,7 @@ async fn test_demo2query() {
     let testctx = DemoTestContext::new("demo2query").await;
 
     /* Test case: optional field missing */
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2query?test1=foo",
         None as Option<()>,
@@ -195,8 +191,7 @@ async fn test_demo2query() {
     assert_eq!(json.test2, None);
 
     /* Test case: both fields specified */
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2query?test1=foo&test2=10",
         None as Option<()>,
@@ -209,8 +204,7 @@ async fn test_demo2query() {
     assert_eq!(json.test2, Some(10));
 
     /* Test case: required field missing */
-    let error = make_request(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2query",
         None as Option<()>,
@@ -224,8 +218,7 @@ async fn test_demo2query() {
     );
 
     /* Test case: typed field has bad value */
-    let error = make_request(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2query?test1=foo&test2=bar",
         None as Option<()>,
@@ -239,8 +232,7 @@ async fn test_demo2query() {
     );
 
     /* Test case: duplicated field name */
-    let error = make_request(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2query?test1=foo&test1=bar",
         None as Option<()>,
@@ -270,8 +262,7 @@ async fn test_demo2json() {
         test1: "bar".to_string(),
         test2: None,
     };
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2json",
         Some(input),
@@ -288,8 +279,7 @@ async fn test_demo2json() {
         test1: "bar".to_string(),
         test2: Some(15),
     };
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2json",
         Some(input),
@@ -302,8 +292,7 @@ async fn test_demo2json() {
     assert_eq!(json.test2, Some(15));
 
     /* Test case: no input specified */
-    let error = make_request(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo2json",
         None as Option<()>,
@@ -314,8 +303,7 @@ async fn test_demo2json() {
     assert!(error.message.starts_with("unable to parse body JSON"));
 
     /* Test case: invalid JSON */
-    let error = make_request_with_body(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request_with_body(
         Method::GET,
         "/testing/demo2json",
         "}".into(),
@@ -327,8 +315,7 @@ async fn test_demo2json() {
 
     /* Test case: bad type */
     let json_bad_type = "{ \"test1\": \"oops\", \"test2\": \"oops\" }";
-    let error = make_request_with_body(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request_with_body(
         Method::GET,
         "/testing/demo2json",
         json_bad_type.into(),
@@ -360,8 +347,7 @@ async fn test_demo3json() {
         test2: Some(0),
     };
 
-    let mut response = make_request(
-        &testctx.client_testctx,
+    let mut response = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo3?test1=martin&test2=2",
         Some(json_input),
@@ -380,8 +366,7 @@ async fn test_demo3json() {
         test1: "bart".to_string(),
         test2: Some(0),
     };
-    let error = make_request(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request(
         Method::GET,
         "/testing/demo3?test2=2",
         Some(json_input),
@@ -395,8 +380,7 @@ async fn test_demo3json() {
     );
 
     /* Test case: error parsing body */
-    let error = make_request_with_body(
-        &testctx.client_testctx,
+    let error = testctx.client_testctx.make_request_with_body(
         Method::GET,
         "/testing/demo3?test1=martin&test2=2",
         "}".into(),
