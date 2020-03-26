@@ -3,8 +3,11 @@
  */
 
 use httpapi::test_util::ClientTestContext;
+use httpapi::test_util::log_file_for_test;
 use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
+use oxide_api_prototype::api_config::ConfigLogging;
+use std::fs;
 use std::path::Path;
 use tokio::task::JoinHandle;
 
@@ -12,7 +15,7 @@ use tokio::task::JoinHandle;
  * ApiTestContext encapsulates several pieces needed for these basic tests.
  * Essentially, any common setup code (and components, like an HTTP server and
  * client) ought to be included in this struct.
- * XXX TODO-cleanup This duplicates a lot of the code in
+ * TODO-cleanup This duplicates a lot of the code in
  * lib/httpapi/tests/test_demo.rs.  These are essentially two different
  * consumers of the `httpapi` crate and it shouldn't take so much boilerplate to
  * set up a test context.
@@ -24,6 +27,8 @@ pub struct ApiTestContext {
     api_server: ApiServer,
     /** handle to the task that's running the HTTP server */
     api_server_task: JoinHandle<Result<(), hyper::error::Error>>,
+    /** path to the per-test log file */
+    log_path: Option<String>,
 }
 
 impl ApiTestContext {
@@ -39,15 +44,30 @@ impl ApiTestContext {
          * configuration file.  However, we override the TCP port for the server
          * to 0, indicating that we wish to bind to any available port.  This is
          * necessary because we'll run multiple servers concurrently, so there's
-         * no one port that we could reasonably pick.
-         * XXX TODO-cleanup consider just removing "test-suite" mode and doing
-         * it here?  This could more closely mirror the DemoTestContext, clean
-         * up its own log file, etc.
+         * no one port that we could reasonably pick.  We also override the file
+         * path to provide a unique filename.
+         *
+         * Given these overrides, it's barely worth reading a config file at
+         * all.  However, users can change the logging level and local IP if
+         * they want, and as we add more configuration options, we expect many
+         * of those can be usefully configured (and reconfigured) for the test
+         * suite.
          */
         let config_file_path = Path::new("tests/config.test.toml");
         let mut config = ApiServerConfig::from_file(config_file_path)
             .expect("failed to load config.test.toml");
         config.bind_address.set_port(0);
+        let mut log_path = None;
+        if let ConfigLogging::File { level, path: _, if_exists } = config.log {
+            let new_path = log_file_for_test(test_name);
+            let new_path_str = new_path.as_path().display().to_string();
+            config.log = ConfigLogging::File {
+                level,
+                path: new_path_str.clone(),
+                if_exists
+            };
+            log_path = Some(new_path_str);
+        }
 
         let mut api_server = ApiServer::new(&config).unwrap();
         let api_server_task = api_server.http_server.run();
@@ -63,6 +83,7 @@ impl ApiTestContext {
             client_testctx,
             api_server,
             api_server_task,
+            log_path,
         }
     }
 
@@ -75,5 +96,8 @@ impl ApiTestContext {
         let join_result =
             self.api_server_task.await.expect("failed to join on test server");
         join_result.expect("server closed with an error");
+        if let Some(log_path) = self.log_path {
+            fs::remove_file(log_path).unwrap();
+        }
     }
 }

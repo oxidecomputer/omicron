@@ -85,15 +85,12 @@ general, servers can bind to more than one IP address and port, but this is not
 |`log.mode`
 |`"file"`
 |Yes
-|Controls where server logging will go.  Valid modes are `"stderr-terminal"`,
-`"file", and `"test-suite"``.  If the mode is `"stderr-terminal"`,
-human-readable output, with colors and other terminal formatting if possible,
-will be sent to stderr.  If the mode is `"file"`, Bunyan-format output will be
-sent to the filesystem path given by `log.path`.  See also `log.if_exists`,
-which controls the behavior if the destination path already exists.  The
-`"test-suite"` mode is intended only for use by the test suite.  If specified, a
-set of log files will be created in `log.directory` that will include the
-program name, pid, and other unique identifiers in the filename.
+|Controls where server logging will go.  Valid modes are `"stderr-terminal"` and
+`"file".  If the mode is `"stderr-terminal"`, human-readable output, with colors
+and other terminal formatting if possible, will be sent to stderr.  If the mode
+is `"file"`, Bunyan-format output will be sent to the filesystem path given by
+`log.path`.  See also `log.if_exists`, which controls the behavior if the
+destination path already exists.
 
 |`log.level`
 |`"info"`
@@ -118,27 +115,21 @@ appends to the existing file), `"truncate"` (which truncates the existing file
 and then uses it as though it had just been created), and `"fail"` (which causes
 the server to exit immediately with an error).
 
-|`log.directory`
-|`"logs"`
-|Only if `log.mode = "test-suite"`
-|If `log.mode` is `"test-suite"`, this property determines the path to the
-directory containing uniquely-named log files.
-
 |===
 
 
 == TODO
 
 * Move "httpapi" into its own crate in the same workspace
-** The non-test path works.  I'm working on the test suites.
-*** The httpapi test suite works.
-*** I may need to move more tests from oxide-api-prototype into httpapi.
-** take this opportunity to flesh out tests?
+** Everything currently works, as of the last commit (both test suites)
+** See XXXs -- currently cleaning up some of the test suite logging stuff
 ** rename "httpapi" subcrate to something else?
 ** rename "lib" to something else (e.g., "local_deps")?
 ** incorporate openapi directly into this subcrate?
 ** compare "cargo test" output before and after to make sure I haven't lost tests
 ** check for XXXs, TODOs
+* Clean up the httpapi::HttpServer interface.  See the common boilerplate for
+  setting up a TestContext in DemoTestContext and ApiTestContext.
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

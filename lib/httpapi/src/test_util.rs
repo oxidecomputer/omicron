@@ -17,6 +17,10 @@ use serde::Serialize;
 use slog::Logger;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
 use crate::error::HttpErrorResponseBody;
 
@@ -277,4 +281,27 @@ pub async fn read_string(response: &mut Response<Body>) -> String {
         to_bytes(response.body_mut()).await.expect("error reading body");
     String::from_utf8(body_bytes.as_ref().into())
         .expect("response contained non-UTF-8 bytes")
+}
+
+static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
+
+/**
+ * Returns a unique path name in a temporary directory that includes the given
+ * `test_name`.
+ */
+pub fn log_file_for_test(test_name: &str) -> PathBuf {
+    let arg0 = {
+        let arg0path = std::env::args().next().unwrap();
+        Path::new(&arg0path).file_name().unwrap().to_str().unwrap().to_string()
+    };
+
+    let log_path = {
+        let mut pathbuf = std::env::temp_dir();
+        let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        pathbuf.push(format!("{}-{}.{}.{}.log", arg0, test_name, pid, id));
+        pathbuf
+    };
+
+    log_path
 }

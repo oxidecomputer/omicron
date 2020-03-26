@@ -8,9 +8,6 @@ use serde::Deserialize;
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 
 use slog::Drain;
 use slog::Level;
@@ -69,23 +66,6 @@ pub enum ConfigLogging {
         path: String,
         if_exists: ConfigLoggingIfExists,
     },
-
-    /*
-     * "test-suite" mode generates log files in a particular directory that are
-     * named with both the program name and process id.  It would be nice to
-     * allow some kinds of expansions in the "file" mode instead (e.g., for
-     * `{program_name}` and `{pid}`).  Then we wouldn't need a special mode
-     * here.  There's the `runtime-fmt` crate that could be used for this, but
-     * it requires nightly rust.  For now, we punt -- and don't pretend that
-     * this is any more generic than it is -- a mode for configuring logging for
-     * the test suite.
-     *
-     * Note that neither of the other two modes is suitable for multiple
-     * processes logging to the same file, even when setting `if_exists =
-     * "append"`.
-     */
-    #[serde(rename = "test-suite")]
-    TestSuite { level: ConfigLoggingLevel, directory: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,14 +107,11 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
-static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
-
 impl ConfigLogging {
     /**
      * Create the root logger based on the requested configuration.
      */
     pub fn to_logger(&self) -> Result<Logger, InitError> {
-        let pid = std::process::id();
         match self {
             ConfigLogging::StderrTerminal {
                 level,
@@ -167,30 +144,6 @@ impl ConfigLogging {
                 }
 
                 let drain = log_drain_for_file(&open_options, Path::new(path))?;
-                Ok(async_root_logger(level, drain))
-            }
-
-            ConfigLogging::TestSuite {
-                level,
-                directory,
-            } => {
-                let mut open_options = std::fs::OpenOptions::new();
-                open_options.write(true).create_new(true);
-
-                let arg0path =
-                    std::env::args().next().expect("expected process arg0");
-                let arg0 = Path::new(&arg0path)
-                    .file_name()
-                    .expect("expected arg0 filename")
-                    .to_str()
-                    .expect("expected arg0 filename to be valid Unicode");
-                let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
-                let mut pathbuf = PathBuf::new();
-                pathbuf.push(directory);
-                pathbuf.push(format!("{}.{}.{}.log", arg0, pid, id));
-
-                let path = pathbuf.as_path();
-                let drain = log_drain_for_file(&open_options, path)?;
                 Ok(async_root_logger(level, drain))
             }
         }
@@ -582,8 +535,8 @@ mod test {
             .expect_err("expected failure");
         assert!(error.starts_with("parse \""));
         assert!(error.contains(
-            "\": unknown variant `bonkers`, expected one of \
-             `stderr-terminal`, `file`, `test-suite` for key `log.mode`"
+            "\": unknown variant `bonkers`, expected `stderr-terminal` or \
+             `file` for key `log.mode`"
         ));
     }
 

@@ -15,6 +15,7 @@
  */
 
 use http::StatusCode;
+use httpapi::test_util::log_file_for_test;
 use httpapi::test_util::read_json;
 use httpapi::test_util::read_string;
 use httpapi::test_util::ClientTestContext;
@@ -34,10 +35,7 @@ use serde::Serialize;
 use std::any::Any;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
@@ -51,8 +49,6 @@ struct DemoTestContext {
     server_task: JoinHandle<Result<(), hyper::error::Error>>,
     log_path: PathBuf,
 }
-
-static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);
 
 impl DemoTestContext {
     async fn new(test_name: &str) -> DemoTestContext {
@@ -73,25 +69,9 @@ impl DemoTestContext {
          * so we create a separate bunyan log file for each test.  If the test
          * succeeds, we remove the log file.
          */
-        let arg0 = {
-            let arg0path = std::env::args().next().unwrap();
-            Path::new(&arg0path)
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string()
-        };
-
-        let log_path = {
-            let mut pathbuf = std::env::temp_dir();
-            let id = TEST_SUITE_LOGGER_ID.fetch_add(1, Ordering::SeqCst);
-            let pid = std::process::id();
-            pathbuf.push(format!("{}-{}.{}.{}.log", arg0, test_name, pid, id));
-            pathbuf
-        };
-
+        let log_path = log_file_for_test(test_name);
         eprintln!("log file: {:?}", log_path);
+
         let log = {
             let file = fs::OpenOptions::new()
                 .write(true)
@@ -424,7 +404,6 @@ async fn test_demo3json() {
 
 /*
  * Demo handler functions
- * XXX cleanup
  */
 pub fn register_test_endpoints(router: &mut HttpRouter) {
     router.insert(
