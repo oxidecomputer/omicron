@@ -53,7 +53,7 @@ impl ApiServer {
             &config.bind_address,
             router,
             Box::new(api_state),
-            &log
+            &log,
         )
         .map_err(|error| api_error::InitError(format!("{}", error)))?;
 

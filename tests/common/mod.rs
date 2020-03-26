@@ -2,11 +2,11 @@
  * Shared automated testing facilities
  */
 
-use httpapi::test_util::ClientTestContext;
 use httpapi::test_util::log_file_for_test;
+use httpapi::test_util::ClientTestContext;
+use oxide_api_prototype::api_config::ConfigLogging;
 use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
-use oxide_api_prototype::api_config::ConfigLogging;
 use std::fs;
 use std::path::Path;
 use tokio::task::JoinHandle;
@@ -58,13 +58,18 @@ impl ApiTestContext {
             .expect("failed to load config.test.toml");
         config.bind_address.set_port(0);
         let mut log_path = None;
-        if let ConfigLogging::File { level, path: _, if_exists } = config.log {
+        if let ConfigLogging::File {
+            level,
+            path: _,
+            if_exists,
+        } = config.log
+        {
             let new_path = log_file_for_test(test_name);
             let new_path_str = new_path.as_path().display().to_string();
             config.log = ConfigLogging::File {
                 level,
                 path: new_path_str.clone(),
-                if_exists
+                if_exists,
             };
             log_path = Some(new_path_str);
         }
