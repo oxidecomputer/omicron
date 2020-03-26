@@ -161,15 +161,6 @@ enum HttpRouterEdges {
 }
 
 /**
- * Represents an outgoing edge having a variable name.  (See the `HttpRouter`
- * comments for details.)  This is just used to group the variable name and the
- * Node pointer.  There's no corresponding struct for literal-named edges
- * because they don't have any data aside from the Node pointer.
- */
-#[derive(Debug)]
-struct HttpRouterEdgeVariable(String, Box<HttpRouterNode>);
-
-/**
  * `PathSegment` represents a segment in a URI path when the router is being
  * configured.  Each segment may be either a literal string or a variable (the
  * latter indicated by being wrapped in braces.
@@ -316,10 +307,10 @@ impl HttpRouter {
                     );
                     match edges {
                         /*
-                         * We do not allow both literal and variable edges from the
-                         * same node.  This could be supported (with some caveats
-                         * about how matching would work), but it seems more likely
-                         * to be a mistake.
+                         * We do not allow both literal and variable edges from
+                         * the same node.  This could be supported (with some
+                         * caveats about how matching would work), but it seems
+                         * more likely to be a mistake.
                          */
                         HttpRouterEdges::Variable(varname, _) => {
                             panic!(
@@ -358,8 +349,8 @@ impl HttpRouter {
                         ));
                     match edges {
                         /*
-                         * See the analogous check above about combining literal and
-                         * variable path segments from the same resource.
+                         * See the analogous check above about combining literal
+                         * and variable path segments from the same resource.
                          */
                         HttpRouterEdges::Literals(_) => panic!(
                             "URI path \"{}\": attempted to register route for \
@@ -372,10 +363,10 @@ impl HttpRouter {
                         HttpRouterEdges::Variable(varname, ref mut node) => {
                             if *new_varname != *varname {
                                 /*
-                                 * Don't allow people to use different names for the
-                                 * same part of the path.  Again, this could be
-                                 * supported, but it seems likely to be confusing and
-                                 * probably a mistake.
+                                 * Don't allow people to use different names for
+                                 * the same part of the path.  Again, this could
+                                 * be supported, but it seems likely to be
+                                 * confusing and probably a mistake.
                                  */
                                 panic!(
                                     "URI path \"{}\": attempted to use \
@@ -500,7 +491,7 @@ impl HttpRouter {
 /**
  * Route Interator implementation. We perform a preorder, depth first traversal
  * of the tree starting from the root node. For each node, we enumerate the
- * methods and then descend into its chilren (or single child in the case of
+ * methods and then descend into its children (or single child in the case of
  * path parameter variables). `method` holds the iterator over the current
  * node's `method_handlers`; `path` is a stack that represents the current
  * collection of path segments and the iterators at each corresponding node.
@@ -510,9 +501,8 @@ impl HttpRouter {
  * children.
  */
 pub struct HttpRouterIter<'a> {
-    method: Box<
-        dyn Iterator<Item = (&'a String, &'a Box<dyn RouteHandler + 'a>)> + 'a,
-    >,
+    method:
+        Box<dyn Iterator<Item = (&'a String, &'a Box<dyn RouteHandler>)> + 'a>,
     path: Vec<(
         PathSegment,
         Box<dyn Iterator<Item = (PathSegment, &'a Box<HttpRouterNode>)> + 'a>,
