@@ -10,8 +10,8 @@ use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 
-use httpapi::test_util::read_json;
-use httpapi::test_util::read_ndjson;
+use dropshot::test_util::read_json;
+use dropshot::test_util::read_ndjson;
 
 pub mod common;
 use common::ApiTestContext;

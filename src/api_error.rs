@@ -1,9 +1,9 @@
 /*!
- * API-specific error handling facilities.  See httpapi/error.rs for details.
+ * API-specific error handling facilities.  See dropshot/error.rs for details.
  */
 
 use crate::api_model;
-use httpapi::HttpError;
+use dropshot::HttpError;
 
 /**
  * ApiError represents errors that can be generated within the API server.  See

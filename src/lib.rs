@@ -14,9 +14,9 @@ mod sim;
 pub mod test_common;
 
 pub use api_config::ApiServerConfig;
-pub use httpapi;
-use httpapi::RequestContext;
-pub use httpapi::HEADER_REQUEST_ID;
+pub use dropshot;
+use dropshot::RequestContext;
+pub use dropshot::HEADER_REQUEST_ID;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use slog::Logger;
  * Consumer handle for the API server.
  */
 pub struct ApiServer {
-    pub http_server: httpapi::HttpServer,
+    pub http_server: dropshot::HttpServer,
     pub log: Logger,
 }
 
@@ -37,7 +37,7 @@ impl ApiServer {
         config: &ApiServerConfig,
         openapi: bool,
     ) -> Result<ApiServer, api_error::InitError> {
-        let mut router = httpapi::HttpRouter::new();
+        let mut router = dropshot::HttpRouter::new();
         api_http_entrypoints::api_register_entrypoints(&mut router);
         if openapi {
             router.print_openapi();
@@ -61,7 +61,7 @@ impl ApiServer {
             backend: Arc::new(simbuilder.build()),
         });
 
-        let http_server = httpapi::HttpServer::new(
+        let http_server = dropshot::HttpServer::new(
             &config.bind_address,
             router,
             Box::new(api_state),

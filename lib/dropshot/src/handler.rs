@@ -48,10 +48,10 @@
  *
  * ```
  * use http::StatusCode;
- * use httpapi::HttpError;
- * use httpapi::Json;
- * use httpapi::Query;
- * use httpapi::RequestContext;
+ * use dropshot::HttpError;
+ * use dropshot::Json;
+ * use dropshot::Query;
+ * use dropshot::RequestContext;
  * use hyper::Body;
  * use hyper::Response;
  * use std::sync::Arc;

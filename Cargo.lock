@@ -177,6 +177,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dropshot"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono 0.4.11",
+ "futures",
+ "http",
+ "hyper",
+ "openapiv3",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "dtoa"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -374,27 +395,6 @@ checksum = "13d5ff830006f7646652e057693569bfe0d51760c0085a071769d142a205111b"
 dependencies = [
  "bytes",
  "http",
-]
-
-[[package]]
-name = "httpapi"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono 0.4.11",
- "futures",
- "http",
- "hyper",
- "openapiv3",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "slog",
- "slog-async",
- "slog-bunyan",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -679,10 +679,10 @@ dependencies = [
  "async-trait",
  "chrono 0.4.11",
  "clap",
+ "dropshot",
  "futures",
  "hostname 0.3.1",
  "http",
- "httpapi",
  "hyper",
  "openapi",
  "serde",

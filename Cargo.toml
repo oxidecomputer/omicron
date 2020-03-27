@@ -11,7 +11,7 @@ clap = "2"
 futures = "0.3.1"
 hostname = "0.3.0"
 http = "0.2.0"
-httpapi = { path = "lib/httpapi" }
+dropshot = { path = "lib/dropshot" }
 hyper = "0.13"
 openapi = { path = "lib/openapi" }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -25,5 +25,5 @@ tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 
 [workspace]
-members = [".", "lib/httpapi", "lib/openapi"]
-default-members = [".", "lib/httpapi", "lib/openapi"]
+members = [".", "lib/dropshot", "lib/openapi"]
+default-members = [".", "lib/dropshot", "lib/openapi"]

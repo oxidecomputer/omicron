@@ -15,18 +15,18 @@
  */
 
 use http::StatusCode;
-use httpapi::test_util::log_file_for_test;
-use httpapi::test_util::read_json;
-use httpapi::test_util::read_string;
-use httpapi::test_util::ClientTestContext;
-use httpapi::HttpError;
-use httpapi::HttpRouteHandler;
-use httpapi::HttpRouter;
-use httpapi::HttpServer;
-use httpapi::Json;
-use httpapi::Query;
-use httpapi::RequestContext;
-use httpapi::CONTENT_TYPE_JSON;
+use dropshot::test_util::log_file_for_test;
+use dropshot::test_util::read_json;
+use dropshot::test_util::read_string;
+use dropshot::test_util::ClientTestContext;
+use dropshot::HttpError;
+use dropshot::HttpRouteHandler;
+use dropshot::HttpRouter;
+use dropshot::HttpServer;
+use dropshot::Json;
+use dropshot::Query;
+use dropshot::RequestContext;
+use dropshot::CONTENT_TYPE_JSON;
 use hyper::Body;
 use hyper::Method;
 use hyper::Response;
@@ -79,7 +79,7 @@ impl DemoTestContext {
                 .append(true)
                 .open(&log_path)
                 .unwrap();
-            let bunyan = slog_bunyan::with_name("httpapi_test_demo", file)
+            let bunyan = slog_bunyan::with_name("dropshot_test_demo", file)
                 .build()
                 .fuse();
             let drain = slog_async::Async::new(bunyan).build().fuse();
@@ -89,13 +89,13 @@ impl DemoTestContext {
         /*
          * Package up our test endpoints into a router.
          */
-        let mut router = httpapi::HttpRouter::new();
+        let mut router = dropshot::HttpRouter::new();
         register_test_endpoints(&mut router);
 
         /*
          * Set up the server itself.
          */
-        let mut server = httpapi::HttpServer::new(
+        let mut server = dropshot::HttpServer::new(
             &bind_address,
             router,
             Box::new(0) as Box<dyn Any + Send + Sync + 'static>,
@@ -105,7 +105,7 @@ impl DemoTestContext {
         let server_task = server.run();
 
         let server_addr = server.local_addr();
-        let client_log = log.new(o!("http_client" => "httpapi test suite"));
+        let client_log = log.new(o!("http_client" => "dropshot test suite"));
         let client_testctx = ClientTestContext::new(server_addr, client_log);
 
         DemoTestContext {

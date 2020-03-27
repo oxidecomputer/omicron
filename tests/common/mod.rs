@@ -2,8 +2,8 @@
  * Shared automated testing facilities
  */
 
-use httpapi::test_util::log_file_for_test;
-use httpapi::test_util::ClientTestContext;
+use dropshot::test_util::log_file_for_test;
+use dropshot::test_util::ClientTestContext;
 use oxide_api_prototype::api_config::ConfigLogging;
 use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
@@ -16,9 +16,9 @@ use tokio::task::JoinHandle;
  * Essentially, any common setup code (and components, like an HTTP server and
  * client) ought to be included in this struct.
  * TODO-cleanup This duplicates a lot of the code in
- * lib/httpapi/tests/test_demo.rs.  These are essentially two different
- * consumers of the `httpapi` crate and it shouldn't take so much boilerplate to
- * set up a test context.
+ * lib/dropshot/tests/test_demo.rs.  These are essentially two different
+ * consumers of the `dropshot` crate and it shouldn't take so much boilerplate
+ * to set up a test context.
  */
 pub struct ApiTestContext {
     /** client-side testing context */

@@ -19,12 +19,12 @@ use std::collections::BTreeSet;
  * ```
  * use http::Method;
  * use http::StatusCode;
- * use httpapi::HttpError;
- * use httpapi::HttpRouteHandler;
- * use httpapi::HttpRouter;
- * use httpapi::RequestContext;
- * use httpapi::RouteHandler;
- * use httpapi::RouterLookupResult;
+ * use dropshot::HttpError;
+ * use dropshot::HttpRouteHandler;
+ * use dropshot::HttpRouter;
+ * use dropshot::RequestContext;
+ * use dropshot::RouteHandler;
+ * use dropshot::RouterLookupResult;
  * use hyper::Body;
  * use hyper::Response;
  * use std::sync::Arc;
