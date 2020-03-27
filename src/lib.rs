@@ -13,15 +13,25 @@ pub mod api_model;
 mod sim;
 
 pub use api_config::ApiServerConfig;
-pub use dropshot;
 use dropshot::RequestContext;
 pub use dropshot::HEADER_REQUEST_ID;
 use std::any::Any;
 use std::sync::Arc;
 
+use dropshot::ApiDescription;
+
 #[macro_use]
 extern crate slog;
 use slog::Logger;
+
+/**
+ * Returns a Dropshot `ApiDescription` for our API.
+ */
+pub fn dropshot_api() -> ApiDescription {
+    let mut api = ApiDescription::new();
+    api_http_entrypoints::api_register_entrypoints(&mut api);
+    api
+}
 
 /**
  * Consumer handle for the API server.
@@ -36,10 +46,10 @@ impl ApiServer {
         config: &ApiServerConfig,
         openapi: bool,
     ) -> Result<ApiServer, api_error::InitError> {
-        let mut router = dropshot::HttpRouter::new();
-        api_http_entrypoints::api_register_entrypoints(&mut router);
+        let mut api = ApiDescription::new();
+        api_http_entrypoints::api_register_entrypoints(&mut api);
         if openapi {
-            router.print_openapi();
+            api.print_openapi();
             std::process::exit(0);
         }
 
@@ -47,12 +57,6 @@ impl ApiServer {
             .log
             .to_logger()
             .map_err(|message| api_error::InitError(message))?;
-        for (path, method) in router.iter() {
-            debug!(log, "registered endpoint";
-                "method" => &method,
-                "path" => &path
-            );
-        }
 
         let mut simbuilder = sim::SimulatorBuilder::new();
         simbuilder.project_create("simproject1");
@@ -65,7 +69,7 @@ impl ApiServer {
 
         let http_server = dropshot::HttpServer::new(
             &config.dropshot,
-            router,
+            api,
             Box::new(api_state),
             &log,
         )

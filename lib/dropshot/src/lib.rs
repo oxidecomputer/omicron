@@ -4,6 +4,7 @@
  * HTTP-serving Rust programs.
  */
 
+mod api_description;
 mod config;
 mod error;
 mod handler;
@@ -17,6 +18,7 @@ pub mod test_util;
 #[macro_use]
 extern crate slog;
 
+pub use api_description::ApiDescription;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
@@ -40,4 +42,3 @@ pub use logging::ConfigLoggingLevel;
 pub use router::HttpRouter;
 pub use router::RouterLookupResult;
 pub use server::HttpServer;
-pub use server::ServerConfig;

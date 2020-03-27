@@ -18,10 +18,10 @@ use dropshot::test_util::log_file_for_test;
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_string;
 use dropshot::test_util::ClientTestContext;
+use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpRouteHandler;
-use dropshot::HttpRouter;
 use dropshot::HttpServer;
 use dropshot::Json;
 use dropshot::Query;
@@ -90,8 +90,8 @@ impl DemoTestContext {
         /*
          * Package up our test endpoints into a router.
          */
-        let mut router = dropshot::HttpRouter::new();
-        register_test_endpoints(&mut router);
+        let mut api = ApiDescription::new();
+        register_test_endpoints(&mut api);
 
         /*
          * Set up the server itself.
@@ -100,7 +100,7 @@ impl DemoTestContext {
             &ConfigDropshot {
                 bind_address: bind_address,
             },
-            router,
+            api,
             Box::new(0) as Box<dyn Any + Send + Sync + 'static>,
             &log,
         )
@@ -408,23 +408,23 @@ async fn test_demo3json() {
 /*
  * Demo handler functions
  */
-pub fn register_test_endpoints(router: &mut HttpRouter) {
-    router.insert(
+pub fn register_test_endpoints(api: &mut ApiDescription) {
+    api.register(
         Method::GET,
         "/testing/demo1",
         HttpRouteHandler::new(demo_handler_args_1),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo2query",
         HttpRouteHandler::new(demo_handler_args_2query),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo2json",
         HttpRouteHandler::new(demo_handler_args_2json),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo3",
         HttpRouteHandler::new(demo_handler_args_3),

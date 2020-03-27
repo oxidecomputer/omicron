@@ -14,13 +14,13 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
 use dropshot::http_extract_path_params;
+use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOkObject;
 use dropshot::HttpResponseOkObjectList;
 use dropshot::HttpRouteHandler;
-use dropshot::HttpRouter;
 use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
@@ -30,32 +30,32 @@ use openapi::endpoint;
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
-pub fn api_register_entrypoints(router: &mut HttpRouter) {
-    router.insert(
+pub fn api_register_entrypoints(api: &mut ApiDescription) {
+    api.register(
         Method::GET,
         "/projects",
         HttpRouteHandler::new(api_projects_get),
     );
-    router.insert(
+    api.register(
         Method::POST,
         "/projects",
         HttpRouteHandler::new(api_projects_post),
     );
     // TODO: rethink this interface and convert all to use openapi::endpoint
     /*
-    router.insert(
+    api.register(
         Method::GET,
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_get_project),
     );
     */
-    api_projects_get_project::register(router);
-    router.insert(
+    api_projects_get_project::register(api);
+    api.register(
         Method::DELETE,
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_delete_project),
     );
-    router.insert(
+    api.register(
         Method::PUT,
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_put_project),
