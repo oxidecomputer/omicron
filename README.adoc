@@ -130,13 +130,10 @@ the server to exit immediately with an error).
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24
 * General work:
-** OpenAPI support
-*** Rust macros
-*** Tooling to generate spec - API Docs
-*** Client library/libraries and CLI
+** OpenAPI support: Rust macros, tooling to generate spec, client librar(ies),
+   CLI
 ** Debugging / monitoring
 *** Prometheus?
-*** Server / request logging
 *** OpenTracing?  OpenTelemetry?
 *** Dynamic tracing?
 *** Core files?

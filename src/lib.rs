@@ -46,7 +46,10 @@ impl ApiServer {
 
         let log = config.log.to_logger()?;
         for (path, method) in router.iter() {
-            debug!(log, "registered endpoint"; "method" => &method, "path" => &path);
+            debug!(log, "registered endpoint";
+                "method" => &method,
+                "path" => &path
+            );
         }
 
         let mut simbuilder = sim::SimulatorBuilder::new();
