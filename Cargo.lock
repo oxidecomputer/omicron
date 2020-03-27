@@ -184,6 +184,7 @@ dependencies = [
  "bytes",
  "chrono 0.4.11",
  "futures",
+ "hostname 0.3.1",
  "http",
  "hyper",
  "openapiv3",
@@ -193,7 +194,10 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-bunyan",
+ "slog-json",
+ "slog-term",
  "tokio",
+ "toml",
  "uuid",
 ]
 

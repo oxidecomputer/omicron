@@ -4,7 +4,7 @@
 
 use dropshot::test_util::log_file_for_test;
 use dropshot::test_util::ClientTestContext;
-use oxide_api_prototype::api_config::ConfigLogging;
+use dropshot::ConfigLogging;
 use oxide_api_prototype::ApiServer;
 use oxide_api_prototype::ApiServerConfig;
 use std::fs;

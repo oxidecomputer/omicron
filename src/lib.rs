@@ -11,7 +11,6 @@ pub mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
 mod sim;
-pub mod test_common;
 
 pub use api_config::ApiServerConfig;
 pub use dropshot;
@@ -44,7 +43,9 @@ impl ApiServer {
             std::process::exit(0);
         }
 
-        let log = config.log.to_logger()?;
+        let log = config.log.to_logger().map_err(|message| {
+            api_error::InitError(message)
+        })?;
         for (path, method) in router.iter() {
             debug!(log, "registered endpoint";
                 "method" => &method,
