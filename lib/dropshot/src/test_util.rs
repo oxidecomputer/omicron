@@ -311,6 +311,21 @@ pub fn log_file_for_test(test_name: &str) -> PathBuf {
     log_path
 }
 
+/**
+ * Load an object of type `T` (usually a hunk of configuration) from the string
+ * `contents`.  `label` is used as an identifying string in a log message.  It
+ * should be unique for each test.
+ */
+pub fn read_config<T: DeserializeOwned + Debug>(
+    label: &str,
+    contents: &str,
+) -> Result<T, String> {
+    let result: Result<T, String> =
+        toml::from_str(contents).map_err(|error| format!("{}", error));
+    eprintln!("config \"{}\": {:?}", label, result);
+    result
+}
+
 /*
  * Bunyan testing facilities
  */

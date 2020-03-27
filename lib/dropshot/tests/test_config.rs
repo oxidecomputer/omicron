@@ -2,27 +2,15 @@
  * Tests for configuration file.
  */
 
+use dropshot::test_util::read_config;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
-use serde::de::DeserializeOwned;
 use slog::Logger;
-use std::fmt::Debug;
 use std::fs;
 
 /*
  * Bad values for "bind_address"
  */
-
-/* TODO-cleanup duplicated in src/logging.rs tests */
-fn read_config<T: DeserializeOwned + Debug>(
-    label: &str,
-    contents: &str,
-) -> Result<T, String> {
-    let result: Result<T, String> =
-        toml::from_str(contents).map_err(|error| format!("{}", error));
-    eprintln!("config \"{}\": {:?}", label, result);
-    result
-}
 
 #[test]
 fn test_config_bad_bind_address_port_too_small() {

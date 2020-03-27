@@ -5,12 +5,11 @@
  */
 
 use serde::Deserialize;
-use std::fs::OpenOptions;
-use std::path::Path;
-
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::fs::OpenOptions;
+use std::path::Path;
 
 /**
  * Represents the logging configuration for a server.  This is expected to be a
@@ -155,11 +154,12 @@ fn log_drain_for_file(
 
 #[cfg(test)]
 mod test {
-    use super::super::test_util::read_bunyan_log;
-    use super::super::test_util::verify_bunyan_records;
-    use super::super::test_util::verify_bunyan_records_sequential;
-    use super::super::test_util::BunyanLogRecordSpec;
-    use super::ConfigLogging;
+    use crate::test_util::read_bunyan_log;
+    use crate::test_util::read_config;
+    use crate::test_util::verify_bunyan_records;
+    use crate::test_util::verify_bunyan_records_sequential;
+    use crate::test_util::BunyanLogRecordSpec;
+    use crate::ConfigLogging;
     use slog::Logger;
     use std::fs;
     use std::path::Path;
@@ -182,28 +182,13 @@ mod test {
     }
 
     /**
-     * Load a ConfigLogging with the given string `contents`.  `label` is used
-     * as an identifying string in error messages.  It should be unique for each
-     * test.
-     */
-    fn read_config(
-        label: &str,
-        contents: &str,
-    ) -> Result<ConfigLogging, String> {
-        let result: Result<ConfigLogging, String> = toml::from_str(contents)
-            .map_err(|error| format!("parse \"{}\": {}", label, error));
-        eprintln!("config \"{}\": {:?}", label, result);
-        result
-    }
-
-    /**
      * Load a configuration and create a logger from it.
      */
     fn read_config_and_create_logger(
         label: &str,
         contents: &str,
     ) -> Result<Logger, String> {
-        let config = read_config(label, contents).unwrap();
+        let config = read_config::<ConfigLogging>(label, contents).unwrap();
         let result = config.to_logger();
         if let Err(ref error) = result {
             eprintln!("error message creating logger: {}", error);
@@ -218,10 +203,11 @@ mod test {
     #[test]
     fn test_config_bad_log_mode() {
         let bad_config = r##" mode = "bonkers" "##;
-        let error = read_config("bad_log_mode", bad_config).unwrap_err();
+        let error = read_config::<ConfigLogging>("bad_log_mode", bad_config)
+            .unwrap_err();
         assert!(error.starts_with(
-            "parse \"bad_log_mode\": unknown variant `bonkers`, expected \
-             `stderr-terminal` or `file` for key `mode`"
+            "unknown variant `bonkers`, expected `stderr-terminal` or `file` \
+             for key `mode`"
         ));
     }
 
@@ -236,8 +222,9 @@ mod test {
     fn test_config_bad_terminal_no_level() {
         let bad_config = r##" mode = "stderr-terminal" "##;
         assert_eq!(
-            read_config("bad_terminal_no_level", bad_config).unwrap_err(),
-            "parse \"bad_terminal_no_level\": missing field `level`"
+            read_config::<ConfigLogging>("bad_terminal_no_level", bad_config)
+                .unwrap_err(),
+            "missing field `level`"
         );
     }
 
@@ -248,10 +235,10 @@ mod test {
             level = "everything"
             "##;
         assert_eq!(
-            read_config("bad_terminal_bad_level", bad_config).unwrap_err(),
-            "parse \"bad_terminal_bad_level\": unknown variant `everything`, \
-             expected one of `trace`, `debug`, `info`, `warn`, `error`, \
-             `critical`"
+            read_config::<ConfigLogging>("bad_terminal_bad_level", bad_config)
+                .unwrap_err(),
+            "unknown variant `everything`, expected one of `trace`, `debug`, \
+             `info`, `warn`, `error`, `critical`"
         );
     }
 
@@ -272,7 +259,8 @@ mod test {
             mode = "stderr-terminal"
             level = "warn"
         "##;
-        let config = read_config("stderr-terminal", config).unwrap();
+        let config =
+            read_config::<ConfigLogging>("stderr-terminal", config).unwrap();
         config.to_logger().unwrap();
     }
 
@@ -286,8 +274,10 @@ mod test {
             mode = "file"
             level = "warn"
             "##;
-        let error = read_config("bad_file_no_file", bad_config).unwrap_err();
-        assert_eq!(error, "parse \"bad_file_no_file\": missing field `path`");
+        let error =
+            read_config::<ConfigLogging>("bad_file_no_file", bad_config)
+                .unwrap_err();
+        assert_eq!(error, "missing field `path`");
     }
 
     #[test]
@@ -296,8 +286,10 @@ mod test {
             mode = "file"
             path = "nonexistent"
             "##;
-        let error = read_config("bad_file_no_level", bad_config).unwrap_err();
-        assert_eq!(error, "parse \"bad_file_no_level\": missing field `level`");
+        let error =
+            read_config::<ConfigLogging>("bad_file_no_level", bad_config)
+                .unwrap_err();
+        assert_eq!(error, "missing field `level`");
     }
 
     /**
