@@ -40,10 +40,13 @@ async fn main() {
         }
     };
 
-    let mut server = match oxide_api_prototype::ApiServer::new(
-        &config,
-        matches.is_present("openapi"),
-    ) {
+    if matches.is_present("openapi") {
+        let api = oxide_api_prototype::dropshot_api();
+        api.print_openapi();
+        std::process::exit(0);
+    }
+
+    let mut server = match oxide_api_prototype::ApiServer::new(&config) {
         Err(error) => {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             std::process::exit(1);

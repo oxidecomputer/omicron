@@ -74,7 +74,7 @@ impl ApiTestContext {
             log_path = Some(new_path_str);
         }
 
-        let mut api_server = ApiServer::new(&config, false).unwrap();
+        let mut api_server = ApiServer::new(&config).unwrap();
         let api_server_task = api_server.http_server.run();
 
         let server_addr = api_server.http_server.local_addr();

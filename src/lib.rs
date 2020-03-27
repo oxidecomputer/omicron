@@ -43,15 +43,10 @@ pub struct ApiServer {
 
 impl ApiServer {
     pub fn new(
-        config: &ApiServerConfig,
-        openapi: bool,
+        config: &ApiServerConfig
     ) -> Result<ApiServer, api_error::InitError> {
         let mut api = ApiDescription::new();
         api_http_entrypoints::api_register_entrypoints(&mut api);
-        if openapi {
-            api.print_openapi();
-            std::process::exit(0);
-        }
 
         let log = config
             .log
