@@ -691,7 +691,6 @@ dependencies = [
  "slog-async",
  "slog-bunyan",
  "slog-json",
- "slog-term",
  "tokio",
  "toml",
 ]

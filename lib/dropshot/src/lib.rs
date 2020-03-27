@@ -7,6 +7,7 @@
 mod error;
 mod handler;
 mod http_util;
+mod logging;
 mod router;
 mod server;
 
