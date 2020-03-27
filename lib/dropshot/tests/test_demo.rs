@@ -14,11 +14,11 @@
  * JSON body length)
  */
 
-use http::StatusCode;
 use dropshot::test_util::log_file_for_test;
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_string;
 use dropshot::test_util::ClientTestContext;
+use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpRouteHandler;
 use dropshot::HttpRouter;
@@ -27,6 +27,7 @@ use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::CONTENT_TYPE_JSON;
+use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
 use hyper::Response;
@@ -96,7 +97,9 @@ impl DemoTestContext {
          * Set up the server itself.
          */
         let mut server = dropshot::HttpServer::new(
-            &bind_address,
+            &ConfigDropshot {
+                bind_address: bind_address,
+            },
             router,
             Box::new(0) as Box<dyn Any + Send + Sync + 'static>,
             &log,

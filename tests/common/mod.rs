@@ -56,7 +56,7 @@ impl ApiTestContext {
         let config_file_path = Path::new("tests/config.test.toml");
         let mut config = ApiServerConfig::from_file(config_file_path)
             .expect("failed to load config.test.toml");
-        config.bind_address.set_port(0);
+        config.dropshot.bind_address.set_port(0);
         let mut log_path = None;
         if let ConfigLogging::File {
             level,

@@ -2,6 +2,7 @@
  * Generic server-wide state and facilities
  */
 
+use super::config::ConfigDropshot;
 use super::error::HttpError;
 use super::handler::RequestContext;
 use super::http_util::HEADER_REQUEST_ID;
@@ -29,9 +30,9 @@ use slog::Logger;
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
 /**
- * Stores shared state used by the generic HTTP server submodule.
+ * Stores shared state used by the Dropshot server.
  */
-pub struct ServerState {
+pub struct DropshotState {
     /** caller-specific state */
     pub private: Box<dyn Any + Send + Sync + 'static>,
     /** static server configuration parameters */
@@ -44,6 +45,7 @@ pub struct ServerState {
 
 /**
  * Stores static configuration associated with the server
+ * TODO-cleanup merge with ConfigDropshot
  */
 pub struct ServerConfig {
     /** maximum allowed size of a request body */
@@ -99,14 +101,14 @@ impl HttpServer {
      * be complete when the `run()` Future is resolved.
      */
     pub fn new(
-        bind_address: &SocketAddr,
+        config: &ConfigDropshot,
         router: HttpRouter,
         private: Box<dyn Any + Send + Sync + 'static>,
         log: &Logger,
     ) -> Result<HttpServer, hyper::error::Error> {
         /* TODO-cleanup too many Arcs? */
         let log_close = log.new(o!());
-        let app_state = Arc::new(ServerState {
+        let app_state = Arc::new(DropshotState {
             private: private,
             config: ServerConfig {
                 /* We start aggressively to ensure test coverage. */
@@ -117,7 +119,7 @@ impl HttpServer {
         });
 
         let make_service = ServerConnectionHandler::new(Arc::clone(&app_state));
-        let builder = hyper::Server::try_bind(bind_address)?;
+        let builder = hyper::Server::try_bind(&config.bind_address)?;
         let server = builder.serve(make_service);
         let local_addr = server.local_addr();
         info!(app_state.log, "listening"; "local_addr" => %local_addr);
@@ -143,7 +145,7 @@ impl HttpServer {
  * connection.
  */
 async fn http_connection_handle(
-    server: Arc<ServerState>,
+    server: Arc<DropshotState>,
     remote_addr: SocketAddr,
 ) -> Result<ServerRequestHandler, GenericError> {
     info!(server.log, "accepted connection"; "remote_addr" => %remote_addr);
@@ -157,7 +159,7 @@ async fn http_connection_handle(
  * also get turned into an HTTP response).
  */
 async fn http_request_handle_wrap(
-    server: Arc<ServerState>,
+    server: Arc<DropshotState>,
     request: Request<Body>,
 ) -> Result<Response<Body>, GenericError> {
     /*
@@ -211,7 +213,7 @@ async fn http_request_handle_wrap(
 }
 
 async fn http_request_handle(
-    server: Arc<ServerState>,
+    server: Arc<DropshotState>,
     request: Request<Body>,
     request_id: &str,
     request_log: Logger,
@@ -265,7 +267,7 @@ fn generate_request_id() -> String {
  */
 pub struct ServerConnectionHandler {
     /** backend state that will be made available to the connection handler */
-    server: Arc<ServerState>,
+    server: Arc<DropshotState>,
 }
 
 impl ServerConnectionHandler {
@@ -273,7 +275,7 @@ impl ServerConnectionHandler {
      * Create an ServerConnectionHandler with the given state object that
      * will be made available to the handler.
      */
-    fn new(server: Arc<ServerState>) -> Self {
+    fn new(server: Arc<DropshotState>) -> Self {
         ServerConnectionHandler {
             server: Arc::clone(&server),
         }
@@ -328,7 +330,7 @@ impl Service<&AddrStream> for ServerConnectionHandler {
  */
 pub struct ServerRequestHandler {
     /** backend state that will be made available to the request handler */
-    server: Arc<ServerState>,
+    server: Arc<DropshotState>,
 }
 
 impl ServerRequestHandler {
@@ -336,7 +338,7 @@ impl ServerRequestHandler {
      * Create a ServerRequestHandler object with the given state object that
      * will be provided to the handler function.
      */
-    fn new(server: Arc<ServerState>) -> Self {
+    fn new(server: Arc<DropshotState>) -> Self {
         ServerRequestHandler {
             server: Arc::clone(&server),
         }

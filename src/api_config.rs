@@ -3,9 +3,9 @@
  * configuration.
  */
 
+use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
-use std::net::SocketAddr;
 use std::path::Path;
 
 /**
@@ -13,8 +13,8 @@ use std::path::Path;
  */
 #[derive(Debug, Deserialize)]
 pub struct ApiServerConfig {
-    /** IP address and TCP port to which to bind for accepting connections. */
-    pub bind_address: SocketAddr,
+    /** Dropshot configuration */
+    pub dropshot: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
 }
@@ -44,17 +44,6 @@ mod test {
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
-
-    /*
-     * Chunks of valid config file.  These are put together with invalid chunks
-     * in the test suite to construct complete config files that will only fail
-     * on the known invalid chunk.
-     */
-    const CONFIG_VALID_LOG: &str = r##"
-            [log]
-            level = "critical"
-            mode = "stderr-terminal"
-        "##;
 
     /**
      * Generates a temporary filesystem path unique for the given label.
@@ -127,138 +116,8 @@ mod test {
     }
 
     /*
-     * Bad values for "bind_address"
+     * XXX add success test case -- note we don't need to retest semantics
+     * because that's done in Dropshot (unless/until we add our own config
+     * sections)
      */
-
-    #[test]
-    fn test_config_bad_bind_address_port_too_small() {
-        let bad_config = format!(
-            "{}{}",
-            r###"
-            bind_address = "127.0.0.1:-3"
-            "###,
-            CONFIG_VALID_LOG
-        );
-        let error = read_config("bad_bind_address_port_too_small", &bad_config)
-            .expect_err("expected failure");
-        assert!(error.starts_with("parse \""));
-        assert!(error
-            .contains("\": invalid IP address syntax for key `bind_address`"));
-    }
-
-    #[test]
-    fn test_config_bad_bind_address_port_too_large() {
-        let bad_config = format!(
-            "{}{}",
-            r###"
-            bind_address = "127.0.0.1:65536"
-            "###,
-            CONFIG_VALID_LOG
-        );
-        let error = read_config("bad_bind_address_port_too_large", &bad_config)
-            .expect_err("expected failure");
-        assert!(error.starts_with("parse \""));
-        assert!(error
-            .contains("\": invalid IP address syntax for key `bind_address`"));
-    }
-
-    #[test]
-    fn test_config_bad_bind_address_garbage() {
-        let bad_config = format!(
-            "{}{}",
-            r###"
-            bind_address = "foobar"
-            "###,
-            CONFIG_VALID_LOG
-        );
-        let error = read_config("bad_bind_address_garbage", &bad_config)
-            .expect_err("expected failure");
-        assert!(error.starts_with("parse \""));
-        assert!(error
-            .contains("\": invalid IP address syntax for key `bind_address`"));
-    }
-
-    #[tokio::test]
-    async fn test_config_bind_address() {
-        let client = hyper::Client::new();
-        let bind_ip_str = "127.0.0.1";
-        let bind_port: u16 = 12221;
-
-        /*
-         * This helper constructs a GET HTTP request to
-         * http://$bind_ip_str:$port/, where $port is the argument to the
-         * closure.
-         */
-        let cons_request = |port: u16| {
-            let uri = hyper::Uri::builder()
-                .scheme("http")
-                .authority(format!("{}:{}", bind_ip_str, port).as_str())
-                .path_and_query("/")
-                .build()
-                .unwrap();
-            hyper::Request::builder()
-                .method(http::method::Method::GET)
-                .uri(&uri)
-                .body(hyper::Body::empty())
-                .unwrap()
-        };
-
-        /*
-         * Make sure there is not currently a server running on our expected
-         * port so that when we subsequently create a server and run it we know
-         * we're getting the one we configured.
-         */
-        let error = client.request(cons_request(bind_port)).await.unwrap_err();
-        assert!(error.is_connect());
-
-        /*
-         * Now start a server with our configuration and make the request again.
-         * This should succeed in terms of making the request.  (The request
-         * itself might fail with a 400-level or 500-level response code -- we
-         * don't want to depend on too much from the ApiServer here -- but we
-         * should have successfully made the request.)
-         */
-        let config_text = format!(
-            "bind_address = \"{}:{}\"\n{}",
-            bind_ip_str, bind_port, CONFIG_VALID_LOG
-        );
-        let config = read_config("bind_address", &config_text).unwrap();
-        let mut server = super::super::ApiServer::new(&config, false).unwrap();
-        let task = server.http_server.run();
-        client.request(cons_request(bind_port)).await.unwrap();
-        server.http_server.close();
-        task.await.unwrap().unwrap();
-
-        /*
-         * Make another request to make sure it fails now that we've shut down
-         * the server.
-         */
-        let error = client.request(cons_request(bind_port)).await.unwrap_err();
-        assert!(error.is_connect());
-
-        /*
-         * Start a server on another TCP port and make sure we can reach that
-         * one (and NOT the one we just shut down).
-         */
-        let config_text = format!(
-            "bind_address = \"{}:{}\"\n{}",
-            bind_ip_str,
-            bind_port + 1,
-            CONFIG_VALID_LOG
-        );
-        let config = read_config("bind_address", &config_text).unwrap();
-        let mut server = super::super::ApiServer::new(&config, false).unwrap();
-        let task = server.http_server.run();
-        client.request(cons_request(bind_port + 1)).await.unwrap();
-        let error = client.request(cons_request(bind_port)).await.unwrap_err();
-        assert!(error.is_connect());
-        server.http_server.close();
-        task.await.unwrap().unwrap();
-
-        let error = client.request(cons_request(bind_port)).await.unwrap_err();
-        assert!(error.is_connect());
-        let error =
-            client.request(cons_request(bind_port + 1)).await.unwrap_err();
-        assert!(error.is_connect());
-    }
 }

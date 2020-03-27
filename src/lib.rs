@@ -43,9 +43,10 @@ impl ApiServer {
             std::process::exit(0);
         }
 
-        let log = config.log.to_logger().map_err(|message| {
-            api_error::InitError(message)
-        })?;
+        let log = config
+            .log
+            .to_logger()
+            .map_err(|message| api_error::InitError(message))?;
         for (path, method) in router.iter() {
             debug!(log, "registered endpoint";
                 "method" => &method,
@@ -63,7 +64,7 @@ impl ApiServer {
         });
 
         let http_server = dropshot::HttpServer::new(
-            &config.bind_address,
+            &config.dropshot,
             router,
             Box::new(api_state),
             &log,

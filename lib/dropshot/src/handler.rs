@@ -120,7 +120,7 @@ use super::error::HttpError;
 use super::http_util::http_read_body;
 use super::http_util::CONTENT_TYPE_JSON;
 use super::http_util::CONTENT_TYPE_NDJSON;
-use super::server::ServerState;
+use super::server::DropshotState;
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -159,7 +159,7 @@ pub type HttpHandlerResult = Result<Response<Body>, HttpError>;
  */
 pub struct RequestContext {
     /** shared server state */
-    pub server: Arc<ServerState>,
+    pub server: Arc<DropshotState>,
     /** HTTP request details */
     pub request: Arc<Mutex<Request<Body>>>,
     /** HTTP request routing variables */
