@@ -6,12 +6,13 @@
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
+use serde::Serialize;
 use std::path::Path;
 
 /**
  * Represents configuration for the whole API server.
  */
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ApiServerConfig {
     /** Dropshot configuration */
     pub dropshot: ConfigDropshot,
@@ -41,7 +42,12 @@ impl ApiServerConfig {
 #[cfg(test)]
 mod test {
     use super::ApiServerConfig;
+    use dropshot::ConfigDropshot;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingIfExists;
+    use dropshot::ConfigLoggingLevel;
     use std::fs;
+    use std::net::SocketAddr;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -116,8 +122,35 @@ mod test {
     }
 
     /*
-     * XXX add success test case -- note we don't need to retest semantics
-     * because that's done in Dropshot (unless/until we add our own config
-     * sections)
+     * Success case.  We don't need to retest semantics for either ConfigLogging
+     * or ConfigDropshot because those are both tested within Dropshot.  If we
+     * add new configuration sections of our own, we will want to test those
+     * here (both syntax and semantics).
      */
+    #[test]
+    fn test_valid() {
+        let config = read_config(
+            "valid",
+            r##"
+            [dropshot]
+            bind_address = "10.1.2.3:4567"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            "##,
+        )
+        .unwrap();
+        assert_eq!(config, ApiServerConfig {
+            dropshot: ConfigDropshot {
+                bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
+            },
+            log: ConfigLogging::File {
+                level: ConfigLoggingLevel::Debug,
+                if_exists: ConfigLoggingIfExists::Fail,
+                path: "/nonexistent/path".to_string()
+            }
+        });
+    }
 }

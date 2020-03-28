@@ -16,7 +16,7 @@ use std::path::Path;
  * Represents the logging configuration for a server.  This is expected to be a
  * top-level block in a TOML config file, although that's not required.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "mode")]
 pub enum ConfigLogging {
     #[serde(rename = "stderr-terminal")]
@@ -30,7 +30,7 @@ pub enum ConfigLogging {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingLevel {
     #[serde(rename = "trace")]
     Trace,
@@ -59,7 +59,7 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingIfExists {
     #[serde(rename = "fail")]
     Fail,
