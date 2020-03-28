@@ -120,10 +120,12 @@ the server to exit immediately with an error).
 
 == TODO
 
-* Clean up the httpapi::HttpServer interface.  See the common boilerplate for
-  setting up a TestContext in DemoTestContext and ApiTestContext.
+* Clean up the dropshot::HttpServer interface.
+** fix the TODO-cleanup on api_context()?
+** review Cargo dependencies between dropshot and API
 ** Retest that log files are created, kept, and removed when expected (both test
    suites)
+** self-review changes -- and commits (shouldn't go in as many commits to master)
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")

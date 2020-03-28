@@ -73,7 +73,10 @@ impl ConfigLogging {
     /**
      * Create the root logger based on the requested configuration.
      */
-    pub fn to_logger(&self, log_name: String) -> Result<Logger, String> {
+    pub fn to_logger<S: AsRef<str>>(
+        &self,
+        log_name: S,
+    ) -> Result<Logger, String> {
         match self {
             ConfigLogging::StderrTerminal {
                 level,
@@ -105,7 +108,11 @@ impl ConfigLogging {
                     }
                 }
 
-                let drain = log_drain_for_file(&open_options, Path::new(path), log_name)?;
+                let drain = log_drain_for_file(
+                    &open_options,
+                    Path::new(path),
+                    log_name.as_ref().to_string(),
+                )?;
                 Ok(async_root_logger(level, drain))
             }
         }
@@ -201,7 +208,7 @@ mod test {
         contents: &str,
     ) -> Result<Logger, String> {
         let config = read_config::<ConfigLogging>(label, contents).unwrap();
-        let result = config.to_logger("oxide-api".to_string());
+        let result = config.to_logger("test-logger");
         if let Err(ref error) = result {
             eprintln!("error message creating logger: {}", error);
         }
@@ -273,7 +280,7 @@ mod test {
         "##;
         let config =
             read_config::<ConfigLogging>("stderr-terminal", config).unwrap();
-        config.to_logger("logname".to_string()).unwrap();
+        config.to_logger("test-logger").unwrap();
     }
 
     /*
@@ -510,7 +517,7 @@ mod test {
         let log_records = read_bunyan_log(&logpath);
         let expected_hostname = hostname::get().unwrap().into_string().unwrap();
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
-            name: Some("oxide-api".to_string()),
+            name: Some("test-logger".to_string()),
             hostname: Some(expected_hostname.clone()),
             v: Some(0),
             pid: Some(std::process::id()),
@@ -552,7 +559,7 @@ mod test {
 
         let log_records = read_bunyan_log(&logpath);
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
-            name: Some("oxide-api".to_string()),
+            name: Some("test-logger".to_string()),
             hostname: Some(expected_hostname),
             v: Some(0),
             pid: Some(std::process::id()),

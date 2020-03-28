@@ -62,7 +62,7 @@ pub fn api_context() -> Box<Arc<ApiContext>>
 pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let log = config
         .log
-        .to_logger("oxide-api".to_string())
+        .to_logger("oxide-api")
         .map_err(|message| format!("initializing logger: {}", message))?;
     info!(log, "starting server");
 

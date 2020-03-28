@@ -305,7 +305,7 @@ impl TestContext {
             other_config @ _ => (None, other_config.clone()),
         };
 
-        let log = log_config.to_logger(test_name.to_string()).unwrap();
+        let log = log_config.to_logger(test_name).unwrap();
 
         /*
          * Set up the server itself.
