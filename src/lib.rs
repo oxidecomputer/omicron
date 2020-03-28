@@ -6,23 +6,20 @@
  * TODO-cleanup is there a better way to do this?
  */
 
-pub mod api_config;
-pub mod api_error;
+mod api_config;
+mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
 mod sim;
 
 pub use api_config::ApiServerConfig;
+use dropshot::ApiDescription;
 use dropshot::RequestContext;
-pub use dropshot::HEADER_REQUEST_ID;
 use std::any::Any;
 use std::sync::Arc;
 
-use dropshot::ApiDescription;
-
 #[macro_use]
 extern crate slog;
-use slog::Logger;
 
 /**
  * Returns a Dropshot `ApiDescription` for our API.
@@ -34,54 +31,60 @@ pub fn dropshot_api() -> ApiDescription {
 }
 
 /**
- * Consumer handle for the API server.
+ * Run the OpenAPI generator, which emits the OpenAPI spec to stdout.
  */
-pub struct ApiServer {
-    pub http_server: dropshot::HttpServer,
-    pub log: Logger,
+pub fn run_openapi()
+{
+    dropshot_api().print_openapi();
 }
 
-impl ApiServer {
-    pub fn new(
-        config: &ApiServerConfig
-    ) -> Result<ApiServer, api_error::InitError> {
-        let mut api = ApiDescription::new();
-        api_http_entrypoints::api_register_entrypoints(&mut api);
+/**
+ * Returns the API-specific state object to be used in our API server.
+ * TODO-cleanup it's clearer now how to get rid of one level of Arc.
+ */
+pub fn api_context() -> Box<Arc<ApiContext>>
+{
+    let mut simbuilder = sim::SimulatorBuilder::new();
+    simbuilder.project_create("simproject1");
+    simbuilder.project_create("simproject2");
+    simbuilder.project_create("simproject3");
 
-        let log = config
-            .log
-            .to_logger()
-            .map_err(|message| api_error::InitError(message))?;
+    let api_state = Arc::new(ApiContext {
+        backend: Arc::new(simbuilder.build()),
+    });
 
-        let mut simbuilder = sim::SimulatorBuilder::new();
-        simbuilder.project_create("simproject1");
-        simbuilder.project_create("simproject2");
-        simbuilder.project_create("simproject3");
+    Box::new(api_state)
+}
 
-        let api_state = Arc::new(ApiRequestContext {
-            backend: Arc::new(simbuilder.build()),
-        });
+/**
+ * Run an instance of the API server.
+ */
+pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
+    let log = config
+        .log
+        .to_logger("oxide-api".to_string())
+        .map_err(|message| format!("initializing logger: {}", message))?;
+    info!(log, "starting server");
 
-        let http_server = dropshot::HttpServer::new(
-            &config.dropshot,
-            api,
-            Box::new(api_state),
-            &log,
-        )
-        .map_err(|error| api_error::InitError(format!("{}", error)))?;
+    let mut http_server = dropshot::HttpServer::new(
+        &config.dropshot,
+        dropshot_api(),
+        api_context(),
+        &log,
+    )
+    .map_err(|error| format!("initializing server: {}", error))?;
 
-        Ok(ApiServer {
-            http_server,
-            log,
-        })
-    }
+    let join_handle = http_server.run().await;
+    let server_result = join_handle
+        .map_err(|error| format!("waiting for server: {}", error))?;
+    server_result.map_err(|error| format!("server stopped: {}", error))
 }
 
 /**
  * API-specific state that we'll associate with the server and make available to
  * API request handler functions.  See `api_backend()`.
  */
-pub struct ApiRequestContext {
+pub struct ApiContext {
     pub backend: Arc<dyn api_model::ApiBackend>,
 }
 
@@ -98,7 +101,7 @@ pub fn api_backend(
 ) -> Arc<dyn api_model::ApiBackend> {
     let maybectx: &(dyn Any + Send + Sync) = rqctx.server.private.as_ref();
     let apictx = maybectx
-        .downcast_ref::<Arc<ApiRequestContext>>()
+        .downcast_ref::<Arc<ApiContext>>()
         .expect("api_backend(): wrong type for private data");
     return Arc::clone(&apictx.backend);
 }

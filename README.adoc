@@ -120,11 +120,12 @@ the server to exit immediately with an error).
 
 == TODO
 
+* Clean up the httpapi::HttpServer interface.  See the common boilerplate for
+  setting up a TestContext in DemoTestContext and ApiTestContext.
+** Update config file docs above for recent changes ("dropshot" section)
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
-* Clean up the httpapi::HttpServer interface.  See the common boilerplate for
-  setting up a TestContext in DemoTestContext and ApiTestContext.
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

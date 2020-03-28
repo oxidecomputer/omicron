@@ -67,7 +67,7 @@ async fn test_config_bind_address() {
         path: log_path.clone(),
         if_exists: dropshot::ConfigLoggingIfExists::Append,
     };
-    let log = log_config.to_logger().unwrap();
+    let log = log_config.to_logger("test_config_bind_address".to_string()).unwrap();
 
     let client = hyper::Client::new();
     let bind_ip_str = "127.0.0.1";

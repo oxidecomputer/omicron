@@ -5,6 +5,7 @@
  */
 
 use serde::Deserialize;
+use serde::Serialize;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
@@ -15,7 +16,7 @@ use std::path::Path;
  * Represents the logging configuration for a server.  This is expected to be a
  * top-level block in a TOML config file, although that's not required.
  */
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "mode")]
 pub enum ConfigLogging {
     #[serde(rename = "stderr-terminal")]
@@ -29,7 +30,7 @@ pub enum ConfigLogging {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ConfigLoggingLevel {
     #[serde(rename = "trace")]
     Trace,
@@ -58,7 +59,7 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ConfigLoggingIfExists {
     #[serde(rename = "fail")]
     Fail,
@@ -72,7 +73,7 @@ impl ConfigLogging {
     /**
      * Create the root logger based on the requested configuration.
      */
-    pub fn to_logger(&self) -> Result<Logger, String> {
+    pub fn to_logger(&self, log_name: String) -> Result<Logger, String> {
         match self {
             ConfigLogging::StderrTerminal {
                 level,
@@ -104,7 +105,7 @@ impl ConfigLogging {
                     }
                 }
 
-                let drain = log_drain_for_file(&open_options, Path::new(path))?;
+                let drain = log_drain_for_file(&open_options, Path::new(path), log_name)?;
                 Ok(async_root_logger(level, drain))
             }
         }
@@ -131,6 +132,7 @@ where
 fn log_drain_for_file(
     open_options: &OpenOptions,
     path: &Path,
+    log_name: String,
 ) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -149,7 +151,17 @@ fn log_drain_for_file(
      * how logging is configured knows where the rest of the log messages went.
      */
     eprintln!("note: configured to log to \"{}\"", path.display());
-    Ok(slog_bunyan::with_name("oxide-api", file).build().fuse())
+
+    /*
+     * Using leak() here is dubious.  However, we really want the logger's name
+     * to be dynamically generated from the test name.  Unfortunately, the
+     * bunyan interface requires that it be a `&'static str`.  The correct
+     * approach is to fix that interface.
+     * TODO-cleanup
+     */
+    let log_name_box = Box::new(log_name);
+    let log_name_leaked = Box::leak(log_name_box);
+    Ok(slog_bunyan::with_name(log_name_leaked, file).build().fuse())
 }
 
 #[cfg(test)]
@@ -189,7 +201,7 @@ mod test {
         contents: &str,
     ) -> Result<Logger, String> {
         let config = read_config::<ConfigLogging>(label, contents).unwrap();
-        let result = config.to_logger();
+        let result = config.to_logger("oxide-api".to_string());
         if let Err(ref error) = result {
             eprintln!("error message creating logger: {}", error);
         }
@@ -261,7 +273,7 @@ mod test {
         "##;
         let config =
             read_config::<ConfigLogging>("stderr-terminal", config).unwrap();
-        config.to_logger().unwrap();
+        config.to_logger("logname".to_string()).unwrap();
     }
 
     /*

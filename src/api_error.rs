@@ -45,17 +45,3 @@ impl From<ApiError> for HttpError {
         }
     }
 }
-
-/**
- * `InitError` is for errors that can only happen during initialization.  There
- * are no translations from `InitError` into `HttpError` the way there are for
- * `ApiError`s.  We also don't need many subtypes because they likely won't be
- * handled programmatically.
- */
-#[derive(Debug)]
-pub struct InitError(pub String);
-impl std::fmt::Display for InitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "error creating API server: {}", self.0)
-    }
-}

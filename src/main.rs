@@ -41,21 +41,11 @@ async fn main() {
     };
 
     if matches.is_present("openapi") {
-        let api = oxide_api_prototype::dropshot_api();
-        api.print_openapi();
-        std::process::exit(0);
-    }
-
-    let mut server = match oxide_api_prototype::ApiServer::new(&config) {
-        Err(error) => {
+        oxide_api_prototype::run_openapi();
+    } else {
+        if let Err(error) = oxide_api_prototype::run_server(&config).await {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             std::process::exit(1);
         }
-        Ok(s) => s,
-    };
-
-    if let Err(error) = server.http_server.run().await {
-        eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-        std::process::exit(1);
     }
 }
