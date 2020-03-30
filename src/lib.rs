@@ -15,7 +15,6 @@ mod sim;
 pub use api_config::ApiServerConfig;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
-use std::any::Any;
 use std::sync::Arc;
 
 #[macro_use]

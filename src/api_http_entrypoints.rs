@@ -2,7 +2,7 @@
  * Handler functions (entrypoints) for HTTP APIs
  */
 
-use hyper::Method;
+use http::Method;
 use serde::Deserialize;
 use std::sync::Arc;
 

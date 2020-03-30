@@ -5,7 +5,7 @@
  */
 
 use http::method::Method;
-use hyper::StatusCode;
+use http::StatusCode;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
