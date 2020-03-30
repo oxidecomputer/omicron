@@ -32,16 +32,14 @@ pub fn dropshot_api() -> ApiDescription {
 /**
  * Run the OpenAPI generator, which emits the OpenAPI spec to stdout.
  */
-pub fn run_openapi()
-{
+pub fn run_openapi() {
     dropshot_api().print_openapi();
 }
 
 /**
  * Returns the API-specific state object to be used in our API server.
  */
-pub fn api_context() -> Arc<ApiContext>
-{
+pub fn api_context() -> Arc<ApiContext> {
     let mut simbuilder = sim::SimulatorBuilder::new();
     simbuilder.project_create("simproject1");
     simbuilder.project_create("simproject2");
