@@ -5,7 +5,7 @@
  */
 
 use http::method::Method;
-use hyper::StatusCode;
+use http::StatusCode;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
@@ -14,10 +14,7 @@ use dropshot::test_util::read_json;
 use dropshot::test_util::read_ndjson;
 
 pub mod common;
-use common::ApiTestContext;
-
-#[macro_use]
-extern crate slog;
+use common::test_setup;
 
 /*
  * Most of our tests wind up in this one test function primarily because they
@@ -39,7 +36,7 @@ extern crate slog;
  */
 #[tokio::test]
 async fn smoke_test() {
-    let testctx = ApiTestContext::new("smoke_test").await;
+    let testctx = test_setup("smoke_test").await;
 
     /*
      * Error case: GET /nonexistent (a path with no route at all)

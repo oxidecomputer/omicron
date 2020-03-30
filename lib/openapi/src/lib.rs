@@ -59,9 +59,9 @@ pub fn endpoint(
         #[allow(non_camel_case_types, missing_docs)]
         pub struct #name;
         impl #name {
-            fn register(router: &mut HttpRouter) {
+            fn register(api: &mut ApiDescription) {
                 #ast
-                router.insert(Method::#method_ident, #path, HttpRouteHandler::new(#name));
+                api.register(Method::#method_ident, #path, HttpRouteHandler::new(#name));
             }
         }
     };

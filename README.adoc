@@ -75,7 +75,7 @@ Supported config properties include:
 |Required?
 |Description
 
-|`bind_address`
+|`dropshot.bind_address`
 |`"127.0.0.1:12220"`
 |Yes
 |Specifies that the server should bind to the given IP address and TCP port.  In
@@ -123,8 +123,7 @@ the server to exit immediately with an error).
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
-* Clean up the httpapi::HttpServer interface.  See the common boilerplate for
-  setting up a TestContext in DemoTestContext and ApiTestContext.
+** Dropshot itself should be documented
 * Flesh out more endpoints and simulator
 * Write out road map
 ** regions, AZs, etc. need to be added per RFD 24

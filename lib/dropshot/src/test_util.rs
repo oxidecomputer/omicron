@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
+use std::any::Any;
 use std::fmt::Debug;
 use std::fs;
 use std::iter::Iterator;
@@ -26,8 +27,14 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
 
+use crate::api_description::ApiDescription;
+use crate::config::ConfigDropshot;
 use crate::error::HttpErrorResponseBody;
+use crate::logging::ConfigLogging;
+use crate::server::HttpServer;
 
 /**
  * List of allowed HTTP headers in responses.  This is used to make sure we
@@ -224,6 +231,116 @@ impl ClientTestContext {
     }
 }
 
+/*
+ * TestContext is used to manage a matched server and client for the common
+ * test-case pattern of setting up a logger, server, and client and tearing them
+ * all down at the end.
+ */
+pub struct TestContext {
+    pub client_testctx: ClientTestContext,
+    pub server: HttpServer,
+    pub log: Logger,
+    server_task: JoinHandle<Result<(), hyper::error::Error>>,
+    log_path: Option<PathBuf>,
+}
+
+impl TestContext {
+    /**
+     * Instantiate a new test context with a logger determined by
+     * `config_logging` and the Dropshot config determined by `config_dropshot`.
+     * Note that if `config_logging` indicates a file destination, the path MUST
+     * be the string "UNUSED".  It will be replaced with a path uniquely
+     * generated for each TestContext.
+     */
+    pub async fn new(
+        test_name: &str,
+        api: ApiDescription,
+        private: Arc<dyn Any + Send + Sync + 'static>,
+        config_dropshot: &ConfigDropshot,
+        initial_config_logging: &ConfigLogging,
+    ) -> TestContext {
+        /*
+         * The local bind address TCP port needs to be zero in the test suite or
+         * else concurrent tests may fail to bind.
+         */
+        assert_eq!(
+            0,
+            config_dropshot.bind_address.port(),
+            "test suite only supports binding on port 0 (any available port)"
+        );
+
+        /*
+         * Set up logging.  If the caller requested a file path, assert that the
+         * path matches our sentinel (just to improve debuggability -- otherwise
+         * people might be pretty confused about where the logs went) and then
+         * override the path with one uniquely generated for this test.  On
+         * success, we will remove the log file.  This way, on failure, users
+         * have the complete log from the first test result.  They don't have to
+         * hope the problem was reproducible in order to know more about what
+         * went wrong.
+         * TODO-developer allow keeping the logs in successful cases with an
+         * environment variable or other flag.
+         */
+        let (log_path, log_config) = match initial_config_logging {
+            ConfigLogging::File {
+                level,
+                path: dummy_path,
+                if_exists,
+            } => {
+                assert_eq!(
+                    dummy_path, "UNUSED",
+                    "for test suite logging configuration, when mode = \
+                     \"file\" is used, the path MUST be the sentinel string \
+                     \"UNUSED\".  It will be replaced with a unique path for \
+                     each test."
+                );
+                let new_path = log_file_for_test(test_name);
+                let new_path_str = new_path.as_path().display().to_string();
+                eprintln!("log file: {:?}", new_path_str);
+                (Some(new_path), ConfigLogging::File {
+                    level: level.clone(),
+                    path: new_path_str.clone(),
+                    if_exists: if_exists.clone(),
+                })
+            }
+            other_config @ _ => (None, other_config.clone()),
+        };
+
+        let log = log_config.to_logger(test_name).unwrap();
+
+        /*
+         * Set up the server itself.
+         */
+        let mut server =
+            HttpServer::new(&config_dropshot, api, private, &log).unwrap();
+        let server_task = server.run();
+
+        let server_addr = server.local_addr();
+        let client_log = log.new(o!("http_client" => "dropshot test suite"));
+        let client_testctx = ClientTestContext::new(server_addr, client_log);
+
+        TestContext {
+            client_testctx,
+            server,
+            log,
+            server_task,
+            log_path,
+        }
+    }
+
+    /*
+     * TODO-cleanup: is there an async analog to Drop?
+     */
+    pub async fn teardown(self) {
+        self.server.close();
+        let join_result = self.server_task.await.unwrap();
+        join_result.expect("server stopped with an error");
+        if let Some(log_path) = self.log_path {
+            fs::remove_file(log_path).unwrap();
+        }
+    }
+}
+
 /**
  * Given a Hyper Response whose body is expected to represent newline-separated
  * JSON, each of which is expected to be parseable via Serde as type T,
@@ -309,6 +426,21 @@ pub fn log_file_for_test(test_name: &str) -> PathBuf {
     };
 
     log_path
+}
+
+/**
+ * Load an object of type `T` (usually a hunk of configuration) from the string
+ * `contents`.  `label` is used as an identifying string in a log message.  It
+ * should be unique for each test.
+ */
+pub fn read_config<T: DeserializeOwned + Debug>(
+    label: &str,
+    contents: &str,
+) -> Result<T, String> {
+    let result: Result<T, String> =
+        toml::from_str(contents).map_err(|error| format!("{}", error));
+    eprintln!("config \"{}\": {:?}", label, result);
+    result
 }
 
 /*

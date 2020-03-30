@@ -5,18 +5,18 @@
  */
 
 use serde::Deserialize;
-use std::fs::OpenOptions;
-use std::path::Path;
-
+use serde::Serialize;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::fs::OpenOptions;
+use std::path::Path;
 
 /**
  * Represents the logging configuration for a server.  This is expected to be a
  * top-level block in a TOML config file, although that's not required.
  */
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "mode")]
 pub enum ConfigLogging {
     #[serde(rename = "stderr-terminal")]
@@ -30,7 +30,7 @@ pub enum ConfigLogging {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingLevel {
     #[serde(rename = "trace")]
     Trace,
@@ -59,7 +59,7 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingIfExists {
     #[serde(rename = "fail")]
     Fail,
@@ -73,7 +73,10 @@ impl ConfigLogging {
     /**
      * Create the root logger based on the requested configuration.
      */
-    pub fn to_logger(&self) -> Result<Logger, String> {
+    pub fn to_logger<S: AsRef<str>>(
+        &self,
+        log_name: S,
+    ) -> Result<Logger, String> {
         match self {
             ConfigLogging::StderrTerminal {
                 level,
@@ -105,7 +108,11 @@ impl ConfigLogging {
                     }
                 }
 
-                let drain = log_drain_for_file(&open_options, Path::new(path))?;
+                let drain = log_drain_for_file(
+                    &open_options,
+                    Path::new(path),
+                    log_name.as_ref().to_string(),
+                )?;
                 Ok(async_root_logger(level, drain))
             }
         }
@@ -132,6 +139,7 @@ where
 fn log_drain_for_file(
     open_options: &OpenOptions,
     path: &Path,
+    log_name: String,
 ) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -150,16 +158,27 @@ fn log_drain_for_file(
      * how logging is configured knows where the rest of the log messages went.
      */
     eprintln!("note: configured to log to \"{}\"", path.display());
-    Ok(slog_bunyan::with_name("oxide-api", file).build().fuse())
+
+    /*
+     * Using leak() here is dubious.  However, we really want the logger's name
+     * to be dynamically generated from the test name.  Unfortunately, the
+     * bunyan interface requires that it be a `&'static str`.  The correct
+     * approach is to fix that interface.
+     * TODO-cleanup
+     */
+    let log_name_box = Box::new(log_name);
+    let log_name_leaked = Box::leak(log_name_box);
+    Ok(slog_bunyan::with_name(log_name_leaked, file).build().fuse())
 }
 
 #[cfg(test)]
 mod test {
-    use super::super::test_util::read_bunyan_log;
-    use super::super::test_util::verify_bunyan_records;
-    use super::super::test_util::verify_bunyan_records_sequential;
-    use super::super::test_util::BunyanLogRecordSpec;
-    use super::ConfigLogging;
+    use crate::test_util::read_bunyan_log;
+    use crate::test_util::read_config;
+    use crate::test_util::verify_bunyan_records;
+    use crate::test_util::verify_bunyan_records_sequential;
+    use crate::test_util::BunyanLogRecordSpec;
+    use crate::ConfigLogging;
     use slog::Logger;
     use std::fs;
     use std::path::Path;
@@ -182,29 +201,14 @@ mod test {
     }
 
     /**
-     * Load a ConfigLogging with the given string `contents`.  `label` is used
-     * as an identifying string in error messages.  It should be unique for each
-     * test.
-     */
-    fn read_config(
-        label: &str,
-        contents: &str,
-    ) -> Result<ConfigLogging, String> {
-        let result: Result<ConfigLogging, String> = toml::from_str(contents)
-            .map_err(|error| format!("parse \"{}\": {}", label, error));
-        eprintln!("config \"{}\": {:?}", label, result);
-        result
-    }
-
-    /**
      * Load a configuration and create a logger from it.
      */
     fn read_config_and_create_logger(
         label: &str,
         contents: &str,
     ) -> Result<Logger, String> {
-        let config = read_config(label, contents).unwrap();
-        let result = config.to_logger();
+        let config = read_config::<ConfigLogging>(label, contents).unwrap();
+        let result = config.to_logger("test-logger");
         if let Err(ref error) = result {
             eprintln!("error message creating logger: {}", error);
         }
@@ -218,10 +222,11 @@ mod test {
     #[test]
     fn test_config_bad_log_mode() {
         let bad_config = r##" mode = "bonkers" "##;
-        let error = read_config("bad_log_mode", bad_config).unwrap_err();
+        let error = read_config::<ConfigLogging>("bad_log_mode", bad_config)
+            .unwrap_err();
         assert!(error.starts_with(
-            "parse \"bad_log_mode\": unknown variant `bonkers`, expected \
-             `stderr-terminal` or `file` for key `mode`"
+            "unknown variant `bonkers`, expected `stderr-terminal` or `file` \
+             for key `mode`"
         ));
     }
 
@@ -236,8 +241,9 @@ mod test {
     fn test_config_bad_terminal_no_level() {
         let bad_config = r##" mode = "stderr-terminal" "##;
         assert_eq!(
-            read_config("bad_terminal_no_level", bad_config).unwrap_err(),
-            "parse \"bad_terminal_no_level\": missing field `level`"
+            read_config::<ConfigLogging>("bad_terminal_no_level", bad_config)
+                .unwrap_err(),
+            "missing field `level`"
         );
     }
 
@@ -248,10 +254,10 @@ mod test {
             level = "everything"
             "##;
         assert_eq!(
-            read_config("bad_terminal_bad_level", bad_config).unwrap_err(),
-            "parse \"bad_terminal_bad_level\": unknown variant `everything`, \
-             expected one of `trace`, `debug`, `info`, `warn`, `error`, \
-             `critical`"
+            read_config::<ConfigLogging>("bad_terminal_bad_level", bad_config)
+                .unwrap_err(),
+            "unknown variant `everything`, expected one of `trace`, `debug`, \
+             `info`, `warn`, `error`, `critical`"
         );
     }
 
@@ -272,8 +278,9 @@ mod test {
             mode = "stderr-terminal"
             level = "warn"
         "##;
-        let config = read_config("stderr-terminal", config).unwrap();
-        config.to_logger().unwrap();
+        let config =
+            read_config::<ConfigLogging>("stderr-terminal", config).unwrap();
+        config.to_logger("test-logger").unwrap();
     }
 
     /*
@@ -286,8 +293,10 @@ mod test {
             mode = "file"
             level = "warn"
             "##;
-        let error = read_config("bad_file_no_file", bad_config).unwrap_err();
-        assert_eq!(error, "parse \"bad_file_no_file\": missing field `path`");
+        let error =
+            read_config::<ConfigLogging>("bad_file_no_file", bad_config)
+                .unwrap_err();
+        assert_eq!(error, "missing field `path`");
     }
 
     #[test]
@@ -296,8 +305,10 @@ mod test {
             mode = "file"
             path = "nonexistent"
             "##;
-        let error = read_config("bad_file_no_level", bad_config).unwrap_err();
-        assert_eq!(error, "parse \"bad_file_no_level\": missing field `level`");
+        let error =
+            read_config::<ConfigLogging>("bad_file_no_level", bad_config)
+                .unwrap_err();
+        assert_eq!(error, "missing field `level`");
     }
 
     /**
@@ -506,7 +517,7 @@ mod test {
         let log_records = read_bunyan_log(&logpath);
         let expected_hostname = hostname::get().unwrap().into_string().unwrap();
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
-            name: Some("oxide-api".to_string()),
+            name: Some("test-logger".to_string()),
             hostname: Some(expected_hostname.clone()),
             v: Some(0),
             pid: Some(std::process::id()),
@@ -548,7 +559,7 @@ mod test {
 
         let log_records = read_bunyan_log(&logpath);
         verify_bunyan_records(log_records.iter(), &BunyanLogRecordSpec {
-            name: Some("oxide-api".to_string()),
+            name: Some("test-logger".to_string()),
             hostname: Some(expected_hostname),
             v: Some(0),
             pid: Some(std::process::id()),

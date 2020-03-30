@@ -6,83 +6,79 @@
  * TODO-cleanup is there a better way to do this?
  */
 
-pub mod api_config;
-pub mod api_error;
+mod api_config;
+mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
 mod sim;
 
 pub use api_config::ApiServerConfig;
-pub use dropshot;
+use dropshot::ApiDescription;
 use dropshot::RequestContext;
-pub use dropshot::HEADER_REQUEST_ID;
-use std::any::Any;
 use std::sync::Arc;
 
 #[macro_use]
 extern crate slog;
-use slog::Logger;
 
 /**
- * Consumer handle for the API server.
+ * Returns a Dropshot `ApiDescription` for our API.
  */
-pub struct ApiServer {
-    pub http_server: dropshot::HttpServer,
-    pub log: Logger,
+pub fn dropshot_api() -> ApiDescription {
+    let mut api = ApiDescription::new();
+    api_http_entrypoints::api_register_entrypoints(&mut api);
+    api
 }
 
-impl ApiServer {
-    pub fn new(
-        config: &ApiServerConfig,
-        openapi: bool,
-    ) -> Result<ApiServer, api_error::InitError> {
-        let mut router = dropshot::HttpRouter::new();
-        api_http_entrypoints::api_register_entrypoints(&mut router);
-        if openapi {
-            router.print_openapi();
-            std::process::exit(0);
-        }
+/**
+ * Run the OpenAPI generator, which emits the OpenAPI spec to stdout.
+ */
+pub fn run_openapi() {
+    dropshot_api().print_openapi();
+}
 
-        let log = config
-            .log
-            .to_logger()
-            .map_err(|message| api_error::InitError(message))?;
-        for (path, method) in router.iter() {
-            debug!(log, "registered endpoint";
-                "method" => &method,
-                "path" => &path
-            );
-        }
+/**
+ * Returns the API-specific state object to be used in our API server.
+ */
+pub fn api_context() -> Arc<ApiContext> {
+    let mut simbuilder = sim::SimulatorBuilder::new();
+    simbuilder.project_create("simproject1");
+    simbuilder.project_create("simproject2");
+    simbuilder.project_create("simproject3");
 
-        let mut simbuilder = sim::SimulatorBuilder::new();
-        simbuilder.project_create("simproject1");
-        simbuilder.project_create("simproject2");
-        simbuilder.project_create("simproject3");
+    Arc::new(ApiContext {
+        backend: Arc::new(simbuilder.build()),
+    })
+}
 
-        let api_state = Arc::new(ApiRequestContext {
-            backend: Arc::new(simbuilder.build()),
-        });
+/**
+ * Run an instance of the API server.
+ */
+pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
+    let log = config
+        .log
+        .to_logger("oxide-api")
+        .map_err(|message| format!("initializing logger: {}", message))?;
+    info!(log, "starting server");
 
-        let http_server = dropshot::HttpServer::new(
-            &config.dropshot,
-            router,
-            Box::new(api_state),
-            &log,
-        )
-        .map_err(|error| api_error::InitError(format!("{}", error)))?;
+    let mut http_server = dropshot::HttpServer::new(
+        &config.dropshot,
+        dropshot_api(),
+        api_context(),
+        &log,
+    )
+    .map_err(|error| format!("initializing server: {}", error))?;
 
-        Ok(ApiServer {
-            http_server,
-            log,
-        })
-    }
+    let join_handle = http_server.run().await;
+    let server_result = join_handle
+        .map_err(|error| format!("waiting for server: {}", error))?;
+    server_result.map_err(|error| format!("server stopped: {}", error))
 }
 
 /**
  * API-specific state that we'll associate with the server and make available to
  * API request handler functions.  See `api_backend()`.
  */
-pub struct ApiRequestContext {
+pub struct ApiContext {
     pub backend: Arc<dyn api_model::ApiBackend>,
 }
 
@@ -97,9 +93,9 @@ pub struct ApiRequestContext {
 pub fn api_backend(
     rqctx: &Arc<RequestContext>,
 ) -> Arc<dyn api_model::ApiBackend> {
-    let maybectx: &(dyn Any + Send + Sync) = rqctx.server.private.as_ref();
+    let maybectx = Arc::clone(&rqctx.server.private);
     let apictx = maybectx
-        .downcast_ref::<Arc<ApiRequestContext>>()
+        .downcast::<ApiContext>()
         .expect("api_backend(): wrong type for private data");
     return Arc::clone(&apictx.backend);
 }

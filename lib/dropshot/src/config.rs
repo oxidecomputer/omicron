@@ -13,7 +13,7 @@ use std::net::SocketAddr;
  * parse their whole file, and then hand us the Dropshot part of the config.
  * TODO-doc add examples
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConfigDropshot {
     /** IP address and TCP port to which to bind for accepting connections */
     pub bind_address: SocketAddr,

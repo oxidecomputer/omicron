@@ -14,15 +14,16 @@
  * JSON body length)
  */
 
-use dropshot::test_util::log_file_for_test;
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_string;
-use dropshot::test_util::ClientTestContext;
+use dropshot::test_util::TestContext;
+use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::ConfigLoggingIfExists;
+use dropshot::ConfigLoggingLevel;
 use dropshot::HttpError;
 use dropshot::HttpRouteHandler;
-use dropshot::HttpRouter;
-use dropshot::HttpServer;
 use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
@@ -33,101 +34,39 @@ use hyper::Method;
 use hyper::Response;
 use serde::Deserialize;
 use serde::Serialize;
-use std::any::Any;
-use std::fs;
-use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 
-#[macro_use]
-extern crate slog;
-use slog::Drain;
-
-struct DemoTestContext {
-    client_testctx: ClientTestContext,
-    server: HttpServer,
-    server_task: JoinHandle<Result<(), hyper::error::Error>>,
-    log_path: PathBuf,
-}
-
-impl DemoTestContext {
-    async fn new(test_name: &str) -> DemoTestContext {
-        /*
-         * The IP address to which we bind can be any local IP, but we use
-         * 127.0.0.1 because we know it's present, it shouldn't expose this
-         * server on any external network, and we don't have to go looking for
-         * some other local IP (likely in a platform-specific way).  We specify
-         * port 0 to request any available port.  This is important because we
-         * may run multiple concurrent tests, so any fixed port could result in
-         * spurious failures due to port conflicts.
-         */
-        let bind_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
-
-        /*
-         * Set up a simple logger.  It sucks to have to re-run the test suite to
-         * get debug output, especially when test failures are non-reproducible,
-         * so we create a separate bunyan log file for each test.  If the test
-         * succeeds, we remove the log file.
-         */
-        let log_path = log_file_for_test(test_name);
-        eprintln!("log file: {:?}", log_path);
-
-        let log = {
-            let file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .unwrap();
-            let bunyan = slog_bunyan::with_name("dropshot_test_demo", file)
-                .build()
-                .fuse();
-            let drain = slog_async::Async::new(bunyan).build().fuse();
-            slog::Logger::root(drain, o!("test_name" => test_name.to_string()))
-        };
-
-        /*
-         * Package up our test endpoints into a router.
-         */
-        let mut router = dropshot::HttpRouter::new();
-        register_test_endpoints(&mut router);
-
-        /*
-         * Set up the server itself.
-         */
-        let mut server = dropshot::HttpServer::new(
-            &ConfigDropshot {
-                bind_address: bind_address,
-            },
-            router,
-            Box::new(0) as Box<dyn Any + Send + Sync + 'static>,
-            &log,
-        )
-        .unwrap();
-        let server_task = server.run();
-
-        let server_addr = server.local_addr();
-        let client_log = log.new(o!("http_client" => "dropshot test suite"));
-        let client_testctx = ClientTestContext::new(server_addr, client_log);
-
-        DemoTestContext {
-            client_testctx,
-            server,
-            server_task,
-            log_path,
-        }
-    }
-
+async fn test_setup(test_name: &str) -> TestContext {
     /*
-     * TODO-cleanup: is there an async analog to Drop?
+     * The IP address to which we bind can be any local IP, but we use
+     * 127.0.0.1 because we know it's present, it shouldn't expose this server
+     * on any external network, and we don't have to go looking for some other
+     * local IP (likely in a platform-specific way).  We specify port 0 to
+     * request any available port.  This is important because we may run
+     * multiple concurrent tests, so any fixed port could result in spurious
+     * failures due to port conflicts.
      */
-    async fn teardown(self) {
-        self.server.close();
-        let join_result = self.server_task.await.unwrap();
-        join_result.expect("server closed with an error");
-        fs::remove_file(self.log_path).unwrap();
-    }
+    let config_dropshot = ConfigDropshot {
+        bind_address: "127.0.0.1:0".parse().unwrap(),
+    };
+
+    let config_logging = ConfigLogging::File {
+        level: ConfigLoggingLevel::Debug,
+        path: "UNUSED".to_string(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+
+    let mut api = ApiDescription::new();
+    register_test_endpoints(&mut api);
+
+    TestContext::new(
+        test_name,
+        api,
+        Arc::new(0),
+        &config_dropshot,
+        &config_logging,
+    )
+    .await
 }
 
 /*
@@ -136,7 +75,7 @@ impl DemoTestContext {
  */
 #[tokio::test]
 async fn test_demo1() {
-    let testctx = DemoTestContext::new("demo1").await;
+    let testctx = test_setup("demo1").await;
     let mut response = testctx
         .client_testctx
         .make_request(
@@ -161,7 +100,7 @@ async fn test_demo1() {
  */
 #[tokio::test]
 async fn test_demo2query() {
-    let testctx = DemoTestContext::new("demo2query").await;
+    let testctx = test_setup("demo2query").await;
 
     /* Test case: optional field missing */
     let mut response = testctx
@@ -251,7 +190,7 @@ async fn test_demo2query() {
  */
 #[tokio::test]
 async fn test_demo2json() {
-    let testctx = DemoTestContext::new("demo2json").await;
+    let testctx = test_setup("demo2json").await;
 
     /* Test case: optional field */
     let input = DemoJsonBody {
@@ -345,7 +284,7 @@ async fn test_demo2json() {
  */
 #[tokio::test]
 async fn test_demo3json() {
-    let testctx = DemoTestContext::new("demo3json").await;
+    let testctx = test_setup("demo3json").await;
 
     /* Test case: everything filled in. */
     let json_input = DemoJsonBody {
@@ -408,23 +347,23 @@ async fn test_demo3json() {
 /*
  * Demo handler functions
  */
-pub fn register_test_endpoints(router: &mut HttpRouter) {
-    router.insert(
+pub fn register_test_endpoints(api: &mut ApiDescription) {
+    api.register(
         Method::GET,
         "/testing/demo1",
         HttpRouteHandler::new(demo_handler_args_1),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo2query",
         HttpRouteHandler::new(demo_handler_args_2query),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo2json",
         HttpRouteHandler::new(demo_handler_args_2json),
     );
-    router.insert(
+    api.register(
         Method::GET,
         "/testing/demo3",
         HttpRouteHandler::new(demo_handler_args_3),

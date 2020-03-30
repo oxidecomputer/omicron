@@ -681,20 +681,14 @@ name = "oxide-api-prototype"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chrono 0.4.11",
  "clap",
  "dropshot",
  "futures",
- "hostname 0.3.1",
  "http",
  "hyper",
  "openapi",
  "serde",
- "serde_json",
  "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
  "tokio",
  "toml",
 ]

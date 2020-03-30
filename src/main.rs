@@ -40,19 +40,12 @@ async fn main() {
         }
     };
 
-    let mut server = match oxide_api_prototype::ApiServer::new(
-        &config,
-        matches.is_present("openapi"),
-    ) {
-        Err(error) => {
+    if matches.is_present("openapi") {
+        oxide_api_prototype::run_openapi();
+    } else {
+        if let Err(error) = oxide_api_prototype::run_server(&config).await {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             std::process::exit(1);
         }
-        Ok(s) => s,
-    };
-
-    if let Err(error) = server.http_server.run().await {
-        eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-        std::process::exit(1);
     }
 }

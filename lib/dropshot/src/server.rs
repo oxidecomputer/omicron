@@ -2,6 +2,7 @@
  * Generic server-wide state and facilities
  */
 
+use super::api_description::ApiDescription;
 use super::config::ConfigDropshot;
 use super::error::HttpError;
 use super::handler::RequestContext;
@@ -34,7 +35,7 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
  */
 pub struct DropshotState {
     /** caller-specific state */
-    pub private: Box<dyn Any + Send + Sync + 'static>,
+    pub private: Arc<dyn Any + Send + Sync + 'static>,
     /** static server configuration parameters */
     pub config: ServerConfig,
     /** request router */
@@ -99,11 +100,13 @@ impl HttpServer {
      * `HttpServer` (and await the result) to actually start the server.  You
      * can call `close()` to begin a graceful shutdown of the server, which will
      * be complete when the `run()` Future is resolved.
+     * TODO-cleanup We should be able to take a reference to the ApiDescription.
+     * We currently can't because we need to hang onto the router.
      */
     pub fn new(
         config: &ConfigDropshot,
-        router: HttpRouter,
-        private: Box<dyn Any + Send + Sync + 'static>,
+        api: ApiDescription,
+        private: Arc<dyn Any + Send + Sync + 'static>,
         log: &Logger,
     ) -> Result<HttpServer, hyper::error::Error> {
         /* TODO-cleanup too many Arcs? */
@@ -114,9 +117,16 @@ impl HttpServer {
                 /* We start aggressively to ensure test coverage. */
                 request_body_max_bytes: 1024,
             },
-            router: router,
+            router: api.into_router(),
             log: log.new(o!()),
         });
+
+        for (path, method) in app_state.router.iter() {
+            debug!(app_state.log, "registered endpoint";
+                "method" => &method,
+                "path" => &path
+            );
+        }
 
         let make_service = ServerConnectionHandler::new(Arc::clone(&app_state));
         let builder = hyper::Server::try_bind(&config.bind_address)?;
