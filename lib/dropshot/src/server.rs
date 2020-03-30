@@ -35,7 +35,7 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
  */
 pub struct DropshotState {
     /** caller-specific state */
-    pub private: Box<dyn Any + Send + Sync + 'static>,
+    pub private: Arc<dyn Any + Send + Sync + 'static>,
     /** static server configuration parameters */
     pub config: ServerConfig,
     /** request router */
@@ -106,7 +106,7 @@ impl HttpServer {
     pub fn new(
         config: &ConfigDropshot,
         api: ApiDescription,
-        private: Box<dyn Any + Send + Sync + 'static>,
+        private: Arc<dyn Any + Send + Sync + 'static>,
         log: &Logger,
     ) -> Result<HttpServer, hyper::error::Error> {
         /* TODO-cleanup too many Arcs? */

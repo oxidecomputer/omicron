@@ -27,6 +27,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 use crate::api_description::ApiDescription;
@@ -254,7 +255,7 @@ impl TestContext {
     pub async fn new(
         test_name: &str,
         api: ApiDescription,
-        private: Box<dyn Any + Send + Sync + 'static>,
+        private: Arc<dyn Any + Send + Sync + 'static>,
         config_dropshot: &ConfigDropshot,
         initial_config_logging: &ConfigLogging,
     ) -> TestContext {
@@ -301,7 +302,7 @@ impl TestContext {
                     path: new_path_str.clone(),
                     if_exists: if_exists.clone(),
                 })
-            },
+            }
             other_config @ _ => (None, other_config.clone()),
         };
 

@@ -62,7 +62,7 @@ async fn test_setup(test_name: &str) -> TestContext {
     TestContext::new(
         test_name,
         api,
-        Box::new(0),
+        Arc::new(0),
         &config_dropshot,
         &config_logging,
     )

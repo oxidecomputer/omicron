@@ -121,8 +121,6 @@ the server to exit immediately with an error).
 == TODO
 
 * Clean up the dropshot::HttpServer interface.
-** fold ClientTestContext into TestContext
-** fix the TODO-cleanup on api_context()?
 ** review Cargo dependencies between dropshot and API
 ** Retest that log files are created, kept, and removed when expected (both test
    suites)

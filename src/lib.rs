@@ -40,20 +40,17 @@ pub fn run_openapi()
 
 /**
  * Returns the API-specific state object to be used in our API server.
- * TODO-cleanup it's clearer now how to get rid of one level of Arc.
  */
-pub fn api_context() -> Box<Arc<ApiContext>>
+pub fn api_context() -> Arc<ApiContext>
 {
     let mut simbuilder = sim::SimulatorBuilder::new();
     simbuilder.project_create("simproject1");
     simbuilder.project_create("simproject2");
     simbuilder.project_create("simproject3");
 
-    let api_state = Arc::new(ApiContext {
+    Arc::new(ApiContext {
         backend: Arc::new(simbuilder.build()),
-    });
-
-    Box::new(api_state)
+    })
 }
 
 /**
@@ -99,9 +96,9 @@ pub struct ApiContext {
 pub fn api_backend(
     rqctx: &Arc<RequestContext>,
 ) -> Arc<dyn api_model::ApiBackend> {
-    let maybectx: &(dyn Any + Send + Sync) = rqctx.server.private.as_ref();
+    let maybectx = Arc::clone(&rqctx.server.private);
     let apictx = maybectx
-        .downcast_ref::<Arc<ApiContext>>()
+        .downcast::<ApiContext>()
         .expect("api_backend(): wrong type for private data");
     return Arc::clone(&apictx.backend);
 }
