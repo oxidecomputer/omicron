@@ -120,11 +120,6 @@ the server to exit immediately with an error).
 
 == TODO
 
-* Clean up the dropshot::HttpServer interface.
-** review Cargo dependencies between dropshot and API
-** Retest that log files are created, kept, and removed when expected (both test
-   suites)
-** self-review changes -- and commits (shouldn't go in as many commits to master)
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
