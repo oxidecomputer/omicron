@@ -168,6 +168,7 @@ mod foo {
             {
                 name = project_id,
                 in = path,
+                deprecated = true,
             }
         ]
     }]
