@@ -23,6 +23,32 @@ macro_rules! abort {
     };
 }
 
+/// name - in macro; required
+/// in - in macro; required
+/// description - in macro; optional
+/// required - in code: Option<T>
+/// deprecated - in macro; optional/future work
+/// allowEmptyValue - future work
+///
+/// style - ignore for now
+/// explode - talk to dap
+/// allowReserved - future work
+/// schema - in code: derived from type
+/// example - not supported (see examples)
+/// examples - in macro: optional/future work
+
+enum InType {
+    Query,
+    Header,
+    Path,
+    Cookie,
+}
+
+struct Parameter {
+    name: String,
+    iin: InType,
+}
+
 /// Attribute to apply to an HTTP endpoint.
 /// TODO(doc) explain intended use
 #[proc_macro_attribute]
@@ -42,16 +68,48 @@ pub fn endpoint(
             attr2,
             r#""method" is a required field; valid values are DELETE, GET, PATCH, POST, and PUT"#
         ),
-        _ => panic!("not done"),
+        _ => panic!("not done; needs test"),
     };
 
     let path = match metadata.get("path") {
         Some(MapEntry::Value(path)) => path,
-        _ => panic!("not done"),
+        _ => panic!("not done; needs test"),
     };
 
+    // ast manipulation
     let ast: syn::ItemFn = syn::parse(item).unwrap();
     let name = ast.sig.ident.clone();
+
+    let args = &ast.sig.inputs;
+
+    let ins = args.iter().skip(1).map(|arg| match arg {
+        syn::FnArg::Receiver(selph) => abort!(
+            selph,
+            "attribute cannot be applied to a method that uses self"
+        ),
+        syn::FnArg::Typed(parameter) => match &*parameter.pat {
+            syn::Pat::Ident(id) => {
+                let ident = &id.ident;
+                let ty = &parameter.ty;
+                quote! {
+                    let #ident: #ty = x;
+                }
+            }
+            _ => abort!(parameter, "unexpected parameter type"),
+        },
+    });
+
+    get_parameters(&metadata);
+
+    let x1 = quote! {
+        fn do_nothing() {}
+    };
+    let x2 = quote! {
+        fn do_less() {}
+    };
+    let mut xxx = quote! {};
+    xxx.extend(x1);
+    xxx.extend(x2);
 
     let method_ident = quote::format_ident!("{}", method);
 
@@ -59,9 +117,13 @@ pub fn endpoint(
         #[allow(non_camel_case_types, missing_docs)]
         pub struct #name;
         impl #name {
-            fn register(api: &mut ApiDescription) {
+            #xxx
+
+            fn register(router: &mut HttpRouter) {
                 #ast
-                api.register(Method::#method_ident, #path, HttpRouteHandler::new(#name));
+                router.insert(Method::#method_ident, #path, HttpRouteHandler::new(#name));
+
+                #(#ins;)*
             }
         }
     };
@@ -224,6 +286,25 @@ fn treeify(depth: usize, tt: &TokenStream) {
             _ => println!("{:width$}{:?}", "", i, width = depth * 2),
         }
     }
+}
+
+fn get_parameters(
+    metadata: &HashMap<String, MapEntry>,
+) -> Result<Vec<Parameter>, String> {
+    let parameters = match metadata.get("parameters") {
+        Some(MapEntry::Array(parameters)) => parameters,
+        _ => panic!("not done; needs test"),
+    };
+
+    for parameter in parameters.iter() {
+        if let MapEntry::Struct(obj) = parameter {
+            if let MapEntry::Value(value) = obj.get("name").unwrap() {
+                println!("n = {}", value);
+            }
+        }
+    }
+
+    Ok(vec![])
 }
 
 #[cfg(test)]
