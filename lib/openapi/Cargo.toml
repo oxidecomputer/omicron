@@ -17,3 +17,4 @@ features = ["full"]
 quote = "*"
 proc-macro-error = "*"
 proc-macro2 = "*"
+serde = { version = "1.0", features = ["derive"] }
