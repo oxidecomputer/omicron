@@ -118,6 +118,7 @@ async fn smoke_test() {
     /*
      * Basic test of out-of-the-box GET /projects
      * TODO-coverage: pagination
+     * TODO-coverage: marker even without pagination
      */
     let mut response = testctx
         .client_testctx

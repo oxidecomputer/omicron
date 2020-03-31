@@ -128,29 +128,30 @@ impl ApiBackend for Simulator {
          * We assemble the list of projects that we're going to return now,
          * under the lock, so that we can release the lock right away.  (This
          * also makes the lifetime of the return value far easier.)
-         *
-         * TODO Is there a cleaner way to write this?  I want to treat
-         * btreemap::iter() the same type as btreemap::range().  They're both
-         * iterators that emit Arc<ApiProject>>, after all.
          */
-        let projects: Vec<Result<Arc<ApiProject>, ApiError>> = match marker {
-            None => projects_by_name
-                .iter()
-                .take(limit)
-                .map(|(_, arcproject)| Ok(Arc::clone(&arcproject)))
-                .collect(),
-            Some(start_value) => projects_by_name
-                //
-                // TODO I think it's correct that this range is inclusive on the
-                // low end, but it means that clients need to make sure they
-                // skip an element that they see twice across page boundaries.
-                // (If we were exclusive on the low end, would it be possible to
-                // miss an element that was present for the whole scan?)
-                //
-                .range(start_value..)
-                .take(limit)
-                .map(|(_, arcproject)| Ok(Arc::clone(&arcproject)))
-                .collect(),
+        let collect_projects =
+            |iter: &mut dyn Iterator<Item = (&String, &Arc<ApiProject>)>| {
+                iter.take(limit)
+                    .map(|(_, arcproject)| Ok(Arc::clone(&arcproject)))
+                    .collect::<Vec<Result<Arc<ApiProject>, ApiError>>>()
+            };
+
+        let projects = match marker {
+            None => collect_projects(&mut projects_by_name.iter()),
+            /*
+             * NOTE: This range is inclusive on the low end because that
+             * makes it easier for the client to know that it hasn't missed
+             * some items in the namespace.  This does mean that clients
+             * have to know to skip the first item on each page because
+             * it'll be the same as the last item on the previous page.
+             * TODO-cleanup would it be a problem to just make this an
+             * exclusive bound?  It seems like you couldn't fail to see any
+             * items that were present for the whole scan, which seems like
+             * the main constraint.
+             */
+            Some(start_value) => {
+                collect_projects(&mut projects_by_name.range(start_value..))
+            }
         };
 
         Ok(futures::stream::iter(projects).boxed())
