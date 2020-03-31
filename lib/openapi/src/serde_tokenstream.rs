@@ -1,4 +1,4 @@
-use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 
 use serde::de::{
     DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
@@ -51,14 +51,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 struct TokenDe {
     input: Peekable<Box<dyn Iterator<Item = TokenTree>>>,
-    start: bool,
 }
 
 impl<'de> TokenDe {
     fn from_tokenstream(input: &'de TokenStream) -> Self {
-        let mut s = TokenDe::new(input);
-        s.start = true;
-        s
+        // We implicitly start inside a brace-surrounded struct; this
+        // allows for more generic handling elsewhere.
+        TokenDe::new(&TokenStream::from(TokenTree::from(Group::new(
+            Delimiter::Brace,
+            input.clone(),
+        ))))
     }
 
     fn new(input: &'de TokenStream) -> Self {
@@ -67,7 +69,14 @@ impl<'de> TokenDe {
             Box::new(input.clone().into_iter());
         TokenDe {
             input: t.peekable(),
-            start: false,
+        }
+    }
+
+    fn gobble_optional_comma(&mut self) -> Result<()> {
+        match self.input.next() {
+            None => Ok(()),
+            Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => Ok(()),
+            Some(_) => Err(Error::ExpectedCommaOrNothing),
         }
     }
 }
@@ -75,7 +84,9 @@ impl<'de> TokenDe {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     ExpectedStruct,
+    ExpectedIdentifier,
     ExpectedBool,
+    ExpectedCommaOrNothing,
     Unknown,
 }
 
@@ -124,17 +135,13 @@ impl<'de, 'a> MapAccess<'de> for TokenDe {
         V: DeserializeSeed<'de>,
     {
         let value = seed.deserialize(&mut *self);
-
-        let comma = self.input.next();
-        match comma {
-            None => (),
-            Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => (),
-            Some(token) => abort!(token, "expected `,`, but found `{}`", token),
+        if value.is_ok() {
+            self.gobble_optional_comma()?;
         }
-
         value
     }
 }
+
 impl<'de, 'a> SeqAccess<'de> for TokenDe {
     type Error = Error;
 
@@ -146,17 +153,9 @@ impl<'de, 'a> SeqAccess<'de> for TokenDe {
             return Ok(None);
         }
         let value = seed.deserialize(&mut *self).map(Some);
-        let comma = self.input.next();
         if value.is_ok() {
-            match comma {
-                None => (),
-                Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => (),
-                Some(token) => {
-                    abort!(token, "expected `,`, but found `{}`", token)
-                }
-            }
+            self.gobble_optional_comma()?;
         }
-
         value
     }
 }
@@ -356,22 +355,15 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
     where
         V: Visitor<'de>,
     {
-        println!("start: {}", self.start);
-        if self.start {
-            return visitor.visit_map(self);
+        if let Some(TokenTree::Group(group)) = self.input.next() {
+            if let Delimiter::Brace = group.delimiter() {
+                return visitor.visit_map(TokenDe::new(&group.stream()));
+            }
         }
-        match self.input.next() {
-            Some(TokenTree::Group(group)) => match group.delimiter() {
-                Delimiter::Brace => {
-                    return visitor.visit_map(TokenDe::new(&group.stream()))
-                }
-                _ => panic!("bad group type"),
-            },
-            None => panic!("struct EOF"),
-            _ => panic!("bad token"),
-        }
-        //Err(Error::ExpectedStruct)
+
+        Err(Error::ExpectedStruct)
     }
+
     fn deserialize_enum<V>(
         self,
         _name: &'static str,
@@ -389,13 +381,9 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         V: Visitor<'de>,
     {
         let id = match self.input.next() {
-            None => panic!("id EOF"),
             Some(ident @ TokenTree::Ident(_)) => ident,
-            Some(token) => {
-                abort!(token, "expected an identifier, but found `{}`", token)
-            }
+            _ => return Err(Error::ExpectedIdentifier),
         };
-        println!("visit_string({})", id.to_string());
         visitor.visit_string(id.to_string())
     }
 }
