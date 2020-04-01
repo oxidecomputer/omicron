@@ -5,6 +5,8 @@
  */
 
 use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
 use futures::future::ready;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
@@ -79,6 +81,34 @@ impl Display for ApiResourceType {
 }
 
 /*
+ * IDENTITY METADATA
+ * (shared by most API objects)
+ */
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiIdentityMetadata {
+    pub id: String,                     /* TODO should be Uuid */
+    pub name: String,                   /* TODO separate type? */
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiIdentityMetadataCreateParams {
+    pub name: String,                   /* TODO separate type? */
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiIdentityMetadataUpdateParams {
+    pub name: Option<String>,           /* TODO separate type? */
+    pub description: Option<String>,
+}
+
+
+/*
  * PROJECTS
  */
 
@@ -89,12 +119,7 @@ pub struct ApiProject {
     /** private data used by the backend implementation */
     pub backend_impl: Box<dyn Any + Send + Sync>,
 
-    /** unique identifier assigned by the system for the project */
-    pub id: String,
-    /** unique identifier assigned by the user for the project */
-    pub name: String,
-    /** human-readable label for the project */
-    pub description: String,
+    pub identity: ApiIdentityMetadata,
 
     /*
      * TODO
@@ -112,9 +137,7 @@ impl ApiObject for ApiProject {
     type View = ApiProjectView;
     fn to_view(&self) -> ApiProjectView {
         ApiProjectView {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            description: self.description.clone(),
+            identity: self.identity.clone(),
         }
     }
 }
@@ -125,9 +148,9 @@ impl ApiObject for ApiProject {
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
-    pub id: String,
-    pub name: String,
-    pub description: String,
+    /* TODO is flattening here the intent in RFD 4? */
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
 }
 
 /**
@@ -136,8 +159,8 @@ pub struct ApiProjectView {
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectCreateParams {
-    pub name: String,
-    pub description: String,
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataCreateParams,
 }
 
 /**
@@ -146,8 +169,8 @@ pub struct ApiProjectCreateParams {
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
-    pub name: Option<String>,
-    pub description: Option<String>,
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataUpdateParams,
 }
 
 /*

@@ -6,6 +6,8 @@
 
 use http::method::Method;
 use http::StatusCode;
+use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
+use oxide_api_prototype::api_model::ApiIdentityMetadataUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
@@ -133,15 +135,15 @@ async fn smoke_test() {
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
     assert_eq!(initial_projects.len(), 3);
-    assert_eq!(initial_projects[0].id, "simproject1");
-    assert_eq!(initial_projects[0].name, "simproject1");
-    assert!(initial_projects[0].description.len() > 0);
-    assert_eq!(initial_projects[1].id, "simproject2");
-    assert_eq!(initial_projects[1].name, "simproject2");
-    assert!(initial_projects[1].description.len() > 0);
-    assert_eq!(initial_projects[2].id, "simproject3");
-    assert_eq!(initial_projects[2].name, "simproject3");
-    assert!(initial_projects[2].description.len() > 0);
+    assert_eq!(initial_projects[0].identity.id, "simproject1");
+    assert_eq!(initial_projects[0].identity.name, "simproject1");
+    assert!(initial_projects[0].identity.description.len() > 0);
+    assert_eq!(initial_projects[1].identity.id, "simproject2");
+    assert_eq!(initial_projects[1].identity.name, "simproject2");
+    assert!(initial_projects[1].identity.description.len() > 0);
+    assert_eq!(initial_projects[2].identity.id, "simproject3");
+    assert_eq!(initial_projects[2].identity.name, "simproject3");
+    assert!(initial_projects[2].identity.description.len() > 0);
 
     /*
      * Basic test of out-of-the-box GET /projects/simproject2
@@ -158,11 +160,11 @@ async fn smoke_test() {
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     let expected = &initial_projects[1];
-    assert_eq!(project.id, "simproject2");
-    assert_eq!(project.id, expected.id);
-    assert_eq!(project.name, expected.name);
-    assert_eq!(project.description, expected.description);
-    assert!(project.description.len() > 0);
+    assert_eq!(project.identity.id, "simproject2");
+    assert_eq!(project.identity.id, expected.identity.id);
+    assert_eq!(project.identity.name, expected.identity.name);
+    assert_eq!(project.identity.description, expected.identity.description);
+    assert!(project.identity.description.len() > 0);
 
     /*
      * Delete "simproject2".  We'll make sure that's reflected in the other
@@ -209,8 +211,10 @@ async fn smoke_test() {
             Method::PUT,
             "/projects/simproject2",
             Some(ApiProjectUpdateParams {
-                name: None,
-                description: None,
+                identity: ApiIdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
             }),
             StatusCode::NOT_FOUND,
         )
@@ -230,24 +234,40 @@ async fn smoke_test() {
         )
         .await
         .expect("expected success");
-    let expected_projects: Vec<&ApiProjectView> =
-        initial_projects.iter().filter(|p| p.name != "simproject2").collect();
+    let expected_projects: Vec<&ApiProjectView> = initial_projects
+        .iter()
+        .filter(|p| p.identity.name != "simproject2")
+        .collect();
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
-    assert_eq!(new_projects[0].id, expected_projects[0].id);
-    assert_eq!(new_projects[0].name, expected_projects[0].name);
-    assert_eq!(new_projects[0].description, expected_projects[0].description);
-    assert_eq!(new_projects[1].id, expected_projects[1].id);
-    assert_eq!(new_projects[1].name, expected_projects[1].name);
-    assert_eq!(new_projects[1].description, expected_projects[1].description);
+    assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
+    assert_eq!(
+        new_projects[0].identity.name,
+        expected_projects[0].identity.name
+    );
+    assert_eq!(
+        new_projects[0].identity.description,
+        expected_projects[0].identity.description
+    );
+    assert_eq!(new_projects[1].identity.id, expected_projects[1].identity.id);
+    assert_eq!(
+        new_projects[1].identity.name,
+        expected_projects[1].identity.name
+    );
+    assert_eq!(
+        new_projects[1].identity.description,
+        expected_projects[1].identity.description
+    );
 
     /*
      * Update "simproject3".  We'll make sure that's reflected in the other
      * requests.
      */
     let project_update = ApiProjectUpdateParams {
-        name: None,
-        description: Some("Li'l lightnin'".to_string()),
+        identity: ApiIdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Li'l lightnin'".to_string()),
+        },
     };
     let mut response = testctx
         .client_testctx
@@ -260,9 +280,9 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.id, "simproject3");
-    assert_eq!(project.name, "simproject3");
-    assert_eq!(project.description, "Li'l lightnin'");
+    assert_eq!(project.identity.id, "simproject3");
+    assert_eq!(project.identity.name, "simproject3");
+    assert_eq!(project.identity.description, "Li'l lightnin'");
 
     let mut response = testctx
         .client_testctx
@@ -276,10 +296,10 @@ async fn smoke_test() {
         .expect("expected success");
     let expected = project;
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.id, expected.id);
-    assert_eq!(project.name, expected.name);
-    assert_eq!(project.description, expected.description);
-    assert_eq!(project.description, "Li'l lightnin'");
+    assert_eq!(project.identity.id, expected.identity.id);
+    assert_eq!(project.identity.name, expected.identity.name);
+    assert_eq!(project.identity.description, expected.identity.description);
+    assert_eq!(project.identity.description, "Li'l lightnin'");
 
     /*
      * Update "simproject3" in a way that changes its name.  This is a deeper
@@ -287,8 +307,10 @@ async fn smoke_test() {
      * fields in one request.
      */
     let project_update = ApiProjectUpdateParams {
-        name: Some("lil_lightnin".to_string()),
-        description: Some("little lightning".to_string()),
+        identity: ApiIdentityMetadataUpdateParams {
+            name: Some("lil_lightnin".to_string()),
+            description: Some("little lightning".to_string()),
+        },
     };
     let mut response = testctx
         .client_testctx
@@ -301,9 +323,9 @@ async fn smoke_test() {
         .await
         .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.id, "simproject3");
-    assert_eq!(project.name, "lil_lightnin");
-    assert_eq!(project.description, "little lightning");
+    assert_eq!(project.identity.id, "simproject3");
+    assert_eq!(project.identity.name, "lil_lightnin");
+    assert_eq!(project.identity.description, "little lightning");
 
     testctx
         .client_testctx
@@ -320,8 +342,10 @@ async fn smoke_test() {
      * Try to create a project with a name that conflicts with an existing one.
      */
     let project_create = ApiProjectCreateParams {
-        name: "simproject1".to_string(),
-        description: "a duplicate of simproject1".to_string(),
+        identity: ApiIdentityMetadataCreateParams {
+            name: "simproject1".to_string(),
+            description: "a duplicate of simproject1".to_string(),
+        },
     };
     let error = testctx
         .client_testctx
@@ -339,8 +363,10 @@ async fn smoke_test() {
      * Now, really do create a new project.
      */
     let project_create = ApiProjectCreateParams {
-        name: "honor roller".to_string(),
-        description: "a soapbox racer".to_string(),
+        identity: ApiIdentityMetadataCreateParams {
+            name: "honor roller".to_string(),
+            description: "a soapbox racer".to_string(),
+        },
     };
     let mut response = testctx
         .client_testctx
@@ -353,9 +379,9 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.id, "honor roller");
-    assert_eq!(project.name, "honor roller");
-    assert_eq!(project.description, "a soapbox racer");
+    assert_eq!(project.identity.id, "honor roller");
+    assert_eq!(project.identity.name, "honor roller");
+    assert_eq!(project.identity.description, "a soapbox racer");
 
     /*
      * List projects again and verify all of our changes.  We should have:
@@ -376,15 +402,15 @@ async fn smoke_test() {
         .expect("expected success");
     let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(projects.len(), 3);
-    assert_eq!(projects[0].id, "honor roller");
-    assert_eq!(projects[0].name, "honor roller");
-    assert_eq!(projects[0].description, "a soapbox racer");
-    assert_eq!(projects[1].id, "simproject3");
-    assert_eq!(projects[1].name, "lil_lightnin");
-    assert_eq!(projects[1].description, "little lightning");
-    assert_eq!(projects[2].id, "simproject1");
-    assert_eq!(projects[2].name, "simproject1");
-    assert!(projects[2].description.len() > 0);
+    assert_eq!(projects[0].identity.id, "honor roller");
+    assert_eq!(projects[0].identity.name, "honor roller");
+    assert_eq!(projects[0].identity.description, "a soapbox racer");
+    assert_eq!(projects[1].identity.id, "simproject3");
+    assert_eq!(projects[1].identity.name, "lil_lightnin");
+    assert_eq!(projects[1].identity.description, "little lightning");
+    assert_eq!(projects[2].identity.id, "simproject1");
+    assert_eq!(projects[2].identity.name, "simproject1");
+    assert!(projects[2].identity.description.len() > 0);
 
     testctx.teardown().await;
 }
