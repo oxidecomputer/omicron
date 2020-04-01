@@ -17,12 +17,9 @@ use std::path::Path;
  * top-level block in a TOML config file, although that's not required.
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "mode")]
+#[serde(rename_all = "kebab-case", tag = "mode")]
 pub enum ConfigLogging {
-    #[serde(rename = "stderr-terminal")]
     StderrTerminal { level: ConfigLoggingLevel },
-
-    #[serde(rename = "file")]
     File {
         level: ConfigLoggingLevel,
         path: String,
@@ -30,19 +27,14 @@ pub enum ConfigLogging {
     },
 }
 
+#[serde(rename_all = "lowercase")]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingLevel {
-    #[serde(rename = "trace")]
     Trace,
-    #[serde(rename = "debug")]
     Debug,
-    #[serde(rename = "info")]
     Info,
-    #[serde(rename = "warn")]
     Warn,
-    #[serde(rename = "error")]
     Error,
-    #[serde(rename = "critical")]
     Critical,
 }
 
@@ -59,13 +51,11 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
+#[serde(rename_all = "lowercase")]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingIfExists {
-    #[serde(rename = "fail")]
     Fail,
-    #[serde(rename = "truncate")]
     Truncate,
-    #[serde(rename = "append")]
     Append,
 }
 
