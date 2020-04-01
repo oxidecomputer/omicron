@@ -9,7 +9,7 @@ use dropshot::HttpError;
  * ApiError represents errors that can be generated within the API server.  See
  * the module-level documentation for details.
  */
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ApiError {
     ObjectNotFound {
         type_name: api_model::ApiResourceType,
@@ -18,6 +18,10 @@ pub enum ApiError {
     ObjectAlreadyExists {
         type_name: api_model::ApiResourceType,
         object_name: String,
+    },
+    InvalidValue {
+        label: String,
+        message: String,
     },
 }
 
@@ -40,6 +44,15 @@ impl From<ApiError> for HttpError {
                 object_name: n,
             } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
+                HttpError::for_bad_request(message)
+            }
+
+            ApiError::InvalidValue {
+                label,
+                message,
+            } => {
+                let message =
+                    format!("unsupported value for \"{}\": {}", label, message);
                 HttpError::for_bad_request(message)
             }
         }

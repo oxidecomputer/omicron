@@ -8,9 +8,11 @@ use http::method::Method;
 use http::StatusCode;
 use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
 use oxide_api_prototype::api_model::ApiIdentityMetadataUpdateParams;
+use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
+use std::convert::TryFrom;
 
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_ndjson;
@@ -70,6 +72,27 @@ async fn smoke_test() {
         .await
         .expect_err("expected error");
     assert_eq!("not found: project \"nonexistent\"", error.message);
+
+    /*
+     * Error case: GET /projects/-invalid-name
+     * TODO-correctness is 400 the right error code here or is 404 more
+     * appropriate?
+     */
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::GET,
+            "/projects/-invalid-name",
+            None as Option<()>,
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!(
+        "unsupported value for \"project_id\": name must begin with an \
+         ASCII lowercase character",
+        error.message
+    );
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
@@ -308,7 +331,7 @@ async fn smoke_test() {
      */
     let project_update = ApiProjectUpdateParams {
         identity: ApiIdentityMetadataUpdateParams {
-            name: Some("lil_lightnin".to_string()),
+            name: Some(ApiName::try_from("lil-lightnin").unwrap()),
             description: Some("little lightning".to_string()),
         },
     };
@@ -324,7 +347,7 @@ async fn smoke_test() {
         .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
     assert_eq!(project.identity.id, "simproject3");
-    assert_eq!(project.identity.name, "lil_lightnin");
+    assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
     testctx
@@ -343,7 +366,7 @@ async fn smoke_test() {
      */
     let project_create = ApiProjectCreateParams {
         identity: ApiIdentityMetadataCreateParams {
-            name: "simproject1".to_string(),
+            name: ApiName::try_from("simproject1".to_string()).unwrap(),
             description: "a duplicate of simproject1".to_string(),
         },
     };
@@ -360,11 +383,31 @@ async fn smoke_test() {
     assert_eq!("already exists: project \"simproject1\"", error.message);
 
     /*
+     * Try to create a project with an unsupported name.
+     * TODO-polish why doesn't serde include the field name in this error?
+     */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            "/projects",
+            "{\"name\": \"sim_project\", \"description\": \"underscore\"}"
+                .into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected failure");
+    assert!(error.message.starts_with(
+        "unable to parse body: name contains invalid character: \"_\" \
+         (allowed characters are lowercase ASCII, digits, and \"-\""
+    ));
+
+    /*
      * Now, really do create a new project.
      */
     let project_create = ApiProjectCreateParams {
         identity: ApiIdentityMetadataCreateParams {
-            name: "honor roller".to_string(),
+            name: ApiName::try_from("honor-roller").unwrap(),
             description: "a soapbox racer".to_string(),
         },
     };
@@ -379,15 +422,15 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.identity.id, "honor roller");
-    assert_eq!(project.identity.name, "honor roller");
+    assert_eq!(project.identity.id, "honor-roller");
+    assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
 
     /*
      * List projects again and verify all of our changes.  We should have:
      *
-     * - "honor roller" with description "a soapbox racer"
-     * - "lil_lightnin" with description "little lightning"
+     * - "honor-roller" with description "a soapbox racer"
+     * - "lil-lightnin" with description "little lightning"
      * - "simproject1", same as out-of-the-box
      */
     let mut response = testctx
@@ -402,11 +445,11 @@ async fn smoke_test() {
         .expect("expected success");
     let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(projects.len(), 3);
-    assert_eq!(projects[0].identity.id, "honor roller");
-    assert_eq!(projects[0].identity.name, "honor roller");
+    assert_eq!(projects[0].identity.id, "honor-roller");
+    assert_eq!(projects[0].identity.name, "honor-roller");
     assert_eq!(projects[0].identity.description, "a soapbox racer");
     assert_eq!(projects[1].identity.id, "simproject3");
-    assert_eq!(projects[1].identity.name, "lil_lightnin");
+    assert_eq!(projects[1].identity.name, "lil-lightnin");
     assert_eq!(projects[1].identity.description, "little lightning");
     assert_eq!(projects[2].identity.id, "simproject1");
     assert_eq!(projects[2].identity.name, "simproject1");

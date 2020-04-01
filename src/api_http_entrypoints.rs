@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::api_backend;
 use crate::api_model::to_view_list;
+use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -111,7 +112,16 @@ async fn api_projects_get(
     let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
     let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-    let marker = params.marker.as_ref().map(|s| s.clone());
+    let marker = {
+        let marker_ref = params.marker.as_ref();
+        let maybe_name =
+            marker_ref.map(|s| ApiName::from_param(s.clone(), "marker"));
+        match maybe_name {
+            None => None,
+            Some(Ok(validated_name)) => Some(validated_name),
+            Some(Err(error)) => return Err(HttpError::from(error)),
+        }
+    };
     let project_stream = backend.projects_list(marker, limit).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
@@ -136,6 +146,7 @@ struct ProjectPathParam {
 
 /*
  * "GET /project/{project_id}": fetch a specific project
+ * TODO-correctness there's a mixup of "id" and "name" all over this.
  */
 #[endpoint {
     method = GET,
@@ -153,8 +164,9 @@ async fn api_projects_get_project(
     let backend = api_backend(&rqctx);
     let params: ProjectPathParam =
         http_extract_path_params(&rqctx.path_variables)?;
-    let project_id = &params.project_id;
-    let project: Arc<ApiProject> = backend.project_lookup(project_id).await?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let project: Arc<ApiProject> = backend.project_lookup(&project_id).await?;
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -167,8 +179,9 @@ async fn api_projects_delete_project(
     let backend = api_backend(&rqctx);
     let params: ProjectPathParam =
         http_extract_path_params(&rqctx.path_variables)?;
-    let project_id = &params.project_id;
-    backend.project_delete(project_id).await?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    backend.project_delete(&project_id).await?;
     Ok(HttpResponseDeleted())
 }
 
@@ -188,9 +201,10 @@ async fn api_projects_put_project(
     let backend = api_backend(&rqctx);
     let params: ProjectPathParam =
         http_extract_path_params(&rqctx.path_variables)?;
-    let project_id = &params.project_id;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
     let newproject = backend
-        .project_update(project_id, &updated_project.into_inner())
+        .project_update(&project_id, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
 }

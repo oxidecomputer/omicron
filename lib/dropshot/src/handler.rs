@@ -667,7 +667,7 @@ where
             inner: j,
         }),
         Err(e) => Err(HttpError::for_bad_request(format!(
-            "unable to parse body JSON: {}",
+            "unable to parse body: {}",
             e
         ))),
     }

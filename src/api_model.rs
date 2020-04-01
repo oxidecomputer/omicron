@@ -1,5 +1,5 @@
 /*!
- * facilities for working with objects in the API (agnostic to both the HTTP
+ * Facilities for working with objects in the API (agnostic to both the HTTP
  * transport through which consumers interact with them and the backend
  * implementation (simulator or a real rack)).
  */
@@ -13,6 +13,7 @@ use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
+use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
@@ -38,9 +39,9 @@ use crate::api_error::ApiError;
  *   wants to update a project.
  *
  * Recall that we intend to support two backends: one backed by a real Oxide
- * rack and the other backed by a simulator.  The interfaces to these backends
- * is defined by the `ApiBackend` trait, which provides functions for operating
- * on resources like projects.  For example, `ApiBackend` provides
+ * rack and the other backed by a simulator.  The interface to these backends is
+ * defined by the `ApiBackend` trait, which provides functions for operating on
+ * resources like projects.  For example, `ApiBackend` provides
  * `project_lookup(primary key)`,
  * `project_list(marker: Option, limit: usize)`,
  * `project_create(project, ApiProjectCreateParams)`,
@@ -67,7 +68,7 @@ pub trait ApiObject {
 /**
  * List of API resource types
  */
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
     Project,
 }
@@ -81,6 +82,111 @@ impl Display for ApiResourceType {
 }
 
 /*
+ * Data types used in the API
+ */
+
+/**
+ * ApiName represents a "name" value in the API.  An ApiName can only be
+ * constructed with a valid name string.
+ */
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(try_from = "String")]
+pub struct ApiName(String);
+
+/**
+ * `ApiName::try_from(String)` is the primary method for constructing an ApiName
+ * from an input string.  This validates the string according to our
+ * requirements for a name.
+ */
+impl TryFrom<String> for ApiName {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() > 63 {
+            return Err(format!("name may contain at most 63 characters"));
+        }
+
+        let mut iter = value.chars();
+
+        let first = iter
+            .next()
+            .ok_or_else(|| format!("name requires at least one character"))?;
+        if !first.is_ascii_lowercase() {
+            return Err(format!(
+                "name must begin with an ASCII lowercase character"
+            ));
+        }
+
+        let mut last = first;
+        for c in iter {
+            last = c;
+
+            if !c.is_ascii_lowercase() && !c.is_digit(10) && c != '-' {
+                return Err(format!(
+                    "name contains invalid character: \"{}\" (allowed \
+                     characters are lowercase ASCII, digits, and \"-\")",
+                    c
+                ));
+            }
+        }
+
+        if last == '-' {
+            return Err(format!("name cannot end with \"-\""));
+        }
+
+        Ok(ApiName(value))
+    }
+}
+
+/**
+ * `ApiName::try_from(&str)` is a convenience primarily for the test suite and
+ * other hardcoded names.
+ */
+impl TryFrom<&str> for ApiName {
+    type Error = String;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        ApiName::try_from(String::from(value))
+    }
+}
+
+/**
+ * Convert an `ApiName` into the `String` representing the actual name.
+ */
+impl From<ApiName> for String {
+    fn from(value: ApiName) -> String {
+        value.0
+    }
+}
+
+/**
+ * `ApiName` instances are comparable like Strings, primarily so that they can
+ * be used as keys in trees.
+ */
+impl<S> PartialEq<S> for ApiName
+where
+    S: AsRef<str>,
+{
+    fn eq(&self, other: &S) -> bool {
+        &self.0 == other.as_ref()
+    }
+}
+
+impl ApiName {
+    /**
+     * Parse an `ApiName`.  This is a convenience wrapper around
+     * `ApiName::try_from(String)` that marshals any error into an appropriate
+     * `ApiError`.
+     */
+    pub fn from_param(value: String, label: &str) -> Result<ApiName, ApiError> {
+        ApiName::try_from(value).map_err(|e| ApiError::InvalidValue {
+            label: String::from(label),
+            message: e,
+        })
+    }
+}
+
+/*
  * IDENTITY METADATA
  * (shared by most API objects)
  */
@@ -88,8 +194,8 @@ impl Display for ApiResourceType {
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
-    pub id: String,                     /* TODO should be Uuid */
-    pub name: String,                   /* TODO separate type? */
+    pub id: String, /* TODO should be Uuid */
+    pub name: ApiName,
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
@@ -97,16 +203,15 @@ pub struct ApiIdentityMetadata {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataCreateParams {
-    pub name: String,                   /* TODO separate type? */
+    pub name: ApiName,
     pub description: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataUpdateParams {
-    pub name: Option<String>,           /* TODO separate type? */
+    pub name: Option<ApiName>,
     pub description: Option<String>,
 }
-
 
 /*
  * PROJECTS
@@ -235,16 +340,88 @@ pub trait ApiBackend: Send + Sync {
         &self,
         params: &ApiProjectCreateParams,
     ) -> CreateResult<ApiProject>;
-    async fn project_lookup(&self, name: &String) -> LookupResult<ApiProject>;
-    async fn project_delete(&self, name: &String) -> DeleteResult;
+    async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject>;
+    async fn project_delete(&self, name: &ApiName) -> DeleteResult;
     async fn project_update(
         &self,
-        name: &String,
+        name: &ApiName,
         params: &ApiProjectUpdateParams,
     ) -> UpdateResult<ApiProject>;
     async fn projects_list(
         &self,
-        marker: Option<String>,
+        marker: Option<ApiName>,
         limit: usize,
     ) -> ListResult<ApiProject>;
+}
+
+#[cfg(test)]
+mod test {
+    use super::ApiName;
+    use crate::api_error::ApiError;
+    use std::convert::TryFrom;
+
+    #[test]
+    fn test_name_parse() {
+        /*
+         * Error cases
+         */
+        let long_name =
+            "a234567890123456789012345678901234567890123456789012345678901234";
+        assert_eq!(long_name.len(), 64);
+        let error_cases: Vec<(&str, &str)> = vec![
+            ("", "name requires at least one character"),
+            (long_name, "name may contain at most 63 characters"),
+            ("123", "name must begin with an ASCII lowercase character"),
+            ("-abc", "name must begin with an ASCII lowercase character"),
+            ("abc-", "name cannot end with \"-\""),
+            (
+                "aBc",
+                "name contains invalid character: \"B\" (allowed characters \
+                 are lowercase ASCII, digits, and \"-\")",
+            ),
+            (
+                "a_c",
+                "name contains invalid character: \"_\" (allowed characters \
+                 are lowercase ASCII, digits, and \"-\")",
+            ),
+            (
+                "a\u{00e9}cc",
+                "name contains invalid character: \"\u{00e9}\" (allowed \
+                 characters are lowercase ASCII, digits, and \"-\")",
+            ),
+        ];
+
+        for (input, expected_message) in error_cases {
+            eprintln!("check name \"{}\" (expecting error)", input);
+            assert_eq!(ApiName::try_from(input).unwrap_err(), expected_message);
+        }
+
+        /*
+         * Success cases
+         */
+        let valid_names: Vec<&str> =
+            vec!["abc", "abc-123", "a123", &long_name[0..63]];
+
+        for name in valid_names {
+            eprintln!("check name \"{}\" (should be valid)", name);
+            assert_eq!(name, String::from(ApiName::try_from(name).unwrap()));
+        }
+    }
+
+    #[test]
+    fn test_name_parse_from_param() {
+        let result = ApiName::from_param(String::from("my-name"), "the_name");
+        assert!(result.is_ok());
+        assert_eq!(result, Ok(ApiName::try_from("my-name").unwrap()));
+
+        let result = ApiName::from_param(String::from(""), "the_name");
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(ApiError::InvalidValue {
+                label: "the_name".to_string(),
+                message: "name requires at least one character".to_string()
+            })
+        );
+    }
 }
