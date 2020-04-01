@@ -189,22 +189,38 @@ fn do_endpoint(
         }
     }
 
-    let ins = args.iter().skip(1).map(|arg| match arg {
-        syn::FnArg::Receiver(selph) => abort!(
-            selph,
-            "attribute cannot be applied to a method that uses self"
-        ),
-        syn::FnArg::Typed(parameter) => match &*parameter.pat {
-            syn::Pat::Ident(id) => {
-                let ident = &id.ident;
-                let ty = &parameter.ty;
-                quote! {
-                    let #ident: #ty = x;
+    let mut vars = vec![];
+    let mut ins = vec![];
+
+    if context {
+        ins.push(quote! { rqctx });
+    }
+
+    for arg in args.iter().skip(if context { 1 } else { 0 }) {
+        match arg {
+            syn::FnArg::Receiver(_) => panic!("caught above"),
+            syn::FnArg::Typed(parameter) => match &*parameter.pat {
+                syn::Pat::Ident(id) => {
+                    let meta = param_map.get(&id.ident.to_string()).unwrap();
+                    let ident = &id.ident;
+                    let ty = &parameter.ty;
+
+                    match meta.inn {
+                        InType::Path => {
+                            vars.push(quote! {
+                                let #ident: #ty =
+                                    http_extract_path_params(
+                                        &rqctx.path_variables)?.#ident;
+                            });
+                            ins.push(quote! { #ident });
+                        }
+                        _ => panic!("not implemented"),
+                    }
                 }
-            }
-            _ => abort!(parameter, "unexpected parameter type"),
-        },
-    });
+                _ => abort!(parameter, "unexpected parameter type"),
+            },
+        }
+    }
 
     let x1 = quote! {
         fn do_nothing() {}
@@ -222,13 +238,15 @@ fn do_endpoint(
         #[allow(non_camel_case_types, missing_docs)]
         pub struct #name;
         impl #name {
-            #xxx
-
-            fn register(router: &mut HttpRouter) {
+            fn register(router: &mut dropshot::HttpRouter) {
                 #ast
-                router.insert(Method::#method_ident, #path, HttpRouteHandler::new(#name));
-
-                #(#ins;)*
+                async fn handle(
+                    rqctx: Arc<RequestContext>
+                ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
+                    #(#vars;)*
+                    #name(#(#ins),*).await
+                }
+                router.insert(Method::#method_ident, #path, HttpRouteHandler::new(handle));
             }
         }
     };
