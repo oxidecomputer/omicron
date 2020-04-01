@@ -146,7 +146,6 @@ struct ProjectPathParam {
 
 /*
  * "GET /project/{project_id}": fetch a specific project
- * TODO-correctness there's a mixup of "id" and "name" all over this.
  */
 #[endpoint {
     method = GET,

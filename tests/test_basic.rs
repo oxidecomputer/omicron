@@ -158,13 +158,10 @@ async fn smoke_test() {
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
     assert_eq!(initial_projects.len(), 3);
-    assert_eq!(initial_projects[0].identity.id, "simproject1");
     assert_eq!(initial_projects[0].identity.name, "simproject1");
     assert!(initial_projects[0].identity.description.len() > 0);
-    assert_eq!(initial_projects[1].identity.id, "simproject2");
     assert_eq!(initial_projects[1].identity.name, "simproject2");
     assert!(initial_projects[1].identity.description.len() > 0);
-    assert_eq!(initial_projects[2].identity.id, "simproject3");
     assert_eq!(initial_projects[2].identity.name, "simproject3");
     assert!(initial_projects[2].identity.description.len() > 0);
 
@@ -183,8 +180,6 @@ async fn smoke_test() {
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     let expected = &initial_projects[1];
-    assert_eq!(project.identity.id, "simproject2");
-    assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
@@ -263,7 +258,6 @@ async fn smoke_test() {
         .collect();
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
-    assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
         new_projects[0].identity.name,
         expected_projects[0].identity.name
@@ -272,7 +266,6 @@ async fn smoke_test() {
         new_projects[0].identity.description,
         expected_projects[0].identity.description
     );
-    assert_eq!(new_projects[1].identity.id, expected_projects[1].identity.id);
     assert_eq!(
         new_projects[1].identity.name,
         expected_projects[1].identity.name
@@ -303,7 +296,6 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.identity.id, "simproject3");
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
@@ -319,7 +311,6 @@ async fn smoke_test() {
         .expect("expected success");
     let expected = project;
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -346,7 +337,6 @@ async fn smoke_test() {
         .await
         .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.identity.id, "simproject3");
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
@@ -422,7 +412,6 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
-    assert_eq!(project.identity.id, "honor-roller");
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
 
@@ -445,13 +434,10 @@ async fn smoke_test() {
         .expect("expected success");
     let projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(projects.len(), 3);
-    assert_eq!(projects[0].identity.id, "honor-roller");
     assert_eq!(projects[0].identity.name, "honor-roller");
     assert_eq!(projects[0].identity.description, "a soapbox racer");
-    assert_eq!(projects[1].identity.id, "simproject3");
     assert_eq!(projects[1].identity.name, "lil-lightnin");
     assert_eq!(projects[1].identity.description, "little lightning");
-    assert_eq!(projects[2].identity.id, "simproject1");
     assert_eq!(projects[2].identity.name, "simproject1");
     assert!(projects[2].identity.description.len() > 0);
 

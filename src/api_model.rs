@@ -194,7 +194,6 @@ impl ApiName {
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
-    pub id: String, /* TODO should be Uuid */
     pub name: ApiName,
     pub description: String,
     pub time_created: DateTime<Utc>,
