@@ -158,31 +158,6 @@ async fn api_projects_get_project(
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
-mod foo {
-    use super::*;
-
-    #[endpoint {
-        method = GET,
-        path = "/projects/{project_id}",
-        parameters = [
-            {
-                name = project_id,
-                in = path,
-                deprecated = true,
-            }
-        ]
-    }]
-    async fn api_projects_get_project_new(
-        rqctx: Arc<RequestContext>,
-        project_id: String,
-    ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
-        let backend = api_backend(&rqctx);
-        let project: Arc<ApiProject> =
-            backend.project_lookup(&project_id).await?;
-        Ok(HttpResponseOkObject(project.to_view()))
-    }
-}
-
 /*
  * "DELETE /project/{project_id}": delete a specific project
  */
