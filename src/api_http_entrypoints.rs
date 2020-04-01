@@ -14,6 +14,7 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+use dropshot::http_extract_path_param;
 use dropshot::http_extract_path_params;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -159,12 +160,9 @@ struct ProjectPathParam {
 }]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
+    project_id: String,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
-    let params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
-    let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
     let project: Arc<ApiProject> = backend.project_lookup(&project_id).await?;
     Ok(HttpResponseOkObject(project.to_view()))
 }

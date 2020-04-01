@@ -209,8 +209,10 @@ fn do_endpoint(
                         InType::Path => {
                             vars.push(quote! {
                                 let #ident: #ty =
-                                    http_extract_path_params(
-                                        &rqctx.path_variables)?.#ident;
+                                    http_extract_path_param(
+                                        &rqctx.path_variables,
+                                        &stringify!(#ident).to_string()
+                                    )?.clone();
                             });
                             ins.push(quote! { #ident });
                         }
@@ -238,7 +240,7 @@ fn do_endpoint(
         #[allow(non_camel_case_types, missing_docs)]
         pub struct #name;
         impl #name {
-            fn register(router: &mut dropshot::HttpRouter) {
+            fn register(api: &mut dropshot::ApiDescription) {
                 #ast
                 async fn handle(
                     rqctx: Arc<RequestContext>
@@ -246,7 +248,7 @@ fn do_endpoint(
                     #(#vars;)*
                     #name(#(#ins),*).await
                 }
-                router.insert(Method::#method_ident, #path, HttpRouteHandler::new(handle));
+                api.register(Method::#method_ident, #path, HttpRouteHandler::new(handle));
             }
         }
     };
