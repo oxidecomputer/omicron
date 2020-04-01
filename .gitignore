@@ -3,3 +3,4 @@
 rusty-tags.vi
 README.html
 logs
+/lib/*/target
