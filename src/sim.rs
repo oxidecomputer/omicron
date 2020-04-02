@@ -68,7 +68,9 @@ impl SimulatorBuilder {
         let now = Utc::now();
 
         for builder_project in self.projects {
-            let simproject = SimProject {};
+            let simproject = SimProject {
+                instances: BTreeMap::new(),
+            };
             let id_validated = Uuid::parse_str(&builder_project.id)
                 .expect("unsupported project id");
             let name_validated =
@@ -107,10 +109,21 @@ pub struct Simulator {
 }
 
 /**
- * Backend-specific implementation of an ApiProject.  We currently don't need
+ * Backend-specific implementation of an ApiProject.
+ */
+struct SimProject {
+    instances: BTreeMap<ApiName, Arc<ApiInstance>>,
+}
+fn sim_project(api_project: &ApiProject) -> &SimProject {
+    api_project.backend_impl.as_ref().downcast_ref::<SimProject>().unwrap()
+}
+
+/**
+ * Backend-specific implementation of an ApiInstance.  We currently don't need
  * any additional fields for this.
  */
-struct SimProject {}
+#[derive(Clone)]
+struct SimInstance {}
 
 #[async_trait]
 impl ApiBackend for Simulator {
@@ -128,7 +141,9 @@ impl ApiBackend for Simulator {
 
         let now = Utc::now();
         let newname = &new_project.identity.name;
-        let simproject = SimProject {};
+        let simproject = SimProject {
+            instances: BTreeMap::new(),
+        };
         let project = Arc::new(ApiProject {
             backend_impl: Box::new(simproject),
             identity: ApiIdentityMetadata {
@@ -151,40 +166,7 @@ impl ApiBackend for Simulator {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject> {
         let projects_by_name = self.projects_by_name.lock().await;
-        /* TODO-cleanup this logic should be in a wrapper function. */
-        let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-
-        /*
-         * We assemble the list of projects that we're going to return now,
-         * under the lock, so that we can release the lock right away.  (This
-         * also makes the lifetime of the return value far easier.)
-         */
-        let collect_projects =
-            |iter: &mut dyn Iterator<Item = (&ApiName, &Arc<ApiProject>)>| {
-                iter.take(limit)
-                    .map(|(_, arcproject)| Ok(Arc::clone(&arcproject)))
-                    .collect::<Vec<Result<Arc<ApiProject>, ApiError>>>()
-            };
-
-        let projects = match &pagparams.marker {
-            None => collect_projects(&mut projects_by_name.iter()),
-            /*
-             * NOTE: This range is inclusive on the low end because that
-             * makes it easier for the client to know that it hasn't missed
-             * some items in the namespace.  This does mean that clients
-             * have to know to skip the first item on each page because
-             * it'll be the same as the last item on the previous page.
-             * TODO-cleanup would it be a problem to just make this an
-             * exclusive bound?  It seems like you couldn't fail to see any
-             * items that were present for the whole scan, which seems like
-             * the main constraint.
-             */
-            Some(start_value) => {
-                collect_projects(&mut projects_by_name.range(start_value..))
-            }
-        };
-
-        Ok(futures::stream::iter(projects).boxed())
+        list_collection(&projects_by_name, pagparams).await
     }
 
     async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject> {
@@ -220,6 +202,7 @@ impl ApiBackend for Simulator {
                 type_name: ApiResourceType::Project,
                 object_name: String::from(name.clone()),
             })?;
+        let oldbe = sim_project(&oldproject);
         let newname = &new_params
             .identity
             .name
@@ -243,7 +226,9 @@ impl ApiBackend for Simulator {
          * put the SimProject behind an Arc.  (It's not clear that will make
          * sense -- the two ApiProjects will have different state!)
          */
-        let beimpl: Box<SimProject> = Box::new(SimProject {});
+        let beimpl: Box<SimProject> = Box::new(SimProject {
+            instances: oldbe.instances.clone(),
+        });
         let newvalue = Arc::new(ApiProject {
             backend_impl: beimpl,
             identity: ApiIdentityMetadata {
@@ -266,6 +251,53 @@ impl ApiBackend for Simulator {
         project_name: &ApiName,
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance> {
-        unimplemented!();
+        let project = self.project_lookup(project_name).await?;
+        let simproject = sim_project(&project);
+        list_collection(&simproject.instances, pagparams).await
     }
+}
+
+/**
+ * List a page of items from a collection.
+ */
+async fn list_collection<KeyType, ValueType>(
+    tree: &BTreeMap<KeyType, Arc<ValueType>>,
+    pagparams: &PaginationParams<KeyType>,
+) -> ListResult<ValueType>
+where
+    KeyType: std::cmp::Ord,
+    ValueType: Send + Sync + 'static,
+{
+    /* TODO-cleanup this logic should be in a wrapper function? */
+    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
+
+    /*
+     * We assemble the list of results that we're going to return now.  If the
+     * caller is holding a lock, they'll be able to release it right away.  This
+     * also makes the lifetime of the return value much easier.
+     */
+    let collect_items =
+        |iter: &mut dyn Iterator<Item = (&KeyType, &Arc<ValueType>)>| {
+            iter.take(limit)
+                .map(|(_, arcitem)| Ok(Arc::clone(&arcitem)))
+                .collect::<Vec<Result<Arc<ValueType>, ApiError>>>()
+        };
+
+    let items = match &pagparams.marker {
+        None => collect_items(&mut tree.iter()),
+        /*
+         * NOTE: This range is inclusive on the low end because that
+         * makes it easier for the client to know that it hasn't missed
+         * some items in the namespace.  This does mean that clients
+         * have to know to skip the first item on each page because
+         * it'll be the same as the last item on the previous page.
+         * TODO-cleanup would it be a problem to just make this an
+         * exclusive bound?  It seems like you couldn't fail to see any
+         * items that were present for the whole scan, which seems like
+         * the main constraint.
+         */
+        Some(start_value) => collect_items(&mut tree.range(start_value..)),
+    };
+
+    Ok(futures::stream::iter(items).boxed())
 }
