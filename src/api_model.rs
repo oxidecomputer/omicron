@@ -23,6 +23,9 @@ use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
+/** Default maximum number of items per page of "list" results */
+pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
+
 /**
  * ApiObject is a trait implemented by the types used to represent objects in
  * the API.  It's helpful to start with a concrete example, so let's consider
@@ -260,7 +263,6 @@ impl ApiObject for ApiProject {
 
 /**
  * Represents the properties of an ApiProject that can be seen by end users.
- * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
@@ -271,7 +273,6 @@ pub struct ApiProjectView {
 
 /**
  * Represents the create-time parameters for an ApiProject.
- * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectCreateParams {
@@ -281,7 +282,6 @@ pub struct ApiProjectCreateParams {
 
 /**
  * Represents the properties of an ApiProject that can be updated by end users.
- * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
@@ -293,9 +293,14 @@ pub struct ApiProjectUpdateParams {
  * INSTANCES
  */
 
+/**
+ * ApiInstanceState describes the runtime state of the instance (i.e., starting,
+ * running, etc.)
+ */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
+#[serde(rename_all = "lowercase")]
 pub enum ApiInstanceState {
     Starting,
     Running,
@@ -303,6 +308,52 @@ pub enum ApiInstanceState {
     Stopped,
     Repairing,
     Failed,
+}
+
+/** Represents the number of CPUs in an instance. */
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceCpuCount(pub usize);
+
+/**
+ * Represents a count of bytes, typically used either for memory or storage.
+ * TODO-cleanup This could benefit from a more complete implementation.
+ * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
+ * need to write a validator for that.
+ */
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct ApiByteCount(u64);
+impl ApiByteCount {
+    pub fn from_bytes(bytes: u64) -> ApiByteCount {
+        ApiByteCount(bytes)
+    }
+    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * kibibytes)
+    }
+    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
+    }
+    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
+    }
+    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
+    }
+
+    pub fn to_bytes(&self) -> u64 {
+        self.0
+    }
+    pub fn to_whole_kibibytes(&self) -> u64 {
+        self.to_bytes() / 1024
+    }
+    pub fn to_whole_mebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024
+    }
+    pub fn to_whole_gibibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024
+    }
+    pub fn to_whole_tebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024 / 1024
+    }
 }
 
 /**
@@ -318,13 +369,13 @@ pub struct ApiInstance {
     pub project_id: Uuid,
 
     /** number of CPUs allocated for this instance */
-    pub ncpus: u64, /* TODO-cleanup different type */
+    pub ncpus: ApiInstanceCpuCount,
     /** memory, in gigabytes, allocated for this instance */
-    pub memory: u64, /* TODO-cleanup different type */
+    pub memory: ApiByteCount,
     /** size of the boot disk for the image */
-    pub boot_disk_size: u64, /* TODO-cleanup different type */
+    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
-    pub hostname: String, /* TODO-cleanup different type */
+    pub hostname: String, /* TODO-cleanup different type? */
     /** current runtime state of the instance */
     pub state: ApiInstanceState,
     /* TODO-completeness: add disks, network, tags, metrics */
@@ -347,7 +398,6 @@ impl ApiObject for ApiInstance {
 
 /**
  * Represents the properties of an `ApiInstance` that can be seen by end users.
- * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiInstanceView {
@@ -359,30 +409,44 @@ pub struct ApiInstanceView {
     pub project_id: Uuid,
 
     /** number of CPUs allocated for this instance */
-    pub ncpus: u64, /* TODO-cleanup different type */
+    #[serde(flatten)]
+    pub ncpus: ApiInstanceCpuCount,
     /** memory, in gigabytes, allocated for this instance */
-    pub memory: u64, /* TODO-cleanup different type */
+    #[serde(flatten)]
+    pub memory: ApiByteCount,
     /** size of the boot disk for the image */
-    pub boot_disk_size: u64, /* TODO-cleanup different type */
+    #[serde(flatten)]
+    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
-    pub hostname: String, /* TODO-cleanup different type */
+    pub hostname: String, /* TODO-cleanup different type? */
     /** current runtime state of the instance */
     pub state: ApiInstanceState,
 }
 
 /**
  * Represents the create-time parameters for an ApiInstance.
- * TODO Is this where the OpenAPI documentation should go?
+ * TODO We're ignoring "type" for now because no types are specified by the API.
+ * Presumably this will need to be its own kind of API object that can be
+ * created, modified, removed, etc.
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
+    #[serde(flatten)]
+    pub ncpus: ApiInstanceCpuCount,
+    #[serde(flatten)]
+    pub memory: ApiByteCount,
+    #[serde(flatten)]
+    pub boot_disk_size: ApiByteCount,
+    pub hostname: String, /* TODO-cleanup different type? */
 }
 
 /**
  * Represents the properties of an ApiInstance that can be updated by end users.
- * TODO Is this where the OpenAPI documentation should go?
+ * TODO Very little is updateable right now because it's not clear if we'll want
+ * the key properties to be updated only by a separate "resize" API that would
+ * be async.
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiInstanceUpdateParams {
@@ -421,6 +485,12 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 /** A stream of Results, each potentially representing an object in the API. */
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+
+#[derive(Deserialize)]
+pub struct PaginationParams<NameType> {
+    pub marker: Option<NameType>,
+    pub limit: Option<usize>,
+}
 
 /**
  * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
@@ -461,13 +531,15 @@ pub trait ApiBackend: Send + Sync {
     ) -> UpdateResult<ApiProject>;
     async fn projects_list(
         &self,
-        marker: Option<ApiName>,
-        limit: usize,
+        pagparams: &PaginationParams<ApiName>
     ) -> ListResult<ApiProject>;
+    async fn project_list_instances(
+        &self, name: &ApiName, pagparams: &PaginationParams<ApiName>) -> ListResult<ApiInstance>;
 }
 
 #[cfg(test)]
 mod test {
+    use super::ApiByteCount;
     use super::ApiName;
     use crate::api_error::ApiError;
     use std::convert::TryFrom;
@@ -535,5 +607,31 @@ mod test {
                 message: "name requires at least one character".to_string()
             })
         );
+    }
+
+    #[test]
+    fn test_bytecount() {
+        let zero = ApiByteCount::from_bytes(0);
+        assert_eq!(0, zero.to_bytes());
+        assert_eq!(0, zero.to_whole_kibibytes());
+        assert_eq!(0, zero.to_whole_mebibytes());
+        assert_eq!(0, zero.to_whole_gibibytes());
+        assert_eq!(0, zero.to_whole_tebibytes());
+
+        let three_terabytes = 3_000_000_000_000;
+        let tb3 = ApiByteCount::from_bytes(three_terabytes);
+        assert_eq!(three_terabytes, tb3.to_bytes());
+        assert_eq!(2929687500, tb3.to_whole_kibibytes());
+        assert_eq!(2861022, tb3.to_whole_mebibytes());
+        assert_eq!(2793, tb3.to_whole_gibibytes());
+        assert_eq!(2, tb3.to_whole_tebibytes());
+
+        let three_tebibytes = 3 * 1024 * 1024 * 1024 * 1024;
+        let tib3 = ApiByteCount::from_bytes(three_tebibytes);
+        assert_eq!(three_tebibytes, tib3.to_bytes());
+        assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
+        assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
+        assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
+        assert_eq!(3, tib3.to_whole_tebibytes());
     }
 }

@@ -8,12 +8,14 @@ use std::sync::Arc;
 
 use crate::api_backend;
 use crate::api_model::to_view_list;
+use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+use crate::api_model::PaginationParams;
 use dropshot::http_extract_path_params;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -27,9 +29,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 
 use openapi::endpoint;
-
-/** Default maximum number of items per page of "list" results */
-const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api.register(
@@ -61,6 +60,13 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_put_project),
     );
+
+    api.register(
+        Method::GET,
+        "/projects/{project_id}/instances",
+        HttpRouteHandler::new(api_project_instances_get),
+    );
+
 }
 
 /*
@@ -96,33 +102,16 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
  *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-#[derive(Deserialize)]
-struct ListQueryParams {
-    pub marker: Option<String>,
-    pub limit: Option<usize>,
-}
-
 /*
  * "GET /projects": list all projects
  */
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<ListQueryParams>,
+    params_raw: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
-    let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-    let marker = {
-        let marker_ref = params.marker.as_ref();
-        let maybe_name =
-            marker_ref.map(|s| ApiName::from_param(s.clone(), "marker"));
-        match maybe_name {
-            None => None,
-            Some(Ok(validated_name)) => Some(validated_name),
-            Some(Err(error)) => return Err(HttpError::from(error)),
-        }
-    };
-    let project_stream = backend.projects_list(marker, limit).await?;
+    let project_stream = backend.projects_list(&params).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -206,4 +195,27 @@ async fn api_projects_put_project(
         .project_update(&project_id, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
+}
+
+
+/*
+ * Instances
+ */
+
+/*
+ * "GET /project/{project_id}/instances": list instances in a project
+ */
+async fn api_project_instances_get(
+    rqctx: Arc<RequestContext>,
+    params_raw: Query<PaginationParams<ApiName>>,
+) -> Result<HttpResponseOkObjectList<ApiInstanceView>, HttpError> {
+    let backend = api_backend(&rqctx);
+    let query_params = params_raw.into_inner();
+    let path_params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_name =
+        ApiName::from_param(path_params.project_id.clone(), "project_id")?;
+    let instance_stream = backend.project_list_instances(&project_name, &query_params).await?;
+    let view_list = to_view_list(instance_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
 }

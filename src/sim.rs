@@ -14,11 +14,14 @@ use uuid::Uuid;
 use crate::api_error::ApiError;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiIdentityMetadata;
+use crate::api_model::ApiInstance;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
+use crate::api_model::PaginationParams;
+use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
 use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
@@ -144,10 +147,11 @@ impl ApiBackend for Simulator {
 
     async fn projects_list(
         &self,
-        marker: Option<ApiName>,
-        limit: usize,
+        pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject> {
         let projects_by_name = self.projects_by_name.lock().await;
+        /* TODO-cleanup this logic should be in a wrapper function. */
+        let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
 
         /*
          * We assemble the list of projects that we're going to return now,
@@ -161,7 +165,7 @@ impl ApiBackend for Simulator {
                     .collect::<Vec<Result<Arc<ApiProject>, ApiError>>>()
             };
 
-        let projects = match marker {
+        let projects = match &pagparams.marker {
             None => collect_projects(&mut projects_by_name.iter()),
             /*
              * NOTE: This range is inclusive on the low end because that
@@ -254,5 +258,13 @@ impl ApiBackend for Simulator {
         let rv = Arc::clone(&newvalue);
         projects.insert(newvalue.identity.name.clone(), newvalue);
         Ok(rv)
+    }
+
+    async fn project_list_instances(
+        &self,
+        project_name: &ApiName,
+        pagparams: &PaginationParams<ApiName>
+    ) -> ListResult<ApiInstance> {
+        unimplemented!();
     }
 }
