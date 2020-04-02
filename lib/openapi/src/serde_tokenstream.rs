@@ -10,20 +10,6 @@ use std::fmt::{self, Display};
 
 use core::iter::Peekable;
 
-// We use the `abort` macro to identify known, aberrant conditions while
-// processing macro parameters. This is based on `proc_macro_error::abort`
-// but modified to be useable in testing contexts where a `proc_macro2::Span`
-// cannot be used in an error context.
-macro_rules! abort {
-    ($span:expr, $($tts:tt)*) => {
-        if cfg!(test) {
-            panic!($($tts)*)
-        } else {
-            proc_macro_error::abort!($span, $($tts)*)
-        }
-    };
-}
-
 // print out the raw tree of TokenStream structures.
 #[allow(dead_code)]
 fn treeify(depth: usize, tt: &TokenStream) {
@@ -52,6 +38,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 struct TokenDe {
     input: Peekable<Box<dyn Iterator<Item = TokenTree>>>,
+    current: Option<TokenTree>,
     last: Option<TokenTree>,
 }
 
@@ -66,11 +53,13 @@ impl<'de> TokenDe {
     }
 
     fn new(input: &'de TokenStream) -> Self {
+        println!("new TokenDe");
         treeify(0, &input.clone());
         let t: Box<dyn Iterator<Item = TokenTree>> =
             Box::new(input.clone().into_iter());
         TokenDe {
             input: t.peekable(),
+            current: None,
             last: None,
         }
     }
@@ -84,19 +73,85 @@ impl<'de> TokenDe {
     }
 
     fn next(&mut self) -> Option<TokenTree> {
-        let last = self.input.next();
-        self.last = last.as_ref().map(|t| t.clone());
-        last
+        let next = self.input.next();
+
+        self.last = std::mem::replace(
+            &mut self.current,
+            next.as_ref().map(|t| t.clone()),
+        );
+        println!("last = {:?}", &self.last);
+        next
     }
 
-    fn last_err<T>(self) -> Result<T> {
-        match self.last {
-            None => Err(Error::Unknown),
+    fn last_err<T>(&self) -> Result<T> {
+        match &self.last {
+            None => {
+                println!("didn't get started");
+                Err(Error::Unknown)
+            }
             Some(token) => Err(Error::ExpectedValue(
                 token.clone(),
                 format!("expected a value following `{}`", token),
             )),
         }
+    }
+
+    fn deserialize_error<VV>(
+        &self,
+        next: Option<TokenTree>,
+        what: &str,
+    ) -> Result<VV> {
+        match next {
+            Some(token) => Err(Error::ExpectedValue(
+                token.clone(),
+                format!("expected {}, but found `{}`", what, token),
+            )),
+            None => self.last_err(),
+        }
+    }
+
+    fn deserialize_int<T, VV, F>(&mut self, visit: F) -> Result<VV>
+    where
+        F: FnOnce(T) -> Result<VV>,
+        T: std::str::FromStr,
+        T::Err: Display,
+    {
+        let token = self.next();
+
+        if let Some(TokenTree::Literal(literal)) = &token {
+            if let Ok(syn::ExprLit {
+                lit: syn::Lit::Int(i), ..
+            }) = syn::parse_str::<syn::ExprLit>(&literal.to_string())
+            {
+                if let Ok(value) = i.base10_parse::<T>() {
+                    return visit(value);
+                }
+            }
+        }
+
+        self.deserialize_error(token, stringify!(T))
+    }
+
+    fn deserialize_float<T, VV, F>(&mut self, visit: F) -> Result<VV>
+    where
+        F: FnOnce(T) -> Result<VV>,
+        T: std::str::FromStr,
+        T::Err: Display,
+    {
+        let token = self.next();
+
+        if let Some(TokenTree::Literal(literal)) = &token {
+            if let Ok(syn::ExprLit {
+                lit: syn::Lit::Float(f), ..
+            }) = syn::parse_str::<syn::ExprLit>(&literal.to_string())
+            {
+                if let Ok(value) = f.base10_parse::<T>() {
+                    return visit(value);
+                }
+            }
+        }
+
+        self.deserialize_error(token, stringify!(T))
     }
 }
 
@@ -104,7 +159,7 @@ impl<'de> TokenDe {
 pub enum Error {
     ExpectedMap,
     ExpectedStruct,
-    ExpectedIdentifier,
+    ExpectedIdentifier(TokenTree, String),
     ExpectedBool,
     ExpectedCommaOrNothing,
     ExpectedAssignment(TokenTree, String),
@@ -145,22 +200,26 @@ impl<'de, 'a> MapAccess<'de> for TokenDe {
         let key = seed.deserialize(&mut *self).map(Some);
 
         // Verify we have an '=' delimiter.
-        let _eq = match self.next() {
-            Some(TokenTree::Punct(punct)) if punct.as_char() == '=' => punct,
+        if key.is_ok() {
+            let _eq = match self.next() {
+                Some(TokenTree::Punct(punct)) if punct.as_char() == '=' => {
+                    punct
+                }
 
-            Some(token) => {
-                return Err(Error::ExpectedAssignment(
-                    token.clone(),
-                    format!("expected `=`, but found `{}`", token),
-                ))
-            }
-            None => {
-                return Err(Error::ExpectedAssignment(
-                    keytok.clone(),
-                    format!("expected `=` following `{}`", keytok),
-                ))
-            }
-        };
+                Some(token) => {
+                    return Err(Error::ExpectedAssignment(
+                        token.clone(),
+                        format!("expected `=`, but found `{}`", token),
+                    ))
+                }
+                None => {
+                    return Err(Error::ExpectedAssignment(
+                        keytok.clone(),
+                        format!("expected `=` following `{}`", keytok),
+                    ))
+                }
+            };
+        }
 
         key
     }
@@ -292,25 +351,24 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
     where
         V: Visitor<'de>,
     {
-        let value = match self.next() {
-            Some(TokenTree::Ident(ident)) => ident.to_string(),
+        let token = self.next();
+        let value = match &token {
+            Some(TokenTree::Ident(ident)) => Some(ident.to_string()),
             Some(TokenTree::Literal(lit)) => {
                 match syn::parse_str::<syn::ExprLit>(&lit.to_string()) {
                     Ok(syn::ExprLit {
                         lit: syn::Lit::Str(s), ..
-                    }) => s.value(),
-                    _ => abort!(lit, "expected a value, but found `{}`", lit),
+                    }) => Some(s.value()),
+                    _ => None,
                 }
             }
-
-            Some(token) => {
-                abort!(token, "expected a value, but found `{}`", token)
-            }
-            None => return &self.last_err(),
+            _ => None,
         };
 
-        println!("visit_string({})", value);
-        visitor.visit_string(value)
+        value.map_or_else(
+            || self.deserialize_error(token, "string"),
+            |v| visitor.visit_string(v),
+        )
     }
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
@@ -376,10 +434,14 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
     {
         let id = match self.next() {
             Some(ident @ TokenTree::Ident(_)) => ident,
-            token => {
+            Some(token) => {
                 println!("{:?}", token);
-                return Err(Error::ExpectedIdentifier);
+                return Err(Error::ExpectedIdentifier(
+                    token.clone(),
+                    format!("expected an identifier, but found `{}`", token),
+                ));
             }
+            None => return self.last_err(),
         };
         visitor.visit_string(id.to_string())
     }
@@ -391,8 +453,8 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         let token = self.next();
         println!("{:?}", token);
 
-        match token {
-            None => todo!(),
+        match &token {
+            None => self.last_err(),
             Some(TokenTree::Group(group)) => match group.delimiter() {
                 Delimiter::Brace => {
                     visitor.visit_map(TokenDe::new(&group.stream()))
@@ -424,23 +486,91 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
                     Ok(syn::ExprLit {
                         lit: syn::Lit::Str(s), ..
                     }) => visitor.visit_string(s.value()),
-                    _ => abort!(lit, "expected a value, but found `{}`", lit),
+                    Ok(syn::ExprLit {
+                        lit: syn::Lit::Int(i), ..
+                    }) => visitor.visit_u64(i.base10_parse::<u64>().unwrap()),
+                    Ok(syn::ExprLit {
+                        lit: syn::Lit::Float(f), ..
+                    }) => visitor.visit_f64(f.base10_parse::<f64>().unwrap()),
+                    _ => self.deserialize_error(token, "a value"),
                 }
             }
             Some(TokenTree::Punct(_)) => Err(Error::Unknown),
         }
     }
 
-    de_unimp!(deserialize_i8);
-    de_unimp!(deserialize_i16);
-    de_unimp!(deserialize_i32);
-    de_unimp!(deserialize_i64);
-    de_unimp!(deserialize_u8);
-    de_unimp!(deserialize_u16);
-    de_unimp!(deserialize_u32);
-    de_unimp!(deserialize_u64);
-    de_unimp!(deserialize_f32);
-    de_unimp!(deserialize_f64);
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_i8(value))
+    }
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_i16(value))
+    }
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_i32(value))
+    }
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_i64(value))
+    }
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_u8(value))
+    }
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_u16(value))
+    }
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_u32(value))
+    }
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_int(|value| visitor.visit_u64(value))
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_float(|value| visitor.visit_f32(value))
+    }
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_float(|value| visitor.visit_f64(value))
+    }
+
+    //de_unimp!(deserialize_i8);
+    //de_unimp!(deserialize_i16);
+    //de_unimp!(deserialize_i32);
+    //de_unimp!(deserialize_i64);
+    //de_unimp!(deserialize_u8);
+    //de_unimp!(deserialize_u16);
+    //de_unimp!(deserialize_u32);
+    //de_unimp!(deserialize_u64);
+    //de_unimp!(deserialize_f32);
+    //de_unimp!(deserialize_f64);
     de_unimp!(deserialize_char);
     de_unimp!(deserialize_str);
     de_unimp!(deserialize_bytes);
@@ -459,7 +589,7 @@ where
 {
     let mut deserializer = TokenDe::from_tokenstream(tokens);
     let t = T::deserialize(&mut deserializer)?;
-    if deserializer.input.next().is_none() {
+    if deserializer.next().is_none() {
         Ok(t)
     } else {
         panic!("extra")
@@ -522,22 +652,26 @@ mod tests {
     }
 
     #[test]
-    fn bad_ident() -> Result<()> {
+    fn bad_ident() {
         #[derive(Deserialize)]
         struct Test {
             #[allow(dead_code)]
             potato: String,
         }
-        let t = from_tokenstream::<Test>(
+        match from_tokenstream::<Test>(
             &quote! {
                 "potato" = potato
             }
             .into(),
-        );
-
-        match t {
-            Err(Error::ExpectedIdentifier) => Ok(()),
-            _ => panic!("unexpeted result"),
+        ) {
+            Err(Error::ExpectedIdentifier(_, msg)) => {
+                assert_eq!(
+                    msg,
+                    "expected an identifier, but found `\"potato\"`"
+                );
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
         }
     }
     #[test]
@@ -596,7 +730,7 @@ mod tests {
             }
             .into(),
         ) {
-            Err(Error::UnexpectedGrouping(_, msg)) => {
+            Err(Error::ExpectedValue(_, msg)) => {
                 assert_eq!(msg, "expected a value following `=`")
             }
             Err(err) => panic!("unexpected failure: {:?}", err),
@@ -617,7 +751,7 @@ mod tests {
             }
             .into(),
         ) {
-            Err(Error::UnexpectedGrouping(_, msg)) => {
+            Err(Error::ExpectedValue(_, msg)) => {
                 assert_eq!(msg, "expected a value following `=`")
             }
             Err(err) => panic!("unexpected failure: {:?}", err),
@@ -625,133 +759,173 @@ mod tests {
         }
     }
 
-    /*
     #[test]
     fn simple() {
-        let m = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            hi: String,
+        }
+        let m = from_tokenstream::<Test>(
             &quote! {
                 hi = there
             }
             .into(),
-        );
+        )
+        .unwrap();
 
-        let hi = m.get("hi");
-        assert!(hi.is_some());
-
-        match hi.unwrap() {
-            crate::MapEntry::Value(s) => assert_eq!(s, "there"),
-            _ => panic!("unexpected value"),
-        }
+        assert_eq!(m.hi, "there");
     }
 
     #[test]
     fn simple2() {
-        let m = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            message: String,
+        }
+        let m = from_tokenstream::<Test>(
             &quote! {
                 message = "hi there"
             }
             .into(),
-        );
-
-        let message = m.get("message");
-        assert!(message.is_some());
-
-        match message.unwrap() {
-            crate::MapEntry::Value(s) => assert_eq!(s, r#"hi there"#),
-            _ => panic!("unexpected value"),
-        }
+        )
+        .unwrap();
+        assert_eq!(m.message, "hi there");
     }
-
     #[test]
     fn trailing_comma() {
-        let m = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            hi: String,
+        }
+        let m = from_tokenstream::<Test>(
             &quote! {
                 hi = there,
             }
             .into(),
-        );
-
-        let hi = m.get("hi");
-        assert!(hi.is_some());
-
-        match hi.unwrap() {
-            crate::MapEntry::Value(s) => assert_eq!(s, "there"),
-            _ => panic!("unexpected value"),
-        }
+        )
+        .unwrap();
+        assert_eq!(m.hi, "there");
     }
 
     #[test]
-    #[should_panic(expected = "expected an identifier, but found `,`")]
     fn double_comma() {
-        let m = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            hi: String,
+        }
+        match from_tokenstream::<Test>(
             &quote! {
                 hi = there,,
             }
             .into(),
-        );
-
-        let hi = m.get("hi");
-        assert!(hi.is_some());
-
-        match hi.unwrap() {
-            crate::MapEntry::Value(s) => assert_eq!(s, "there"),
-            _ => panic!("unexpected value"),
+        ) {
+            Err(Error::ExpectedIdentifier(_, msg)) => {
+                assert_eq!(msg, "expected an identifier, but found `,`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
         }
     }
 
     #[test]
-    #[should_panic(expected = "expected a value, but found `?`")]
     fn bad_value() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            wat: String,
+        }
+        match from_tokenstream::<Test>(
             &quote! {
                 wat = ?
             }
             .into(),
-        );
+        ) {
+            Err(Error::ExpectedValue(_, msg)) => {
+                assert_eq!(msg, "expected a value, but found `?`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "expected a value, but found `42`")]
     fn bad_value2() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            the_meaning_of_life_the_universe_and_everything: String,
+        }
+        match from_tokenstream::<Test>(
             &quote! {
                 the_meaning_of_life_the_universe_and_everything = 42
             }
             .into(),
-        );
+        ) {
+            Err(Error::ExpectedValue(_, msg)) => {
+                assert_eq!(msg, "expected an value, but found `42`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "expected an object {...}, but found `1`")]
     fn bad_array() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: Vec<u32>,
+        }
+        match from_tokenstream::<Test>(
             &quote! {
                 array = [1, 2, 3]
             }
             .into(),
-        );
+        ) {
+            Err(Error::ExpectedValue(_, msg)) => {
+                assert_eq!(msg, "expected an object {...}, but found `1`")
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
     }
 
     #[test]
     fn simple_array() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            array: Vec<u32>,
+        }
+        let t = from_tokenstream::<Test>(
             &quote! {
                 array = []
             }
             .into(),
-        );
+        )
+        .unwrap();
+        assert!(t.array.is_empty());
     }
 
     #[test]
     fn simple_array2() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            array: Vec<Test2>,
+        }
+        #[derive(Deserialize)]
+        struct Test2 {}
+        let t = from_tokenstream::<Test>(
             &quote! {
-                array = [{}, {}]
+                array = [{}]
             }
             .into(),
-        );
+        )
+        .unwrap();
+        assert!(t.array.is_empty());
     }
 
+    /*
     #[test]
     fn simple_array3() {
         let _ = super::to_map(
