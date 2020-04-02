@@ -191,6 +191,11 @@ impl ApiName {
  * (shared by most API objects)
  */
 
+/*
+ * TODO-correctness: RFD 4 calls for an "id" here, but it's not clear yet how it
+ * could be used.  At some point we'll need to resolve that and decide what we
+ * want to do here.
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
