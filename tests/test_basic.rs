@@ -13,6 +13,7 @@ use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 use std::convert::TryFrom;
+use uuid::Uuid;
 
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_ndjson;
@@ -157,11 +158,17 @@ async fn smoke_test() {
         .expect("expected success");
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
+    let simid1 = Uuid::parse_str("1eb2b543-b199-405f-b705-1739d01a197c").unwrap();
+    let simid2 = Uuid::parse_str("4f57c123-3bda-4fae-94a2-46a9632d40b6").unwrap();
+    let simid3 = Uuid::parse_str("4aac89b0-df9a-441d-b050-f953476ea290").unwrap();
     assert_eq!(initial_projects.len(), 3);
+    assert_eq!(initial_projects[0].identity.id, simid1);
     assert_eq!(initial_projects[0].identity.name, "simproject1");
     assert!(initial_projects[0].identity.description.len() > 0);
+    assert_eq!(initial_projects[1].identity.id, simid2);
     assert_eq!(initial_projects[1].identity.name, "simproject2");
     assert!(initial_projects[1].identity.description.len() > 0);
+    assert_eq!(initial_projects[2].identity.id, simid3);
     assert_eq!(initial_projects[2].identity.name, "simproject3");
     assert!(initial_projects[2].identity.description.len() > 0);
 
@@ -180,6 +187,7 @@ async fn smoke_test() {
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     let expected = &initial_projects[1];
+    assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
@@ -259,12 +267,20 @@ async fn smoke_test() {
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
     assert_eq!(
+        new_projects[0].identity.id,
+        expected_projects[0].identity.id
+    );
+    assert_eq!(
         new_projects[0].identity.name,
         expected_projects[0].identity.name
     );
     assert_eq!(
         new_projects[0].identity.description,
         expected_projects[0].identity.description
+    );
+    assert_eq!(
+        new_projects[1].identity.id,
+        expected_projects[1].identity.id
     );
     assert_eq!(
         new_projects[1].identity.name,
@@ -296,6 +312,7 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
+    assert_eq!(project.identity.id, simid3);
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
@@ -337,6 +354,7 @@ async fn smoke_test() {
         .await
         .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
+    assert_eq!(project.identity.id, simid3);
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 

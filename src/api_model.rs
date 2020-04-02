@@ -19,6 +19,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::pin::Pin;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
@@ -199,9 +200,15 @@ impl ApiName {
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
+    /** unique, immutable, system-controlled identifier for each resource */
+    pub id: Uuid,
+    /** unique, mutable, user-controlled identifier for each resource */
     pub name: ApiName,
+    /** human-readable free-form text about a resource */
     pub description: String,
+    /** timestamp when this resource was created */
     pub time_created: DateTime<Utc>,
+    /** timestamp when this resource was last modified */
     pub time_modified: DateTime<Utc>,
 }
 
@@ -227,7 +234,7 @@ pub struct ApiIdentityMetadataUpdateParams {
 pub struct ApiProject {
     /** private data used by the backend implementation */
     pub backend_impl: Box<dyn Any + Send + Sync>,
-
+    /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
     /*
@@ -252,7 +259,7 @@ impl ApiObject for ApiProject {
 }
 
 /**
- * Represents the properties of a Project that can be seen by end users.
+ * Represents the properties of an ApiProject that can be seen by end users.
  * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
@@ -263,7 +270,7 @@ pub struct ApiProjectView {
 }
 
 /**
- * Represents the create-time parameters for a Project.
+ * Represents the create-time parameters for an ApiProject.
  * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
@@ -273,11 +280,112 @@ pub struct ApiProjectCreateParams {
 }
 
 /**
- * Represents the properties of a Project that can be updated by end users.
+ * Represents the properties of an ApiProject that can be updated by end users.
  * TODO Is this where the OpenAPI documentation should go?
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataUpdateParams,
+}
+
+/*
+ * INSTANCES
+ */
+
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+pub enum ApiInstanceState {
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Repairing,
+    Failed,
+}
+
+/**
+ * Represents an instance (VM) in the API
+ */
+pub struct ApiInstance {
+    /** private data used by the backend implementation */
+    pub backend_impl: Box<dyn Any + Send + Sync>,
+    /** common identifying metadata */
+    pub identity: ApiIdentityMetadata,
+
+    /** id for the project containing this instance */
+    pub project_id: Uuid,
+
+    /** number of CPUs allocated for this instance */
+    pub ncpus: u64, /* TODO-cleanup different type */
+    /** memory, in gigabytes, allocated for this instance */
+    pub memory: u64, /* TODO-cleanup different type */
+    /** size of the boot disk for the image */
+    pub boot_disk_size: u64, /* TODO-cleanup different type */
+    /** RFC1035-compliant hostname for the instance. */
+    pub hostname: String, /* TODO-cleanup different type */
+    /** current runtime state of the instance */
+    pub state: ApiInstanceState,
+    /* TODO-completeness: add disks, network, tags, metrics */
+}
+
+impl ApiObject for ApiInstance {
+    type View = ApiInstanceView;
+    fn to_view(&self) -> ApiInstanceView {
+        ApiInstanceView {
+            identity: self.identity.clone(),
+            project_id: self.project_id.clone(),
+            ncpus: self.ncpus,
+            memory: self.memory,
+            boot_disk_size: self.boot_disk_size,
+            hostname: self.hostname.clone(),
+            state: self.state.clone(),
+        }
+    }
+}
+
+/**
+ * Represents the properties of an `ApiInstance` that can be seen by end users.
+ * TODO Is this where the OpenAPI documentation should go?
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiInstanceView {
+    /* TODO is flattening here the intent in RFD 4? */
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
+
+    /** id for the project containing this instance */
+    pub project_id: Uuid,
+
+    /** number of CPUs allocated for this instance */
+    pub ncpus: u64, /* TODO-cleanup different type */
+    /** memory, in gigabytes, allocated for this instance */
+    pub memory: u64, /* TODO-cleanup different type */
+    /** size of the boot disk for the image */
+    pub boot_disk_size: u64, /* TODO-cleanup different type */
+    /** RFC1035-compliant hostname for the instance. */
+    pub hostname: String, /* TODO-cleanup different type */
+    /** current runtime state of the instance */
+    pub state: ApiInstanceState,
+}
+
+/**
+ * Represents the create-time parameters for an ApiInstance.
+ * TODO Is this where the OpenAPI documentation should go?
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiInstanceCreateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataCreateParams,
+}
+
+/**
+ * Represents the properties of an ApiInstance that can be updated by end users.
+ * TODO Is this where the OpenAPI documentation should go?
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
 }
