@@ -66,7 +66,6 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
         "/projects/{project_id}/instances",
         HttpRouteHandler::new(api_project_instances_get),
     );
-
 }
 
 /*
@@ -197,7 +196,6 @@ async fn api_projects_put_project(
     Ok(HttpResponseOkObject(newproject.to_view()))
 }
 
-
 /*
  * Instances
  */
@@ -215,7 +213,8 @@ async fn api_project_instances_get(
         http_extract_path_params(&rqctx.path_variables)?;
     let project_name =
         ApiName::from_param(path_params.project_id.clone(), "project_id")?;
-    let instance_stream = backend.project_list_instances(&project_name, &query_params).await?;
+    let instance_stream =
+        backend.project_list_instances(&project_name, &query_params).await?;
     let view_list = to_view_list(instance_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }

@@ -20,13 +20,13 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
-use crate::api_model::PaginationParams;
-use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
 use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
+use crate::api_model::PaginationParams;
 use crate::api_model::UpdateResult;
+use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
 
 /**
  * SimulatorBuilder is used to initialize and populate a Simulator
@@ -71,8 +71,9 @@ impl SimulatorBuilder {
             let simproject = SimProject {};
             let id_validated = Uuid::parse_str(&builder_project.id)
                 .expect("unsupported project id");
-            let name_validated = ApiName::try_from(builder_project.name.clone())
-                .expect("unsupported project name");
+            let name_validated =
+                ApiName::try_from(builder_project.name.clone())
+                    .expect("unsupported project name");
             projects_by_name.insert(
                 name_validated.clone(),
                 Arc::new(ApiProject {
@@ -263,7 +264,7 @@ impl ApiBackend for Simulator {
     async fn project_list_instances(
         &self,
         project_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>
+        pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance> {
         unimplemented!();
     }

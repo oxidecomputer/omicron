@@ -531,10 +531,13 @@ pub trait ApiBackend: Send + Sync {
     ) -> UpdateResult<ApiProject>;
     async fn projects_list(
         &self,
-        pagparams: &PaginationParams<ApiName>
+        pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject>;
     async fn project_list_instances(
-        &self, name: &ApiName, pagparams: &PaginationParams<ApiName>) -> ListResult<ApiInstance>;
+        &self,
+        name: &ApiName,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiInstance>;
 }
 
 #[cfg(test)]

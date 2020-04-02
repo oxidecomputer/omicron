@@ -269,8 +269,7 @@ async fn test_demo2json() {
         .await
         .expect_err("expected failure");
     assert!(error.message.starts_with(
-        "unable to parse body: invalid type: string \"oops\", expected \
-         u32"
+        "unable to parse body: invalid type: string \"oops\", expected u32"
     ));
 
     testctx.teardown().await;

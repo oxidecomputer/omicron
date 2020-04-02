@@ -90,8 +90,8 @@ async fn smoke_test() {
         .await
         .expect_err("expected error");
     assert_eq!(
-        "unsupported value for \"project_id\": name must begin with an \
-         ASCII lowercase character",
+        "unsupported value for \"project_id\": name must begin with an ASCII \
+         lowercase character",
         error.message
     );
 
@@ -158,9 +158,12 @@ async fn smoke_test() {
         .expect("expected success");
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
-    let simid1 = Uuid::parse_str("1eb2b543-b199-405f-b705-1739d01a197c").unwrap();
-    let simid2 = Uuid::parse_str("4f57c123-3bda-4fae-94a2-46a9632d40b6").unwrap();
-    let simid3 = Uuid::parse_str("4aac89b0-df9a-441d-b050-f953476ea290").unwrap();
+    let simid1 =
+        Uuid::parse_str("1eb2b543-b199-405f-b705-1739d01a197c").unwrap();
+    let simid2 =
+        Uuid::parse_str("4f57c123-3bda-4fae-94a2-46a9632d40b6").unwrap();
+    let simid3 =
+        Uuid::parse_str("4aac89b0-df9a-441d-b050-f953476ea290").unwrap();
     assert_eq!(initial_projects.len(), 3);
     assert_eq!(initial_projects[0].identity.id, simid1);
     assert_eq!(initial_projects[0].identity.name, "simproject1");
@@ -266,10 +269,7 @@ async fn smoke_test() {
         .collect();
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
-    assert_eq!(
-        new_projects[0].identity.id,
-        expected_projects[0].identity.id
-    );
+    assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
         new_projects[0].identity.name,
         expected_projects[0].identity.name
@@ -278,10 +278,7 @@ async fn smoke_test() {
         new_projects[0].identity.description,
         expected_projects[0].identity.description
     );
-    assert_eq!(
-        new_projects[1].identity.id,
-        expected_projects[1].identity.id
-    );
+    assert_eq!(new_projects[1].identity.id, expected_projects[1].identity.id);
     assert_eq!(
         new_projects[1].identity.name,
         expected_projects[1].identity.name

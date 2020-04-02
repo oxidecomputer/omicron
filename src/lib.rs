@@ -41,9 +41,12 @@ pub fn run_openapi() {
  */
 pub fn api_context() -> Arc<ApiContext> {
     let mut simbuilder = sim::SimulatorBuilder::new();
-    simbuilder.project_create("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1");
-    simbuilder.project_create("4f57c123-3bda-4fae-94a2-46a9632d40b6", "simproject2");
-    simbuilder.project_create("4aac89b0-df9a-441d-b050-f953476ea290", "simproject3");
+    simbuilder
+        .project_create("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1");
+    simbuilder
+        .project_create("4f57c123-3bda-4fae-94a2-46a9632d40b6", "simproject2");
+    simbuilder
+        .project_create("4aac89b0-df9a-441d-b050-f953476ea290", "simproject3");
 
     Arc::new(ApiContext {
         backend: Arc::new(simbuilder.build()),
