@@ -1,14 +1,46 @@
-use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+//! Serde implementation for proc_macro::TokenStream. This is intended for
+//! proc_macro builders who want rich configuration in their custom attributes.
+//!
+//! If the consumers of your macro use it like this:
+//!
+//! ```ignore
+//! #[my_macro {
+//!     settings = {
+//!         reticulate_splines = true,
+//!         normalizing_power = false,
+//!     },
+//!     disaster = "tornado"
+//! }]
+//! ```
+//!
+//! Your macro probably starts like this:
+//!
+//! ```ignore
+//! #[proc_macro_attribute]
+//! pub fn my_macro(
+//!     attr: proc_macro::TokenStream,
+//!     item: proc_macro::TokenStream,
+//! ) -> proc_macro::TokenStream {
+//!     ...
+//! ```
+//!
+//! Use `serde_tokenstream` to deserialize `attr` into a structure with the
+//! `Deserialize` trait (typically `derive`d):
+//!
+//! ```ignore
+//!     let cfg = from_tokenstream::<Config>(&TokenStream::from(attr))?;
+//! ```
+//!
 
+use core::iter::Peekable;
+use std::fmt::{self, Display};
+
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use serde::de::{
     DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
 };
 use serde::{Deserialize, Deserializer};
-
-use std::collections::HashMap;
-use std::fmt::{self, Display};
-
-use core::iter::Peekable;
+use syn::{ExprLit, Lit};
 
 // print out the raw tree of TokenStream structures.
 #[allow(dead_code)]
@@ -44,8 +76,8 @@ struct TokenDe {
 
 impl<'de> TokenDe {
     fn from_tokenstream(input: &'de TokenStream) -> Self {
-        // We implicitly start inside a brace-surrounded struct; this
-        // allows for more generic handling elsewhere.
+        // We implicitly start inside a brace-surrounded struct.
+        // Constructing a Group allows for more generic handling elsewhere.
         TokenDe::new(&TokenStream::from(TokenTree::from(Group::new(
             Delimiter::Brace,
             input.clone(),
@@ -87,6 +119,9 @@ impl<'de> TokenDe {
 
     fn last_err<T>(&self) -> Result<T> {
         match &self.last {
+            // It should not be possible to reach this point. Although
+            // `self.last` starts as `None`, the first thing we'll try to do
+            // is deserialize a structure type
             None => {
                 println!("didn't get started");
                 Err(Error::Unknown)
@@ -197,7 +232,6 @@ impl<'de, 'a> MapAccess<'de> for TokenDe {
     {
         let keytok = match self.input.peek() {
             None => {
-                //panic!("looking but not finding");
                 return Ok(None);
             }
             Some(token) => token.clone(),
@@ -271,7 +305,7 @@ impl<'de, 'a> EnumAccess<'de> for &mut TokenDe {
         let val = seed.deserialize(&mut *self);
 
         match val {
-            Err(err) => panic!("error: {}", err),
+            Err(err) => todo!("error: {}", err),
             Ok(v) => Ok((v, self)),
         }
     }
@@ -491,7 +525,6 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         let id = match self.next() {
             Some(ident @ TokenTree::Ident(_)) => ident,
             Some(token) => {
-                println!("{:?}", token);
                 return Err(Error::ExpectedIdentifier(
                     token.clone(),
                     format!("expected an identifier, but found `{}`", token),
@@ -507,7 +540,6 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         V: Visitor<'de>,
     {
         let token = self.next();
-        println!("any {:?}", token);
 
         match &token {
             None => self.last_err(),
@@ -537,18 +569,35 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
                 visitor.visit_string(ident.to_string())
             }
             Some(TokenTree::Literal(lit)) => {
-                println!("literal {:?}", lit);
-                match syn::parse_str::<syn::ExprLit>(&lit.to_string()) {
-                    Ok(syn::ExprLit {
-                        lit: syn::Lit::Str(s), ..
+                match syn::parse_str::<ExprLit>(&lit.to_string()) {
+                    Ok(ExprLit {
+                        lit: Lit::Str(s), ..
                     }) => visitor.visit_string(s.value()),
-                    Ok(syn::ExprLit {
-                        lit: syn::Lit::Int(i), ..
+                    Ok(ExprLit {
+                        lit: Lit::ByteStr(_), ..
+                    }) => todo!("bytestr"),
+                    Ok(ExprLit {
+                        lit: Lit::Byte(_), ..
+                    }) => todo!("byte"),
+                    Ok(ExprLit {
+                        lit: Lit::Char(_), ..
+                    }) => todo!("char"),
+                    Ok(ExprLit {
+                        lit: Lit::Int(i), ..
                     }) => visitor.visit_u64(i.base10_parse::<u64>().unwrap()),
-                    Ok(syn::ExprLit {
-                        lit: syn::Lit::Float(f), ..
+                    Ok(ExprLit {
+                        lit: Lit::Float(f), ..
                     }) => visitor.visit_f64(f.base10_parse::<f64>().unwrap()),
-                    _ => self.deserialize_error(token, "a value"),
+                    Ok(ExprLit {
+                        lit: Lit::Bool(_), ..
+                    }) => panic!("can't happen; bool is handled elsewhere"),
+                    Ok(ExprLit {
+                        lit: Lit::Verbatim(_), ..
+                    }) => todo!("verbatim"),
+                    Err(err) => panic!(
+                        "can't happen; must be parseable: {} {}",
+                        lit, err
+                    ),
                 }
             }
             Some(TokenTree::Punct(_)) => {
@@ -640,8 +689,7 @@ where
     match &result {
         // This can only happen if we were given no input
         Err(Error::NoData(_)) => {
-            assert!(deserializer.last.is_none());
-            result
+            panic!("Error::NoData should never propagate to the caller")
         }
 
         // Pass through all other errors.
@@ -658,20 +706,21 @@ where
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(untagged)]
-enum MapEntry {
-    Value(String),
-    Struct(MapData),
-    Array(Vec<MapEntry>),
-}
-
-type MapData = HashMap<String, MapEntry>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use quote::quote;
+    use std::collections::HashMap;
+
+    #[derive(Clone, Debug, Deserialize)]
+    #[serde(untagged)]
+    enum MapEntry {
+        Value(String),
+        Struct(MapData),
+        Array(Vec<MapEntry>),
+    }
+
+    type MapData = HashMap<String, MapEntry>;
 
     fn compare_kv(k: Option<&MapEntry>, v: &str) {
         match k {

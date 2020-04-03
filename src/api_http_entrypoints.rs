@@ -43,6 +43,7 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
         "/projects",
         HttpRouteHandler::new(api_projects_post),
     );
+
     // TODO: rethink this interface and convert all to use openapi::endpoint
     /*
     api.register(
@@ -52,6 +53,8 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
     );
     */
     api_projects_get_project::register(api);
+    //api.register(api_projects_get_project);
+
     api.register(
         Method::DELETE,
         "/projects/{project_id}",

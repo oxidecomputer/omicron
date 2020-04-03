@@ -102,36 +102,13 @@ pub fn endpoint(
 ) -> proc_macro::TokenStream {
     do_endpoint(attr, item).unwrap()
 }
-/// Conservative TokenStream equality.
-fn tokenstream_eq(a: &TokenStream, b: &TokenStream) -> bool {
-    let mut aa = a.clone().into_iter();
-    let mut bb = b.clone().into_iter();
-
-    loop {
-        match (aa.next(), bb.next()) {
-            (None, None) => break true,
-            (Some(TokenTree::Ident(at)), Some(TokenTree::Ident(bt)))
-                if at == bt =>
-            {
-                continue
-            }
-            (Some(TokenTree::Punct(at)), Some(TokenTree::Punct(bt)))
-                if at.as_char() == bt.as_char() =>
-            {
-                continue
-            }
-            _ => break false,
-        }
-    }
-}
 
 fn do_endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> Result<proc_macro::TokenStream, &'static str> {
-    let attr2 = TokenStream::from(attr);
-
-    let metadata = match from_tokenstream::<Metadata>(&attr2) {
+    let metadata = match from_tokenstream::<Metadata>(&TokenStream::from(attr))
+    {
         Ok(value) => value,
         Err(err) => panic!("{:?}", err),
     };
@@ -243,4 +220,27 @@ fn do_endpoint(
         }
     };
     Ok(stream.into())
+}
+
+/// Conservative TokenStream equality.
+fn tokenstream_eq(a: &TokenStream, b: &TokenStream) -> bool {
+    let mut aa = a.clone().into_iter();
+    let mut bb = b.clone().into_iter();
+
+    loop {
+        match (aa.next(), bb.next()) {
+            (None, None) => break true,
+            (Some(TokenTree::Ident(at)), Some(TokenTree::Ident(bt)))
+                if at == bt =>
+            {
+                continue
+            }
+            (Some(TokenTree::Punct(at)), Some(TokenTree::Punct(bt)))
+                if at.as_char() == bt.as_char() =>
+            {
+                continue
+            }
+            _ => break false,
+        }
+    }
 }
