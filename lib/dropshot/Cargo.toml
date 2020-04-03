@@ -13,6 +13,8 @@ http = "0.2.0"
 hostname = "0.3.0"
 hyper = "0.13"
 openapiv3 = "0.3.0"
+proc-macro-error = "*"
+proc-macro2 = "*"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 serde_urlencoded = "0.6"
@@ -20,6 +22,7 @@ slog-async = "2.4"
 slog-bunyan = "2.2"
 slog-json = "2.3"
 slog-term = "2.5"
+syn = { version = "1", features = ["full", "extra-traits"] }
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }

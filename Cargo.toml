@@ -11,13 +11,14 @@ clap = "2"
 futures = "0.3.1"
 http = "0.2.0"
 dropshot = { path = "lib/dropshot" }
+dropshot_endpoint = { path = "lib/dropshot_endpoint" }
 hyper = "0.13"
-openapi = { path = "lib/openapi" }
 serde = { version = "1.0", features = [ "derive" ] }
+serde_tokenstream = { path = "lib/serde_tokenstream" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 
 [workspace]
-members = [".", "lib/dropshot", "lib/openapi"]
-default-members = [".", "lib/dropshot", "lib/openapi"]
+members = [".", "lib/dropshot", "lib/dropshot_endpoint", "lib/serde_tokenstream"]
+default-members = [".", "lib/dropshot", "lib/dropshot_endpoint", "lib/serde_tokenstream"]

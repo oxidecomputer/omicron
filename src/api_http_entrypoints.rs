@@ -27,7 +27,7 @@ use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
 
-use openapi::endpoint;
+use dropshot_endpoint::endpoint;
 
 /** Default maximum number of items per page of "list" results */
 const DEFAULT_LIST_PAGE_SIZE: usize = 100;

@@ -188,6 +188,8 @@ dependencies = [
  "http",
  "hyper",
  "openapiv3",
+ "proc-macro-error",
+ "proc-macro2",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -196,9 +198,23 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
+ "syn",
  "tokio",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "dropshot_endpoint"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "slog",
+ "syn",
 ]
 
 [[package]]
@@ -655,17 +671,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openapi"
-version = "0.1.0"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "serde",
- "syn",
-]
-
-[[package]]
 name = "openapiv3"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -685,11 +690,12 @@ dependencies = [
  "chrono 0.4.11",
  "clap",
  "dropshot",
+ "dropshot_endpoint",
  "futures",
  "http",
  "hyper",
- "openapi",
  "serde",
+ "serde_tokenstream",
  "slog",
  "tokio",
  "toml",
@@ -900,6 +906,17 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_tokenstream"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
 ]
 
 [[package]]
