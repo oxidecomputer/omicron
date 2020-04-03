@@ -289,7 +289,7 @@ impl<'de, 'a> VariantAccess<'de> for &mut TokenDe {
         T: DeserializeSeed<'de>,
     {
         // TODO should not be allowed
-        panic!("newtype_variant_seed");
+        todo!("newtype_variant_seed");
     }
 
     fn tuple_variant<V>(self, _len: usize, _visitor: V) -> Result<V::Value>
@@ -297,7 +297,7 @@ impl<'de, 'a> VariantAccess<'de> for &mut TokenDe {
         V: Visitor<'de>,
     {
         // TODO should not be allowed
-        panic!("tuple_variant");
+        todo!("tuple_variant");
     }
 
     fn struct_variant<V>(
@@ -308,8 +308,7 @@ impl<'de, 'a> VariantAccess<'de> for &mut TokenDe {
     where
         V: Visitor<'de>,
     {
-        // TODO should not be allowed
-        panic!("struct_variant");
+        todo!("struct_variant");
     }
 }
 
