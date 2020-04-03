@@ -68,7 +68,10 @@ impl<'de> TokenDe {
         match self.next() {
             None => Ok(()),
             Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => Ok(()),
-            Some(_) => Err(Error::ExpectedCommaOrNothing),
+            Some(token) => Err(Error::ExpectedCommaOrNothing(
+                token.clone(),
+                format!("expected `,` or nothing, but found `{}`", token),
+            )),
         }
     }
 
@@ -79,7 +82,6 @@ impl<'de> TokenDe {
             &mut self.current,
             next.as_ref().map(|t| t.clone()),
         );
-        println!("last = {:?}", &self.last);
         next
     }
 
@@ -157,16 +159,16 @@ impl<'de> TokenDe {
 
 #[derive(Clone, Debug)]
 pub enum Error {
-    ExpectedMap,
-    ExpectedStruct,
+    ExpectedArray(TokenTree, String),
+    ExpectedMap(TokenTree, String),
+    ExpectedStruct(TokenTree, String),
     ExpectedIdentifier(TokenTree, String),
-    ExpectedBool,
-    ExpectedCommaOrNothing,
+    ExpectedCommaOrNothing(TokenTree, String),
     ExpectedAssignment(TokenTree, String),
     ExpectedValue(TokenTree, String),
     Unknown,
     UnexpectedGrouping(TokenTree, String),
-    EOF(TokenTree, String),
+    NoData(String),
 }
 
 impl serde::de::Error for Error {
@@ -174,7 +176,7 @@ impl serde::de::Error for Error {
     where
         T: std::fmt::Display,
     {
-        panic!("{:}", msg);
+        Error::NoData(format!("{}", msg))
     }
 }
 impl std::error::Error for Error {}
@@ -193,7 +195,10 @@ impl<'de, 'a> MapAccess<'de> for TokenDe {
         K: serde::de::DeserializeSeed<'de>,
     {
         let keytok = match self.input.peek() {
-            None => return Ok(None),
+            None => {
+                //panic!("looking but not finding");
+                return Ok(None);
+            }
             Some(token) => token.clone(),
         };
 
@@ -307,6 +312,7 @@ impl<'de, 'a> VariantAccess<'de> for &mut TokenDe {
     }
 }
 
+/// Stub out Deserializer trait functions we don't want to deal with right now.
 macro_rules! de_unimp {
     ($i:ident $(, $p:ident : $t:ty )*) => {
         fn $i<V>(self $(, $p: $t)*, _visitor: V) -> Result<V::Value>
@@ -335,7 +341,8 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
             Some(TokenTree::Ident(ident)) if ident.to_string() == "false" => {
                 visitor.visit_bool(false)
             }
-            _ => Err(Error::ExpectedBool),
+            // TODO not quite right
+            other => self.deserialize_error(other, "bool"),
         }
     }
 
@@ -366,22 +373,41 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         };
 
         value.map_or_else(
-            || self.deserialize_error(token, "string"),
+            || self.deserialize_error(token, "a string"),
             |v| visitor.visit_string(v),
         )
     }
+
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        match self.next() {
-            Some(TokenTree::Group(group)) => match group.delimiter() {
-                Delimiter::Bracket => {
-                    visitor.visit_seq(TokenDe::new(&group.stream()))
+        let next = self.next();
+
+        if let Some(token) = &next {
+            if let TokenTree::Group(group) = token {
+                if let Delimiter::Bracket = group.delimiter() {
+                    match visitor.visit_seq(TokenDe::new(&group.stream())) {
+                        Err(Error::NoData(msg)) => {
+                            return Err(Error::ExpectedValue(
+                                token.clone(),
+                                msg,
+                            ))
+                        }
+                        other => return other,
+                    }
                 }
-                _ => panic!("bad group type"),
-            },
-            _ => panic!("not a group"),
+            }
+        }
+
+        match next {
+            Some(token) => Err(Error::ExpectedArray(
+                token.clone(),
+                format!("expected an array, but found `{}`", token),
+            )),
+            // TODO this isn't quite right. I should make Error a struct with 3
+            // fields: reason, token, msg.
+            None => self.last_err(),
         }
     }
 
@@ -394,26 +420,56 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
     where
         V: Visitor<'de>,
     {
-        if let Some(TokenTree::Group(group)) = self.next() {
-            if let Delimiter::Brace = group.delimiter() {
-                return visitor.visit_map(TokenDe::new(&group.stream()));
-            }
-        }
+        let next = self.next();
 
-        Err(Error::ExpectedStruct)
+        if let Some(token) = &next {
+            if let TokenTree::Group(group) = token {
+                if let Delimiter::Brace = group.delimiter() {
+                    match visitor.visit_map(TokenDe::new(&group.stream())) {
+                        Err(Error::NoData(msg)) => {
+                            return Err(Error::ExpectedIdentifier(
+                                token.clone(),
+                                msg,
+                            ))
+                        }
+                        other => return other,
+                    }
+                }
+            }
+        };
+
+        match next {
+            Some(token) => Err(Error::ExpectedStruct(
+                token.clone(),
+                format!("expected a struct, but found `{}`", token),
+            )),
+            // TODO this isn't quite right. I should make Error a struct with 3
+            // fields: reason, token, msg.
+            None => self.last_err(),
+        }
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        if let Some(TokenTree::Group(group)) = self.next() {
+        let next = self.next();
+
+        if let Some(TokenTree::Group(group)) = &next {
             if let Delimiter::Brace = group.delimiter() {
                 return visitor.visit_map(TokenDe::new(&group.stream()));
             }
         }
 
-        Err(Error::ExpectedMap)
+        match next {
+            Some(token) => Err(Error::ExpectedMap(
+                token.clone(),
+                format!("expected a map, but found `{}`", token),
+            )),
+            // TODO this isn't quite right. I should make Error a struct with 3
+            // fields: reason, token, msg.
+            None => self.last_err(),
+        }
     }
 
     fn deserialize_enum<V>(
@@ -451,7 +507,7 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         V: Visitor<'de>,
     {
         let token = self.next();
-        println!("{:?}", token);
+        println!("any {:?}", token);
 
         match &token {
             None => self.last_err(),
@@ -561,16 +617,6 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
         self.deserialize_float(|value| visitor.visit_f64(value))
     }
 
-    //de_unimp!(deserialize_i8);
-    //de_unimp!(deserialize_i16);
-    //de_unimp!(deserialize_i32);
-    //de_unimp!(deserialize_i64);
-    //de_unimp!(deserialize_u8);
-    //de_unimp!(deserialize_u16);
-    //de_unimp!(deserialize_u32);
-    //de_unimp!(deserialize_u64);
-    //de_unimp!(deserialize_f32);
-    //de_unimp!(deserialize_f64);
     de_unimp!(deserialize_char);
     de_unimp!(deserialize_str);
     de_unimp!(deserialize_bytes);
@@ -589,10 +635,11 @@ where
 {
     let mut deserializer = TokenDe::from_tokenstream(tokens);
     let t = T::deserialize(&mut deserializer)?;
+
     if deserializer.next().is_none() {
         Ok(t)
     } else {
-        panic!("extra")
+        todo!("extra")
     }
 }
 
@@ -842,7 +889,7 @@ mod tests {
             .into(),
         ) {
             Err(Error::ExpectedValue(_, msg)) => {
-                assert_eq!(msg, "expected a value, but found `?`");
+                assert_eq!(msg, "expected a string, but found `?`");
             }
             Err(err) => panic!("unexpected failure: {:?}", err),
             Ok(_) => panic!("unexpected success"),
@@ -863,7 +910,7 @@ mod tests {
             .into(),
         ) {
             Err(Error::ExpectedValue(_, msg)) => {
-                assert_eq!(msg, "expected an value, but found `42`");
+                assert_eq!(msg, "expected a string, but found `42`");
             }
             Err(err) => panic!("unexpected failure: {:?}", err),
             Ok(_) => panic!("unexpected success"),
@@ -871,28 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn bad_array() {
-        #[derive(Deserialize)]
-        struct Test {
-            #[allow(dead_code)]
-            array: Vec<u32>,
-        }
-        match from_tokenstream::<Test>(
-            &quote! {
-                array = [1, 2, 3]
-            }
-            .into(),
-        ) {
-            Err(Error::ExpectedValue(_, msg)) => {
-                assert_eq!(msg, "expected an object {...}, but found `1`")
-            }
-            Err(err) => panic!("unexpected failure: {:?}", err),
-            Ok(_) => panic!("unexpected success"),
-        }
-    }
-
-    #[test]
-    fn simple_array() {
+    fn simple_array1() {
         #[derive(Deserialize)]
         struct Test {
             array: Vec<u32>,
@@ -906,9 +932,26 @@ mod tests {
         .unwrap();
         assert!(t.array.is_empty());
     }
-
     #[test]
     fn simple_array2() {
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: Vec<u32>,
+        }
+        match from_tokenstream::<Test>(
+            &quote! {
+                array = [1, 2, 3]
+            }
+            .into(),
+        ) {
+            Ok(t) => assert_eq!(t.array[0], 1),
+            Err(err) => panic!("unexpected failure: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn simple_array3() {
         #[derive(Deserialize)]
         struct Test {
             array: Vec<Test2>,
@@ -922,41 +965,127 @@ mod tests {
             .into(),
         )
         .unwrap();
-        assert!(t.array.is_empty());
+        assert_eq!(t.array.len(), 1);
     }
 
-    /*
     #[test]
-    fn simple_array3() {
-        let _ = super::to_map(
+    fn simple_array4() {
+        #[derive(Deserialize)]
+        struct Test {
+            array: Vec<Test2>,
+        }
+        #[derive(Deserialize)]
+        struct Test2 {}
+        let t = from_tokenstream::<Test>(
             &quote! {
                 array = [{}, {},]
             }
             .into(),
-        );
-    };
+        )
+        .unwrap();
+        assert_eq!(t.array.len(), 2);
+    }
 
     #[test]
-    #[should_panic(expected = "expected `,`, but found `<`")]
     fn bad_array2() {
-        let _ = super::to_map(
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: Vec<Test2>,
+        }
+        #[derive(Deserialize)]
+        struct Test2 {}
+        match from_tokenstream::<Test>(
             &quote! {
                 array = [{}<-]
             }
             .into(),
-        );
+        ) {
+            Err(Error::ExpectedCommaOrNothing(_, msg)) => {
+                assert_eq!(msg, "expected `,` or nothing, but found `<`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
     }
-    */
+
     #[test]
-    fn bad_bad_bad() {
-        use super::MapEntry;
-        use std::collections::HashMap;
-        let _: super::Result<HashMap<String, MapEntry>> =
-            super::from_tokenstream(
-                &quote! {
-                    array = [{}<-]
-                }
-                .into(),
-            );
+    fn bad_array3() {
+        match from_tokenstream::<MapData>(
+            &quote! {
+                array = [{}<-]
+            }
+            .into(),
+        ) {
+            Err(Error::ExpectedCommaOrNothing(_, msg)) => {
+                assert_eq!(msg, "expected `,` or nothing, but found `<`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
+    }
+    #[test]
+    fn bad_array4() {
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: Vec<Test2>,
+        }
+        #[derive(Deserialize)]
+        struct Test2 {}
+        match from_tokenstream::<Test>(
+            &quote! {
+                array = {}
+            }
+            .into(),
+        ) {
+            Err(Error::ExpectedArray(_, msg)) => {
+                assert_eq!(msg, "expected an array, but found `{}`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
+    }
+
+    #[test]
+    fn bupkis() {
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: String,
+        }
+        match from_tokenstream::<Test>(&quote! {}.into()) {
+            Err(Error::ExpectedIdentifier(_, msg)) => {
+                assert_eq!(msg, "missing field `array`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
+    }
+
+    #[test]
+    fn nested_bupkis1() {
+        #[derive(Deserialize)]
+        struct Test {
+            #[allow(dead_code)]
+            array: Test2,
+        }
+        #[derive(Deserialize)]
+        struct Test2 {
+            #[allow(dead_code)]
+            item: u32,
+        }
+        match from_tokenstream::<Test>(
+            &quote! {
+                array = {}
+            }
+            .into(),
+        ) {
+            Err(Error::ExpectedIdentifier(_, msg)) => {
+                assert_eq!(msg, "missing field `item`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
     }
 }
