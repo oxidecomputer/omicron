@@ -166,6 +166,7 @@ pub enum Error {
     ExpectedCommaOrNothing(TokenTree, String),
     ExpectedAssignment(TokenTree, String),
     ExpectedValue(TokenTree, String),
+    ExpectedEOF(TokenTree, String),
     Unknown,
     UnexpectedGrouping(TokenTree, String),
     NoData(String),
@@ -551,7 +552,9 @@ impl<'de, 'a> Deserializer<'de> for &'a mut TokenDe {
                     _ => self.deserialize_error(token, "a value"),
                 }
             }
-            Some(TokenTree::Punct(_)) => Err(Error::Unknown),
+            Some(TokenTree::Punct(_)) => {
+                self.deserialize_error(token, "a value")
+            }
         }
     }
 
@@ -634,12 +637,25 @@ where
     T: Deserialize<'a>,
 {
     let mut deserializer = TokenDe::from_tokenstream(tokens);
-    let t = T::deserialize(&mut deserializer)?;
+    let result = T::deserialize(&mut deserializer);
+    match &result {
+        // This can only happen if we were given no input
+        Err(Error::NoData(_)) => {
+            assert!(deserializer.last.is_none());
+            result
+        }
 
-    if deserializer.next().is_none() {
-        Ok(t)
-    } else {
-        todo!("extra")
+        // Pass through all other errors.
+        Err(_) => result,
+
+        // On success, check that there isn't extra data.
+        Ok(_) => match deserializer.next() {
+            None => result,
+            Some(token) => Err(Error::ExpectedEOF(
+                token.clone(),
+                format!("expected EOF but found `{}`", token),
+            )),
+        },
     }
 }
 
@@ -911,6 +927,21 @@ mod tests {
         ) {
             Err(Error::ExpectedValue(_, msg)) => {
                 assert_eq!(msg, "expected a string, but found `42`");
+            }
+            Err(err) => panic!("unexpected failure: {:?}", err),
+            Ok(_) => panic!("unexpected success"),
+        }
+    }
+    #[test]
+    fn bad_value3() {
+        match from_tokenstream::<MapData>(
+            &quote! {
+                wtf = [ ?! ]
+            }
+            .into(),
+        ) {
+            Err(Error::ExpectedValue(_, msg)) => {
+                assert_eq!(msg, "expected a value, but found `?`")
             }
             Err(err) => panic!("unexpected failure: {:?}", err),
             Ok(_) => panic!("unexpected success"),
