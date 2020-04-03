@@ -75,12 +75,14 @@ pub trait ApiObject {
 #[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
     Project,
+    Instance,
 }
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
+            ApiResourceType::Instance => "instance",
         })
     }
 }
@@ -409,13 +411,10 @@ pub struct ApiInstanceView {
     pub project_id: Uuid,
 
     /** number of CPUs allocated for this instance */
-    #[serde(flatten)]
     pub ncpus: ApiInstanceCpuCount,
     /** memory, in gigabytes, allocated for this instance */
-    #[serde(flatten)]
     pub memory: ApiByteCount,
     /** size of the boot disk for the image */
-    #[serde(flatten)]
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
@@ -433,11 +432,8 @@ pub struct ApiInstanceView {
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
-    #[serde(flatten)]
     pub ncpus: ApiInstanceCpuCount,
-    #[serde(flatten)]
     pub memory: ApiByteCount,
-    #[serde(flatten)]
     pub boot_disk_size: ApiByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
 }
@@ -533,11 +529,22 @@ pub trait ApiBackend: Send + Sync {
         &self,
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject>;
+
     async fn project_list_instances(
         &self,
         name: &ApiName,
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance>;
+    async fn project_create_instance(
+        &self,
+        name: &ApiName,
+        params: &ApiInstanceCreateParams,
+    ) -> CreateResult<ApiInstance>;
+    async fn project_lookup_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> LookupResult<ApiInstance>;
 }
 
 #[cfg(test)]

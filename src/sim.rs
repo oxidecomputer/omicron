@@ -15,6 +15,8 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiBackend;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
+use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -69,7 +71,7 @@ impl SimulatorBuilder {
 
         for builder_project in self.projects {
             let simproject = SimProject {
-                instances: BTreeMap::new(),
+                instances: Mutex::new(BTreeMap::new()),
             };
             let id_validated = Uuid::parse_str(&builder_project.id)
                 .expect("unsupported project id");
@@ -112,7 +114,7 @@ pub struct Simulator {
  * Backend-specific implementation of an ApiProject.
  */
 struct SimProject {
-    instances: BTreeMap<ApiName, Arc<ApiInstance>>,
+    instances: Mutex<BTreeMap<ApiName, Arc<ApiInstance>>>,
 }
 fn sim_project(api_project: &ApiProject) -> &SimProject {
     api_project.backend_impl.as_ref().downcast_ref::<SimProject>().unwrap()
@@ -142,7 +144,7 @@ impl ApiBackend for Simulator {
         let now = Utc::now();
         let newname = &new_project.identity.name;
         let simproject = SimProject {
-            instances: BTreeMap::new(),
+            instances: Mutex::new(BTreeMap::new()),
         };
         let project = Arc::new(ApiProject {
             backend_impl: Box::new(simproject),
@@ -166,16 +168,13 @@ impl ApiBackend for Simulator {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject> {
         let projects_by_name = self.projects_by_name.lock().await;
-        list_collection(&projects_by_name, pagparams).await
+        collection_list(&projects_by_name, pagparams).await
     }
 
     async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject> {
-        let projects = self.projects_by_name.lock().await;
+        let mut projects = self.projects_by_name.lock().await;
         let project =
-            projects.get(name).ok_or_else(|| ApiError::ObjectNotFound {
-                type_name: ApiResourceType::Project,
-                object_name: String::from(name.clone()),
-            })?;
+            collection_lookup(&mut projects, name, ApiResourceType::Project)?;
         let rv = Arc::clone(project);
         Ok(rv)
     }
@@ -226,8 +225,9 @@ impl ApiBackend for Simulator {
          * put the SimProject behind an Arc.  (It's not clear that will make
          * sense -- the two ApiProjects will have different state!)
          */
+        let old_instances = oldbe.instances.lock().await;
         let beimpl: Box<SimProject> = Box::new(SimProject {
-            instances: oldbe.instances.clone(),
+            instances: Mutex::new(old_instances.clone()),
         });
         let newvalue = Arc::new(ApiProject {
             backend_impl: beimpl,
@@ -246,6 +246,10 @@ impl ApiBackend for Simulator {
         Ok(rv)
     }
 
+    /*
+     * Instances
+     */
+
     async fn project_list_instances(
         &self,
         project_name: &ApiName,
@@ -253,14 +257,83 @@ impl ApiBackend for Simulator {
     ) -> ListResult<ApiInstance> {
         let project = self.project_lookup(project_name).await?;
         let simproject = sim_project(&project);
-        list_collection(&simproject.instances, pagparams).await
+        let instances = simproject.instances.lock().await;
+        collection_list(&instances, pagparams).await
+    }
+
+    async fn project_create_instance(
+        &self,
+        project_name: &ApiName,
+        params: &ApiInstanceCreateParams,
+    ) -> CreateResult<ApiInstance> {
+        let now = Utc::now();
+        let newname = params.identity.name.clone();
+
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let simproject = sim_project(project);
+        let mut instances = simproject.instances.lock().await;
+        if instances.contains_key(&newname) {
+            return Err(ApiError::ObjectAlreadyExists {
+                type_name: ApiResourceType::Instance,
+                object_name: String::from(newname),
+            });
+        }
+
+        let instance = Arc::new(ApiInstance {
+            backend_impl: Box::new(SimInstance {}),
+            identity: ApiIdentityMetadata {
+                id: Uuid::new_v4(),
+                name: params.identity.name.clone(),
+                description: params.identity.description.clone(),
+                time_created: now.clone(),
+                time_modified: now.clone(),
+            },
+            project_id: project.identity.id.clone(),
+            ncpus: params.ncpus,
+            memory: params.memory,
+            boot_disk_size: params.boot_disk_size,
+            hostname: params.hostname.clone(),
+            /* TODO-debug: add state timestamp */
+            state: ApiInstanceState::Starting,
+        });
+
+        let rv = Arc::clone(&instance);
+        instances.insert(newname, instance);
+        Ok(rv)
+    }
+
+    async fn project_lookup_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> LookupResult<ApiInstance>
+    {
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let simproject = sim_project(project);
+        let instances = simproject.instances.lock().await;
+        let instance = collection_lookup(
+            &instances,
+            instance_name,
+            ApiResourceType::Instance,
+        )?;
+        Ok(Arc::clone(instance))
     }
 }
 
 /**
  * List a page of items from a collection.
  */
-async fn list_collection<KeyType, ValueType>(
+async fn collection_list<KeyType, ValueType>(
     tree: &BTreeMap<KeyType, Arc<ValueType>>,
     pagparams: &PaginationParams<KeyType>,
 ) -> ListResult<ValueType>
@@ -300,4 +373,20 @@ where
     };
 
     Ok(futures::stream::iter(items).boxed())
+}
+
+/*
+ * TODO-cleanup: for consistency and generality it would be nice if we could
+ * make this take a KeyType type parameters, but I'm not sure how to specify the
+ * bound that &KeyType: Into<String>
+ */
+fn collection_lookup<'a, 'b, ValueType>(
+    tree: &'b BTreeMap<ApiName, Arc<ValueType>>,
+    name: &'a ApiName,
+    resource_type: ApiResourceType,
+) -> Result<&'b Arc<ValueType>, ApiError> {
+    Ok(tree.get(name).ok_or_else(|| ApiError::ObjectNotFound {
+        type_name: resource_type,
+        object_name: String::from(name.clone()),
+    })?)
 }
