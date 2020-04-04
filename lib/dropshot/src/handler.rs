@@ -249,7 +249,7 @@ where
  * Defines an implementation of the `HttpHandlerFunc` trait for functions
  * matching one of the supported signatures for HTTP endpoint handler functions.
  * We use a macro to do this because we need to provide different
- * implementations for functions that take 0 arguments, 1 arugment, 2 arguments,
+ * implementations for functions that take 0 arguments, 1 argument, 2 arguments,
  * etc., but the implementations are almost identical.
  */
 /*
