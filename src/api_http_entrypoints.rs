@@ -165,7 +165,10 @@ async fn api_projects_get_project(
     project_id: String,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
-    let project: Arc<ApiProject> = backend.project_lookup(&project_id).await?;
+    let project: Arc<ApiProject> = backend
+        .project_lookup(&ApiName::from_param(project_id, "project_id")?)
+        .await?;
+
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
