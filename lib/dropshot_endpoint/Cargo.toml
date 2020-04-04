@@ -1,0 +1,20 @@
+[package]
+name = "dropshot_endpoint"
+version = "0.1.0"
+authors = ["Adam H. Leventhal <ahl@oxide.computer>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-error = "*"
+proc-macro2 = "*"
+quote = "*"
+serde = { version = "1.0", features = [ "derive" ] }
+serde_tokenstream = { path = "../serde_tokenstream" }
+syn = "*"
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
