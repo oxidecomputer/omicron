@@ -26,7 +26,6 @@ use dropshot::HttpRouteHandler;
 use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
-
 use dropshot_endpoint::endpoint;
 
 /** Default maximum number of items per page of "list" results */
