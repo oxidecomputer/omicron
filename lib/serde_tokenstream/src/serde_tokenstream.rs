@@ -51,8 +51,6 @@ impl<'de> TokenDe {
     }
 
     fn new(input: &'de TokenStream) -> Self {
-        println!("new TokenDe");
-        treeify(0, &input.clone());
         let t: Box<dyn Iterator<Item = TokenTree>> =
             Box::new(input.clone().into_iter());
         TokenDe {
