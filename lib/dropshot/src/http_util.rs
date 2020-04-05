@@ -137,15 +137,3 @@ pub fn http_extract_path_params<T: DeserializeOwned>(
         HttpError::for_internal_error(format!("missing path param: {}", e))
     })
 }
-
-/**
- * Extract a single path parameter from a set of variables.
- */
-pub fn http_extract_path_param<'a>(
-    path_params: &'a BTreeMap<String, String>,
-    key: &String,
-) -> Result<&'a String, HttpError> {
-    path_params.get(key).ok_or_else(|| {
-        HttpError::for_internal_error(format!("missing path param: {}", key))
-    })
-}

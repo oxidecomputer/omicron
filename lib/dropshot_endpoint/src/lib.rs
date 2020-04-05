@@ -4,66 +4,17 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::TokenStream;
+use quote::format_ident;
 use quote::quote;
 use quote::ToTokens;
-
-use std::collections::HashMap;
-
 use serde::Deserialize;
+use serde_derive_internals::ast::Container;
+use serde_derive_internals::{Ctxt, Derive};
+use syn::{parse_macro_input, DeriveInput, ItemFn};
 
 use serde_tokenstream::from_tokenstream;
 use serde_tokenstream::Error;
-use syn::spanned::Spanned;
-
-// We use the `abort` macro to identify known, aberrant conditions while
-// processing macro parameters. This is based on `proc_macro_error::abort`
-// but modified to be useable in testing contexts where a `proc_macro2::Span`
-// cannot be used in an error context.
-macro_rules! abort {
-    ($span:expr, $($tts:tt)*) => {
-        if cfg!(test) {
-            panic!($($tts)*)
-        } else {
-            proc_macro_error::abort!($span, $($tts)*)
-        }
-    };
-}
-
-/// name - in macro; required
-/// in - in macro; required
-/// description - in macro; optional
-/// required - in code: Option<T>
-/// deprecated - in macro; optional/future work
-/// allowEmptyValue - future work
-///
-/// style - ignore for now
-/// explode - talk to dap
-/// allowReserved - future work
-/// schema - in code: derived from type
-/// example - not supported (see examples)
-/// examples - in macro: optional/future work
-
-#[derive(Deserialize, Debug)]
-enum InType {
-    #[serde(rename = "query")]
-    Query,
-    #[serde(rename = "header")]
-    Header,
-    #[serde(rename = "path")]
-    Path,
-    #[serde(rename = "cookie")]
-    Cookie,
-}
-
-#[derive(Deserialize, Debug)]
-struct Parameter {
-    name: String,
-    #[serde(rename = "in")]
-    inn: InType,
-    description: Option<String>,
-    deprecated: Option<bool>,
-}
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
@@ -91,8 +42,10 @@ impl MethodType {
 struct Metadata {
     method: MethodType,
     path: String,
-    parameters: Vec<Parameter>,
+    _dropshot_crate: Option<String>,
 }
+
+const DROPSHOT: &str = "dropshot";
 
 /// Attribute to apply to an HTTP endpoint.
 /// TODO(doc) explain intended use
@@ -102,153 +55,360 @@ pub fn endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    match do_endpoint(attr, item) {
-        Ok(result) => result,
+    match do_endpoint(attr.into(), item.into()) {
+        Ok(result) => result.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
 fn do_endpoint(
-    attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> Result<proc_macro::TokenStream, Error> {
+    attr: TokenStream,
+    item: TokenStream,
+) -> Result<TokenStream, Error> {
     let metadata = from_tokenstream::<Metadata>(&TokenStream::from(attr))?;
 
     let method = metadata.method.as_str();
     let path = metadata.path;
 
-    let param_map = metadata
-        .parameters
-        .iter()
-        .map(|parameter| (&parameter.name, parameter))
-        .collect::<HashMap<_, _>>();
+    let ast: ItemFn = syn::parse2(item)?;
 
-    let ast: syn::ItemFn = syn::parse(item).unwrap();
-    let name = ast.sig.ident.clone();
+    let name = &ast.sig.ident;
+    let method_ident = format_ident!("{}", method);
 
-    let mut context = false;
-
-    let cty = quote! {
-        Arc<RequestContext>
-    };
-
-    let args = &ast.sig.inputs;
-
-    // Do validation of the fn paramters against the metadata we have.
-    for (i, arg) in args.iter().enumerate() {
-        match arg {
-            syn::FnArg::Typed(parameter) => match &*parameter.pat {
-                syn::Pat::Ident(id) => {
-                    let mut tt = TokenStream::new();
-                    parameter.ty.to_tokens(&mut tt);
-                    if tokenstream_eq(&cty, &tt) {
-                        context = true;
-                        if i != 0 {
-                            return Err(Error::new(
-                                arg.span(),
-                                "context parameter needs to be first",
-                            ));
-                        }
-                    } else {
-                        if param_map.get(&id.ident.to_string()).is_none() {
-                            return Err(Error::new(
-                                arg.span(),
-                                "param not described",
-                            ));
-                        }
-                    }
-                }
-                _ => {
-                    return Err(Error::new(
-                        parameter.span(),
-                        "unexpected parameter type",
-                    ));
-                }
-            },
-            syn::FnArg::Receiver(_self) => {
-                return Err(Error::new(
-                    arg.span(),
-                    "attribute cannot be applied to a method that uses self",
-                ));
-            }
+    let description = extract_doc_from_attrs(&ast.attrs).map(|s| {
+        quote! {
+            endpoint.description = Some(#s.to_string());
         }
-    }
+    });
 
-    let mut vars = vec![];
-    let mut ins = vec![];
+    let dropshot = get_crate(metadata._dropshot_crate);
 
-    if context {
-        ins.push(quote! { rqctx });
-    }
-
-    for arg in args.iter().skip(if context { 1 } else { 0 }) {
-        match arg {
-            syn::FnArg::Receiver(_) => panic!("caught above"),
-            syn::FnArg::Typed(parameter) => match &*parameter.pat {
-                syn::Pat::Ident(id) => {
-                    let meta = param_map.get(&id.ident.to_string()).unwrap();
-                    let ident = &id.ident;
-                    let ty = &parameter.ty;
-
-                    match meta.inn {
-                        InType::Path => {
-                            vars.push(quote! {
-                                let #ident: #ty =
-                                    http_extract_path_param(
-                                        &rqctx.path_variables,
-                                        &stringify!(#ident).to_string()
-                                    )?.clone();
-                            });
-                            ins.push(quote! { #ident });
-                        }
-                        _ => panic!("not implemented"),
-                    }
-                }
-                _ => abort!(parameter, "unexpected parameter type"),
-            },
-        }
-    }
-
-    let method_ident = quote::format_ident!("{}", method);
-
+    // The final TokenStream returned will have a few components that reference
+    // `#name`, the name of the method to which this macro was applied...
     let stream = quote! {
+        // ... a struct type called `#name` that has no members
         #[allow(non_camel_case_types, missing_docs)]
-        pub struct #name;
-        impl #name {
-            fn register(api: &mut dropshot::ApiDescription) {
+        pub struct #name {}
+        // ... a constant of type `#name` whose identifier is also #name
+        #[allow(non_upper_case_globals, missing_docs)]
+        const #name: #name = #name {};
+
+        // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
+        // `#name` to be passed into `ApiDescription::register()`
+        impl From<#name> for #dropshot::ApiEndpoint {
+            fn from(_: #name) -> Self {
                 #ast
-                async fn handle(
-                    rqctx: Arc<RequestContext>
-                ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
-                    #(#vars;)*
-                    #name(#(#ins),*).await
-                }
-                api.register(Method::#method_ident, #path, HttpRouteHandler::new(handle));
+
+                #[allow(unused_mut)]
+                let mut endpoint = #dropshot::ApiEndpoint::new(
+                    #name,
+                    Method::#method_ident,
+                    #path,
+                );
+                #description
+                endpoint
             }
         }
     };
+
     Ok(stream.into())
 }
 
-/// Conservative TokenStream equality.
-fn tokenstream_eq(a: &TokenStream, b: &TokenStream) -> bool {
-    let mut aa = a.clone().into_iter();
-    let mut bb = b.clone().into_iter();
+/// Derive the implementation for dropshot::ExtractedParameter
+#[proc_macro_derive(ExtractedParameter, attributes(dropshot))]
+pub fn derive_parameter(
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    do_derive_parameter(&input).unwrap_or_else(to_compile_errors).into()
+}
 
-    loop {
-        match (aa.next(), bb.next()) {
-            (None, None) => break true,
-            (Some(TokenTree::Ident(at)), Some(TokenTree::Ident(bt)))
-                if at == bt =>
-            {
-                continue
+fn do_derive_parameter(
+    input: &DeriveInput,
+) -> Result<TokenStream, Vec<syn::Error>> {
+    let ctxt = Ctxt::new();
+
+    let cont = match Container::from_ast(&ctxt, input, Derive::Deserialize) {
+        Some(cont) => cont,
+        None => return Err(ctxt.check().unwrap_err()),
+    };
+
+    ctxt.check()?;
+
+    let dropshot = get_crate(get_crate_attr(&cont));
+
+    let fields = cont
+        .data
+        .all_fields()
+        .filter_map(|f| {
+            match &f.member {
+                syn::Member::Named(ident) => {
+                    let doc = extract_doc_from_attrs(&f.original.attrs)
+                        .map_or_else(
+                            || quote! { None },
+                            |s| quote! { Some(#s.to_string()) },
+                        );
+                    let name = ident.to_string();
+                    Some(quote! {
+                        #dropshot::ApiEndpointParameter {
+                            name: #name.to_string(),
+                            inn: _in.clone(),
+                            description: #doc ,
+                            required: true, // TODO look for Option type
+                            examples: vec![],
+                        }
+                    })
+                }
+                _ => None,
             }
-            (Some(TokenTree::Punct(at)), Some(TokenTree::Punct(bt)))
-                if at.as_char() == bt.as_char() =>
+        })
+        .collect::<Vec<_>>();
+
+    // Construct the appropriate where clause.
+    let name = cont.ident;
+    let mut generics = cont.generics.clone();
+
+    for tp in cont.generics.type_params() {
+        let ident = &tp.ident;
+        let pred: syn::WherePredicate = syn::parse2(quote! {
+            #ident : serde::de::DeserializeOwned
+        })
+        .map_err(|e| vec![e])?;
+        generics.make_where_clause().predicates.push(pred);
+    }
+
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let stream = quote! {
+        impl #impl_generics #dropshot::ExtractedParameter for #name #ty_generics
+        #where_clause
+        {
+            fn generate(
+                _in: #dropshot::ApiEndpointParameterLocation,
+            ) -> Vec<#dropshot::ApiEndpointParameter>
             {
-                continue
+                vec![ #(#fields,)* ]
             }
-            _ => break false,
         }
+    };
+
+    Ok(stream.into())
+}
+
+fn get_crate(var: Option<String>) -> TokenStream {
+    if let Some(s) = var {
+        if let Ok(ts) = syn::parse_str(s.as_str()) {
+            return ts;
+        }
+    }
+    syn::Ident::new(DROPSHOT, proc_macro2::Span::call_site()).to_token_stream()
+}
+
+fn get_crate_attr(
+    cont: &serde_derive_internals::ast::Container,
+) -> Option<String> {
+    cont.original
+        .attrs
+        .iter()
+        .filter_map(|attr| {
+            if let Ok(meta) = attr.parse_meta() {
+                if let syn::Meta::List(list) = meta {
+                    if list.path.is_ident(&syn::Ident::new(
+                        "dropshot",
+                        proc_macro2::Span::call_site(),
+                    )) && list.nested.len() == 1
+                    {
+                        if let Some(syn::NestedMeta::Meta(
+                            syn::Meta::NameValue(nv),
+                        )) = list.nested.first()
+                        {
+                            if nv.path.is_ident(&syn::Ident::new(
+                                "crate",
+                                proc_macro2::Span::call_site(),
+                            )) {
+                                if let syn::Lit::Str(s) = &nv.lit {
+                                    return Some(s.value());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .last()
+}
+
+#[allow(dead_code)]
+fn to_compile_errors(errors: Vec<syn::Error>) -> proc_macro2::TokenStream {
+    let compile_errors = errors.iter().map(syn::Error::to_compile_error);
+    quote!(#(#compile_errors)*)
+}
+
+fn extract_doc_from_attrs(attrs: &Vec<syn::Attribute>) -> Option<String> {
+    let doc = syn::Ident::new("doc", proc_macro2::Span::call_site());
+
+    attrs
+        .iter()
+        .filter_map(|attr| {
+            if let Ok(meta) = attr.parse_meta() {
+                if let syn::Meta::NameValue(nv) = meta {
+                    if nv.path.is_ident(&doc) {
+                        if let syn::Lit::Str(s) = nv.lit {
+                            let comment = s.value();
+                            if comment.starts_with(" ")
+                                && !comment.starts_with("  ")
+                            {
+                                // Trim off the first character if the comment
+                                // begins with a single space.
+                                return Some(format!(
+                                    "{}",
+                                    &comment.as_str()[1..]
+                                ));
+                            } else {
+                                return Some(comment);
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .fold(None, |acc, comment| {
+            Some(format!("{}{}", acc.unwrap_or(String::new()), comment))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_endpoint1() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                fn handler_xyz() {}
+            }
+            .into(),
+        );
+        let expected = quote! {
+            #[allow(non_camel_case_types, missing_docs)]
+            pub struct handler_xyz {}
+            #[allow(non_upper_case_globals, missing_docs)]
+            const handler_xyz: handler_xyz = handler_xyz {};
+            impl From<handler_xyz> for dropshot::ApiEndpoint {
+                fn from(_: handler_xyz) -> Self {
+                    fn handler_xyz() {}
+                    #[allow(unused_mut)]
+                    let mut endpoint =
+                        dropshot::ApiEndpoint::new(
+                            handler_xyz,
+                            Method::GET,
+                            "/a/b/c",
+                        );
+                    endpoint
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), ret.unwrap().to_string());
+    }
+
+    #[test]
+    fn test_endpoint2() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("expected `fn`", msg);
+    }
+
+    #[test]
+    fn test_endpoint3() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = /a/b/c
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("expected a string, but found `/`", msg);
+    }
+
+    #[test]
+    fn test_endpoint4() {
+        let ret = do_endpoint(
+            quote! {
+                methud = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("extraneous member `methud`", msg);
+    }
+
+    #[test]
+    fn test_derive_parameter() {
+        let ret = do_derive_parameter(
+            &syn::parse2::<syn::DeriveInput>(quote! {
+                struct Foo {
+                    a: String,
+                    b: String,
+                }
+            })
+            .unwrap(),
+        );
+
+        let expected = quote! {
+            impl dropshot::ExtractedParameter for Foo {
+                fn generate(
+                    _in: dropshot::ApiEndpointParameterLocation,
+                ) -> Vec<dropshot::ApiEndpointParameter> {
+                    vec![
+                        dropshot::ApiEndpointParameter {
+                            name: "a".to_string(),
+                            inn: _in.clone(),
+                            description: None,
+                            required: true,
+                            examples: vec![],
+                        },
+                        dropshot::ApiEndpointParameter {
+                            name: "b".to_string(),
+                            inn: _in.clone(),
+                            description: None,
+                            required: true,
+                            examples: vec![],
+                        },
+                    ]
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), ret.unwrap().to_string());
     }
 }

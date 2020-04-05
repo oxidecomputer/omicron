@@ -11,7 +11,6 @@ clap = "2"
 futures = "0.3.1"
 http = "0.2.0"
 dropshot = { path = "lib/dropshot" }
-dropshot_endpoint = { path = "lib/dropshot_endpoint" }
 hyper = "0.13"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_tokenstream = { path = "lib/serde_tokenstream" }

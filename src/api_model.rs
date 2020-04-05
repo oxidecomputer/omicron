@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
+use dropshot::ExtractedParameter;
+
 /** Default maximum number of items per page of "list" results */
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
@@ -255,7 +257,7 @@ pub struct ApiProjectView {
 /**
  * Represents the create-time parameters for an ApiProject.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -405,7 +407,7 @@ pub struct ApiInstanceView {
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,

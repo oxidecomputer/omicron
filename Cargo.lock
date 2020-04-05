@@ -183,10 +183,12 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono 0.4.11",
+ "dropshot_endpoint",
  "futures",
  "hostname 0.3.1",
  "http",
  "hyper",
+ "indexmap",
  "openapiv3",
  "serde",
  "serde_json",
@@ -208,7 +210,9 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
+ "schemars",
  "serde",
+ "serde_derive_internals",
  "serde_tokenstream",
  "slog",
  "syn",
@@ -687,7 +691,6 @@ dependencies = [
  "chrono 0.4.11",
  "clap",
  "dropshot",
- "dropshot_endpoint",
  "futures",
  "http",
  "hyper",
@@ -876,6 +879,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "535622e6be132bccd223f4bb2b8ac8d53cda3c7a6394944d3b2b33fb974f9d76"
 
 [[package]]
+name = "schemars"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10db1d3c2260e94570e1a492c762e62c11e1aac8869a2c3d869137995e6810d4"
+dependencies = [
+ "schemars_derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706d022205b93f710ea83037db4fc103358dd24e61a330d287d45d93fe1dc250"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -889,6 +915,17 @@ name = "serde_derive"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac5d00fc561ba2724df6758a17de23df5914f20e41cb00f94d5b7ae42fffaff8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dbab34ca63057a1f15280bdf3c39f2b1eb1b54c17e98360e511637aef7418c6"
 dependencies = [
  "proc-macro2",
  "quote",

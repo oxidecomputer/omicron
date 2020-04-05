@@ -19,10 +19,14 @@ pub mod test_util;
 extern crate slog;
 
 pub use api_description::ApiDescription;
+pub use api_description::ApiEndpoint;
+pub use api_description::ApiEndpointParameter;
+pub use api_description::ApiEndpointParameterLocation;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
-pub use handler::Derived;
+pub use handler::ExtractedParameter;
+pub use handler::Extractor;
 pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
 pub use handler::HttpResponseOkObject;
@@ -33,7 +37,6 @@ pub use handler::Path;
 pub use handler::Query;
 pub use handler::RequestContext;
 pub use handler::RouteHandler;
-pub use http_util::http_extract_path_param;
 pub use http_util::CONTENT_TYPE_JSON;
 pub use http_util::CONTENT_TYPE_NDJSON;
 pub use http_util::HEADER_REQUEST_ID;
@@ -52,3 +55,7 @@ pub use server::HttpServer;
  */
 pub use router::HttpRouter;
 pub use router::RouterLookupResult;
+
+extern crate dropshot_endpoint;
+pub use dropshot_endpoint::endpoint;
+pub use dropshot_endpoint::ExtractedParameter;

@@ -11,81 +11,71 @@ use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
-use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
-use crate::api_model::ApiProjectView;
+use crate::api_model::{ApiProject, ApiProjectView};
 use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
-use dropshot::http_extract_path_param;
+use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiEndpoint;
+use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOkObject;
 use dropshot::HttpResponseOkObjectList;
-use dropshot::HttpRouteHandler;
 use dropshot::Json;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
-use dropshot_endpoint::endpoint;
 
-pub fn api_register_entrypoints(api: &mut ApiDescription) {
-    api.register(
-        Method::GET,
-        "/projects",
-        HttpRouteHandler::new(api_projects_get),
-    );
-    api.register(
+pub fn api_register_entrypoints(
+    api: &mut ApiDescription,
+) -> Result<(), String> {
+    api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"))?;
+    api.register(ApiEndpoint::new(
+        api_projects_post,
         Method::POST,
         "/projects",
-        HttpRouteHandler::new(api_projects_post),
-    );
+    ))?;
 
-    // TODO: rethink this interface and convert all to use openapi::endpoint
-    /*
-    api.register(
-        Method::GET,
-        "/projects/{project_id}",
-        HttpRouteHandler::new(api_projects_get_project),
-    );
-    */
-    api_projects_get_project::register(api);
-    //api.register(api_projects_get_project);
+    api.register(api_projects_get_project)?;
 
-    api.register(
+    api.register(ApiEndpoint::new(
+        api_projects_delete_project,
         Method::DELETE,
         "/projects/{project_id}",
-        HttpRouteHandler::new(api_projects_delete_project),
-    );
-    api.register(
+    ))?;
+    api.register(ApiEndpoint::new(
+        api_projects_put_project,
         Method::PUT,
         "/projects/{project_id}",
-        HttpRouteHandler::new(api_projects_put_project),
-    );
+    ))?;
 
-    api.register(
+    api.register(ApiEndpoint::new(
+        api_project_instances_get,
         Method::GET,
         "/projects/{project_id}/instances",
-        HttpRouteHandler::new(api_project_instances_get),
-    );
-    api.register(
+    ))?;
+    api.register(ApiEndpoint::new(
+        api_project_instances_post,
         Method::POST,
         "/projects/{project_id}/instances",
-        HttpRouteHandler::new(api_project_instances_post),
-    );
-    api.register(
+    ))?;
+    api.register(ApiEndpoint::new(
+        api_project_instances_get_instance,
         Method::GET,
         "/projects/{project_id}/instances/{instance_id}",
-        HttpRouteHandler::new(api_project_instances_get_instance),
-    );
-    api.register(
+    ))?;
+    api.register(ApiEndpoint::new(
+        api_project_instances_delete_instance,
         Method::DELETE,
         "/projects/{project_id}/instances/{instance_id}",
-        HttpRouteHandler::new(api_project_instances_delete_instance),
-    );
+    ))?;
+
+    Ok(())
 }
 
 /*
@@ -126,12 +116,12 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
  */
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<PaginationParams<ApiName>>,
+    query_params: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params = params_raw.into_inner();
-    let project_stream = rack.projects_list(&params).await?;
+    let query = query_params.into_inner();
+    let project_stream = rack.projects_list(&query).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -149,33 +139,30 @@ async fn api_projects_post(
     Ok(HttpResponseCreated(project.to_view()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ExtractedParameter)]
 struct ProjectPathParam {
+    /// The project's unique ID.
     project_id: String,
 }
 
-/*
- * "GET /project/{project_id}": fetch a specific project
+/**
+ * Fetch a specific project
  */
 #[endpoint {
     method = GET,
     path = "/projects/{project_id}",
-    parameters = [
-        {
-            name = project_id,
-            in = path,
-        }
-    ]
 }]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
-    project_id: String,
+    path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let project: Arc<ApiProject> = rack
-        .project_lookup(&ApiName::from_param(project_id, "project_id")?)
-        .await?;
+    let path = path_params.into_inner();
+    let project_id =
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
+    let project: Arc<ApiProject> = rack.project_lookup(&project_id).await?;
+
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -270,7 +257,7 @@ async fn api_project_instances_post(
     Ok(HttpResponseCreated(instance.to_view()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     project_id: String,
     instance_id: String,
