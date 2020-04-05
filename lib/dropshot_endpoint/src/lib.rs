@@ -46,14 +46,14 @@ macro_rules! abort {
 
 #[derive(Deserialize, Debug)]
 enum InType {
-    #[serde(rename = "query")]
-    Query,
+    #[serde(rename = "cookie")]
+    Cookie,
     #[serde(rename = "header")]
     Header,
     #[serde(rename = "path")]
     Path,
-    #[serde(rename = "cookie")]
-    Cookie,
+    #[serde(rename = "query")]
+    Query,
 }
 
 #[derive(Deserialize, Debug)]

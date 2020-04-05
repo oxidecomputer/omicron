@@ -6,6 +6,7 @@
 
 mod api_description;
 mod config;
+mod endpoint;
 mod error;
 mod handler;
 mod http_util;
@@ -20,6 +21,10 @@ extern crate slog;
 
 pub use api_description::ApiDescription;
 pub use config::ConfigDropshot;
+pub use endpoint::Endpoint;
+pub use endpoint::EndpointInfo;
+pub use endpoint::EndpointParameter;
+pub use endpoint::EndpointParameterLocation;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::Derived;
@@ -40,6 +45,7 @@ pub use http_util::HEADER_REQUEST_ID;
 pub use logging::ConfigLogging;
 pub use logging::ConfigLoggingIfExists;
 pub use logging::ConfigLoggingLevel;
+pub use router::HttpEndpoint;
 pub use server::HttpServer;
 
 /*

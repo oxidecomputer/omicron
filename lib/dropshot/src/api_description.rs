@@ -3,6 +3,7 @@
  */
 
 use crate::router::HttpRouter;
+use crate::Endpoint;
 use crate::RouteHandler;
 use http::Method;
 
@@ -30,6 +31,11 @@ impl ApiDescription {
         handler: Box<dyn RouteHandler>,
     ) {
         self.router.insert(method, path, handler);
+    }
+
+    pub fn register2(&mut self, endpoint: &dyn Endpoint) {
+        let foo = endpoint.get();
+        self.router.insert2(endpoint.get());
     }
 
     pub fn print_openapi(&self) {

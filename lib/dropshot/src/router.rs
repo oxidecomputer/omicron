@@ -5,6 +5,8 @@
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
+use crate::EndpointInfo;
+use crate::EndpointParameter;
 use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
@@ -146,10 +148,17 @@ pub struct HttpRouter {
  */
 #[derive(Debug)]
 struct HttpRouterNode {
-    /** Handlers for each of the HTTP methods defined for this node. */
-    method_handlers: BTreeMap<String, Box<dyn RouteHandler>>,
+    /** Handlers, etc. for each of the HTTP methods defined for this node. */
+    methods: BTreeMap<String, HttpEndpoint>,
     /** Edges linking to child nodes. */
     edges: Option<HttpRouterEdges>,
+}
+
+#[derive(Debug)]
+pub struct HttpEndpoint {
+    /** Caller-supplied handler */
+    pub handler: Box<dyn RouteHandler>,
+    pub parameters: Vec<EndpointParameter>,
 }
 
 #[derive(Debug)]
@@ -220,7 +229,7 @@ pub struct RouterLookupResult<'a> {
 impl HttpRouterNode {
     pub fn new() -> Self {
         HttpRouterNode {
-            method_handlers: BTreeMap::new(),
+            methods: BTreeMap::new(),
             edges: None,
         }
     }
@@ -293,7 +302,16 @@ impl HttpRouter {
         path: &str,
         handler: Box<dyn RouteHandler>,
     ) {
-        let all_segments = HttpRouter::path_to_segments(path);
+        self.insert2(EndpointInfo {
+            method: method,
+            handler: handler,
+            path: path.to_string(),
+            parameters: vec![],
+        })
+    }
+
+    pub fn insert2(&mut self, endpoint: EndpointInfo) {
+        let all_segments = HttpRouter::path_to_segments(&endpoint.path);
         let mut varnames: BTreeSet<String> = BTreeSet::new();
 
         let mut node: &mut Box<HttpRouterNode> = &mut self.root;
@@ -318,7 +336,7 @@ impl HttpRouter {
                                  for literal path segment \"{}\" when a route \
                                  exists for variable path segment (variable \
                                  name: \"{}\")",
-                                path, lit, varname
+                                endpoint.path, lit, varname
                             );
                         }
                         HttpRouterEdges::Literals(ref mut literals) => literals
@@ -337,7 +355,7 @@ impl HttpRouter {
                         panic!(
                             "URI path \"{}\": variable name \"{}\" is used \
                              more than once",
-                            path, new_varname
+                            endpoint.path, new_varname
                         );
                     }
                     varnames.insert(new_varname.clone());
@@ -357,7 +375,7 @@ impl HttpRouter {
                              variable path segment (variable name: \"{}\") \
                              when a route already exists for a literal path \
                              segment",
-                            path, new_varname
+                            endpoint.path, new_varname
                         ),
 
                         HttpRouterEdges::Variable(varname, ref mut node) => {
@@ -373,7 +391,7 @@ impl HttpRouter {
                                      variable name \"{}\", but a different \
                                      name (\"{}\") has already been used for \
                                      this",
-                                    path, new_varname, varname
+                                    endpoint.path, new_varname, varname
                                 );
                             }
 
@@ -384,16 +402,19 @@ impl HttpRouter {
             };
         }
 
-        let methodname = method.as_str().to_uppercase();
-        if node.method_handlers.get(&methodname).is_some() {
+        let methodname = endpoint.method.as_str().to_uppercase();
+        if node.methods.get(&methodname).is_some() {
             panic!(
                 "URI path \"{}\": attempted to create duplicate route for \
                  method \"{}\"",
-                path, method
+                endpoint.path, endpoint.method,
             );
         }
 
-        node.method_handlers.insert(methodname, handler);
+        node.methods.insert(methodname, HttpEndpoint {
+            handler: endpoint.handler,
+            parameters: endpoint.parameters,
+        });
     }
 
     /**
@@ -436,15 +457,15 @@ impl HttpRouter {
          * As a somewhat special case, if one requests a node with no handlers
          * at all, report a 404.  We could probably treat this as a 405 as well.
          */
-        if node.method_handlers.is_empty() {
+        if node.methods.is_empty() {
             return Err(HttpError::for_status(StatusCode::NOT_FOUND));
         }
 
         let methodname = method.as_str().to_uppercase();
-        node.method_handlers
+        node.methods
             .get(&methodname)
             .map(|handler| RouterLookupResult {
-                handler,
+                handler: &handler.handler,
                 variables,
             })
             .ok_or_else(|| {
@@ -493,16 +514,13 @@ impl HttpRouter {
  * of the tree starting from the root node. For each node, we enumerate the
  * methods and then descend into its children (or single child in the case of
  * path parameter variables). `method` holds the iterator over the current
- * node's `method_handlers`; `path` is a stack that represents the current
- * collection of path segments and the iterators at each corresponding node.
- *
- * We start with the root node's `method_handlers` iterator and a stack
- * consisting of a blank string and an iterator over the root node's
- * children.
+ * node's `methods`; `path` is a stack that represents the current collection
+ * of path segments and the iterators at each corresponding node. We start with
+ * the root node's `methods` iterator and a stack consisting of a
+ * blank string and an iterator over the root node's children.
  */
 pub struct HttpRouterIter<'a> {
-    method:
-        Box<dyn Iterator<Item = (&'a String, &'a Box<dyn RouteHandler>)> + 'a>,
+    method: Box<dyn Iterator<Item = (&'a String, &'a HttpEndpoint)> + 'a>,
     path: Vec<(
         PathSegment,
         Box<dyn Iterator<Item = (PathSegment, &'a Box<HttpRouterNode>)> + 'a>,
@@ -512,7 +530,7 @@ pub struct HttpRouterIter<'a> {
 impl<'a> HttpRouterIter<'a> {
     fn new(router: &'a HttpRouter) -> Self {
         HttpRouterIter {
-            method: Box::new(router.root.method_handlers.iter()),
+            method: Box::new(router.root.methods.iter()),
             path: vec![(
                 PathSegment::Literal("".to_string()),
                 HttpRouterIter::iter_node(&router.root),
@@ -589,8 +607,7 @@ impl<'a> Iterator for HttpRouterIter<'a> {
                                     path_component,
                                     HttpRouterIter::iter_node(node),
                                 ));
-                                self.method =
-                                    Box::new(node.method_handlers.iter());
+                                self.method = Box::new(node.methods.iter());
                             }
                         },
                     }

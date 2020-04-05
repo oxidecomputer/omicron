@@ -20,6 +20,7 @@ use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::http_extract_path_param;
 use dropshot::ApiDescription;
+use dropshot::Endpoint;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -55,11 +56,12 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api_projects_get_project::register(api);
     //api.register(api_projects_get_project);
 
-    api.register(
-        Method::DELETE,
-        "/projects/{project_id}",
-        HttpRouteHandler::new(api_projects_delete_project),
-    );
+    api.register2(EndpointInfo {
+        method: Method::DELETE,
+        path: "/projects/{project_id}".to_string(),
+        handler: HttpRouteHandler::new(api_projects_delete_project),
+        parameters: vec![],
+    });
     api.register(
         Method::PUT,
         "/projects/{project_id}",
