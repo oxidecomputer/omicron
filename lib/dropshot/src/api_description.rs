@@ -3,9 +3,32 @@
  */
 
 use crate::router::HttpRouter;
-use crate::Endpoint;
 use crate::RouteHandler;
 use http::Method;
+
+#[derive(Debug)]
+pub struct Endpoint<'a> {
+    pub handler: Box<dyn RouteHandler>,
+    pub method: Method,
+    pub path: &'a str,
+    pub parameters: Vec<EndpointParameter>,
+}
+
+#[derive(Debug)]
+pub struct EndpointParameter {
+    // everything I need for OpenAPI
+    name: String,
+    location: EndpointParameterLocation,
+    description: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum EndpointParameterLocation {
+    Cookie,
+    Header,
+    Path,
+    Query,
+}
 
 /**
  * An ApiDescription represents the endpoints and handler functions in your API.
@@ -33,9 +56,12 @@ impl ApiDescription {
         self.router.insert(method, path, handler);
     }
 
-    pub fn register2(&mut self, endpoint: &dyn Endpoint) {
-        let foo = endpoint.get();
-        self.router.insert2(endpoint.get());
+    pub fn register2<'a, T>(&mut self, endpoint: T)
+    where
+        T: Into<Endpoint<'a>>,
+    {
+        let e = endpoint.into();
+        self.register(e.method.clone(), &e.path, e.handler)
     }
 
     pub fn print_openapi(&self) {

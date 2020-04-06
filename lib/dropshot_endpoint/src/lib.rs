@@ -211,11 +211,20 @@ fn do_endpoint(
 
     let method_ident = quote::format_ident!("{}", method);
 
+    // The final TokenStream returned will have a few components that reference
+    // `#name`, the name of the method to which this macro was applied:
+    // 1. a struct type called `#name` that has no members
+    // 2. a constant of type `#name` whose identifier is also #name
+    // 3. an implementation for `From<#name>` for Endpoint which allows the
+    //    constant `#name` to be passed into `ApiDescription::register()`
     let stream = quote! {
         #[allow(non_camel_case_types, missing_docs)]
-        pub struct #name;
-        impl #name {
-            fn register(api: &mut dropshot::ApiDescription) {
+        pub struct #name {}
+        #[allow(non_upper_case_globals, missing_docs)]
+        const #name: #name = #name {};
+
+        impl<'a> From<#name> for Endpoint<'a> {
+            fn from(_: #name) -> Self {
                 #ast
                 async fn handle(
                     rqctx: Arc<RequestContext>
@@ -223,7 +232,13 @@ fn do_endpoint(
                     #(#vars;)*
                     #name(#(#ins),*).await
                 }
-                api.register(Method::#method_ident, #path, HttpRouteHandler::new(handle));
+
+                Endpoint {
+                    method: Method::#method_ident,
+                    path: #path,
+                    handler: HttpRouteHandler::new(handle),
+                    parameters: vec![],
+                }
             }
         }
     };

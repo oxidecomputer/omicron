@@ -6,7 +6,6 @@
 
 mod api_description;
 mod config;
-mod endpoint;
 mod error;
 mod handler;
 mod http_util;
@@ -20,11 +19,10 @@ pub mod test_util;
 extern crate slog;
 
 pub use api_description::ApiDescription;
+pub use api_description::Endpoint;
+pub use api_description::EndpointParameter;
+pub use api_description::EndpointParameterLocation;
 pub use config::ConfigDropshot;
-pub use endpoint::Endpoint;
-pub use endpoint::EndpointInfo;
-pub use endpoint::EndpointParameter;
-pub use endpoint::EndpointParameterLocation;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::Derived;

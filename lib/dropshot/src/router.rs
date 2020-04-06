@@ -5,7 +5,6 @@
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
-use crate::EndpointInfo;
 use crate::EndpointParameter;
 use http::Method;
 use http::StatusCode;
@@ -302,16 +301,7 @@ impl HttpRouter {
         path: &str,
         handler: Box<dyn RouteHandler>,
     ) {
-        self.insert2(EndpointInfo {
-            method: method,
-            handler: handler,
-            path: path.to_string(),
-            parameters: vec![],
-        })
-    }
-
-    pub fn insert2(&mut self, endpoint: EndpointInfo) {
-        let all_segments = HttpRouter::path_to_segments(&endpoint.path);
+        let all_segments = HttpRouter::path_to_segments(path);
         let mut varnames: BTreeSet<String> = BTreeSet::new();
 
         let mut node: &mut Box<HttpRouterNode> = &mut self.root;
@@ -336,7 +326,7 @@ impl HttpRouter {
                                  for literal path segment \"{}\" when a route \
                                  exists for variable path segment (variable \
                                  name: \"{}\")",
-                                endpoint.path, lit, varname
+                                path, lit, varname
                             );
                         }
                         HttpRouterEdges::Literals(ref mut literals) => literals
@@ -355,7 +345,7 @@ impl HttpRouter {
                         panic!(
                             "URI path \"{}\": variable name \"{}\" is used \
                              more than once",
-                            endpoint.path, new_varname
+                            path, new_varname
                         );
                     }
                     varnames.insert(new_varname.clone());
@@ -375,7 +365,7 @@ impl HttpRouter {
                              variable path segment (variable name: \"{}\") \
                              when a route already exists for a literal path \
                              segment",
-                            endpoint.path, new_varname
+                            path, new_varname
                         ),
 
                         HttpRouterEdges::Variable(varname, ref mut node) => {
@@ -391,7 +381,7 @@ impl HttpRouter {
                                      variable name \"{}\", but a different \
                                      name (\"{}\") has already been used for \
                                      this",
-                                    endpoint.path, new_varname, varname
+                                    path, new_varname, varname
                                 );
                             }
 
@@ -402,18 +392,19 @@ impl HttpRouter {
             };
         }
 
-        let methodname = endpoint.method.as_str().to_uppercase();
+        let methodname = method.as_str().to_uppercase();
         if node.methods.get(&methodname).is_some() {
             panic!(
                 "URI path \"{}\": attempted to create duplicate route for \
                  method \"{}\"",
-                endpoint.path, endpoint.method,
+                path, method,
             );
         }
 
         node.methods.insert(methodname, HttpEndpoint {
-            handler: endpoint.handler,
-            parameters: endpoint.parameters,
+            handler: handler,
+            // TODO
+            parameters: vec![],
         });
     }
 
