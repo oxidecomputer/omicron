@@ -417,7 +417,7 @@ pub trait RouteHandler: Debug + Send + Sync {
      * Returns a description of this handler.  This might be a function name,
      * for example.  This is not guaranteed to be unique.
      */
-    fn label(&self) -> &String;
+    fn label(&self) -> &str;
 
     /**
      * Handle an incoming HTTP request.
@@ -478,7 +478,7 @@ where
     FuncParams: Derived + 'static,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
-    fn label(&self) -> &String {
+    fn label(&self) -> &str {
         &self.label
     }
 
