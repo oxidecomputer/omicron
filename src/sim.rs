@@ -311,8 +311,7 @@ impl ApiBackend for Simulator {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance>
-    {
+    ) -> LookupResult<ApiInstance> {
         let mut projects = self.projects_by_name.lock().await;
         let project = collection_lookup(
             &mut projects,
@@ -333,8 +332,7 @@ impl ApiBackend for Simulator {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> DeleteResult
-    {
+    ) -> DeleteResult {
         let mut projects = self.projects_by_name.lock().await;
         let project = collection_lookup(
             &mut projects,
@@ -344,9 +342,11 @@ impl ApiBackend for Simulator {
         let simproject = sim_project(project);
         let mut instances = simproject.instances.lock().await;
 
-        instances.remove(instance_name).ok_or_else(|| ApiError::ObjectNotFound {
-            type_name: ApiResourceType::Instance,
-            object_name: String::from(instance_name.clone()),
+        instances.remove(instance_name).ok_or_else(|| {
+            ApiError::ObjectNotFound {
+                type_name: ApiResourceType::Instance,
+                object_name: String::from(instance_name.clone()),
+            }
         })?;
         Ok(())
     }
