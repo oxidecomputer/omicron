@@ -7,6 +7,7 @@
 use http::method::Method;
 use http::StatusCode;
 use oxide_api_prototype::api_model::ApiByteCount;
+use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
 use oxide_api_prototype::api_model::ApiIdentityMetadataUpdateParams;
 use oxide_api_prototype::api_model::ApiInstanceCpuCount;
@@ -531,6 +532,7 @@ async fn test_instances() {
     assert_eq!(instances.len(), 0);
 
     /* Create an instance. */
+    let instance_url = format!("{}/just-rainsticks", url_instances);
     let new_instance = ApiInstanceCreateParams {
         identity: ApiIdentityMetadataCreateParams {
             name: ApiName::try_from("just-rainsticks").unwrap(),
@@ -573,26 +575,76 @@ async fn test_instances() {
         .unwrap();
     let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
     assert_eq!(instances.len(), 1);
-    assert_eq!(instances[0].identity.name, instance.identity.name);
-    assert_eq!(
-        instances[0].identity.description,
-        instance.identity.description
-    );
-    let ApiInstanceCpuCount(nfoundcpus2) = instances[0].ncpus;
-    assert_eq!(nfoundcpus, nfoundcpus2);
-    assert_eq!(instances[0].memory.to_bytes(), instance.memory.to_bytes());
-    assert_eq!(
-        instances[0].boot_disk_size.to_bytes(),
-        instance.boot_disk_size.to_bytes()
-    );
-    assert_eq!(instances[0].hostname, instance.hostname);
+    instances_eq(&instances[0], &instance);
+
+    /* Fetch the instance and expect it to match. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instance_get: ApiInstanceView = read_json(&mut response).await;
+    instances_eq(&instances[0], &instance_get);
+
+    /* Delete the instance. */
+    testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    /* Make sure we get a 404 if we fetch it. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Try to delete it again.  This should fail with a 404, too. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* List instances again.  We should find none. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &url_instances,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    assert_eq!(instances.len(), 0);
 
     /*
      * TODO-coverage: tests to add:
-     * - GET instance, make sure it matches what we expect
-     * - DELETE instance
-     * - LIST instances again
-     * - DELETE instance again (should fail)
      * - invalid cases:
      *   - GET: nonexistent (covered elsewhere?)
      *   - DELETE: nonexistent (covered elsewhere?)
@@ -632,4 +684,31 @@ async fn test_instances() {
      */
 
     testctx.teardown().await;
+}
+
+fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView)
+{
+    identity_eq(&instance1.identity, &instance2.identity);
+    assert_eq!(instance1.project_id, instance2.project_id);
+
+    let ApiInstanceCpuCount(nfoundcpus1) = instance1.ncpus;
+    let ApiInstanceCpuCount(nfoundcpus2) = instance2.ncpus;
+    assert_eq!(nfoundcpus1, nfoundcpus2);
+
+    assert_eq!(instance1.memory.to_bytes(), instance2.memory.to_bytes());
+    assert_eq!(
+        instance1.boot_disk_size.to_bytes(),
+        instance2.boot_disk_size.to_bytes()
+    );
+    assert_eq!(instance1.hostname, instance2.hostname);
+    assert_eq!(instance1.state, instance2.state);
+}
+
+fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata)
+{
+    assert_eq!(ident1.id, ident2.id);
+    assert_eq!(ident1.name, ident2.name);
+    assert_eq!(ident1.description, ident2.description);
+    assert_eq!(ident1.time_created, ident2.time_created);
+    assert_eq!(ident1.time_modified, ident2.time_modified);
 }

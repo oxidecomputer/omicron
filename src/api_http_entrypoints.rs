@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use crate::api_backend;
 use crate::api_model::to_view_list;
+use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
-use crate::api_model::ApiInstance;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
@@ -77,6 +77,11 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
         Method::GET,
         "/projects/{project_id}/instances/{instance_id}",
         HttpRouteHandler::new(api_project_instances_get_instance),
+    );
+    api.register(
+        Method::DELETE,
+        "/projects/{project_id}/instances/{instance_id}",
+        HttpRouteHandler::new(api_project_instances_delete_instance),
     );
 }
 
@@ -267,7 +272,7 @@ struct InstancePathParam {
  * "GET /project/{project_id}/instances/{instance_id}"
  */
 async fn api_project_instances_get_instance(
-    rqctx: Arc<RequestContext>
+    rqctx: Arc<RequestContext>,
 ) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params: InstancePathParam =
@@ -276,7 +281,24 @@ async fn api_project_instances_get_instance(
         ApiName::from_param(params.project_id.clone(), "project_id")?;
     let instance_id =
         ApiName::from_param(params.instance_id.clone(), "instance_id")?;
-    let instance: Arc<ApiInstance> = backend.project_lookup_instance(
-        &project_id, &instance_id).await?;
+    let instance: Arc<ApiInstance> =
+        backend.project_lookup_instance(&project_id, &instance_id).await?;
     Ok(HttpResponseOkObject(instance.to_view()))
+}
+
+/*
+ * "DELETE /project/{project_id}/instances/{instance_id}"
+ */
+async fn api_project_instances_delete_instance(
+    rqctx: Arc<RequestContext>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let backend = api_backend(&rqctx);
+    let params: InstancePathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let instance_id =
+        ApiName::from_param(params.instance_id.clone(), "instance_id")?;
+    backend.project_delete_instance(&project_id, &instance_id).await?;
+    Ok(HttpResponseDeleted())
 }

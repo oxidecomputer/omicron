@@ -545,6 +545,11 @@ pub trait ApiBackend: Send + Sync {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance>;
+    async fn project_delete_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> DeleteResult;
 }
 
 #[cfg(test)]

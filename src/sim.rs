@@ -328,6 +328,28 @@ impl ApiBackend for Simulator {
         )?;
         Ok(Arc::clone(instance))
     }
+
+    async fn project_delete_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> DeleteResult
+    {
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let simproject = sim_project(project);
+        let mut instances = simproject.instances.lock().await;
+
+        instances.remove(instance_name).ok_or_else(|| ApiError::ObjectNotFound {
+            type_name: ApiResourceType::Instance,
+            object_name: String::from(instance_name.clone()),
+        })?;
+        Ok(())
+    }
 }
 
 /**
