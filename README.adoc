@@ -122,8 +122,6 @@ the server to exit immediately with an error).
 
 * Current work: adding support for Instances
 ** Working on instances
-*** finish writing tests in test_basic.rs
-*** Delete
 *** Update?
 *** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
