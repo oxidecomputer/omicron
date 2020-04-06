@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use serde_tokenstream::from_tokenstream;
+use serde_tokenstream::Error;
+use syn::spanned::Spanned;
 
 // We use the `abort` macro to identify known, aberrant conditions while
 // processing macro parameters. This is based on `proc_macro_error::abort`
@@ -94,23 +96,23 @@ struct Metadata {
 
 /// Attribute to apply to an HTTP endpoint.
 /// TODO(doc) explain intended use
+#[proc_macro_error::proc_macro_error]
 #[proc_macro_attribute]
 pub fn endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    do_endpoint(attr, item).unwrap()
+    match do_endpoint(attr, item) {
+        Ok(result) => result,
+        Err(err) => err.to_compile_error().into(),
+    }
 }
 
 fn do_endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
-) -> Result<proc_macro::TokenStream, &'static str> {
-    let metadata = match from_tokenstream::<Metadata>(&TokenStream::from(attr))
-    {
-        Ok(value) => value,
-        Err(err) => panic!("{:?}", err),
-    };
+) -> Result<proc_macro::TokenStream, Error> {
+    let metadata = from_tokenstream::<Metadata>(&TokenStream::from(attr))?;
 
     let method = metadata.method.as_str();
     let path = metadata.path;
@@ -142,20 +144,32 @@ fn do_endpoint(
                     if tokenstream_eq(&cty, &tt) {
                         context = true;
                         if i != 0 {
-                            return Err("context parameter needs to be first");
+                            return Err(Error::new(
+                                arg.span(),
+                                "context parameter needs to be first",
+                            ));
                         }
                     } else {
                         if param_map.get(&id.ident.to_string()).is_none() {
-                            return Err("param not described");
+                            return Err(Error::new(
+                                arg.span(),
+                                "param not described",
+                            ));
                         }
                     }
                 }
-                _ => return Err("unexpected parameter type"),
+                _ => {
+                    return Err(Error::new(
+                        parameter.span(),
+                        "unexpected parameter type",
+                    ));
+                }
             },
-            syn::FnArg::Receiver(_selph) => {
-                return Err(
-                    "attribute cannot be applied to a method that uses self"
-                )
+            syn::FnArg::Receiver(_self) => {
+                return Err(Error::new(
+                    arg.span(),
+                    "attribute cannot be applied to a method that uses self",
+                ));
             }
         }
     }

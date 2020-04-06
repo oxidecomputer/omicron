@@ -33,3 +33,5 @@
 
 mod serde_tokenstream;
 pub use crate::serde_tokenstream::from_tokenstream;
+pub use crate::serde_tokenstream::Error;
+pub use crate::serde_tokenstream::Result;
