@@ -149,6 +149,24 @@ async fn test_basic_failures() {
          and \"-\")",
         error.message
     );
+
+    /* Error case: delete an instance with an invalid name. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            "/projects/nonexistent/instances/my_instance",
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!(
+        "unsupported value for \"instance_id\": name contains invalid \
+         character: \"_\" (allowed characters are lowercase ASCII, digits, \
+         and \"-\")",
+        error.message
+    );
 }
 
 /*
@@ -531,8 +549,34 @@ async fn test_instances() {
     let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
     assert_eq!(instances.len(), 0);
 
-    /* Create an instance. */
+    /* Make sure we get a 404 if we fetch one. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Ditto if we try to delete one. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Create an instance. */
     let new_instance = ApiInstanceCreateParams {
         identity: ApiIdentityMetadataCreateParams {
             name: ApiName::try_from("just-rainsticks").unwrap(),
@@ -548,7 +592,7 @@ async fn test_instances() {
         .make_request(
             Method::POST,
             &url_instances,
-            Some(new_instance),
+            Some(new_instance.clone()),
             StatusCode::CREATED,
         )
         .await
@@ -561,6 +605,19 @@ async fn test_instances() {
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
     assert_eq!(instance.boot_disk_size.to_whole_mebibytes(), 1024);
     assert_eq!(instance.hostname, "rainsticks");
+
+    /* Attempt to create a second instance with a conflicting name. */
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::POST,
+            &url_instances,
+            Some(new_instance),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
 
     /* List instances again and expect to find the one we just created. */
     let mut response = testctx
@@ -644,50 +701,54 @@ async fn test_instances() {
     assert_eq!(instances.len(), 0);
 
     /*
-     * TODO-coverage: tests to add:
-     * - invalid cases:
-     *   - GET: nonexistent (covered elsewhere?)
-     *   - DELETE: nonexistent (covered elsewhere?)
-     *   - DELETE: invalid name (worth covering here?)
-     *   - CREATE:
-     *     - bad values for various parameters?
-     *       - should most of this be covered by unit tests in the model?
-     *     - duplicate name
-     *     - invalid name
-     * TODO:
-     * - Do we want to consider an omnibus "bad input" test that would:
-     *   - set up a hierarchy with at least one of every resource
-     *   - for every possible resource:
-     *     - attempt to (create, get, put, delete) one with an invalid name
-     *     - attempt to (GET, DELETE, PUT) one that does not exist
-     *     - attempt to create one with invalid JSON
-     *     - attempt to create one with a duplicate name of the one we know
-     *       about
-     *     - exercise list operation with marker and limit
-     *       (may need to create many of them)
-     *     - for each required input property:
-     *       - attempt to create a resource without that property
-     *     - for each input property:
-     *       - attempt to create a resource with invalid values for that
-     *         property
-     *
-     * - More sophisticated, but maybe duplicating what's here:
-     *   - for every resource:
-     *     - list resources, find the one we know about
-     *     - GET the resource we know about
-     *     - DELETE the resource we know about
-     *     - GET the resource we know about and have it fail
-     *     - list resources, find nothing
-     *
-     * This isn't that different than what we have right now, but I wonder how
-     * much more could be automated instead of handcoding all these cases.
+     * The rest of these examples attempt to create invalid instances.  We don't
+     * do exhaustive tests of the model here -- those are part of unit tests --
+     * but we exercise a few different types of errors to make sure those get
+     * passed through properly.
      */
+
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &url_instances,
+            "{".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .message
+        .starts_with("unable to parse body: EOF while parsing an object"));
+
+    let request_body = r##"
+        {
+            "name": "an-instance",
+            "description": "will never exist",
+            "ncpus": -3,
+            "memory": 256,
+            "boot_disk_size": 2048,
+            "hostname": "localhost",
+        }
+    "##;
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &url_instances,
+            request_body.into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .message
+        .starts_with("unable to parse body: invalid value: integer `-3`"));
 
     testctx.teardown().await;
 }
 
-fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView)
-{
+fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
     identity_eq(&instance1.identity, &instance2.identity);
     assert_eq!(instance1.project_id, instance2.project_id);
 
@@ -704,8 +765,7 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView)
     assert_eq!(instance1.state, instance2.state);
 }
 
-fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata)
-{
+fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata) {
     assert_eq!(ident1.id, ident2.id);
     assert_eq!(ident1.name, ident2.name);
     assert_eq!(ident1.description, ident2.description);

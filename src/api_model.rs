@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
@@ -63,9 +64,12 @@ pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
  *
  * The only thing guaranteed by the `ApiObject` trait is that the type can be
  * converted to a View, which is something that can be serialized.
+ *
+ * TODO-coverage: each type could have unit tests for various invalid input
+ * types?
  */
 pub trait ApiObject {
-    type View: Serialize;
+    type View: Serialize + Clone + Debug;
     fn to_view(&self) -> Self::View;
 }
 
@@ -197,11 +201,6 @@ impl ApiName {
  * (shared by most API objects)
  */
 
-/*
- * TODO-correctness: RFD 4 calls for an "id" here, but it's not clear yet how it
- * could be used.  At some point we'll need to resolve that and decide what we
- * want to do here.
- */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
@@ -217,13 +216,13 @@ pub struct ApiIdentityMetadata {
     pub time_modified: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
     pub description: Option<String>,
@@ -266,7 +265,7 @@ impl ApiObject for ApiProject {
 /**
  * Represents the properties of an ApiProject that can be seen by end users.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -276,7 +275,7 @@ pub struct ApiProjectView {
 /**
  * Represents the create-time parameters for an ApiProject.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -285,7 +284,7 @@ pub struct ApiProjectCreateParams {
 /**
  * Represents the properties of an ApiProject that can be updated by end users.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
@@ -401,7 +400,7 @@ impl ApiObject for ApiInstance {
 /**
  * Represents the properties of an `ApiInstance` that can be seen by end users.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -428,7 +427,7 @@ pub struct ApiInstanceView {
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -444,7 +443,7 @@ pub struct ApiInstanceCreateParams {
  * the key properties to be updated only by a separate "resize" API that would
  * be async.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
