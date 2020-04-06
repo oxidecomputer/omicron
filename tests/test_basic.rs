@@ -6,13 +6,19 @@
 
 use http::method::Method;
 use http::StatusCode;
+use oxide_api_prototype::api_model::ApiByteCount;
+use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
 use oxide_api_prototype::api_model::ApiIdentityMetadataUpdateParams;
+use oxide_api_prototype::api_model::ApiInstanceCpuCount;
+use oxide_api_prototype::api_model::ApiInstanceCreateParams;
+use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 use std::convert::TryFrom;
+use uuid::Uuid;
 
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_ndjson;
@@ -20,31 +26,11 @@ use dropshot::test_util::read_ndjson;
 pub mod common;
 use common::test_setup;
 
-/*
- * Most of our tests wind up in this one test function primarily because they
- * depend on each other and Rust is allowed to parallelize execution of separate
- * tests.  An example where tests depend on each other is that one test creates
- * a project, one test deletes a project, and another lists projects.  The
- * result of the "list projects" test depends on which of these other tests have
- * run.  We could have it deal with all possible valid cases, but that's not
- * very scalable.  We could demand that users run with RUST_TEST_THREADS=1, but
- * in the future we may have lots of tests that _can_ run in parallel, and it
- * would be nice to do so.  This way, the code reflects the real dependency.
- * (It would be ideal if Rust had a way to say that the tests within one file
- * must not be parallelized or something like that, but that doesn't seem to
- * exist.)
- *
- * TODO-perf: many of these really could be broken out (e.g., all the error
- * cases that are totally independent of everything else) if we allowed the test
- * server to bind to an arbitrary port.
- */
 #[tokio::test]
-async fn smoke_test() {
-    let testctx = test_setup("smoke_test").await;
+async fn test_basic_failures() {
+    let testctx = test_setup("basic_failures").await;
 
-    /*
-     * Error case: GET /nonexistent (a path with no route at all)
-     */
+    /* Error case: GET /nonexistent (a path with no route at all) */
     let error = testctx
         .client_testctx
         .make_request(
@@ -89,10 +75,108 @@ async fn smoke_test() {
         .await
         .expect_err("expected error");
     assert_eq!(
-        "unsupported value for \"project_id\": name must begin with an \
-         ASCII lowercase character",
+        "unsupported value for \"project_id\": name must begin with an ASCII \
+         lowercase character",
         error.message
     );
+
+    /* Error case: PUT /projects */
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::PUT,
+            "/projects",
+            None as Option<()>,
+            StatusCode::METHOD_NOT_ALLOWED,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!("Method Not Allowed", error.message);
+
+    /* Error case: DELETE /projects */
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::DELETE,
+            "/projects",
+            None as Option<()>,
+            StatusCode::METHOD_NOT_ALLOWED,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!("Method Not Allowed", error.message);
+
+    /* Error case: list instances in a nonexistent project. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/projects/nonexistent/instances",
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!("not found: project \"nonexistent\"", error.message);
+
+    /* Error case: fetch an instance in a nonexistent project. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/projects/nonexistent/instances/my-instance",
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!("not found: project \"nonexistent\"", error.message);
+
+    /* Error case: fetch an instance with an invalid name. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/projects/nonexistent/instances/my_instance",
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!(
+        "unsupported value for \"instance_id\": name contains invalid \
+         character: \"_\" (allowed characters are lowercase ASCII, digits, \
+         and \"-\")",
+        error.message
+    );
+
+    /* Error case: delete an instance with an invalid name. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            "/projects/nonexistent/instances/my_instance",
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .expect_err("expected error");
+    assert_eq!(
+        "unsupported value for \"instance_id\": name contains invalid \
+         character: \"_\" (allowed characters are lowercase ASCII, digits, \
+         and \"-\")",
+        error.message
+    );
+}
+
+/*
+ * TODO-cleanup: At this point, it would probably be best to remove any
+ * pre-created projects from the server and update this test to assume no
+ * initial projects.
+ */
+#[tokio::test]
+async fn test_projects() {
+    let testctx = test_setup("test_projects").await;
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
@@ -111,36 +195,6 @@ async fn smoke_test() {
     assert_eq!("Not Found", error.message);
 
     /*
-     * Error case: PUT /projects
-     */
-    let error = testctx
-        .client_testctx
-        .make_request(
-            Method::PUT,
-            "/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
-
-    /*
-     * Error case: DELETE /projects
-     */
-    let error = testctx
-        .client_testctx
-        .make_request(
-            Method::DELETE,
-            "/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
-
-    /*
      * Basic test of out-of-the-box GET /projects
      * TODO-coverage: pagination
      * TODO-coverage: marker even without pagination
@@ -157,11 +211,20 @@ async fn smoke_test() {
         .expect("expected success");
     let initial_projects: Vec<ApiProjectView> =
         read_ndjson(&mut response).await;
+    let simid1 =
+        Uuid::parse_str("1eb2b543-b199-405f-b705-1739d01a197c").unwrap();
+    let simid2 =
+        Uuid::parse_str("4f57c123-3bda-4fae-94a2-46a9632d40b6").unwrap();
+    let simid3 =
+        Uuid::parse_str("4aac89b0-df9a-441d-b050-f953476ea290").unwrap();
     assert_eq!(initial_projects.len(), 3);
+    assert_eq!(initial_projects[0].identity.id, simid1);
     assert_eq!(initial_projects[0].identity.name, "simproject1");
     assert!(initial_projects[0].identity.description.len() > 0);
+    assert_eq!(initial_projects[1].identity.id, simid2);
     assert_eq!(initial_projects[1].identity.name, "simproject2");
     assert!(initial_projects[1].identity.description.len() > 0);
+    assert_eq!(initial_projects[2].identity.id, simid3);
     assert_eq!(initial_projects[2].identity.name, "simproject3");
     assert!(initial_projects[2].identity.description.len() > 0);
 
@@ -180,6 +243,7 @@ async fn smoke_test() {
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
     let expected = &initial_projects[1];
+    assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
@@ -258,6 +322,7 @@ async fn smoke_test() {
         .collect();
     let new_projects: Vec<ApiProjectView> = read_ndjson(&mut response).await;
     assert_eq!(new_projects.len(), expected_projects.len());
+    assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
         new_projects[0].identity.name,
         expected_projects[0].identity.name
@@ -266,6 +331,7 @@ async fn smoke_test() {
         new_projects[0].identity.description,
         expected_projects[0].identity.description
     );
+    assert_eq!(new_projects[1].identity.id, expected_projects[1].identity.id);
     assert_eq!(
         new_projects[1].identity.name,
         expected_projects[1].identity.name
@@ -296,6 +362,7 @@ async fn smoke_test() {
         .await
         .expect("expected success");
     let project: ApiProjectView = read_json(&mut response).await;
+    assert_eq!(project.identity.id, simid3);
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
@@ -337,6 +404,7 @@ async fn smoke_test() {
         .await
         .expect("failed to make request to server");
     let project: ApiProjectView = read_json(&mut response).await;
+    assert_eq!(project.identity.id, simid3);
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
@@ -442,4 +510,265 @@ async fn smoke_test() {
     assert!(projects[2].identity.description.len() > 0);
 
     testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_instances() {
+    let testctx = test_setup("test_instances").await;
+
+    /* Create a project that we'll use for testing. */
+    let project_name = "springfield-squidport";
+    let url_instances = format!("/projects/{}/instances", project_name);
+    testctx
+        .client_testctx
+        .make_request(
+            Method::POST,
+            "/projects",
+            Some(ApiProjectCreateParams {
+                identity: ApiIdentityMetadataCreateParams {
+                    name: ApiName::try_from(project_name).unwrap(),
+                    description: "a pier".to_string(),
+                },
+            }),
+            StatusCode::CREATED,
+        )
+        .await
+        .unwrap();
+
+    /* List instances.  There aren't any yet. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &url_instances,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    assert_eq!(instances.len(), 0);
+
+    /* Make sure we get a 404 if we fetch one. */
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Ditto if we try to delete one. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Create an instance. */
+    let new_instance = ApiInstanceCreateParams {
+        identity: ApiIdentityMetadataCreateParams {
+            name: ApiName::try_from("just-rainsticks").unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        ncpus: ApiInstanceCpuCount(4),
+        memory: ApiByteCount::from_mebibytes(256),
+        boot_disk_size: ApiByteCount::from_gibibytes(1),
+        hostname: String::from("rainsticks"),
+    };
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::POST,
+            &url_instances,
+            Some(new_instance.clone()),
+            StatusCode::CREATED,
+        )
+        .await
+        .unwrap();
+    let instance: ApiInstanceView = read_json(&mut response).await;
+    assert_eq!(instance.identity.name, "just-rainsticks");
+    assert_eq!(instance.identity.description, "sells rainsticks");
+    let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
+    assert_eq!(nfoundcpus, 4);
+    assert_eq!(instance.memory.to_whole_mebibytes(), 256);
+    assert_eq!(instance.boot_disk_size.to_whole_mebibytes(), 1024);
+    assert_eq!(instance.hostname, "rainsticks");
+
+    /* Attempt to create a second instance with a conflicting name. */
+    let error = testctx
+        .client_testctx
+        .make_request(
+            Method::POST,
+            &url_instances,
+            Some(new_instance),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
+
+    /* List instances again and expect to find the one we just created. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &url_instances,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    assert_eq!(instances.len(), 1);
+    instances_eq(&instances[0], &instance);
+
+    /* Fetch the instance and expect it to match. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instance_get: ApiInstanceView = read_json(&mut response).await;
+    instances_eq(&instances[0], &instance_get);
+
+    /* Delete the instance. */
+    testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    /* Make sure we get a 404 if we fetch it. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* Try to delete it again.  This should fail with a 404, too. */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::DELETE,
+            &instance_url,
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+
+    /* List instances again.  We should find none. */
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &url_instances,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    assert_eq!(instances.len(), 0);
+
+    /*
+     * The rest of these examples attempt to create invalid instances.  We don't
+     * do exhaustive tests of the model here -- those are part of unit tests --
+     * but we exercise a few different types of errors to make sure those get
+     * passed through properly.
+     */
+
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &url_instances,
+            "{".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .message
+        .starts_with("unable to parse body: EOF while parsing an object"));
+
+    let request_body = r##"
+        {
+            "name": "an-instance",
+            "description": "will never exist",
+            "ncpus": -3,
+            "memory": 256,
+            "boot_disk_size": 2048,
+            "hostname": "localhost",
+        }
+    "##;
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &url_instances,
+            request_body.into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .message
+        .starts_with("unable to parse body: invalid value: integer `-3`"));
+
+    testctx.teardown().await;
+}
+
+fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
+    identity_eq(&instance1.identity, &instance2.identity);
+    assert_eq!(instance1.project_id, instance2.project_id);
+
+    let ApiInstanceCpuCount(nfoundcpus1) = instance1.ncpus;
+    let ApiInstanceCpuCount(nfoundcpus2) = instance2.ncpus;
+    assert_eq!(nfoundcpus1, nfoundcpus2);
+
+    assert_eq!(instance1.memory.to_bytes(), instance2.memory.to_bytes());
+    assert_eq!(
+        instance1.boot_disk_size.to_bytes(),
+        instance2.boot_disk_size.to_bytes()
+    );
+    assert_eq!(instance1.hostname, instance2.hostname);
+    assert_eq!(instance1.state, instance2.state);
+}
+
+fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata) {
+    assert_eq!(ident1.id, ident2.id);
+    assert_eq!(ident1.name, ident2.name);
+    assert_eq!(ident1.description, ident2.description);
+    assert_eq!(ident1.time_created, ident2.time_created);
+    assert_eq!(ident1.time_modified, ident2.time_modified);
 }

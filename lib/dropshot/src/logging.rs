@@ -19,7 +19,9 @@ use std::path::Path;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "mode")]
 pub enum ConfigLogging {
-    StderrTerminal { level: ConfigLoggingLevel },
+    StderrTerminal {
+        level: ConfigLoggingLevel,
+    },
     File {
         level: ConfigLoggingLevel,
         path: String,

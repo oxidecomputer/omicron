@@ -18,6 +18,7 @@ serde_tokenstream = { path = "lib/serde_tokenstream" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
+uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
 [workspace]
 members = [".", "lib/dropshot", "lib/dropshot_endpoint", "lib/serde_tokenstream"]

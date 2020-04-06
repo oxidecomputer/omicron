@@ -696,6 +696,7 @@ dependencies = [
  "slog",
  "tokio",
  "toml",
+ "uuid",
 ]
 
 [[package]]

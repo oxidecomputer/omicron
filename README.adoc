@@ -120,6 +120,16 @@ the server to exit immediately with an error).
 
 == TODO
 
+* Current work: adding support for Instances
+** Working on instances
+*** Update?
+*** Build infrastructure for supporting async operations (boot, halt, reboot),
+    checking on status, etc.
+** Other thoughts:
+*** separate out api_model_data.rs from api_model_backend.rs?
+*** Instead of having this totally agnostic backend, would it make sense to
+    instead have a model layer that knows exactly what _storage_ backend it's
+    using but has a Rack backend that's all timeouts and noops?
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
@@ -153,6 +163,25 @@ the server to exit immediately with an error).
 ** Hardening (see RFD 10)
 *** throttling / load shedding
 ** Automated testing
+*** General API testing: there's a lot of boilerplate in hand-generated tests
+    for each kind of resource.  Would it be reasonable / possible to have a sort
+    of omnibus test that's given the OpenAPI spec (or something like it),
+    creates a hierarchy with at least one of every possible resource, and does
+    things like: For each possible resource
+**** attempt to (create, get, put, delete) one with an invalid name
+**** attempt to (GET, DELETE, PUT) one that does not exist
+**** attempt to create one with invalid JSON
+**** attempt to create one with a duplicate name of the one we know about
+**** exercise list operation with marker and limit (may need to create many of them)
+**** for each required input property:
+***** attempt to create a resource without that property
+**** for each input property: attempt to create a resource with invalid values
+     for that property
+**** list instances of that resource and expect to find the one we know about
+**** GET the one instance we know about
+**** DELETE the one instance we know about
+**** GET the one instance we know about again and expect it to fail
+**** list instances again and expect to find nothing
 *** Basic functionality
 *** Performance testing
 *** Stress testing

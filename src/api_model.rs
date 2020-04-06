@@ -14,13 +14,18 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::pin::Pin;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::api_error::ApiError;
+
+/** Default maximum number of items per page of "list" results */
+pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 /**
  * ApiObject is a trait implemented by the types used to represent objects in
@@ -59,9 +64,12 @@ use crate::api_error::ApiError;
  *
  * The only thing guaranteed by the `ApiObject` trait is that the type can be
  * converted to a View, which is something that can be serialized.
+ *
+ * TODO-coverage: each type could have unit tests for various invalid input
+ * types?
  */
 pub trait ApiObject {
-    type View: Serialize;
+    type View: Serialize + Clone + Debug;
     fn to_view(&self) -> Self::View;
 }
 
@@ -71,12 +79,14 @@ pub trait ApiObject {
 #[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
     Project,
+    Instance,
 }
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
+            ApiResourceType::Instance => "instance",
         })
     }
 }
@@ -191,27 +201,28 @@ impl ApiName {
  * (shared by most API objects)
  */
 
-/*
- * TODO-correctness: RFD 4 calls for an "id" here, but it's not clear yet how it
- * could be used.  At some point we'll need to resolve that and decide what we
- * want to do here.
- */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
+    /** unique, immutable, system-controlled identifier for each resource */
+    pub id: Uuid,
+    /** unique, mutable, user-controlled identifier for each resource */
     pub name: ApiName,
+    /** human-readable free-form text about a resource */
     pub description: String,
+    /** timestamp when this resource was created */
     pub time_created: DateTime<Utc>,
+    /** timestamp when this resource was last modified */
     pub time_modified: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
     pub description: Option<String>,
@@ -227,7 +238,7 @@ pub struct ApiIdentityMetadataUpdateParams {
 pub struct ApiProject {
     /** private data used by the backend implementation */
     pub backend_impl: Box<dyn Any + Send + Sync>,
-
+    /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
     /*
@@ -252,10 +263,9 @@ impl ApiObject for ApiProject {
 }
 
 /**
- * Represents the properties of a Project that can be seen by end users.
- * TODO Is this where the OpenAPI documentation should go?
+ * Represents the properties of an ApiProject that can be seen by end users.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -263,21 +273,178 @@ pub struct ApiProjectView {
 }
 
 /**
- * Represents the create-time parameters for a Project.
- * TODO Is this where the OpenAPI documentation should go?
+ * Represents the create-time parameters for an ApiProject.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
 }
 
 /**
- * Represents the properties of a Project that can be updated by end users.
- * TODO Is this where the OpenAPI documentation should go?
+ * Represents the properties of an ApiProject that can be updated by end users.
  */
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataUpdateParams,
+}
+
+/*
+ * INSTANCES
+ */
+
+/**
+ * ApiInstanceState describes the runtime state of the instance (i.e., starting,
+ * running, etc.)
+ */
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiInstanceState {
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Repairing,
+    Failed,
+}
+
+/** Represents the number of CPUs in an instance. */
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceCpuCount(pub usize);
+
+/**
+ * Represents a count of bytes, typically used either for memory or storage.
+ * TODO-cleanup This could benefit from a more complete implementation.
+ * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
+ * need to write a validator for that.
+ */
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct ApiByteCount(u64);
+impl ApiByteCount {
+    pub fn from_bytes(bytes: u64) -> ApiByteCount {
+        ApiByteCount(bytes)
+    }
+    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * kibibytes)
+    }
+    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
+    }
+    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
+    }
+    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
+    }
+
+    pub fn to_bytes(&self) -> u64 {
+        self.0
+    }
+    pub fn to_whole_kibibytes(&self) -> u64 {
+        self.to_bytes() / 1024
+    }
+    pub fn to_whole_mebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024
+    }
+    pub fn to_whole_gibibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024
+    }
+    pub fn to_whole_tebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024 / 1024
+    }
+}
+
+/**
+ * Represents an instance (VM) in the API
+ */
+pub struct ApiInstance {
+    /** private data used by the backend implementation */
+    pub backend_impl: Box<dyn Any + Send + Sync>,
+    /** common identifying metadata */
+    pub identity: ApiIdentityMetadata,
+
+    /** id for the project containing this instance */
+    pub project_id: Uuid,
+
+    /** number of CPUs allocated for this instance */
+    pub ncpus: ApiInstanceCpuCount,
+    /** memory, in gigabytes, allocated for this instance */
+    pub memory: ApiByteCount,
+    /** size of the boot disk for the image */
+    pub boot_disk_size: ApiByteCount,
+    /** RFC1035-compliant hostname for the instance. */
+    pub hostname: String, /* TODO-cleanup different type? */
+    /** current runtime state of the instance */
+    pub state: ApiInstanceState,
+    /* TODO-completeness: add disks, network, tags, metrics */
+}
+
+impl ApiObject for ApiInstance {
+    type View = ApiInstanceView;
+    fn to_view(&self) -> ApiInstanceView {
+        ApiInstanceView {
+            identity: self.identity.clone(),
+            project_id: self.project_id.clone(),
+            ncpus: self.ncpus,
+            memory: self.memory,
+            boot_disk_size: self.boot_disk_size,
+            hostname: self.hostname.clone(),
+            state: self.state.clone(),
+        }
+    }
+}
+
+/**
+ * Represents the properties of an `ApiInstance` that can be seen by end users.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceView {
+    /* TODO is flattening here the intent in RFD 4? */
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
+
+    /** id for the project containing this instance */
+    pub project_id: Uuid,
+
+    /** number of CPUs allocated for this instance */
+    pub ncpus: ApiInstanceCpuCount,
+    /** memory, in gigabytes, allocated for this instance */
+    pub memory: ApiByteCount,
+    /** size of the boot disk for the image */
+    pub boot_disk_size: ApiByteCount,
+    /** RFC1035-compliant hostname for the instance. */
+    pub hostname: String, /* TODO-cleanup different type? */
+    /** current runtime state of the instance */
+    pub state: ApiInstanceState,
+}
+
+/**
+ * Represents the create-time parameters for an ApiInstance.
+ * TODO We're ignoring "type" for now because no types are specified by the API.
+ * Presumably this will need to be its own kind of API object that can be
+ * created, modified, removed, etc.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceCreateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataCreateParams,
+    pub ncpus: ApiInstanceCpuCount,
+    pub memory: ApiByteCount,
+    pub boot_disk_size: ApiByteCount,
+    pub hostname: String, /* TODO-cleanup different type? */
+}
+
+/**
+ * Represents the properties of an ApiInstance that can be updated by end users.
+ * TODO Very little is updateable right now because it's not clear if we'll want
+ * the key properties to be updated only by a separate "resize" API that would
+ * be async.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
 }
@@ -313,6 +480,12 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 /** A stream of Results, each potentially representing an object in the API. */
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+
+#[derive(Deserialize)]
+pub struct PaginationParams<NameType> {
+    pub marker: Option<NameType>,
+    pub limit: Option<usize>,
+}
 
 /**
  * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
@@ -353,13 +526,34 @@ pub trait ApiBackend: Send + Sync {
     ) -> UpdateResult<ApiProject>;
     async fn projects_list(
         &self,
-        marker: Option<ApiName>,
-        limit: usize,
+        pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject>;
+
+    async fn project_list_instances(
+        &self,
+        name: &ApiName,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiInstance>;
+    async fn project_create_instance(
+        &self,
+        name: &ApiName,
+        params: &ApiInstanceCreateParams,
+    ) -> CreateResult<ApiInstance>;
+    async fn project_lookup_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> LookupResult<ApiInstance>;
+    async fn project_delete_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> DeleteResult;
 }
 
 #[cfg(test)]
 mod test {
+    use super::ApiByteCount;
     use super::ApiName;
     use crate::api_error::ApiError;
     use std::convert::TryFrom;
@@ -427,5 +621,31 @@ mod test {
                 message: "name requires at least one character".to_string()
             })
         );
+    }
+
+    #[test]
+    fn test_bytecount() {
+        let zero = ApiByteCount::from_bytes(0);
+        assert_eq!(0, zero.to_bytes());
+        assert_eq!(0, zero.to_whole_kibibytes());
+        assert_eq!(0, zero.to_whole_mebibytes());
+        assert_eq!(0, zero.to_whole_gibibytes());
+        assert_eq!(0, zero.to_whole_tebibytes());
+
+        let three_terabytes = 3_000_000_000_000;
+        let tb3 = ApiByteCount::from_bytes(three_terabytes);
+        assert_eq!(three_terabytes, tb3.to_bytes());
+        assert_eq!(2929687500, tb3.to_whole_kibibytes());
+        assert_eq!(2861022, tb3.to_whole_mebibytes());
+        assert_eq!(2793, tb3.to_whole_gibibytes());
+        assert_eq!(2, tb3.to_whole_tebibytes());
+
+        let three_tebibytes = 3 * 1024 * 1024 * 1024 * 1024;
+        let tib3 = ApiByteCount::from_bytes(three_tebibytes);
+        assert_eq!(three_tebibytes, tib3.to_bytes());
+        assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
+        assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
+        assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
+        assert_eq!(3, tib3.to_whole_tebibytes());
     }
 }

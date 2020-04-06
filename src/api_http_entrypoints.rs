@@ -8,12 +8,16 @@ use std::sync::Arc;
 
 use crate::api_backend;
 use crate::api_model::to_view_list;
+use crate::api_model::ApiInstance;
+use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+use crate::api_model::PaginationParams;
 use dropshot::http_extract_path_param;
 use dropshot::http_extract_path_params;
 use dropshot::ApiDescription;
@@ -27,9 +31,6 @@ use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
-
-/** Default maximum number of items per page of "list" results */
-const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api.register(
@@ -63,6 +64,27 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
         Method::PUT,
         "/projects/{project_id}",
         HttpRouteHandler::new(api_projects_put_project),
+    );
+
+    api.register(
+        Method::GET,
+        "/projects/{project_id}/instances",
+        HttpRouteHandler::new(api_project_instances_get),
+    );
+    api.register(
+        Method::POST,
+        "/projects/{project_id}/instances",
+        HttpRouteHandler::new(api_project_instances_post),
+    );
+    api.register(
+        Method::GET,
+        "/projects/{project_id}/instances/{instance_id}",
+        HttpRouteHandler::new(api_project_instances_get_instance),
+    );
+    api.register(
+        Method::DELETE,
+        "/projects/{project_id}/instances/{instance_id}",
+        HttpRouteHandler::new(api_project_instances_delete_instance),
     );
 }
 
@@ -99,33 +121,16 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
  *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-#[derive(Deserialize)]
-struct ListQueryParams {
-    pub marker: Option<String>,
-    pub limit: Option<usize>,
-}
-
 /*
  * "GET /projects": list all projects
  */
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<ListQueryParams>,
+    params_raw: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let backend = api_backend(&rqctx);
     let params = params_raw.into_inner();
-    let limit = params.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-    let marker = {
-        let marker_ref = params.marker.as_ref();
-        let maybe_name =
-            marker_ref.map(|s| ApiName::from_param(s.clone(), "marker"));
-        match maybe_name {
-            None => None,
-            Some(Ok(validated_name)) => Some(validated_name),
-            Some(Err(error)) => return Err(HttpError::from(error)),
-        }
-    };
-    let project_stream = backend.projects_list(marker, limit).await?;
+    let project_stream = backend.projects_list(&params).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -209,4 +214,94 @@ async fn api_projects_put_project(
         .project_update(&project_id, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
+}
+
+/*
+ * Instances
+ */
+
+/*
+ * "GET /project/{project_id}/instances": list instances in a project
+ */
+async fn api_project_instances_get(
+    rqctx: Arc<RequestContext>,
+    params_raw: Query<PaginationParams<ApiName>>,
+) -> Result<HttpResponseOkObjectList<ApiInstanceView>, HttpError> {
+    let backend = api_backend(&rqctx);
+    let query_params = params_raw.into_inner();
+    let path_params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_name =
+        ApiName::from_param(path_params.project_id.clone(), "project_id")?;
+    let instance_stream =
+        backend.project_list_instances(&project_name, &query_params).await?;
+    let view_list = to_view_list(instance_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
+
+/*
+ * "POST /project/{project_id}/instances": create instance in a project
+ * TODO-correctness This is supposed to be async.  Is that right?  We can create
+ * the instance immediately -- it's just not booted yet.  Maybe the boot
+ * operation is what's a separate operation_id.  What about the response code
+ * (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a
+ * useful response, including an operation id, with either response code.  Maybe
+ * a "reboot" operation would return a 202 Accepted because there's no actual
+ * resource created?
+ */
+async fn api_project_instances_post(
+    rqctx: Arc<RequestContext>,
+    new_instance: Json<ApiInstanceCreateParams>,
+) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
+    let backend = api_backend(&rqctx);
+    let path_params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_name =
+        ApiName::from_param(path_params.project_id.clone(), "project_id")?;
+    let new_instance_params = &new_instance.into_inner();
+    let instance = backend
+        .project_create_instance(&project_name, &new_instance_params)
+        .await?;
+    Ok(HttpResponseCreated(instance.to_view()))
+}
+
+#[derive(Deserialize)]
+struct InstancePathParam {
+    project_id: String,
+    instance_id: String,
+}
+
+/*
+ * "GET /project/{project_id}/instances/{instance_id}"
+ */
+async fn api_project_instances_get_instance(
+    rqctx: Arc<RequestContext>,
+) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+    let backend = api_backend(&rqctx);
+    let params: InstancePathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let instance_id =
+        ApiName::from_param(params.instance_id.clone(), "instance_id")?;
+    let instance: Arc<ApiInstance> =
+        backend.project_lookup_instance(&project_id, &instance_id).await?;
+    Ok(HttpResponseOkObject(instance.to_view()))
+}
+
+/*
+ * "DELETE /project/{project_id}/instances/{instance_id}"
+ */
+async fn api_project_instances_delete_instance(
+    rqctx: Arc<RequestContext>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let backend = api_backend(&rqctx);
+    let params: InstancePathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let instance_id =
+        ApiName::from_param(params.instance_id.clone(), "instance_id")?;
+    backend.project_delete_instance(&project_id, &instance_id).await?;
+    Ok(HttpResponseDeleted())
 }
