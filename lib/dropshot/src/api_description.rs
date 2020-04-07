@@ -61,7 +61,7 @@ impl ApiDescription {
         T: Into<Endpoint<'a>>,
     {
         let e = endpoint.into();
-        self.register(e.method.clone(), &e.path, e.handler)
+        self.router.insert(e.method.clone(), &e.path, e.handler)
     }
 
     pub fn print_openapi(&self) {

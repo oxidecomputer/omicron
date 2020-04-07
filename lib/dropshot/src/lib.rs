@@ -26,12 +26,10 @@ pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::Derived;
-pub use handler::HttpHandlerResult;
 pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
 pub use handler::HttpResponseOkObject;
 pub use handler::HttpResponseOkObjectList;
-pub use handler::HttpResponseWrap;
 pub use handler::HttpRouteHandler;
 pub use handler::Json;
 pub use handler::Path;
@@ -45,7 +43,6 @@ pub use http_util::HEADER_REQUEST_ID;
 pub use logging::ConfigLogging;
 pub use logging::ConfigLoggingIfExists;
 pub use logging::ConfigLoggingLevel;
-pub use router::HttpEndpoint;
 pub use server::HttpServer;
 
 /*

@@ -241,36 +241,6 @@ fn do_endpoint(
                 }
             }
         }
-
-        // impl for RouteHandler that deals with marshalling method parameters
-        // out of the RequestContext
-        #[async_trait::async_trait]
-        impl dropshot::RouteHandler for #name {
-            fn label(&self) -> &str {
-                stringify!("#name")
-            }
-
-            async fn handle_request(
-                &self,
-                rqctx_raw: dropshot::RequestContext,
-            ) -> dropshot::HttpHandlerResult {
-                #ast
-                let rqctx = Arc::new(rqctx_raw);
-                #(#vars;)*
-                let response = #name(#(#ins),*).await?;
-                let response_as_wrap: dropshot::HttpResponseWrap =
-                    response.into();
-                response_as_wrap.into()
-            }
-        }
-
-        impl std::fmt::Debug for #name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
-                -> std::fmt::Result
-            {
-                write!(f, "handler: {}", stringify!(#name))
-            }
-        }
     };
     Ok(stream.into())
 }
