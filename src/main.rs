@@ -14,12 +14,15 @@
  * - Move even more of the server setup into api_server.rs
  */
 
+use std::io::{stderr, Write};
+use std::process::exit;
+
 use clap::{App, Arg};
 use oxide_api_prototype::ApiServerConfig;
 
 #[tokio::main]
 async fn main() {
-    let matches = App::new("oxide-api-prototype")
+    let args = App::new("oxide-api-prototype")
         .after_help("See README.adoc for more information")
         .arg(
             Arg::with_name("openapi")
@@ -28,7 +31,15 @@ async fn main() {
                 .help("Print the OpenAPI Spec document and exit"),
         )
         .arg(Arg::with_name("CONFIG_FILE_PATH").required(true).index(1))
-        .get_matches();
+        .get_matches_safe();
+
+    let matches = match args {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = write!(stderr(), "{}", e);
+            exit(1);
+        }
+    };
 
     let config_file = matches.value_of("CONFIG_FILE_PATH").unwrap();
     let config_file_path = std::path::Path::new(config_file);
