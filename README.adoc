@@ -156,6 +156,8 @@ the server to exit immediately with an error).
 ** Other API changes
 *** regions, AZs, etc. need to be added per RFD 24
 *** /racks, /servers
+*** are servers going to have uuids?  Will we need a bunch of operations like
+    Triton never really had around chassis swaps?
 *** What's the scope of these servers?
 *** CAP choices
 *** Active/Active, Active/Passive, Consensus?
