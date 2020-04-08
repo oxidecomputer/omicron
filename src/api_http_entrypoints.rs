@@ -15,10 +15,15 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+<<<<<<< HEAD
 use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::http_extract_path_param;
+=======
+use crate::api_model::PaginationParams;
+use dropshot::http_extract_path_params;
+>>>>>>> 4f1366b... rip out unused stuff; play with doc attributes
 use dropshot::ApiDescription;
 use dropshot::Endpoint;
 use dropshot::HttpError;
@@ -34,51 +39,50 @@ use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
-    api.register(
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_projects_get),
         Method::GET,
         "/projects",
-        HttpRouteHandler::new(api_projects_get),
-    );
-    api.register(
+    ));
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_projects_post),
         Method::POST,
         "/projects",
-        HttpRouteHandler::new(api_projects_post),
-    );
+    ));
 
-    api.register2(api_projects_get_project);
+    api.register(api_projects_get_project);
 
-    api.register2(Endpoint {
-        method: Method::DELETE,
-        path: "/projects/{project_id}",
-        handler: HttpRouteHandler::new(api_projects_delete_project),
-        parameters: vec![],
-    });
-    api.register(
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_projects_delete_project),
+        Method::DELETE,
+        "/projects/{project_id}",
+    ));
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_projects_put_project),
         Method::PUT,
         "/projects/{project_id}",
-        HttpRouteHandler::new(api_projects_put_project),
-    );
+    ));
 
-    api.register(
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_project_instances_get),
         Method::GET,
         "/projects/{project_id}/instances",
-        HttpRouteHandler::new(api_project_instances_get),
-    );
-    api.register(
+    ));
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_project_instances_post),
         Method::POST,
         "/projects/{project_id}/instances",
-        HttpRouteHandler::new(api_project_instances_post),
-    );
-    api.register(
+    ));
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_project_instances_get_instance),
         Method::GET,
         "/projects/{project_id}/instances/{instance_id}",
-        HttpRouteHandler::new(api_project_instances_get_instance),
-    );
-    api.register(
+    ));
+    api.register(Endpoint::new(
+        HttpRouteHandler::new(api_project_instances_delete_instance),
         Method::DELETE,
         "/projects/{project_id}/instances/{instance_id}",
-        HttpRouteHandler::new(api_project_instances_delete_instance),
-    );
+    ));
 }
 
 /*
@@ -153,22 +157,25 @@ struct ProjectPathParam {
 #[endpoint {
     method = GET,
     path = "/projects/{project_id}",
-    parameters = [
-        {
-            name = project_id,
-            in = path,
-        }
-    ]
 }]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
-    project_id: String,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
+<<<<<<< HEAD
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let project: Arc<ApiProject> = rack
         .project_lookup(&ApiName::from_param(project_id, "project_id")?)
         .await?;
+=======
+    let backend = api_backend(&rqctx);
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let project: Arc<ApiProject> = backend.project_lookup(&project_id).await?;
+
+>>>>>>> 4f1366b... rip out unused stuff; play with doc attributes
     Ok(HttpResponseOkObject(project.to_view()))
 }
 

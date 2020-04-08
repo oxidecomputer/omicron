@@ -20,8 +20,6 @@ extern crate slog;
 
 pub use api_description::ApiDescription;
 pub use api_description::Endpoint;
-pub use api_description::EndpointParameter;
-pub use api_description::EndpointParameterLocation;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
@@ -36,7 +34,11 @@ pub use handler::Path;
 pub use handler::Query;
 pub use handler::RequestContext;
 pub use handler::RouteHandler;
+<<<<<<< HEAD
 pub use http_util::http_extract_path_param;
+=======
+pub use http_util::http_extract_path_params;
+>>>>>>> 4f1366b... rip out unused stuff; play with doc attributes
 pub use http_util::CONTENT_TYPE_JSON;
 pub use http_util::CONTENT_TYPE_NDJSON;
 pub use http_util::HEADER_REQUEST_ID;

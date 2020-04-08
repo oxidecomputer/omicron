@@ -7,27 +7,30 @@ use crate::RouteHandler;
 use http::Method;
 
 #[derive(Debug)]
+/**
+ * An Endpoint represents a single API endpoint associated with an
+ * ApiDescription.
+ *
+ * TODO: it will need to have parameter information TBD
+ */
 pub struct Endpoint<'a> {
     pub handler: Box<dyn RouteHandler>,
     pub method: Method,
     pub path: &'a str,
-    pub parameters: Vec<EndpointParameter>,
 }
 
-#[derive(Debug)]
-pub struct EndpointParameter {
-    // everything I need for OpenAPI
-    name: String,
-    location: EndpointParameterLocation,
-    description: Option<String>,
-}
-
-#[derive(Debug)]
-pub enum EndpointParameterLocation {
-    Cookie,
-    Header,
-    Path,
-    Query,
+impl<'a> Endpoint<'a> {
+    pub fn new(
+        handler: Box<dyn RouteHandler>,
+        method: Method,
+        path: &'a str,
+    ) -> Self {
+        Endpoint {
+            handler,
+            method,
+            path,
+        }
+    }
 }
 
 /**
@@ -47,16 +50,10 @@ impl ApiDescription {
         }
     }
 
-    pub fn register(
-        &mut self,
-        method: Method,
-        path: &str,
-        handler: Box<dyn RouteHandler>,
-    ) {
-        self.router.insert(method, path, handler);
-    }
-
-    pub fn register2<'a, T>(&mut self, endpoint: T)
+    /**
+     * Register a new API endpoint.
+     */
+    pub fn register<'a, T>(&mut self, endpoint: T)
     where
         T: Into<Endpoint<'a>>,
     {

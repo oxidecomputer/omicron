@@ -4,31 +4,13 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::TokenStream;
 use quote::quote;
-use quote::ToTokens;
-
-use std::collections::HashMap;
 
 use serde::Deserialize;
 
 use serde_tokenstream::from_tokenstream;
 use serde_tokenstream::Error;
-use syn::spanned::Spanned;
-
-// We use the `abort` macro to identify known, aberrant conditions while
-// processing macro parameters. This is based on `proc_macro_error::abort`
-// but modified to be useable in testing contexts where a `proc_macro2::Span`
-// cannot be used in an error context.
-macro_rules! abort {
-    ($span:expr, $($tts:tt)*) => {
-        if cfg!(test) {
-            panic!($($tts)*)
-        } else {
-            proc_macro_error::abort!($span, $($tts)*)
-        }
-    };
-}
 
 /// name - in macro; required
 /// in - in macro; required
@@ -91,7 +73,6 @@ impl MethodType {
 struct Metadata {
     method: MethodType,
     path: String,
-    parameters: Vec<Parameter>,
 }
 
 /// Attribute to apply to an HTTP endpoint.
@@ -117,98 +98,11 @@ fn do_endpoint(
     let method = metadata.method.as_str();
     let path = metadata.path;
 
-    let param_map = metadata
-        .parameters
-        .iter()
-        .map(|parameter| (&parameter.name, parameter))
-        .collect::<HashMap<_, _>>();
-
     let ast: syn::ItemFn = syn::parse(item).unwrap();
+
+    let _ = extract_doc(&ast);
+
     let name = ast.sig.ident.clone();
-
-    let mut context = false;
-
-    let cty = quote! {
-        Arc<RequestContext>
-    };
-
-    let args = &ast.sig.inputs;
-
-    // Do validation of the fn paramters against the metadata we have.
-    for (i, arg) in args.iter().enumerate() {
-        match arg {
-            syn::FnArg::Typed(parameter) => match &*parameter.pat {
-                syn::Pat::Ident(id) => {
-                    let mut tt = TokenStream::new();
-                    parameter.ty.to_tokens(&mut tt);
-                    if tokenstream_eq(&cty, &tt) {
-                        context = true;
-                        if i != 0 {
-                            return Err(Error::new(
-                                arg.span(),
-                                "context parameter needs to be first",
-                            ));
-                        }
-                    } else {
-                        if param_map.get(&id.ident.to_string()).is_none() {
-                            return Err(Error::new(
-                                arg.span(),
-                                "param not described",
-                            ));
-                        }
-                    }
-                }
-                _ => {
-                    return Err(Error::new(
-                        parameter.span(),
-                        "unexpected parameter type",
-                    ));
-                }
-            },
-            syn::FnArg::Receiver(_self) => {
-                return Err(Error::new(
-                    arg.span(),
-                    "attribute cannot be applied to a method that uses self",
-                ));
-            }
-        }
-    }
-
-    let mut vars = vec![];
-    let mut ins = vec![];
-
-    if context {
-        ins.push(quote! { rqctx });
-    }
-
-    for arg in args.iter().skip(if context { 1 } else { 0 }) {
-        match arg {
-            syn::FnArg::Receiver(_) => panic!("caught above"),
-            syn::FnArg::Typed(parameter) => match &*parameter.pat {
-                syn::Pat::Ident(id) => {
-                    let meta = param_map.get(&id.ident.to_string()).unwrap();
-                    let ident = &id.ident;
-                    let ty = &parameter.ty;
-
-                    match meta.inn {
-                        InType::Path => {
-                            vars.push(quote! {
-                                let #ident: #ty =
-                                    http_extract_path_param(
-                                        &rqctx.path_variables,
-                                        &stringify!(#ident).to_string()
-                                    )?.clone();
-                            });
-                            ins.push(quote! { #ident });
-                        }
-                        _ => panic!("not implemented"),
-                    }
-                }
-                _ => abort!(parameter, "unexpected parameter type"),
-            },
-        }
-    }
-
     let method_ident = quote::format_ident!("{}", method);
 
     // The final TokenStream returned will have a few components that reference
@@ -226,44 +120,61 @@ fn do_endpoint(
         impl<'a> From<#name> for Endpoint<'a> {
             fn from(_: #name) -> Self {
                 #ast
-                async fn handle(
-                    rqctx: Arc<RequestContext>
-                ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
-                    #(#vars;)*
-                    #name(#(#ins),*).await
-                }
 
-                Endpoint {
-                    method: Method::#method_ident,
-                    path: #path,
-                    handler: HttpRouteHandler::new(handle),
-                    parameters: vec![],
-                }
+                Endpoint::new(
+                    HttpRouteHandler::new(#name),
+                    Method::#method_ident,
+                    #path,
+                )
             }
         }
     };
+
     Ok(stream.into())
 }
 
-/// Conservative TokenStream equality.
-fn tokenstream_eq(a: &TokenStream, b: &TokenStream) -> bool {
-    let mut aa = a.clone().into_iter();
-    let mut bb = b.clone().into_iter();
-
-    loop {
-        match (aa.next(), bb.next()) {
-            (None, None) => break true,
-            (Some(TokenTree::Ident(at)), Some(TokenTree::Ident(bt)))
-                if at == bt =>
+fn extract_doc(item: &syn::ItemFn) -> Result<(), Error> {
+    println!("{:?}", item);
+    for attr in &item.attrs {
+        println!("attr {:?}", attr);
+        let meta = attr.parse_meta().unwrap();
+        if let syn::Meta::NameValue(nv) = meta {
+            if nv.path.leading_colon.is_none()
+                && nv.path.segments.len() == 1
+                && &nv.path.segments[0].ident
+                    == &syn::Ident::new("doc", proc_macro2::Span::call_site())
             {
-                continue
+                if let syn::Lit::Str(s) = nv.lit {
+                    println!("parse {:?}", attr.parse_meta());
+                    println!("path {:?}", attr.path);
+                    println!("  s {:?}", s.value());
+                }
             }
-            (Some(TokenTree::Punct(at)), Some(TokenTree::Punct(bt)))
-                if at.as_char() == bt.as_char() =>
-            {
-                continue
-            }
-            _ => break false,
         }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::quote;
+
+    #[test]
+    fn doc() {
+        let item = quote! {
+            /// this looks like a comment, but it's actually part of the test
+            /// this too
+            #[doc = "testing"]
+            #[doc(hidden)]
+            fn do_nothing() {}
+        };
+
+        let ast: syn::ItemFn = syn::parse2(item).unwrap();
+
+        let _ = extract_doc(&ast);
+
+        panic!("bad");
     }
 }

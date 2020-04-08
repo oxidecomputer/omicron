@@ -5,7 +5,6 @@
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
-use crate::EndpointParameter;
 use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
@@ -157,7 +156,6 @@ struct HttpRouterNode {
 pub struct HttpEndpoint {
     /** Caller-supplied handler */
     pub handler: Box<dyn RouteHandler>,
-    pub parameters: Vec<EndpointParameter>,
 }
 
 #[derive(Debug)]
@@ -403,8 +401,6 @@ impl HttpRouter {
 
         node.methods.insert(methodname, HttpEndpoint {
             handler: handler,
-            // TODO
-            parameters: vec![],
         });
     }
 
