@@ -136,7 +136,6 @@ the server to exit immediately with an error).
 ** Dropshot itself should be documented
 * Flesh out more endpoints and simulator
 * Write out road map
-** regions, AZs, etc. need to be added per RFD 24
 * General work:
 ** OpenAPI support: Rust macros, tooling to generate spec, client librar(ies),
    CLI
@@ -154,6 +153,9 @@ the server to exit immediately with an error).
 ** Authentication
 ** Authorization
 ** Data storage
+** Other API changes
+*** regions, AZs, etc. need to be added per RFD 24
+*** /racks, /servers
 *** What's the scope of these servers?
 *** CAP choices
 *** Active/Active, Active/Passive, Consensus?
