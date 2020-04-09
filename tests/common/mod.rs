@@ -24,7 +24,8 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let config = ApiServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let api = oxide_api_prototype::dropshot_api();
-    let apictx = oxide_api_prototype::api_context();
+    let apictx = oxide_api_prototype::ApiContext::new();
+    oxide_api_prototype::populate_initial_data(&apictx).await;
     TestContext::new(test_name, api, apictx, &config.dropshot, &config.log)
         .await
 }

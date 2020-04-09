@@ -4,21 +4,17 @@
  * implementation (simulator or a real rack)).
  */
 
-use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
-use futures::future::ready;
-use futures::stream::Stream;
-use futures::stream::StreamExt;
+use futures::lock::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
-use std::any::Any;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -43,24 +39,14 @@ pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
  * * `ApiProjectUpdate`, which is what must be provided to the API when a user
  *   wants to update a project.
  *
- * Recall that we intend to support two backends: one backed by a real Oxide
- * rack and the other backed by a simulator.  The interface to these backends is
- * defined by the `ApiBackend` trait, which provides functions for operating on
- * resources like projects.  For example, `ApiBackend` provides
- * `project_lookup(primary key)`,
- * `project_list(marker: Option, limit: usize)`,
- * `project_create(project, ApiProjectCreateParams)`,
- * `project_update(project, ApiProjectUpdateParams)`, and
- * `project_delete(project)`.  These are all `async` functions.
- *
  * We expect to add many more types to the API for things like instances, disks,
  * images, networking abstractions, organizations, teams, users, system
  * components, and the like.  See RFD 4 for details.  The current plan is to add
- * types and supporting backend functions for each of these resources.  However,
+ * types and supporting functions for each of these resources.  However,
  * different types may support different operations.  For examples, instances
  * will have additional operations (like "boot" and "halt").  System component
  * resources may be immutable (i.e., they won't define a "CreateParams" type, an
- * "UpdateParams" type, nor create or update functions on the Backend).
+ * "UpdateParams" type, nor create or update functions).
  *
  * The only thing guaranteed by the `ApiObject` trait is that the type can be
  * converted to a View, which is something that can be serialized.
@@ -236,8 +222,15 @@ pub struct ApiIdentityMetadataUpdateParams {
  * Represents a Project in the API.  See RFD for field details.
  */
 pub struct ApiProject {
-    /** private data used by the backend implementation */
-    pub backend_impl: Box<dyn Any + Send + Sync>,
+    /*
+     * TODO-cleanup: this shouldn't be here because you shouldn't have to load
+     * all instances in order to be able to look at a project's metadata.  This
+     * should all be behind a "datastore" abstraction or the like -- see
+     * OxideRack.
+     */
+    /** instances associated with this project */
+    pub instances: Mutex<BTreeMap<ApiName, Arc<ApiInstance>>>,
+
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
@@ -245,9 +238,8 @@ pub struct ApiProject {
      * TODO
      * We define a generation number here at the model layer so that in theory
      * the model layer can handle optimistic concurrency control (i.e.,
-     * put-only-if-matches-etag and the like).  It's not yet clear if this is
-     * better handled in the backend or if a generation number is the right way
-     * to express this.
+     * put-only-if-matches-etag and the like).  It's not yet clear if a
+     * generation number is the right way to express this.
      */
     /** generation number for this version of the object. */
     pub generation: u64,
@@ -361,8 +353,6 @@ impl ApiByteCount {
  * Represents an instance (VM) in the API
  */
 pub struct ApiInstance {
-    /** private data used by the backend implementation */
-    pub backend_impl: Box<dyn Any + Send + Sync>,
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
@@ -447,108 +437,6 @@ pub struct ApiInstanceCreateParams {
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
-}
-
-/*
- * BACKEND INTERFACES
- *
- * TODO: Currently, the HTTP layer calls directly into the backend layer.
- * That's probably not what we want.  A good example where we don't really want
- * that is where the user requests to delete a project.  We need to go delete
- * everything _in_ that project first.  That's common code that ought to live
- * outside the backend.  It's also not HTTP-specific, if we were to throw some
- * other control interface on this server.  Hence, it belongs in this model
- * layer.
- */
-
-/*
- * These type aliases exist primarily to make it easier to be consistent in the
- * way these functions look.
- */
-
-/** Result of a create operation for the specified type. */
-pub type CreateResult<T> = Result<Arc<T>, ApiError>;
-/** Result of a delete operation for the specified type. */
-pub type DeleteResult = Result<(), ApiError>;
-/** Result of a list operation that returns an ObjectStream. */
-pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
-/** Result of a lookup operation for the specified type. */
-pub type LookupResult<T> = Result<Arc<T>, ApiError>;
-/** Result of an update operation for the specified type. */
-pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
-
-/** A stream of Results, each potentially representing an object in the API. */
-pub type ObjectStream<T> =
-    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
-
-#[derive(Deserialize)]
-pub struct PaginationParams<NameType> {
-    pub marker: Option<NameType>,
-    pub limit: Option<usize>,
-}
-
-/**
- * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
- * return a vector of the objects' views.  Any failures are ignored.
- * TODO-hardening: Consider how to better deal with these failures.  We should
- * probably at least log something.
- */
-pub async fn to_view_list<T: ApiObject>(
-    object_stream: ObjectStream<T>,
-) -> Vec<T::View> {
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().to_view())
-        .collect::<Vec<T::View>>()
-        .await
-}
-
-/**
- * Represents a backend implementation of the API.
- * TODO Is it possible to make some of these operations more generic?  A
- * particularly good example is probably list() (or even lookup()), where
- * with the right type parameters, generic code can be written to work on all
- * types.
- * TODO update and delete need to accommodate both with-etag and don't-care
- */
-#[async_trait]
-pub trait ApiBackend: Send + Sync {
-    async fn project_create(
-        &self,
-        params: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject>;
-    async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject>;
-    async fn project_delete(&self, name: &ApiName) -> DeleteResult;
-    async fn project_update(
-        &self,
-        name: &ApiName,
-        params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject>;
-    async fn projects_list(
-        &self,
-        pagparams: &PaginationParams<ApiName>,
-    ) -> ListResult<ApiProject>;
-
-    async fn project_list_instances(
-        &self,
-        name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
-    ) -> ListResult<ApiInstance>;
-    async fn project_create_instance(
-        &self,
-        name: &ApiName,
-        params: &ApiInstanceCreateParams,
-    ) -> CreateResult<ApiInstance>;
-    async fn project_lookup_instance(
-        &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance>;
-    async fn project_delete_instance(
-        &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> DeleteResult;
 }
 
 #[cfg(test)]

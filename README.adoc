@@ -6,22 +6,22 @@
 
 This repo houses a prototype for the Oxide Rack API.  See:
 
-* https://github.com/oxidecomputer/rfd/tree/master/rfd/0004[RFD 4 User Facing API Design]
-* https://github.com/oxidecomputer/rfd/tree/master/rfd/0010[RFD 10 API Prototype and Simulated Implementation]
+* https://4.rfd.oxide.computer[RFD 4 User Facing API Design]
+* https://10.rfd.oxide.computer[RFD 10 API Prototype and Simulated
+  Implementation]
+* https://48.rfd.oxide.computer[RFD 48 Control Plane Architecture]
 
 == Status
 
-The code here is very rough at this point.
+The code here is still rough, but the following are implemented:
 
-There are a couple of somewhat independent efforts, in no particular order:
-
-* API server guts: work out the shape of the HTTP and API layers.  (See
-  DESIGN.md.)
-* OpenAPI integration.  See RFD 10 for notes on this.  Figure out the approach
-  and implement it (e.g., decide that the server code is the source of truth,
-  define some syntax for noting that in code, and then implement a tool to
-  process this and produce an OpenAPI spec file).
-* Rest of the server: logging, tracing, error handling, etc. that we want.
+* actual API: basic CRUD support for projects and instances
+* Dropshot: a general-purpose crate for building an HTTP API server, including
+  basic routing with path parameters; strong types for request and response
+  bodies; basic query parameter support; ergonomic error handling; OpenAPI
+  support; and request ids
+* basic server infrastructure: configuration, logging
+* test coverage for most of the above
 
 See <<_todo>> for more info.
 
@@ -117,19 +117,27 @@ the server to exit immediately with an error).
 
 |===
 
+== Design notes
+
+The implementation is divided into several subsystems:
+
+- **Dropshot**, a generic crate that provides facilities for implementing an
+  HTTP API server with strong OpenAPI support.  This exists today.
+- **Oxide Rack HTTP API layer**.  These are the parts of this crate that use
+  Dropshot to provide an HTTP interface to the underlying Oxide Rack.
+- **Oxide Rack**.  This is an HTTP-agnostic model of the resources in a rack.
+- (still to be fleshed out) **Data storage**.  The parts of the Oxide Rack that
+  persist information about resources in the rack will wind up behind a data
+  storage interface.
 
 == TODO
 
-* Current work: adding support for Instances
-** Working on instances
-*** Update?
-*** Build infrastructure for supporting async operations (boot, halt, reboot),
+* Working on instances
+** Update?
+** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
 ** Other thoughts:
-*** separate out api_model_data.rs from api_model_backend.rs?
-*** Instead of having this totally agnostic backend, would it make sense to
-    instead have a model layer that knows exactly what _storage_ backend it's
-    using but has a Rack backend that's all timeouts and noops?
+*** separate out api_model_data.rs?
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
@@ -156,6 +164,8 @@ the server to exit immediately with an error).
 ** Other API changes
 *** regions, AZs, etc. need to be added per RFD 24
 *** /racks, /servers
+*** are servers going to have uuids?  Will we need a bunch of operations like
+    Triton never really had around chassis swaps?
 *** What's the scope of these servers?
 *** CAP choices
 *** Active/Active, Active/Passive, Consensus?
