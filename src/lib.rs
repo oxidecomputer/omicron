@@ -10,12 +10,13 @@ mod api_config;
 mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
-mod sim;
+mod api_impl;
 
 pub use api_config::ApiServerConfig;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
 use std::sync::Arc;
+use api_impl::OxideRack;
 
 #[macro_use]
 extern crate slog;
@@ -37,23 +38,6 @@ pub fn run_openapi() {
 }
 
 /**
- * Returns the API-specific state object to be used in our API server.
- */
-pub fn api_context() -> Arc<ApiContext> {
-    let mut simbuilder = sim::SimulatorBuilder::new();
-    simbuilder
-        .project_create("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1");
-    simbuilder
-        .project_create("4f57c123-3bda-4fae-94a2-46a9632d40b6", "simproject2");
-    simbuilder
-        .project_create("4aac89b0-df9a-441d-b050-f953476ea290", "simproject3");
-
-    Arc::new(ApiContext {
-        backend: Arc::new(simbuilder.build()),
-    })
-}
-
-/**
  * Run an instance of the API server.
  */
 pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
@@ -66,7 +50,7 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
         dropshot_api(),
-        api_context(),
+        ApiContext::new(),
         &log,
     )
     .map_err(|error| format!("initializing server: {}", error))?;
@@ -74,31 +58,45 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let join_handle = http_server.run().await;
     let server_result = join_handle
         .map_err(|error| format!("waiting for server: {}", error))?;
+
+    // XXX This is where we should initialize hardcoded data, I think?
+    //simbuilder
+    //    .project_create("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1");
+    //simbuilder
+    //    .project_create("4f57c123-3bda-4fae-94a2-46a9632d40b6", "simproject2");
+    //simbuilder
+    //    .project_create("4aac89b0-df9a-441d-b050-f953476ea290", "simproject3");
+
     server_result.map_err(|error| format!("server stopped: {}", error))
 }
 
 /**
  * API-specific state that we'll associate with the server and make available to
- * API request handler functions.  See `api_backend()`.
+ * API request handler functions.
  */
 pub struct ApiContext {
-    pub backend: Arc<dyn api_model::ApiBackend>,
+    pub rack: Arc<OxideRack>,
 }
 
-/**
- * This function gets our implementation-specific backend out of the
- * generic RequestContext structure.  We make use of 'dyn Any' here and
- * downcast.  It should not be possible for this downcast to fail unless the
- * caller has passed us a RequestContext from a totally different HttpServer
- * created with a different type for its private data, which we do not expect.
- * TODO-cleanup: can we make this API statically type-safe?
- */
-pub fn api_backend(
-    rqctx: &Arc<RequestContext>,
-) -> Arc<dyn api_model::ApiBackend> {
-    let maybectx = Arc::clone(&rqctx.server.private);
-    let apictx = maybectx
-        .downcast::<ApiContext>()
-        .expect("api_backend(): wrong type for private data");
-    return Arc::clone(&apictx.backend);
+impl ApiContext {
+    pub fn new() -> Arc<ApiContext> {
+        Arc::new(ApiContext {
+            rack: Arc::new(api_impl::OxideRack::new()),
+        })
+    }
+
+    /**
+     * Retrieves our API-specific context out of the generic RequestContext
+     * structure.  It should not be possible for this downcast to fail unless
+     * the caller has passed us a RequestContext from a totally different
+     * HttpServer created with a different type for its private data.  This
+     * should not happen in practice.
+     * TODO-cleanup: can we make this API statically type-safe?
+     */
+    fn from_request(rqctx: &Arc<RequestContext>) -> Arc<ApiContext> {
+        let maybectx = Arc::clone(&rqctx.server.private);
+        maybectx
+            .downcast::<ApiContext>()
+            .expect("ApiContext: wrong type for private data")
+    }
 }
