@@ -205,27 +205,105 @@ impl OxideRack {
         Ok(rv)
     }
 
-    // XXX
-    //     async fn project_list_instances(
-    //         &self,
-    //         name: &ApiName,
-    //         pagparams: &PaginationParams<ApiName>,
-    //     ) -> ListResult<ApiInstance>;
-    //     async fn project_create_instance(
-    //         &self,
-    //         name: &ApiName,
-    //         params: &ApiInstanceCreateParams,
-    //     ) -> CreateResult<ApiInstance>;
-    //     async fn project_lookup_instance(
-    //         &self,
-    //         project_name: &ApiName,
-    //         instance_name: &ApiName,
-    //     ) -> LookupResult<ApiInstance>;
-    //     async fn project_delete_instance(
-    //         &self,
-    //         project_name: &ApiName,
-    //         instance_name: &ApiName,
-    //     ) -> DeleteResult;
+    /*
+     * Instances
+     */
+
+    pub async fn project_list_instances(
+        &self,
+        project_name: &ApiName,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiInstance> {
+        let project = self.project_lookup(project_name).await?;
+        let instances = project.instances.lock().await;
+        collection_list(&instances, pagparams).await
+    }
+
+    pub async fn project_create_instance(
+        &self,
+        project_name: &ApiName,
+        params: &ApiInstanceCreateParams,
+    ) -> CreateResult<ApiInstance> {
+        let now = Utc::now();
+        let newname = params.identity.name.clone();
+
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let mut instances = project.instances.lock().await;
+        if instances.contains_key(&newname) {
+            return Err(ApiError::ObjectAlreadyExists {
+                type_name: ApiResourceType::Instance,
+                object_name: String::from(newname),
+            });
+        }
+
+        let instance = Arc::new(ApiInstance {
+            identity: ApiIdentityMetadata {
+                id: Uuid::new_v4(),
+                name: params.identity.name.clone(),
+                description: params.identity.description.clone(),
+                time_created: now.clone(),
+                time_modified: now.clone(),
+            },
+            project_id: project.identity.id.clone(),
+            ncpus: params.ncpus,
+            memory: params.memory,
+            boot_disk_size: params.boot_disk_size,
+            hostname: params.hostname.clone(),
+            /* TODO-debug: add state timestamp */
+            state: ApiInstanceState::Starting,
+        });
+
+        let rv = Arc::clone(&instance);
+        instances.insert(newname, instance);
+        Ok(rv)
+    }
+
+    pub async fn project_lookup_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> LookupResult<ApiInstance> {
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let instances = project.instances.lock().await;
+        let instance = collection_lookup(
+            &instances,
+            instance_name,
+            ApiResourceType::Instance,
+        )?;
+        Ok(Arc::clone(instance))
+    }
+
+    pub async fn project_delete_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> DeleteResult {
+        let mut projects = self.projects_by_name.lock().await;
+        let project = collection_lookup(
+            &mut projects,
+            project_name,
+            ApiResourceType::Project,
+        )?;
+        let mut instances = project.instances.lock().await;
+
+        instances.remove(instance_name).ok_or_else(|| {
+            ApiError::ObjectNotFound {
+                type_name: ApiResourceType::Instance,
+                object_name: String::from(instance_name.clone()),
+            }
+        })?;
+        Ok(())
+    }
 }
 
 /**

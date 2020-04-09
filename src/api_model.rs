@@ -356,8 +356,6 @@ impl ApiByteCount {
  * Represents an instance (VM) in the API
  */
 pub struct ApiInstance {
-    /** private data used by the backend implementation */
-    pub backend_impl: Box<dyn Any + Send + Sync>,
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
