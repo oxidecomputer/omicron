@@ -15,16 +15,16 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
 use chrono::Utc;
+use futures::future::ready;
 use futures::lock::Mutex;
+use futures::stream::Stream;
 use futures::stream::StreamExt;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
-use std::pin::Pin;
-use futures::stream::Stream;
-use futures::future::ready;
 
 /*
  * These type aliases exist primarily to make it easier to be consistent about
@@ -86,6 +86,7 @@ pub struct OxideRack {
  * with the right type parameters, generic code can be written to work on all
  * types.
  * TODO update and delete need to accommodate both with-etag and don't-care
+ * TODO audit logging ought to be part of this structure and its functions
  */
 impl OxideRack {
     pub fn new() -> OxideRack {
@@ -96,6 +97,14 @@ impl OxideRack {
 
     pub async fn project_create(
         &self,
+        new_project: &ApiProjectCreateParams,
+    ) -> CreateResult<ApiProject> {
+        self.project_create_with_id(Uuid::new_v4(), new_project).await
+    }
+
+    pub async fn project_create_with_id(
+        &self,
+        new_uuid: Uuid,
         new_project: &ApiProjectCreateParams,
     ) -> CreateResult<ApiProject> {
         let mut projects_by_name = self.projects_by_name.lock().await;
@@ -111,7 +120,7 @@ impl OxideRack {
         let project = Arc::new(ApiProject {
             instances: Mutex::new(BTreeMap::new()),
             identity: ApiIdentityMetadata {
-                id: Uuid::new_v4(),
+                id: new_uuid,
                 name: newname.clone(),
                 description: new_project.identity.description.clone(),
                 time_created: now.clone(),
@@ -125,8 +134,10 @@ impl OxideRack {
         Ok(rv)
     }
 
-    pub async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject>
-    {
+    pub async fn project_lookup(
+        &self,
+        name: &ApiName,
+    ) -> LookupResult<ApiProject> {
         let mut projects = self.projects_by_name.lock().await;
         let project =
             collection_lookup(&mut projects, name, ApiResourceType::Project)?;
@@ -134,19 +145,67 @@ impl OxideRack {
         Ok(rv)
     }
 
+    pub async fn projects_list(
+        &self,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiProject> {
+        let projects_by_name = self.projects_by_name.lock().await;
+        collection_list(&projects_by_name, pagparams).await
+    }
+
+    pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
+        let mut projects = self.projects_by_name.lock().await;
+        projects.remove(name).ok_or_else(|| ApiError::ObjectNotFound {
+            type_name: ApiResourceType::Project,
+            object_name: String::from(name.clone()),
+        })?;
+        Ok(())
+    }
+
+    pub async fn project_update(
+        &self,
+        name: &ApiName,
+        new_params: &ApiProjectUpdateParams,
+    ) -> UpdateResult<ApiProject> {
+        let now = Utc::now();
+        let mut projects = self.projects_by_name.lock().await;
+
+        let oldproject: Arc<ApiProject> =
+            projects.remove(name).ok_or_else(|| ApiError::ObjectNotFound {
+                type_name: ApiResourceType::Project,
+                object_name: String::from(name.clone()),
+            })?;
+        let newname = &new_params
+            .identity
+            .name
+            .as_ref()
+            .unwrap_or(&oldproject.identity.name);
+        let newdescription = &new_params
+            .identity
+            .description
+            .as_ref()
+            .unwrap_or(&oldproject.identity.description);
+        let newgen = oldproject.generation + 1;
+
+        let old_instances = oldproject.instances.lock().await;
+        let newvalue = Arc::new(ApiProject {
+            instances: Mutex::new(old_instances.clone()),
+            identity: ApiIdentityMetadata {
+                id: oldproject.identity.id.clone(),
+                name: (*newname).clone(),
+                description: (*newdescription).clone(),
+                time_created: oldproject.identity.time_created.clone(),
+                time_modified: now.clone(),
+            },
+            generation: newgen,
+        });
+
+        let rv = Arc::clone(&newvalue);
+        projects.insert(newvalue.identity.name.clone(), newvalue);
+        Ok(rv)
+    }
+
     // XXX
-    //     async fn project_lookup(&self, name: &ApiName) -> LookupResult<ApiProject>;
-    //     async fn project_delete(&self, name: &ApiName) -> DeleteResult;
-    //     async fn project_update(
-    //         &self,
-    //         name: &ApiName,
-    //         params: &ApiProjectUpdateParams,
-    //     ) -> UpdateResult<ApiProject>;
-    //     async fn projects_list(
-    //         &self,
-    //         pagparams: &PaginationParams<ApiName>,
-    //     ) -> ListResult<ApiProject>;
-    //
     //     async fn project_list_instances(
     //         &self,
     //         name: &ApiName,
@@ -168,7 +227,6 @@ impl OxideRack {
     //         instance_name: &ApiName,
     //     ) -> DeleteResult;
 }
-
 
 /**
  * List a page of items from a collection.

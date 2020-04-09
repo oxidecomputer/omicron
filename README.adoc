@@ -121,6 +121,8 @@ the server to exit immediately with an error).
 == TODO
 
 * Current work: refactoring backend
+** currently: uncommenting out http entrypoints, updating them, and filling in
+   implementation in api_impl.rs.
 ** search for XXXs, uses of "backend", "sim", etc. everywhere (comments and
    design docs too)
 ** Working on instances

@@ -86,6 +86,10 @@ impl HttpServer {
         channel.send(()).expect("failed to send close signal");
     }
 
+    /*
+     * TODO-cleanup is it more accurate to call this start() and say it returns
+     * a Future that resolves when the server is finished?
+     */
     pub fn run(
         &mut self,
     ) -> tokio::task::JoinHandle<Result<(), hyper::error::Error>> {

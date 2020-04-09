@@ -6,7 +6,8 @@ use http::Method;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::ApiContext;
+use crate::api_impl::to_view_list;
+use crate::api_impl::PaginationParams;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
@@ -16,6 +17,7 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+use crate::ApiContext;
 use dropshot::http_extract_path_param;
 use dropshot::http_extract_path_params;
 use dropshot::ApiDescription;
@@ -31,12 +33,11 @@ use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
-//    api.register(
-//        Method::GET,
-//        "/projects",
-//        HttpRouteHandler::new(api_projects_get),
-//    );
-    // XXX
+    api.register(
+        Method::GET,
+        "/projects",
+        HttpRouteHandler::new(api_projects_get),
+    );
     api.register(
         Method::POST,
         "/projects",
@@ -54,37 +55,38 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api_projects_get_project::register(api);
     //api.register(api_projects_get_project);
 
-//    api.register(
-//        Method::DELETE,
-//        "/projects/{project_id}",
-//        HttpRouteHandler::new(api_projects_delete_project),
-//    );
-//    api.register(
-//        Method::PUT,
-//        "/projects/{project_id}",
-//        HttpRouteHandler::new(api_projects_put_project),
-//    );
-//
-//    api.register(
-//        Method::GET,
-//        "/projects/{project_id}/instances",
-//        HttpRouteHandler::new(api_project_instances_get),
-//    );
-//    api.register(
-//        Method::POST,
-//        "/projects/{project_id}/instances",
-//        HttpRouteHandler::new(api_project_instances_post),
-//    );
-//    api.register(
-//        Method::GET,
-//        "/projects/{project_id}/instances/{instance_id}",
-//        HttpRouteHandler::new(api_project_instances_get_instance),
-//    );
-//    api.register(
-//        Method::DELETE,
-//        "/projects/{project_id}/instances/{instance_id}",
-//        HttpRouteHandler::new(api_project_instances_delete_instance),
-//    );
+    api.register(
+        Method::DELETE,
+        "/projects/{project_id}",
+        HttpRouteHandler::new(api_projects_delete_project),
+    );
+    api.register(
+        Method::PUT,
+        "/projects/{project_id}",
+        HttpRouteHandler::new(api_projects_put_project),
+    );
+
+    // XXX
+    //    api.register(
+    //        Method::GET,
+    //        "/projects/{project_id}/instances",
+    //        HttpRouteHandler::new(api_project_instances_get),
+    //    );
+    //    api.register(
+    //        Method::POST,
+    //        "/projects/{project_id}/instances",
+    //        HttpRouteHandler::new(api_project_instances_post),
+    //    );
+    //    api.register(
+    //        Method::GET,
+    //        "/projects/{project_id}/instances/{instance_id}",
+    //        HttpRouteHandler::new(api_project_instances_get_instance),
+    //    );
+    //    api.register(
+    //        Method::DELETE,
+    //        "/projects/{project_id}/instances/{instance_id}",
+    //        HttpRouteHandler::new(api_project_instances_delete_instance),
+    //    );
 }
 
 /*
@@ -120,19 +122,20 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
  *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-// /*
-//  * "GET /projects": list all projects
-//  */
-// async fn api_projects_get(
-//     rqctx: Arc<RequestContext>,
-//     params_raw: Query<PaginationParams<ApiName>>,
-// ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
-//     let backend = api_backend(&rqctx);
-//     let params = params_raw.into_inner();
-//     let project_stream = backend.projects_list(&params).await?;
-//     let view_list = to_view_list(project_stream).await;
-//     Ok(HttpResponseOkObjectList(view_list))
-// }
+/*
+ * "GET /projects": list all projects
+ */
+async fn api_projects_get(
+    rqctx: Arc<RequestContext>,
+    params_raw: Query<PaginationParams<ApiName>>,
+) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let rack = &apictx.rack;
+    let params = params_raw.into_inner();
+    let project_stream = rack.projects_list(&params).await?;
+    let view_list = to_view_list(project_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
 
 /*
  * "POST /projects": create a new project
@@ -177,49 +180,50 @@ async fn api_projects_get_project(
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
-// /*
-//  * "DELETE /project/{project_id}": delete a specific project
-//  */
-// async fn api_projects_delete_project(
-//     rqctx: Arc<RequestContext>,
-// ) -> Result<HttpResponseDeleted, HttpError> {
-//     let backend = api_backend(&rqctx);
-//     let params: ProjectPathParam =
-//         http_extract_path_params(&rqctx.path_variables)?;
-//     let project_id =
-//         ApiName::from_param(params.project_id.clone(), "project_id")?;
-//     backend.project_delete(&project_id).await?;
-//     Ok(HttpResponseDeleted())
-// }
-// 
-// /*
-//  * "PUT /project/{project_id}": update a specific project
-//  *
-//  * TODO-correctness: Is it valid for PUT to accept application/json that's a
-//  * subset of what the resource actually represents?  If not, is that a problem?
-//  * (HTTP may require that this be idempotent.)  If so, can we get around that
-//  * having this be a slightly different content-type (e.g.,
-//  * "application/json-patch")?  We should see what other APIs do.
-//  */
-// async fn api_projects_put_project(
-//     rqctx: Arc<RequestContext>,
-//     updated_project: Json<ApiProjectUpdateParams>,
-// ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
-//     let backend = api_backend(&rqctx);
-//     let params: ProjectPathParam =
-//         http_extract_path_params(&rqctx.path_variables)?;
-//     let project_id =
-//         ApiName::from_param(params.project_id.clone(), "project_id")?;
-//     let newproject = backend
-//         .project_update(&project_id, &updated_project.into_inner())
-//         .await?;
-//     Ok(HttpResponseOkObject(newproject.to_view()))
-// }
-// 
+/*
+ * "DELETE /project/{project_id}": delete a specific project
+ */
+async fn api_projects_delete_project(
+    rqctx: Arc<RequestContext>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let rack = &apictx.rack;
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    rack.project_delete(&project_id).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/*
+ * "PUT /project/{project_id}": update a specific project
+ *
+ * TODO-correctness: Is it valid for PUT to accept application/json that's a
+ * subset of what the resource actually represents?  If not, is that a problem?
+ * (HTTP may require that this be idempotent.)  If so, can we get around that
+ * having this be a slightly different content-type (e.g.,
+ * "application/json-patch")?  We should see what other APIs do.
+ */
+async fn api_projects_put_project(
+    rqctx: Arc<RequestContext>,
+    updated_project: Json<ApiProjectUpdateParams>,
+) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let rack = &apictx.rack;
+    let params: ProjectPathParam =
+        http_extract_path_params(&rqctx.path_variables)?;
+    let project_id =
+        ApiName::from_param(params.project_id.clone(), "project_id")?;
+    let newproject =
+        rack.project_update(&project_id, &updated_project.into_inner()).await?;
+    Ok(HttpResponseOkObject(newproject.to_view()))
+}
+//
 // /*
 //  * Instances
 //  */
-// 
+//
 // /*
 //  * "GET /project/{project_id}/instances": list instances in a project
 //  */
@@ -238,7 +242,7 @@ async fn api_projects_get_project(
 //     let view_list = to_view_list(instance_stream).await;
 //     Ok(HttpResponseOkObjectList(view_list))
 // }
-// 
+//
 // /*
 //  * "POST /project/{project_id}/instances": create instance in a project
 //  * TODO-correctness This is supposed to be async.  Is that right?  We can create
@@ -264,13 +268,13 @@ async fn api_projects_get_project(
 //         .await?;
 //     Ok(HttpResponseCreated(instance.to_view()))
 // }
-// 
+//
 // #[derive(Deserialize)]
 // struct InstancePathParam {
 //     project_id: String,
 //     instance_id: String,
 // }
-// 
+//
 // /*
 //  * "GET /project/{project_id}/instances/{instance_id}"
 //  */
@@ -288,7 +292,7 @@ async fn api_projects_get_project(
 //         backend.project_lookup_instance(&project_id, &instance_id).await?;
 //     Ok(HttpResponseOkObject(instance.to_view()))
 // }
-// 
+//
 // /*
 //  * "DELETE /project/{project_id}/instances/{instance_id}"
 //  */
