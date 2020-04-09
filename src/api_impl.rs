@@ -21,7 +21,6 @@ use futures::stream::Stream;
 use futures::stream::StreamExt;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
 use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
