@@ -1,96 +1,46 @@
 /*!
- * Implementation of APIs for the Oxide Rack
+ * Data storage interfaces for resources in the Oxide Rack.  Currently, this
+ * just stores data in-memory, but the intent is to move this towards something
+ * more like a distributed database.
  */
 
 use crate::api_error::ApiError;
+use crate::rack::CreateResult;
+use crate::rack::DeleteResult;
+use crate::rack::ListResult;
+use crate::rack::LookupResult;
+use crate::rack::PaginationParams;
+use crate::rack::UpdateResult;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
-use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
 use chrono::Utc;
-use futures::future::ready;
 use futures::lock::Mutex;
-use futures::stream::Stream;
 use futures::stream::StreamExt;
-use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/*
- * These type aliases exist primarily to make it easier to be consistent about
- * return values from this module.
- */
-
-/** Result of a create operation for the specified type. */
-pub type CreateResult<T> = Result<Arc<T>, ApiError>;
-/** Result of a delete operation for the specified type. */
-pub type DeleteResult = Result<(), ApiError>;
-/** Result of a list operation that returns an ObjectStream. */
-pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
-/** Result of a lookup operation for the specified type. */
-pub type LookupResult<T> = Result<Arc<T>, ApiError>;
-/** Result of an update operation for the specified type. */
-pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
-
-/** A stream of Results, each potentially representing an object in the API. */
-pub type ObjectStream<T> =
-    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
-
-#[derive(Deserialize)]
-pub struct PaginationParams<NameType> {
-    pub marker: Option<NameType>,
-    pub limit: Option<usize>,
+pub struct RackDataStore {
+    /** projects in the rack, indexed by name */
+    projects_by_name: Mutex<BTreeMap<ApiName, Arc<ApiProject>>>,
+    /** project instances, indexed by project name, then by instance name */
+    instances_by_project_name:
+        Mutex<BTreeMap<ApiName, BTreeMap<ApiName, Arc<ApiInstance>>>>,
 }
 
-/**
- * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
- * return a vector of the objects' views.  Any failures are ignored.
- * TODO-hardening: Consider how to better deal with these failures.  We should
- * probably at least log something.
- */
-pub async fn to_view_list<T: ApiObject>(
-    object_stream: ObjectStream<T>,
-) -> Vec<T::View> {
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().to_view())
-        .collect::<Vec<T::View>>()
-        .await
-}
-
-/**
- * Represents the state of the Oxide rack that we're managing.
- */
-pub struct OxideRack {
-    /*
-     * TODO-cleanup the data here about the contents of the rack should probably
-     * be behind some other abstraction (like a "datastore"?).
-     */
-    /** Projects and instances in the rack. */
-    projects_by_name: Arc<Mutex<BTreeMap<ApiName, Arc<ApiProject>>>>,
-}
-
-/*
- * TODO Is it possible to make some of these operations more generic?  A
- * particularly good example is probably list() (or even lookup()), where
- * with the right type parameters, generic code can be written to work on all
- * types.
- * TODO update and delete need to accommodate both with-etag and don't-care
- * TODO audit logging ought to be part of this structure and its functions
- */
-impl OxideRack {
-    pub fn new() -> OxideRack {
-        OxideRack {
-            projects_by_name: Arc::new(Mutex::new(BTreeMap::new())),
+impl RackDataStore {
+    pub fn new() -> RackDataStore {
+        RackDataStore {
+            projects_by_name: Mutex::new(BTreeMap::new()),
+            instances_by_project_name: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -107,17 +57,19 @@ impl OxideRack {
         new_project: &ApiProjectCreateParams,
     ) -> CreateResult<ApiProject> {
         let mut projects_by_name = self.projects_by_name.lock().await;
-        if projects_by_name.contains_key(&new_project.identity.name) {
+        let mut project_instances = self.instances_by_project_name.lock().await;
+        let newname = &new_project.identity.name;
+        if projects_by_name.contains_key(&newname) {
+            assert!(project_instances.contains_key(&newname));
             return Err(ApiError::ObjectAlreadyExists {
                 type_name: ApiResourceType::Project,
                 object_name: String::from(new_project.identity.name.clone()),
             });
         }
 
+        assert!(!project_instances.contains_key(&newname));
         let now = Utc::now();
-        let newname = &new_project.identity.name;
         let project = Arc::new(ApiProject {
-            instances: Mutex::new(BTreeMap::new()),
             identity: ApiIdentityMetadata {
                 id: new_uuid,
                 name: newname.clone(),
@@ -130,6 +82,7 @@ impl OxideRack {
 
         let rv = Arc::clone(&project);
         projects_by_name.insert(newname.clone(), project);
+        project_instances.insert(newname.clone(), BTreeMap::new());
         Ok(rv)
     }
 
@@ -154,10 +107,14 @@ impl OxideRack {
 
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
         let mut projects = self.projects_by_name.lock().await;
+        let mut project_instances = self.instances_by_project_name.lock().await;
         projects.remove(name).ok_or_else(|| ApiError::ObjectNotFound {
             type_name: ApiResourceType::Project,
             object_name: String::from(name.clone()),
         })?;
+        project_instances
+            .remove(name)
+            .expect("project existed but had no instances collection");
         Ok(())
     }
 
@@ -186,9 +143,7 @@ impl OxideRack {
             .unwrap_or(&oldproject.identity.description);
         let newgen = oldproject.generation + 1;
 
-        let old_instances = oldproject.instances.lock().await;
         let newvalue = Arc::new(ApiProject {
-            instances: Mutex::new(old_instances.clone()),
             identity: ApiIdentityMetadata {
                 id: oldproject.identity.id.clone(),
                 name: (*newname).clone(),
@@ -213,8 +168,16 @@ impl OxideRack {
         project_name: &ApiName,
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance> {
-        let project = self.project_lookup(project_name).await?;
-        let instances = project.instances.lock().await;
+        /*
+         * TODO-cleanup a common function for looking up instances that returns
+         * an appropriate ApiError would avoid this weird call where we ignore
+         * the value (and in several other places as well).
+         */
+        self.project_lookup(project_name).await?;
+        let project_instances = self.instances_by_project_name.lock().await;
+        let instances = project_instances
+            .get(project_name)
+            .expect("project existed but had no instance collection");
         collection_list(&instances, pagparams).await
     }
 
@@ -226,13 +189,19 @@ impl OxideRack {
         let now = Utc::now();
         let newname = params.identity.name.clone();
 
-        let mut projects = self.projects_by_name.lock().await;
+        let projects = self.projects_by_name.lock().await;
+
         let project = collection_lookup(
-            &mut projects,
+            &projects,
             project_name,
             ApiResourceType::Project,
         )?;
-        let mut instances = project.instances.lock().await;
+
+        let mut project_instances = self.instances_by_project_name.lock().await;
+        let instances = project_instances
+            .get_mut(project_name)
+            .expect("project existed but had no instance collection");
+
         if instances.contains_key(&newname) {
             return Err(ApiError::ObjectAlreadyExists {
                 type_name: ApiResourceType::Instance,
@@ -267,13 +236,17 @@ impl OxideRack {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
-        let mut projects = self.projects_by_name.lock().await;
-        let project = collection_lookup(
-            &mut projects,
+        let projects = self.projects_by_name.lock().await;
+        /* TODO-cleanup we're just doing this to handle the error case */
+        collection_lookup(
+            &projects,
             project_name,
             ApiResourceType::Project,
         )?;
-        let instances = project.instances.lock().await;
+        let project_instances = self.instances_by_project_name.lock().await;
+        let instances = project_instances
+            .get(project_name)
+            .expect("project existed but had no instance collection");
         let instance = collection_lookup(
             &instances,
             instance_name,
@@ -288,13 +261,16 @@ impl OxideRack {
         instance_name: &ApiName,
     ) -> DeleteResult {
         let mut projects = self.projects_by_name.lock().await;
-        let project = collection_lookup(
+        /* TODO-cleanup we're just doing this to handle the error case */
+        collection_lookup(
             &mut projects,
             project_name,
             ApiResourceType::Project,
         )?;
-        let mut instances = project.instances.lock().await;
-
+        let mut project_instances = self.instances_by_project_name.lock().await;
+        let instances = project_instances
+            .get_mut(project_name)
+            .expect("project existed but had no instance collection");
         instances.remove(instance_name).ok_or_else(|| {
             ApiError::ObjectNotFound {
                 type_name: ApiResourceType::Instance,

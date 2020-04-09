@@ -6,8 +6,6 @@ use http::Method;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::api_impl::to_view_list;
-use crate::api_impl::PaginationParams;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
@@ -17,6 +15,8 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
+use crate::rack::to_view_list;
+use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::http_extract_path_param;
 use dropshot::http_extract_path_params;

@@ -6,16 +6,13 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use futures::lock::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
@@ -222,15 +219,6 @@ pub struct ApiIdentityMetadataUpdateParams {
  * Represents a Project in the API.  See RFD for field details.
  */
 pub struct ApiProject {
-    /*
-     * TODO-cleanup: this shouldn't be here because you shouldn't have to load
-     * all instances in order to be able to look at a project's metadata.  This
-     * should all be behind a "datastore" abstraction or the like -- see
-     * OxideRack.
-     */
-    /** instances associated with this project */
-    pub instances: Mutex<BTreeMap<ApiName, Arc<ApiInstance>>>,
-
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 

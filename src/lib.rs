@@ -9,11 +9,12 @@
 mod api_config;
 mod api_error;
 mod api_http_entrypoints;
-mod api_impl;
+mod rack;
 pub mod api_model;
+mod datastore;
 
 pub use api_config::ApiServerConfig;
-use api_impl::OxideRack;
+use rack::OxideRack;
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;
 use api_model::ApiProjectCreateParams;
@@ -81,7 +82,7 @@ pub struct ApiContext {
 impl ApiContext {
     pub fn new() -> Arc<ApiContext> {
         Arc::new(ApiContext {
-            rack: Arc::new(api_impl::OxideRack::new()),
+            rack: Arc::new(OxideRack::new()),
         })
     }
 
