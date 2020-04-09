@@ -137,11 +137,11 @@ The implementation is divided into several subsystems:
 ** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
 ** Other thoughts:
-*** separate out api_model_data.rs?
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
 ** Dropshot itself should be documented
+** separate out api_model_data.rs?
 * Flesh out more endpoints and simulator
 * Write out road map
 * General work:
