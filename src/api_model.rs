@@ -42,11 +42,11 @@ pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
  * We expect to add many more types to the API for things like instances, disks,
  * images, networking abstractions, organizations, teams, users, system
  * components, and the like.  See RFD 4 for details.  The current plan is to add
- * types and supporting backend functions for each of these resources.  However,
+ * types and supporting functions for each of these resources.  However,
  * different types may support different operations.  For examples, instances
  * will have additional operations (like "boot" and "halt").  System component
  * resources may be immutable (i.e., they won't define a "CreateParams" type, an
- * "UpdateParams" type, nor create or update functions on the Backend).
+ * "UpdateParams" type, nor create or update functions).
  *
  * The only thing guaranteed by the `ApiObject` trait is that the type can be
  * converted to a View, which is something that can be serialized.
@@ -238,9 +238,8 @@ pub struct ApiProject {
      * TODO
      * We define a generation number here at the model layer so that in theory
      * the model layer can handle optimistic concurrency control (i.e.,
-     * put-only-if-matches-etag and the like).  It's not yet clear if this is
-     * better handled in the backend or if a generation number is the right way
-     * to express this.
+     * put-only-if-matches-etag and the like).  It's not yet clear if a
+     * generation number is the right way to express this.
      */
     /** generation number for this version of the object. */
     pub generation: u64,

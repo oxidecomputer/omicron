@@ -121,19 +121,14 @@ the server to exit immediately with an error).
 == TODO
 
 * Current work: refactoring backend
-** currently: uncommenting out http entrypoints, updating them, and filling in
-   implementation in api_impl.rs.
-** search for XXXs, uses of "backend", "sim", etc. everywhere (comments and
-   design docs too)
-** Working on instances
-*** Update?
-*** Build infrastructure for supporting async operations (boot, halt, reboot),
+** update comment in dropshot/src/error.rs.
+** update DESIGN.md
+* Working on instances
+** Update?
+** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
 ** Other thoughts:
-*** separate out api_model_data.rs from api_model_backend.rs?
-*** Instead of having this totally agnostic backend, would it make sense to
-    instead have a model layer that knows exactly what _storage_ backend it's
-    using but has a Rack backend that's all timeouts and noops?
+*** separate out api_model_data.rs?
 * Repo cleanup
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
