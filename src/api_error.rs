@@ -6,8 +6,8 @@ use crate::api_model;
 use dropshot::HttpError;
 
 /**
- * ApiError represents errors that can be generated within the API server.  See
- * the module-level documentation for details.
+ * ApiError represents errors that can be generated within the API server.
+ * These are HTTP-agnostic.  See the module-level documentation for details.
  */
 #[derive(Debug, PartialEq)]
 pub enum ApiError {
