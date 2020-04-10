@@ -125,7 +125,7 @@ impl HttpServer {
             log: log.new(o!()),
         });
 
-        for (path, method) in app_state.router.iter() {
+        for (path, method, _) in app_state.router.iter() {
             debug!(app_state.log, "registered endpoint";
                 "method" => &method,
                 "path" => &path

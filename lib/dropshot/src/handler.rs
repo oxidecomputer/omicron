@@ -122,6 +122,7 @@ use super::http_util::http_read_body;
 use super::http_util::CONTENT_TYPE_JSON;
 use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::DropshotState;
+use crate::api_description::{EndpointParameter, EndpointParameterLocation};
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -172,41 +173,49 @@ pub struct RequestContext {
 }
 
 /**
- * `Derived` defines an interface allowing a type to be constructed from a
- * `RequestContext`.  Unlike most traits, `Derived` essentially defines only a
+ * `Extractor` defines an interface allowing a type to be constructed from a
+ * `RequestContext`.  Unlike most traits, `Extractor` essentially defines only a
  * constructor function, not instance functions.
  *
- * The extractors that we provide (e.g., `Query`, `Json`) implement `Derived` in
- * order to construct themselves from the request.  For example, `Derived` is
+ * The extractors that we provide (e.g., `Query`, `Json`) implement `Extractor` in
+ * order to construct themselves from the request.  For example, `Extractor` is
  * implemented for `Query<Q>` with a function that reads the query string from
  * the request, parses it, and constructs a `Query<Q>` with it.
  *
- * We also define implementations of `Derived` for tuples of types that
- * themselves implement `Derived`.  See the implementation of
+ * We also define implementations of `Extractor` for tuples of types that
+ * themselves implement `Extractor`.  See the implementation of
  * `HttpRouteHandler` for more on why this needed.
  */
 #[async_trait]
-pub trait Derived: Send + Sync + Sized {
+pub trait Extractor: Send + Sync + Sized {
     /**
      * Construct an instance of this type from a `RequestContext`.
      */
     async fn from_request(
         rqctx: Arc<RequestContext>,
     ) -> Result<Self, HttpError>;
+
+    fn generate() -> Vec<EndpointParameter>;
 }
 
 /**
- * `impl_derived_for_tuple!` defines implementations of `Derived` for tuples
- * whose elements themselves implement `Derived`.
+ * `impl_derived_for_tuple!` defines implementations of `Extractor` for tuples
+ * whose elements themselves implement `Extractor`.
  */
 macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
     #[async_trait]
-    impl< $($T: Derived + 'static,)* > Derived for ($($T,)*)
+    impl< $($T: Extractor + 'static,)* > Extractor for ($($T,)*)
     {
         async fn from_request(_rqctx: Arc<RequestContext>)
             -> Result<( $($T,)* ), HttpError>
         {
             Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
+        }
+
+        fn generate() -> Vec<EndpointParameter> {
+            let mut v = vec![];
+            $( v.append(&mut $T::generate()); )*
+            v
         }
     }
 });
@@ -214,6 +223,10 @@ macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
 impl_derived_for_tuple!();
 impl_derived_for_tuple!(T1);
 impl_derived_for_tuple!(T1, T2);
+
+pub trait ExtractorParameter: DeserializeOwned {
+    fn generate(inn: EndpointParameterLocation) -> Vec<EndpointParameter>;
+}
 
 /**
  * `HttpHandlerFunc` is a trait providing a single function, `handle_request()`,
@@ -236,7 +249,7 @@ impl_derived_for_tuple!(T1, T2);
 pub trait HttpHandlerFunc<FuncParams, ResponseType>:
     Send + Sync + 'static
 where
-    FuncParams: Derived,
+    FuncParams: Extractor,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     async fn handle_request(
@@ -362,17 +375,17 @@ where
  * `Result<Response<Body>, HttpError>` and we provide our own converter from
  * that to `HttpResponseWrap` (which ends up looking silly, as shown above).
  *
- * Note: the second element in the tuple below (the type parameter, `$T:tt`)
- * ought to be an "ident".  However, that causes us to run afoul of issue
- * dtolnay/async-trait#46.
+ * Note: the macro parameters really ought to be `$i:literal` and `$T:ident`,
+ * however that causes us to run afoul of issue dtolnay/async-trait#46. The
+ * workaround is to make both parameters `tt` (token tree).
  *
  * TODO-cleanup: could this all be a lot simpler if we made callers that want to
  * use `Response<Body>` wrap it in our own type?  That'd be nice anyway because
  * we want that to be the uncommon case.  We could even generate a warning that
  * has to be gagged or something.
  */
-macro_rules! impl_HttpHandlerFunc_for_func_with_params
-    ( { $(($i:tt, $T:tt)),* } => {
+macro_rules! impl_HttpHandlerFunc_for_func_with_params {
+    ( $(($i:tt, $T:tt)),*) => {
 
     #[async_trait]
     impl<FuncType, FutureType, ResponseType, $($T,)*>
@@ -383,7 +396,7 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params
         FutureType: Future<Output = Result<ResponseType, HttpError>>
             + Send + 'static,
         ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
-        $($T: Derived + Send + Sync + 'static,)*
+        $($T: Extractor + Send + Sync + 'static,)*
     {
         async fn handle_request(
             &self,
@@ -397,7 +410,7 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params
             response_as_wrap.into()
         }
     }
-});
+}}
 
 impl_HttpHandlerFunc_for_func_with_params!();
 impl_HttpHandlerFunc_for_func_with_params!((0, T0));
@@ -438,7 +451,7 @@ pub trait RouteHandler: Debug + Send + Sync {
 pub struct HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
-    FuncParams: Derived,
+    FuncParams: Extractor,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /** the actual HttpHandlerFunc used to implement this route */
@@ -462,7 +475,7 @@ impl<HandlerType, FuncParams, ResponseType> Debug
     for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
-    FuncParams: Derived,
+    FuncParams: Extractor,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -475,7 +488,7 @@ impl<HandlerType, FuncParams, ResponseType> RouteHandler
     for HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
-    FuncParams: Derived + 'static,
+    FuncParams: Extractor + 'static,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     fn label(&self) -> &str {
@@ -492,8 +505,8 @@ where
          * arguments to the handler function.  This could be `()`, `(Query<Q>)`,
          * `(Json<J>)`, `(Query<Q>, Json<J>)`, or any other combination of
          * extractors we decide to support in the future.  Whatever it is must
-         * implement `Derived`, which means we can invoke
-         * `Derived::from_request()` to construct the argument tuple, generally
+         * implement `Extractor`, which means we can invoke
+         * `Extractor::from_request()` to construct the argument tuple, generally
          * from information available in the `request` object.  We pass this
          * down to the `HttpHandlerFunc`, for which there's a different
          * implementation for each value of `FuncParams`.  The `HttpHandlerFunc`
@@ -505,7 +518,7 @@ where
          * resolved statically.
          */
         let rqctx = Arc::new(rqctx_raw);
-        let funcparams = Derived::from_request(Arc::clone(&rqctx)).await?;
+        let funcparams = Extractor::from_request(Arc::clone(&rqctx)).await?;
         let future = self.handler.handle_request(rqctx, funcparams);
         future.await
     }
@@ -519,7 +532,7 @@ impl<HandlerType, FuncParams, ResponseType>
     HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
-    FuncParams: Derived + 'static,
+    FuncParams: Extractor + 'static,
     ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
 {
     /**
@@ -583,7 +596,7 @@ fn http_request_load_query<QueryType: Send + Sync>(
     request: &Request<Body>,
 ) -> Result<Query<QueryType>, HttpError>
 where
-    QueryType: DeserializeOwned,
+    QueryType: ExtractorParameter,
 {
     let raw_query_string = request.uri().query().unwrap_or("");
     /*
@@ -601,7 +614,7 @@ where
 }
 
 /*
- * The `Derived` implementation for Query<QueryType> describes how to construct
+ * The `Extractor` implementation for Query<QueryType> describes how to construct
  * an instance of `Query<QueryType>` from an HTTP request: namely, by parsing
  * the query string to an instance of `QueryType`.
  * TODO-cleanup We shouldn't have to use the "'static" bound on `QueryType`
@@ -609,15 +622,19 @@ where
  * doesn't seem to be defined.
  */
 #[async_trait]
-impl<QueryType> Derived for Query<QueryType>
+impl<QueryType> Extractor for Query<QueryType>
 where
-    QueryType: DeserializeOwned + Send + Sync + 'static,
+    QueryType: ExtractorParameter + Send + Sync + 'static,
 {
     async fn from_request(
         rqctx: Arc<RequestContext>,
     ) -> Result<Query<QueryType>, HttpError> {
         let request = rqctx.request.lock().await;
         http_request_load_query(&request)
+    }
+
+    fn generate() -> Vec<EndpointParameter> {
+        QueryType::generate(EndpointParameterLocation::Query)
     }
 }
 
@@ -674,11 +691,11 @@ where
  * that implements `serde::Deserialize`.  See this module's documentation for
  * more information.
  */
-pub struct Json<JsonType: Send + Sync> {
+pub struct Json<JsonType: DeserializeOwned + Send + Sync> {
     inner: JsonType,
 }
 
-impl<JsonType: Send + Sync> Json<JsonType> {
+impl<JsonType: DeserializeOwned + Send + Sync> Json<JsonType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -718,7 +735,7 @@ where
 }
 
 /*
- * The `Derived` implementation for Json<JsonType> describes how to construct an
+ * The `Extractor` implementation for Json<JsonType> describes how to construct an
  * instance of `Json<JsonType>` from an HTTP request: namely, by reading the
  * request body and parsing it as JSON into type `JsonType`.
  * TODO-cleanup We shouldn't have to use the "'static" bound on `JsonType` here.
@@ -726,7 +743,7 @@ where
  * to be defined.
  */
 #[async_trait]
-impl<JsonType> Derived for Json<JsonType>
+impl<JsonType> Extractor for Json<JsonType>
 where
     JsonType: DeserializeOwned + Send + Sync + 'static,
 {
@@ -734,6 +751,10 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Json<JsonType>, HttpError> {
         http_request_load_json_body(rqctx).await
+    }
+
+    fn generate() -> Vec<EndpointParameter> {
+        vec![]
     }
 }
 

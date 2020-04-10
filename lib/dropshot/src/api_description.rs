@@ -2,35 +2,60 @@
  * Describes the endpoints and handler functions in your API
  */
 
+use crate::handler::{HttpHandlerFunc, HttpResponseWrap};
 use crate::router::HttpRouter;
-use crate::RouteHandler;
+use crate::{Extractor, HttpRouteHandler, RouteHandler};
+
 use http::Method;
 
-#[derive(Debug)]
 /**
  * An Endpoint represents a single API endpoint associated with an
  * ApiDescription.
  *
  * TODO: it will need to have parameter information TBD
  */
+#[derive(Debug)]
 pub struct Endpoint<'a> {
     pub handler: Box<dyn RouteHandler>,
     pub method: Method,
     pub path: &'a str,
+    pub parameters: Vec<EndpointParameter>,
 }
 
 impl<'a> Endpoint<'a> {
-    pub fn new(
-        handler: Box<dyn RouteHandler>,
+    pub fn new<HandlerType, FuncParams, ResponseType>(
+        handler: HandlerType,
         method: Method,
         path: &'a str,
-    ) -> Self {
+    ) -> Self
+    where
+        HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
+        FuncParams: Extractor + 'static,
+        ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    {
         Endpoint {
-            handler,
-            method,
-            path,
+            handler: HttpRouteHandler::new(handler),
+            method: method,
+            path: path,
+            parameters: FuncParams::generate(),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct EndpointParameter {
+    pub name: String,
+    pub inn: EndpointParameterLocation,
+    pub description: Option<String>,
+    pub required: bool,
+    // TODO: schema
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EndpointParameterLocation {
+    Path,
+    Query,
 }
 
 /**
@@ -58,7 +83,7 @@ impl ApiDescription {
         T: Into<Endpoint<'a>>,
     {
         let e = endpoint.into();
-        self.router.insert(e.method.clone(), &e.path, e.handler)
+        self.router.insert(e.method, &e.path, e.handler, e.parameters)
     }
 
     pub fn print_openapi(&self) {

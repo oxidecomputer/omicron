@@ -20,10 +20,13 @@ extern crate slog;
 
 pub use api_description::ApiDescription;
 pub use api_description::Endpoint;
+pub use api_description::EndpointParameter;
+pub use api_description::EndpointParameterLocation;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
-pub use handler::Derived;
+pub use handler::Extractor;
+pub use handler::ExtractorParameter;
 pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
 pub use handler::HttpResponseOkObject;

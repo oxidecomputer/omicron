@@ -2,6 +2,7 @@
  * Routes incoming HTTP requests to handler functions
  */
 
+use super::api_description::EndpointParameter;
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
@@ -156,6 +157,7 @@ struct HttpRouterNode {
 pub struct HttpEndpoint {
     /** Caller-supplied handler */
     pub handler: Box<dyn RouteHandler>,
+    pub parameters: Vec<EndpointParameter>,
 }
 
 #[derive(Debug)]
@@ -298,6 +300,7 @@ impl HttpRouter {
         method: Method,
         path: &str,
         handler: Box<dyn RouteHandler>,
+        parameters: Vec<EndpointParameter>,
     ) {
         let all_segments = HttpRouter::path_to_segments(path);
         let mut varnames: BTreeSet<String> = BTreeSet::new();
@@ -401,6 +404,7 @@ impl HttpRouter {
 
         node.methods.insert(methodname, HttpEndpoint {
             handler: handler,
+            parameters: parameters,
         });
     }
 
@@ -467,7 +471,7 @@ impl HttpRouter {
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
 
-        for (path, method) in self.iter() {
+        for (path, method, endpoint) in self.iter() {
             let path = openapi.paths.entry(path).or_insert(
                 openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()),
             );
@@ -488,8 +492,41 @@ impl HttpRouter {
                 "TRACE" => &mut pathitem.trace,
                 other => panic!("unexpected method `{}`", other),
             };
+            let mut operation = openapiv3::Operation::default();
 
-            method_ref.replace(openapiv3::Operation::default());
+            operation.parameters = endpoint
+                .parameters
+                .iter()
+                .map(|param| {
+                    openapiv3::ReferenceOr::Item(openapiv3::Parameter::Query {
+                        parameter_data: openapiv3::ParameterData {
+                            name: param.name.clone(),
+                            description: None,
+                            required: true,
+                            deprecated: None,
+                            format: openapiv3::ParameterSchemaOrContent::Schema(
+                                openapiv3::ReferenceOr::Item(
+                                    openapiv3::Schema {
+                                        schema_data:
+                                            openapiv3::SchemaData::default(),
+                                        schema_kind:
+                                            openapiv3::SchemaKind::Type(
+                                                openapiv3::Type::String(openapiv3::StringType::default()),
+                                            ),
+                                    },
+                                ),
+                            ),
+                            example: None,
+                            examples: indexmap::map::IndexMap::new(),
+                        },
+                        allow_reserved: true,
+                        style: openapiv3::QueryStyle::Form,
+                        allow_empty_value: None,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            method_ref.replace(operation);
         }
 
         println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
@@ -566,7 +603,7 @@ impl<'a> HttpRouterIter<'a> {
 }
 
 impl<'a> Iterator for HttpRouterIter<'a> {
-    type Item = (String, String);
+    type Item = (String, String, &'a HttpEndpoint);
 
     fn next(&mut self) -> Option<Self::Item> {
         // If there are no path components left then we've reached the end of
@@ -578,7 +615,7 @@ impl<'a> Iterator for HttpRouterIter<'a> {
 
         loop {
             match self.method.next() {
-                Some((m, _)) => break Some((self.path(), m.clone())),
+                Some((m, ref e)) => break Some((self.path(), m.clone(), e)),
                 None => {
                     // We've iterated fully through the method in this node so it's
                     // time to find the next node.

@@ -6,46 +6,13 @@ extern crate proc_macro;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-
 use serde::Deserialize;
+use serde_derive_internals::ast::Container;
+use serde_derive_internals::{Ctxt, Derive};
+use syn::{parse_macro_input, DeriveInput, ItemFn};
 
 use serde_tokenstream::from_tokenstream;
 use serde_tokenstream::Error;
-
-/// name - in macro; required
-/// in - in macro; required
-/// description - in macro; optional
-/// required - in code: Option<T>
-/// deprecated - in macro; optional/future work
-/// allowEmptyValue - future work
-///
-/// style - ignore for now
-/// explode - talk to dap
-/// allowReserved - future work
-/// schema - in code: derived from type
-/// example - not supported (see examples)
-/// examples - in macro: optional/future work
-
-#[derive(Deserialize, Debug)]
-enum InType {
-    #[serde(rename = "cookie")]
-    Cookie,
-    #[serde(rename = "header")]
-    Header,
-    #[serde(rename = "path")]
-    Path,
-    #[serde(rename = "query")]
-    Query,
-}
-
-#[derive(Deserialize, Debug)]
-struct Parameter {
-    name: String,
-    #[serde(rename = "in")]
-    inn: InType,
-    description: Option<String>,
-    deprecated: Option<bool>,
-}
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
@@ -98,11 +65,9 @@ fn do_endpoint(
     let method = metadata.method.as_str();
     let path = metadata.path;
 
-    let ast: syn::ItemFn = syn::parse(item).unwrap();
+    let ast: ItemFn = syn::parse(item)?;
 
-    let _ = extract_doc(&ast);
-
-    let name = ast.sig.ident.clone();
+    let name = &ast.sig.ident;
     let method_ident = quote::format_ident!("{}", method);
 
     // The final TokenStream returned will have a few components that reference
@@ -121,16 +86,79 @@ fn do_endpoint(
             fn from(_: #name) -> Self {
                 #ast
 
-                Endpoint::new(
-                    HttpRouteHandler::new(#name),
-                    Method::#method_ident,
-                    #path,
-                )
+                Endpoint::new(#name, Method::#method_ident, #path)
             }
         }
     };
 
     Ok(stream.into())
+}
+
+#[proc_macro_derive(ExtractorParameter)]
+pub fn derive_parameter(
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+
+    let ctxt = Ctxt::new();
+
+    let cont = Container::from_ast(&ctxt, &input, Derive::Deserialize).unwrap();
+    // TODO error checking
+    let _ = ctxt.check();
+
+    let fields = cont
+        .data
+        .all_fields()
+        .map(|f| match &f.member {
+            syn::Member::Named(ident) => {
+                let name = ident.to_string();
+                quote! {
+                    dropshot::EndpointParameter {
+                        name: #name.to_string(),
+                        inn: _in.clone(),
+                        description: None,
+                        required: true, // TODO look at option
+                        examples: vec![],
+                    }
+                }
+            }
+            _ => quote! {},
+        })
+        .collect::<Vec<_>>();
+
+    // Construct the appropriate where clause.
+    let name = cont.ident;
+    let mut generics = cont.generics.clone();
+
+    for tp in cont.generics.type_params() {
+        let ident = &tp.ident;
+        let pred: syn::WherePredicate = syn::parse2(quote! {
+            #ident : dropshot::ExtractorParameter
+        })
+        .unwrap();
+        generics.make_where_clause().predicates.push(pred);
+    }
+
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let stream = quote! {
+        impl #impl_generics dropshot::ExtractorParameter for #name #ty_generics
+        #where_clause
+        {
+            fn generate(_in: dropshot::EndpointParameterLocation)
+                -> Vec<dropshot::EndpointParameter>
+            {
+                vec![ #(#fields),* ]
+            }
+        }
+    };
+
+    stream.into()
+}
+
+fn to_compile_errors(errors: Vec<syn::Error>) -> proc_macro2::TokenStream {
+    let compile_errors = errors.iter().map(syn::Error::to_compile_error);
+    quote!(#(#compile_errors)*)
 }
 
 fn extract_doc(item: &syn::ItemFn) -> Result<(), Error> {
@@ -147,7 +175,7 @@ fn extract_doc(item: &syn::ItemFn) -> Result<(), Error> {
                 if let syn::Lit::Str(s) = nv.lit {
                     println!("parse {:?}", attr.parse_meta());
                     println!("path {:?}", attr.path);
-                    println!("  s {:?}", s.value());
+                    println!("  s {}", s.value());
                 }
             }
         }
@@ -164,7 +192,7 @@ mod tests {
     #[test]
     fn doc() {
         let item = quote! {
-            /// this looks like a comment, but it's actually part of the test
+            /// this looks like a "comment", but it's actually part of the test
             /// this too
             #[doc = "testing"]
             #[doc(hidden)]
@@ -175,6 +203,33 @@ mod tests {
 
         let _ = extract_doc(&ast);
 
+        panic!("bad");
+    }
+
+    use schemars::{schema_for, JsonSchema};
+    use std::marker::PhantomData;
+
+    #[derive(JsonSchema)]
+    struct Foo {
+        a: String,
+        b: String,
+    }
+
+    struct Bar {
+        a: String,
+    }
+
+    fn x<T>()
+    where
+        T: JsonSchema,
+    {
+        let schema = schema_for!(T);
+        println!("{:?}", schema);
+    }
+
+    #[test]
+    fn thing() {
+        x::<Foo>();
         panic!("bad");
     }
 }

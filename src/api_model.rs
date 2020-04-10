@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
+use dropshot_endpoint::ExtractorParameter;
+
 /** Default maximum number of items per page of "list" results */
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
@@ -83,7 +85,15 @@ impl Display for ApiResourceType {
  * constructed with a valid name string.
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ExtractorParameter,
 )]
 #[serde(try_from = "String")]
 pub struct ApiName(String);
@@ -255,7 +265,7 @@ pub struct ApiProjectView {
 /**
  * Represents the create-time parameters for an ApiProject.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ExtractorParameter)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -405,7 +415,7 @@ pub struct ApiInstanceView {
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ExtractorParameter)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
