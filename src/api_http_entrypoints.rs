@@ -11,19 +11,12 @@ use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
-use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
-use crate::api_model::ApiProjectView;
-<<<<<<< HEAD
+use crate::api_model::{ApiProject, ApiProjectView};
 use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
-use dropshot::http_extract_path_param;
-=======
-use crate::api_model::PaginationParams;
-use dropshot::http_extract_path_params;
->>>>>>> 4f1366b... rip out unused stuff; play with doc attributes
 use dropshot::ApiDescription;
 use dropshot::Endpoint;
 use dropshot::HttpError;
@@ -36,6 +29,7 @@ use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
+use dropshot_endpoint::ExtractorParameter;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api.register(Endpoint::new(api_projects_get, Method::GET, "/projects"));
@@ -114,12 +108,12 @@ pub fn api_register_entrypoints(api: &mut ApiDescription) {
  */
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<PaginationParams<ApiName>>,
+    query_params: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params = params_raw.into_inner();
-    let project_stream = rack.projects_list(&params).await?;
+    let query = query_params.into_inner();
+    let project_stream = rack.projects_list(&query).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -137,7 +131,7 @@ async fn api_projects_post(
     Ok(HttpResponseCreated(project.to_view()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ExtractorParameter)]
 struct ProjectPathParam {
     project_id: String,
 }
@@ -151,22 +145,15 @@ struct ProjectPathParam {
 }]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
-<<<<<<< HEAD
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let project: Arc<ApiProject> = rack
-        .project_lookup(&ApiName::from_param(project_id, "project_id")?)
-        .await?;
-=======
-    let backend = api_backend(&rqctx);
-    let params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let path = path_params.into_inner();
     let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
-    let project: Arc<ApiProject> = backend.project_lookup(&project_id).await?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
+    let project: Arc<ApiProject> = rack.project_lookup(&project_id).await?;
 
->>>>>>> 4f1366b... rip out unused stuff; play with doc attributes
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -261,7 +248,7 @@ async fn api_project_instances_post(
     Ok(HttpResponseCreated(instance.to_view()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ExtractorParameter)]
 struct InstancePathParam {
     project_id: String,
     instance_id: String,

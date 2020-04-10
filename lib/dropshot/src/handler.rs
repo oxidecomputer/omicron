@@ -662,14 +662,14 @@ impl<PathType: Send + Sync> Path<PathType> {
 }
 
 /*
- * The `Derived` implementation for Path<PathType> describes how to construct
+ * The `Extractor` implementation for Path<PathType> describes how to construct
  * an instance of `Path<QueryType>` from an HTTP request: namely, by extracting
  * parameters from the query string.
  */
 #[async_trait]
-impl<PathType> Derived for Path<PathType>
+impl<PathType> Extractor for Path<PathType>
 where
-    PathType: DeserializeOwned + Send + Sync + 'static,
+    PathType: ExtractorParameter + Send + Sync + 'static,
 {
     async fn from_request(
         rqctx: Arc<RequestContext>,
@@ -678,6 +678,10 @@ where
         Ok(Path {
             inner: params,
         })
+    }
+
+    fn generate() -> Vec<EndpointParameter> {
+        PathType::generate(EndpointParameterLocation::Path)
     }
 }
 
