@@ -6,6 +6,7 @@ use super::api_description::EndpointParameter;
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
+use crate::EndpointParameterLocation;
 use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
@@ -498,31 +499,44 @@ impl HttpRouter {
                 .parameters
                 .iter()
                 .map(|param| {
-                    openapiv3::ReferenceOr::Item(openapiv3::Parameter::Query {
-                        parameter_data: openapiv3::ParameterData {
-                            name: param.name.clone(),
-                            description: None,
-                            required: true,
-                            deprecated: None,
-                            format: openapiv3::ParameterSchemaOrContent::Schema(
-                                openapiv3::ReferenceOr::Item(
-                                    openapiv3::Schema {
-                                        schema_data:
-                                            openapiv3::SchemaData::default(),
-                                        schema_kind:
-                                            openapiv3::SchemaKind::Type(
-                                                openapiv3::Type::String(openapiv3::StringType::default()),
-                                            ),
-                                    },
+                    let parameter_data = openapiv3::ParameterData {
+                        name: param.name.clone(),
+                        description: None,
+                        required: true,
+                        deprecated: None,
+                        format: openapiv3::ParameterSchemaOrContent::Schema(
+                            openapiv3::ReferenceOr::Item(openapiv3::Schema {
+                                schema_data: openapiv3::SchemaData::default(),
+                                schema_kind: openapiv3::SchemaKind::Type(
+                                    openapiv3::Type::String(
+                                        openapiv3::StringType::default(),
+                                    ),
                                 ),
-                            ),
-                            example: None,
-                            examples: indexmap::map::IndexMap::new(),
-                        },
-                        allow_reserved: true,
-                        style: openapiv3::QueryStyle::Form,
-                        allow_empty_value: None,
-                    })
+                            }),
+                        ),
+                        example: None,
+                        examples: indexmap::map::IndexMap::new(),
+                    };
+                    match param.inn {
+                        EndpointParameterLocation::Query => {
+                            openapiv3::ReferenceOr::Item(
+                                openapiv3::Parameter::Query {
+                                    parameter_data: parameter_data,
+                                    allow_reserved: true,
+                                    style: openapiv3::QueryStyle::Form,
+                                    allow_empty_value: None,
+                                },
+                            )
+                        }
+                        EndpointParameterLocation::Path => {
+                            openapiv3::ReferenceOr::Item(
+                                openapiv3::Parameter::Path {
+                                    parameter_data: parameter_data,
+                                    style: openapiv3::PathStyle::Simple,
+                                },
+                            )
+                        }
+                    }
                 })
                 .collect::<Vec<_>>();
 
