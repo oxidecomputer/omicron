@@ -117,6 +117,7 @@
  */
 
 use super::error::HttpError;
+use super::http_util::http_extract_path_params;
 use super::http_util::http_read_body;
 use super::http_util::CONTENT_TYPE_JSON;
 use super::http_util::CONTENT_TYPE_NDJSON;
@@ -617,6 +618,49 @@ where
     ) -> Result<Query<QueryType>, HttpError> {
         let request = rqctx.request.lock().await;
         http_request_load_query(&request)
+    }
+}
+
+/*
+ * Path: path parameter string extractor
+ */
+
+/**
+ * `Path<PathType>` is an extractor used to deserialize an instance of
+ * `PathType` from an HTTP request's path parameters.  `PathType` is any
+ * structure of yours that implements `serde::Deserialize`.  See this module's
+ * documentation for more information.
+ */
+pub struct Path<PathType: Send + Sync> {
+    inner: PathType,
+}
+
+impl<PathType: Send + Sync> Path<PathType> {
+    /*
+     * TODO drop this in favor of Deref?  + Display and Debug for convenience?
+     */
+    pub fn into_inner(self) -> PathType {
+        self.inner
+    }
+}
+
+/*
+ * The `Derived` implementation for Path<PathType> describes how to construct
+ * an instance of `Path<QueryType>` from an HTTP request: namely, by extracting
+ * parameters from the query string.
+ */
+#[async_trait]
+impl<PathType> Derived for Path<PathType>
+where
+    PathType: DeserializeOwned + Send + Sync + 'static,
+{
+    async fn from_request(
+        rqctx: Arc<RequestContext>,
+    ) -> Result<Path<PathType>, HttpError> {
+        let params: PathType = http_extract_path_params(&rqctx.path_variables)?;
+        Ok(Path {
+            inner: params,
+        })
     }
 }
 
