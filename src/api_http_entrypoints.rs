@@ -19,7 +19,6 @@ use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::http_extract_path_param;
-use dropshot::http_extract_path_params;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -28,6 +27,7 @@ use dropshot::HttpResponseOkObject;
 use dropshot::HttpResponseOkObjectList;
 use dropshot::HttpRouteHandler;
 use dropshot::Json;
+use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
@@ -184,11 +184,11 @@ async fn api_projects_get_project(
  */
 async fn api_projects_delete_project(
     rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let params = path_params.into_inner();
     let project_id =
         ApiName::from_param(params.project_id.clone(), "project_id")?;
     rack.project_delete(&project_id).await?;
@@ -206,14 +206,14 @@ async fn api_projects_delete_project(
  */
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
     updated_project: Json<ApiProjectUpdateParams>,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let path = path_params.into_inner();
     let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
     let newproject =
         rack.project_update(&project_id, &updated_project.into_inner()).await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
@@ -228,17 +228,17 @@ async fn api_projects_put_project(
  */
 async fn api_project_instances_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<PaginationParams<ApiName>>,
+    query_params: Query<PaginationParams<ApiName>>,
+    path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOkObjectList<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let query_params = params_raw.into_inner();
-    let path_params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let query = query_params.into_inner();
+    let path: ProjectPathParam = path_params.into_inner();
     let project_name =
-        ApiName::from_param(path_params.project_id.clone(), "project_id")?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
     let instance_stream =
-        rack.project_list_instances(&project_name, &query_params).await?;
+        rack.project_list_instances(&project_name, &query).await?;
     let view_list = to_view_list(instance_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -255,14 +255,14 @@ async fn api_project_instances_get(
  */
 async fn api_project_instances_post(
     rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
     new_instance: Json<ApiInstanceCreateParams>,
 ) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let path_params: ProjectPathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let path = path_params.into_inner();
     let project_name =
-        ApiName::from_param(path_params.project_id.clone(), "project_id")?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
     let new_instance_params = &new_instance.into_inner();
     let instance = rack
         .project_create_instance(&project_name, &new_instance_params)
@@ -281,15 +281,15 @@ struct InstancePathParam {
  */
 async fn api_project_instances_get_instance(
     rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params: InstancePathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let path = path_params.into_inner();
     let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
     let instance_id =
-        ApiName::from_param(params.instance_id.clone(), "instance_id")?;
+        ApiName::from_param(path.instance_id.clone(), "instance_id")?;
     let instance: Arc<ApiInstance> =
         rack.project_lookup_instance(&project_id, &instance_id).await?;
     Ok(HttpResponseOkObject(instance.to_view()))
@@ -300,15 +300,15 @@ async fn api_project_instances_get_instance(
  */
 async fn api_project_instances_delete_instance(
     rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
-    let params: InstancePathParam =
-        http_extract_path_params(&rqctx.path_variables)?;
+    let path = path_params.into_inner();
     let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
+        ApiName::from_param(path.project_id.clone(), "project_id")?;
     let instance_id =
-        ApiName::from_param(params.instance_id.clone(), "instance_id")?;
+        ApiName::from_param(path.instance_id.clone(), "instance_id")?;
     rack.project_delete_instance(&project_id, &instance_id).await?;
     Ok(HttpResponseDeleted())
 }
