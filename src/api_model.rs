@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
-use dropshot_endpoint::ExtractedParameter;
+use dropshot::ExtractedParameter;
 
 /** Default maximum number of items per page of "list" results */
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;

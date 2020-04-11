@@ -11,7 +11,7 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::datastore::RackDataStore;
-use dropshot_endpoint::ExtractedParameter;
+use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::stream::Stream;
 use futures::stream::StreamExt;

@@ -17,8 +17,10 @@ use crate::api_model::{ApiProject, ApiProjectView};
 use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
+use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ApiEndpoint;
+use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -28,8 +30,6 @@ use dropshot::Json;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
-use dropshot_endpoint::endpoint;
-use dropshot_endpoint::ExtractedParameter;
 
 pub fn api_register_entrypoints(
     api: &mut ApiDescription,
