@@ -31,47 +31,51 @@ use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
 use dropshot_endpoint::ExtractedParameter;
 
-pub fn api_register_entrypoints(api: &mut ApiDescription) {
-    api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"));
+pub fn api_register_entrypoints(
+    api: &mut ApiDescription,
+) -> Result<(), String> {
+    api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"))?;
     api.register(ApiEndpoint::new(
         api_projects_post,
         Method::POST,
         "/projects",
-    ));
+    ))?;
 
-    api.register(api_projects_get_project);
+    api.register(api_projects_get_project)?;
 
     api.register(ApiEndpoint::new(
         api_projects_delete_project,
         Method::DELETE,
         "/projects/{project_id}",
-    ));
+    ))?;
     api.register(ApiEndpoint::new(
         api_projects_put_project,
         Method::PUT,
         "/projects/{project_id}",
-    ));
+    ))?;
 
     api.register(ApiEndpoint::new(
         api_project_instances_get,
         Method::GET,
         "/projects/{project_id}/instances",
-    ));
+    ))?;
     api.register(ApiEndpoint::new(
         api_project_instances_post,
         Method::POST,
         "/projects/{project_id}/instances",
-    ));
+    ))?;
     api.register(ApiEndpoint::new(
         api_project_instances_get_instance,
         Method::GET,
         "/projects/{project_id}/instances/{instance_id}",
-    ));
+    ))?;
     api.register(ApiEndpoint::new(
         api_project_instances_delete_instance,
         Method::DELETE,
         "/projects/{project_id}/instances/{instance_id}",
-    ));
+    ))?;
+
+    Ok(())
 }
 
 /*

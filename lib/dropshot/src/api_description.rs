@@ -7,6 +7,7 @@ use crate::router::HttpRouter;
 use crate::{Extractor, HttpRouteHandler, RouteHandler};
 
 use http::Method;
+use std::collections::HashSet;
 
 /**
  * An Endpoint represents a single API endpoint associated with an
@@ -78,16 +79,119 @@ impl ApiDescription {
     /**
      * Register a new API endpoint.
      */
-    pub fn register<'a, T>(&mut self, endpoint: T)
+    pub fn register<'a, T>(&mut self, endpoint: T) -> Result<(), String>
     where
         T: Into<ApiEndpoint>,
     {
         let e = endpoint.into();
+
+        // Gather up the path parameters and the path variable components, and
+        // make sure they're identical.
+        let path = e
+            .path
+            .split("/")
+            .filter_map(|segment| {
+                if segment.starts_with("{") && segment.ends_with("}") {
+                    Some(&segment[1..segment.len() - 1])
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        let vars = e
+            .parameters
+            .iter()
+            .filter_map(|p| match p.inn {
+                ApiEndpointParameterLocation::Path => Some(p.name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+
+        if path != vars {
+            return Err("path parameters are inconsistent".to_string());
+        }
+
         self.router.insert(e);
+
+        Ok(())
     }
 
     pub fn print_openapi(&self) {
-        self.router.print_openapi();
+        let mut openapi = openapiv3::OpenAPI::default();
+
+        for (path, method, endpoint) in &self.router {
+            let path = openapi.paths.entry(path).or_insert(
+                openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()),
+            );
+
+            let pathitem = match path {
+                openapiv3::ReferenceOr::Item(ref mut item) => item,
+                _ => panic!("reference not expected"),
+            };
+
+            let method_ref = match &method[..] {
+                "GET" => &mut pathitem.get,
+                "PUT" => &mut pathitem.put,
+                "POST" => &mut pathitem.post,
+                "DELETE" => &mut pathitem.delete,
+                "OPTIONS" => &mut pathitem.options,
+                "HEAD" => &mut pathitem.head,
+                "PATCH" => &mut pathitem.patch,
+                "TRACE" => &mut pathitem.trace,
+                other => panic!("unexpected method `{}`", other),
+            };
+            let mut operation = openapiv3::Operation::default();
+            operation.description = endpoint.description.clone();
+
+            operation.parameters = endpoint
+                .parameters
+                .iter()
+                .map(|param| {
+                    let parameter_data = openapiv3::ParameterData {
+                        name: param.name.clone(),
+                        description: param.description.clone(),
+                        required: true,
+                        deprecated: None,
+                        format: openapiv3::ParameterSchemaOrContent::Schema(
+                            openapiv3::ReferenceOr::Item(openapiv3::Schema {
+                                schema_data: openapiv3::SchemaData::default(),
+                                schema_kind: openapiv3::SchemaKind::Type(
+                                    openapiv3::Type::String(
+                                        openapiv3::StringType::default(),
+                                    ),
+                                ),
+                            }),
+                        ),
+                        example: None,
+                        examples: indexmap::map::IndexMap::new(),
+                    };
+                    match param.inn {
+                        ApiEndpointParameterLocation::Query => {
+                            openapiv3::ReferenceOr::Item(
+                                openapiv3::Parameter::Query {
+                                    parameter_data: parameter_data,
+                                    allow_reserved: true,
+                                    style: openapiv3::QueryStyle::Form,
+                                    allow_empty_value: None,
+                                },
+                            )
+                        }
+                        ApiEndpointParameterLocation::Path => {
+                            openapiv3::ReferenceOr::Item(
+                                openapiv3::Parameter::Path {
+                                    parameter_data: parameter_data,
+                                    style: openapiv3::PathStyle::Simple,
+                                },
+                            )
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            method_ref.replace(operation);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
     }
 
     /*
@@ -97,5 +201,91 @@ impl ApiDescription {
      */
     pub fn into_router(self) -> HttpRouter {
         self.router
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::error::HttpError;
+    use super::super::handler::HttpRouteHandler;
+    use super::super::handler::RequestContext;
+    use super::super::handler::RouteHandler;
+    use super::super::ExtractedParameter;
+    use super::super::Path;
+    use super::ApiDescription;
+    use super::ApiEndpoint;
+    use http::Method;
+    use hyper::Body;
+    use hyper::Response;
+    use serde::Deserialize;
+    use std::sync::Arc;
+
+    async fn test_handler(
+        _: Arc<RequestContext>,
+    ) -> Result<Response<Body>, HttpError> {
+        panic!("test handler is not supposed to run");
+    }
+
+    fn new_handler_named(name: &str) -> Box<dyn RouteHandler> {
+        HttpRouteHandler::new_with_name(test_handler, name)
+    }
+
+    fn new_endpoint(
+        handler: Box<dyn RouteHandler>,
+        method: Method,
+        path: &str,
+    ) -> ApiEndpoint {
+        ApiEndpoint {
+            handler: handler,
+            method: method,
+            path: path.to_string(),
+            parameters: vec![],
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_openapi() -> Result<(), String> {
+        let mut api = ApiDescription::new();
+        api.register(new_endpoint(
+            new_handler_named("root_get"),
+            Method::GET,
+            "/",
+        ))?;
+        api.register(new_endpoint(
+            new_handler_named("root_post"),
+            Method::POST,
+            "/",
+        ))?;
+
+        api.print_openapi();
+
+        Ok(())
+    }
+
+    #[derive(Deserialize, ExtractedParameter)]
+    #[dropshot(crate = "super::super")]
+    #[allow(dead_code)]
+    struct TestPath {
+        a: String,
+        b: String,
+    }
+
+    async fn test_badpath_handler(
+        _: Arc<RequestContext>,
+        _: Path<TestPath>,
+    ) -> Result<Response<Body>, HttpError> {
+        panic!("test handler is not supposed to run");
+    }
+
+    #[test]
+    fn test_badpath() {
+        let mut api = ApiDescription::new();
+        let ret = api.register(ApiEndpoint::new(
+            test_badpath_handler,
+            Method::GET,
+            "/",
+        ));
+        assert_eq!(ret, Err("path parameters are inconsistent".to_string()));
     }
 }

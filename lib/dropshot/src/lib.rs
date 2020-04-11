@@ -55,3 +55,6 @@ pub use server::HttpServer;
  */
 pub use router::HttpRouter;
 pub use router::RouterLookupResult;
+
+extern crate dropshot_endpoint;
+pub use dropshot_endpoint::*;

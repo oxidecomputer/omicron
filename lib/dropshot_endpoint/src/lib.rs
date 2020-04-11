@@ -5,7 +5,9 @@
 extern crate proc_macro;
 
 use proc_macro2::TokenStream;
+use quote::format_ident;
 use quote::quote;
+use quote::ToTokens;
 use serde::Deserialize;
 use serde_derive_internals::ast::Container;
 use serde_derive_internals::{Ctxt, Derive};
@@ -40,7 +42,10 @@ impl MethodType {
 struct Metadata {
     method: MethodType,
     path: String,
+    _dropshot_crate: Option<String>,
 }
+
+const DROPSHOT: &str = "dropshot";
 
 /// Attribute to apply to an HTTP endpoint.
 /// TODO(doc) explain intended use
@@ -68,13 +73,15 @@ fn do_endpoint(
     let ast: ItemFn = syn::parse(item)?;
 
     let name = &ast.sig.ident;
-    let method_ident = quote::format_ident!("{}", method);
+    let method_ident = format_ident!("{}", method);
 
     let description = extract_doc_from_attrs(&ast.attrs).map(|s| {
         quote! {
             endpoint.description = Some(#s.to_string());
         }
     });
+
+    let dropshot = get_crate(metadata._dropshot_crate);
 
     // The final TokenStream returned will have a few components that reference
     // `#name`, the name of the method to which this macro was applied...
@@ -88,12 +95,12 @@ fn do_endpoint(
 
         // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
         // `#name` to be passed into `ApiDescription::register()`
-        impl From<#name> for dropshot::ApiEndpoint {
+        impl From<#name> for #dropshot::ApiEndpoint {
             fn from(_: #name) -> Self {
                 #ast
 
                 #[allow(unused_mut)]
-                let mut endpoint = dropshot::ApiEndpoint::new(
+                let mut endpoint = #dropshot::ApiEndpoint::new(
                     #name,
                     Method::#method_ident,
                     #path,
@@ -107,7 +114,7 @@ fn do_endpoint(
     Ok(stream.into())
 }
 
-#[proc_macro_derive(ExtractedParameter)]
+#[proc_macro_derive(ExtractedParameter, attributes(dropshot))]
 pub fn derive_parameter(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
@@ -118,6 +125,8 @@ pub fn derive_parameter(
     let cont = Container::from_ast(&ctxt, &input, Derive::Deserialize).unwrap();
     // TODO error checking
     let _ = ctxt.check();
+
+    let dropshot = get_crate(get_crate_attr(&cont));
 
     let fields = cont
         .data
@@ -132,7 +141,7 @@ pub fn derive_parameter(
                         );
                     let name = ident.to_string();
                     quote! {
-                        dropshot::ApiEndpointParameter {
+                        #dropshot::ApiEndpointParameter {
                             name: #name.to_string(),
                             inn: _in.clone(),
                             description: #doc ,
@@ -153,7 +162,7 @@ pub fn derive_parameter(
     for tp in cont.generics.type_params() {
         let ident = &tp.ident;
         let pred: syn::WherePredicate = syn::parse2(quote! {
-            #ident : dropshot::ExtractedParameter
+            #ident : #dropshot::ExtractedParameter
         })
         .unwrap();
         generics.make_where_clause().predicates.push(pred);
@@ -162,11 +171,11 @@ pub fn derive_parameter(
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let stream = quote! {
-        impl #impl_generics dropshot::ExtractedParameter for #name #ty_generics
+        impl #impl_generics #dropshot::ExtractedParameter for #name #ty_generics
         #where_clause
         {
-            fn generate(_in: dropshot::ApiEndpointParameterLocation)
-                -> Vec<dropshot::ApiEndpointParameter>
+            fn generate(_in: #dropshot::ApiEndpointParameterLocation)
+                -> Vec<#dropshot::ApiEndpointParameter>
             {
                 vec![ #(#fields),* ]
             }
@@ -174,6 +183,50 @@ pub fn derive_parameter(
     };
 
     stream.into()
+}
+
+fn get_crate(var: Option<String>) -> TokenStream {
+    if let Some(s) = var {
+        if let Ok(ts) = syn::parse_str(s.as_str()) {
+            return ts;
+        }
+    }
+    syn::Ident::new(DROPSHOT, proc_macro2::Span::call_site()).to_token_stream()
+}
+
+fn get_crate_attr(
+    cont: &serde_derive_internals::ast::Container,
+) -> Option<String> {
+    cont.original
+        .attrs
+        .iter()
+        .filter_map(|attr| {
+            if let Ok(meta) = attr.parse_meta() {
+                if let syn::Meta::List(list) = meta {
+                    if list.path.is_ident(&syn::Ident::new(
+                        "dropshot",
+                        proc_macro2::Span::call_site(),
+                    )) && list.nested.len() == 1
+                    {
+                        if let Some(syn::NestedMeta::Meta(
+                            syn::Meta::NameValue(nv),
+                        )) = list.nested.first()
+                        {
+                            if nv.path.is_ident(&syn::Ident::new(
+                                "crate",
+                                proc_macro2::Span::call_site(),
+                            )) {
+                                if let syn::Lit::Str(s) = &nv.lit {
+                                    return Some(s.value());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .last()
 }
 
 #[allow(dead_code)]

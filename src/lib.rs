@@ -32,7 +32,7 @@ extern crate slog;
  */
 pub fn dropshot_api() -> ApiDescription {
     let mut api = ApiDescription::new();
-    api_http_entrypoints::api_register_entrypoints(&mut api);
+    let _ = api_http_entrypoints::api_register_entrypoints(&mut api);
     api
 }
 

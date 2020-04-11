@@ -5,7 +5,7 @@
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
-use crate::{ApiEndpoint, ApiEndpointParameterLocation};
+use crate::ApiEndpoint;
 use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
@@ -456,84 +456,6 @@ impl HttpRouter {
                 HttpError::for_status(StatusCode::METHOD_NOT_ALLOWED)
             })
     }
-
-    pub fn print_openapi(&self) {
-        let mut openapi = openapiv3::OpenAPI::default();
-
-        for (path, method, endpoint) in self {
-            let path = openapi.paths.entry(path).or_insert(
-                openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()),
-            );
-
-            let pathitem = match path {
-                openapiv3::ReferenceOr::Item(ref mut item) => item,
-                _ => panic!("reference not expected"),
-            };
-
-            let method_ref = match &method[..] {
-                "GET" => &mut pathitem.get,
-                "PUT" => &mut pathitem.put,
-                "POST" => &mut pathitem.post,
-                "DELETE" => &mut pathitem.delete,
-                "OPTIONS" => &mut pathitem.options,
-                "HEAD" => &mut pathitem.head,
-                "PATCH" => &mut pathitem.patch,
-                "TRACE" => &mut pathitem.trace,
-                other => panic!("unexpected method `{}`", other),
-            };
-            let mut operation = openapiv3::Operation::default();
-            operation.description = endpoint.description.clone();
-
-            operation.parameters = endpoint
-                .parameters
-                .iter()
-                .map(|param| {
-                    let parameter_data = openapiv3::ParameterData {
-                        name: param.name.clone(),
-                        description: param.description.clone(),
-                        required: true,
-                        deprecated: None,
-                        format: openapiv3::ParameterSchemaOrContent::Schema(
-                            openapiv3::ReferenceOr::Item(openapiv3::Schema {
-                                schema_data: openapiv3::SchemaData::default(),
-                                schema_kind: openapiv3::SchemaKind::Type(
-                                    openapiv3::Type::String(
-                                        openapiv3::StringType::default(),
-                                    ),
-                                ),
-                            }),
-                        ),
-                        example: None,
-                        examples: indexmap::map::IndexMap::new(),
-                    };
-                    match param.inn {
-                        ApiEndpointParameterLocation::Query => {
-                            openapiv3::ReferenceOr::Item(
-                                openapiv3::Parameter::Query {
-                                    parameter_data: parameter_data,
-                                    allow_reserved: true,
-                                    style: openapiv3::QueryStyle::Form,
-                                    allow_empty_value: None,
-                                },
-                            )
-                        }
-                        ApiEndpointParameterLocation::Path => {
-                            openapiv3::ReferenceOr::Item(
-                                openapiv3::Parameter::Path {
-                                    parameter_data: parameter_data,
-                                    style: openapiv3::PathStyle::Simple,
-                                },
-                            )
-                        }
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            method_ref.replace(operation);
-        }
-
-        println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
-    }
 }
 
 impl<'a> IntoIterator for &'a HttpRouter {
@@ -596,7 +518,7 @@ impl<'a> HttpRouterIter<'a> {
     }
 
     /**
-     * Produce a human-readible path from the current vector of path segments.
+     * Produce a human-readable path from the current vector of path segments.
      */
     fn path(&self) -> String {
         // Ignore the leading element as that's just a placeholder.
@@ -1109,22 +1031,5 @@ mod test {
             ("/".to_string(), "GET".to_string(),),
             ("/".to_string(), "POST".to_string(),),
         ]);
-    }
-
-    #[test]
-    fn test_openapi() {
-        let mut router = HttpRouter::new();
-        router.insert(new_endpoint(
-            new_handler_named("root_get"),
-            Method::GET,
-            "/",
-        ));
-        router.insert(new_endpoint(
-            new_handler_named("root_post"),
-            Method::POST,
-            "/",
-        ));
-
-        router.print_openapi();
     }
 }
