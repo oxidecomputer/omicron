@@ -203,10 +203,9 @@ impl PathSegment {
                 "HTTP URI path segment variable name cannot be empty"
             );
 
-            let segment_chars: Vec<char> = segment.chars().collect();
-            let newlast = segment_chars.len() - 1;
-            let varname_chars = &segment_chars[1..newlast];
-            PathSegment::Varname(varname_chars.iter().collect())
+            PathSegment::Varname(
+                (&segment.as_str()[1..segment.len() - 1]).into(),
+            )
         } else {
             PathSegment::Literal(segment.to_string())
         }
@@ -458,14 +457,10 @@ impl HttpRouter {
             })
     }
 
-    pub fn iter(&self) -> HttpRouterIter {
-        HttpRouterIter::new(self)
-    }
-
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
 
-        for (path, method, endpoint) in self.iter() {
+        for (path, method, endpoint) in self {
             let path = openapi.paths.entry(path).or_insert(
                 openapiv3::ReferenceOr::Item(openapiv3::PathItem::default()),
             );
@@ -538,6 +533,14 @@ impl HttpRouter {
         }
 
         println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
+    }
+}
+
+impl<'a> IntoIterator for &'a HttpRouter {
+    type Item = (String, String, &'a ApiEndpoint);
+    type IntoIter = HttpRouterIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        HttpRouterIter::new(self)
     }
 }
 
@@ -1064,7 +1067,7 @@ mod test {
     #[test]
     fn test_iter_null() {
         let router = HttpRouter::new();
-        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
+        let ret: Vec<_> = router.into_iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![]);
     }
 
@@ -1081,7 +1084,7 @@ mod test {
             Method::GET,
             "/projects/{project_id}/instances",
         ));
-        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
+        let ret: Vec<_> = router.into_iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![
             ("/".to_string(), "GET".to_string(),),
             ("/projects/{project_id}/instances".to_string(), "GET".to_string(),),
@@ -1101,7 +1104,7 @@ mod test {
             Method::POST,
             "/",
         ));
-        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
+        let ret: Vec<_> = router.into_iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![
             ("/".to_string(), "GET".to_string(),),
             ("/".to_string(), "POST".to_string(),),
