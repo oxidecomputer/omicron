@@ -72,8 +72,7 @@ fn do_endpoint(
 
     let description = extract_doc_from_attrs(&ast.attrs).map(|s| {
         quote! {
-            endpoint.description = Some(#s);
-
+            endpoint.description = Some(#s.to_string());
         }
     });
 
@@ -89,7 +88,7 @@ fn do_endpoint(
 
         // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
         // `#name` to be passed into `ApiDescription::register()`
-        impl<'a> From<#name> for ApiEndpoint<'a> {
+        impl From<#name> for ApiEndpoint {
             fn from(_: #name) -> Self {
                 #ast
 

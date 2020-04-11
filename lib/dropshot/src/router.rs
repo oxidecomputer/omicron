@@ -149,17 +149,9 @@ pub struct HttpRouter {
 #[derive(Debug)]
 struct HttpRouterNode {
     /** Handlers, etc. for each of the HTTP methods defined for this node. */
-    methods: BTreeMap<String, HttpEndpoint>,
+    methods: BTreeMap<String, ApiEndpoint>,
     /** Edges linking to child nodes. */
     edges: Option<HttpRouterEdges>,
-}
-
-#[derive(Debug)]
-pub struct HttpEndpoint {
-    /** Caller-supplied handler */
-    pub handler: Box<dyn RouteHandler>,
-    pub parameters: Vec<ApiEndpointParameter>,
-    pub description: Option<String>,
 }
 
 #[derive(Debug)]
@@ -304,7 +296,7 @@ impl HttpRouter {
         let description = endpoint.description.map(|s| s.to_string());
         let parameters = endpoint.parameters;
 
-        let all_segments = HttpRouter::path_to_segments(path);
+        let all_segments = HttpRouter::path_to_segments(path.as_str());
         let mut varnames: BTreeSet<String> = BTreeSet::new();
 
         let mut node: &mut Box<HttpRouterNode> = &mut self.root;

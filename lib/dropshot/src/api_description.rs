@@ -13,15 +13,15 @@ use http::Method;
  * ApiDescription.
  */
 #[derive(Debug)]
-pub struct ApiEndpoint<'a> {
+pub struct ApiEndpoint {
     pub handler: Box<dyn RouteHandler>,
     pub method: Method,
-    pub path: &'a str,
+    pub path: String,
     pub parameters: Vec<ApiEndpointParameter>,
-    pub description: Option<&'a str>,
+    pub description: Option<String>,
 }
 
-impl<'a> ApiEndpoint<'a> {
+impl<'a> ApiEndpoint {
     pub fn new<HandlerType, FuncParams, ResponseType>(
         handler: HandlerType,
         method: Method,
@@ -35,7 +35,7 @@ impl<'a> ApiEndpoint<'a> {
         ApiEndpoint {
             handler: HttpRouteHandler::new(handler),
             method: method,
-            path: path,
+            path: path.to_string(),
             parameters: FuncParams::generate(),
             description: None,
         }
@@ -80,7 +80,7 @@ impl ApiDescription {
      */
     pub fn register<'a, T>(&mut self, endpoint: T)
     where
-        T: Into<ApiEndpoint<'a>>,
+        T: Into<ApiEndpoint>,
     {
         let e = endpoint.into();
         self.router.insert(e);
