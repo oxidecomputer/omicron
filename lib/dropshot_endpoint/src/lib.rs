@@ -70,23 +70,37 @@ fn do_endpoint(
     let name = &ast.sig.ident;
     let method_ident = quote::format_ident!("{}", method);
 
+    let description = extract_doc_from_attrs(&ast.attrs).map(|s| {
+        quote! {
+            endpoint.description = Some(#s);
+
+        }
+    });
+
     // The final TokenStream returned will have a few components that reference
-    // `#name`, the name of the method to which this macro was applied.
+    // `#name`, the name of the method to which this macro was applied...
     let stream = quote! {
-        // struct type called `#name` that has no members
+        // ... a struct type called `#name` that has no members
         #[allow(non_camel_case_types, missing_docs)]
         pub struct #name {}
-        // constant of type `#name` whose identifier is also #name
+        // ... a constant of type `#name` whose identifier is also #name
         #[allow(non_upper_case_globals, missing_docs)]
         const #name: #name = #name {};
 
-        // impl of `From<#name>` for Endpoint that allows the constant `#name`
-        // to be passed into `ApiDescription::register()`
-        impl<'a> From<#name> for Endpoint<'a> {
+        // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
+        // `#name` to be passed into `ApiDescription::register()`
+        impl<'a> From<#name> for ApiEndpoint<'a> {
             fn from(_: #name) -> Self {
                 #ast
 
-                Endpoint::new(#name, Method::#method_ident, #path)
+                #[allow(unused_mut)]
+                let mut endpoint = dropshot::ApiEndpoint::new(
+                    #name,
+                    Method::#method_ident,
+                    #path,
+                );
+                #description
+                endpoint
             }
         }
     };
@@ -109,20 +123,27 @@ pub fn derive_parameter(
     let fields = cont
         .data
         .all_fields()
-        .map(|f| match &f.member {
-            syn::Member::Named(ident) => {
-                let name = ident.to_string();
-                quote! {
-                    dropshot::EndpointParameter {
-                        name: #name.to_string(),
-                        inn: _in.clone(),
-                        description: None,
-                        required: true, // TODO look at option
-                        examples: vec![],
+        .map(|f| {
+            match &f.member {
+                syn::Member::Named(ident) => {
+                    let doc = extract_doc_from_attrs(&f.original.attrs)
+                        .map_or_else(
+                            || quote! { None },
+                            |s| quote! { Some(#s.to_string()) },
+                        );
+                    let name = ident.to_string();
+                    quote! {
+                        dropshot::ApiEndpointParameter {
+                            name: #name.to_string(),
+                            inn: _in.clone(),
+                            description: #doc ,
+                            required: true, // TODO look at option
+                            examples: vec![],
+                        }
                     }
                 }
+                _ => quote! {},
             }
-            _ => quote! {},
         })
         .collect::<Vec<_>>();
 
@@ -145,8 +166,8 @@ pub fn derive_parameter(
         impl #impl_generics dropshot::ExtractorParameter for #name #ty_generics
         #where_clause
         {
-            fn generate(_in: dropshot::EndpointParameterLocation)
-                -> Vec<dropshot::EndpointParameter>
+            fn generate(_in: dropshot::ApiEndpointParameterLocation)
+                -> Vec<dropshot::ApiEndpointParameter>
             {
                 vec![ #(#fields),* ]
             }
@@ -156,80 +177,45 @@ pub fn derive_parameter(
     stream.into()
 }
 
+#[allow(dead_code)]
 fn to_compile_errors(errors: Vec<syn::Error>) -> proc_macro2::TokenStream {
     let compile_errors = errors.iter().map(syn::Error::to_compile_error);
     quote!(#(#compile_errors)*)
 }
 
-fn extract_doc(item: &syn::ItemFn) -> Result<(), Error> {
-    println!("{:?}", item);
-    for attr in &item.attrs {
-        println!("attr {:?}", attr);
-        let meta = attr.parse_meta().unwrap();
-        if let syn::Meta::NameValue(nv) = meta {
-            if nv.path.leading_colon.is_none()
-                && nv.path.segments.len() == 1
-                && &nv.path.segments[0].ident
-                    == &syn::Ident::new("doc", proc_macro2::Span::call_site())
-            {
-                if let syn::Lit::Str(s) = nv.lit {
-                    println!("parse {:?}", attr.parse_meta());
-                    println!("path {:?}", attr.path);
-                    println!("  s {}", s.value());
+fn extract_doc_from_attrs(attrs: &Vec<syn::Attribute>) -> Option<String> {
+    let doc = syn::Ident::new("doc", proc_macro2::Span::call_site());
+
+    attrs
+        .iter()
+        .filter_map(|attr| {
+            if let Ok(meta) = attr.parse_meta() {
+                if let syn::Meta::NameValue(nv) = meta {
+                    if nv.path.is_ident(&doc) {
+                        if let syn::Lit::Str(s) = nv.lit {
+                            let comment = s.value();
+                            if comment.starts_with(" ")
+                                && !comment.starts_with("  ")
+                            {
+                                // Trim off the first character if the comment
+                                // begins with a single space.
+                                return Some(format!(
+                                    "{}",
+                                    &comment.as_str()[1..]
+                                ));
+                            } else {
+                                return Some(comment);
+                            }
+                        }
+                    }
                 }
             }
-        }
-    }
-
-    Ok(())
+            None
+        })
+        .fold(None, |acc, comment| {
+            Some(format!("{}{}", acc.unwrap_or(String::new()), comment))
+        })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use quote::quote;
-
-    #[test]
-    fn doc() {
-        let item = quote! {
-            /// this looks like a "comment", but it's actually part of the test
-            /// this too
-            #[doc = "testing"]
-            #[doc(hidden)]
-            fn do_nothing() {}
-        };
-
-        let ast: syn::ItemFn = syn::parse2(item).unwrap();
-
-        let _ = extract_doc(&ast);
-
-        panic!("bad");
-    }
-
-    use schemars::{schema_for, JsonSchema};
-    use std::marker::PhantomData;
-
-    #[derive(JsonSchema)]
-    struct Foo {
-        a: String,
-        b: String,
-    }
-
-    struct Bar {
-        a: String,
-    }
-
-    fn x<T>()
-    where
-        T: JsonSchema,
-    {
-        let schema = schema_for!(T);
-        println!("{:?}", schema);
-    }
-
-    #[test]
-    fn thing() {
-        x::<Foo>();
-        panic!("bad");
-    }
-}
+mod tests {}

@@ -11,18 +11,17 @@ use http::Method;
 /**
  * An Endpoint represents a single API endpoint associated with an
  * ApiDescription.
- *
- * TODO: it will need to have parameter information TBD
  */
 #[derive(Debug)]
-pub struct Endpoint<'a> {
+pub struct ApiEndpoint<'a> {
     pub handler: Box<dyn RouteHandler>,
     pub method: Method,
     pub path: &'a str,
-    pub parameters: Vec<EndpointParameter>,
+    pub parameters: Vec<ApiEndpointParameter>,
+    pub description: Option<&'a str>,
 }
 
-impl<'a> Endpoint<'a> {
+impl<'a> ApiEndpoint<'a> {
     pub fn new<HandlerType, FuncParams, ResponseType>(
         handler: HandlerType,
         method: Method,
@@ -33,19 +32,20 @@ impl<'a> Endpoint<'a> {
         FuncParams: Extractor + 'static,
         ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
     {
-        Endpoint {
+        ApiEndpoint {
             handler: HttpRouteHandler::new(handler),
             method: method,
             path: path,
             parameters: FuncParams::generate(),
+            description: None,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct EndpointParameter {
+pub struct ApiEndpointParameter {
     pub name: String,
-    pub inn: EndpointParameterLocation,
+    pub inn: ApiEndpointParameterLocation,
     pub description: Option<String>,
     pub required: bool,
     // TODO: schema
@@ -53,7 +53,7 @@ pub struct EndpointParameter {
 }
 
 #[derive(Debug, Clone)]
-pub enum EndpointParameterLocation {
+pub enum ApiEndpointParameterLocation {
     Path,
     Query,
 }
@@ -80,10 +80,10 @@ impl ApiDescription {
      */
     pub fn register<'a, T>(&mut self, endpoint: T)
     where
-        T: Into<Endpoint<'a>>,
+        T: Into<ApiEndpoint<'a>>,
     {
         let e = endpoint.into();
-        self.router.insert(e.method, &e.path, e.handler, e.parameters)
+        self.router.insert(e);
     }
 
     pub fn print_openapi(&self) {

@@ -19,9 +19,9 @@ pub mod test_util;
 extern crate slog;
 
 pub use api_description::ApiDescription;
-pub use api_description::Endpoint;
-pub use api_description::EndpointParameter;
-pub use api_description::EndpointParameterLocation;
+pub use api_description::ApiEndpoint;
+pub use api_description::ApiEndpointParameter;
+pub use api_description::ApiEndpointParameterLocation;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;

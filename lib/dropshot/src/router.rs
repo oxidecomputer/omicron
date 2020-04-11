@@ -2,11 +2,11 @@
  * Routes incoming HTTP requests to handler functions
  */
 
-use super::api_description::EndpointParameter;
+use super::api_description::ApiEndpointParameter;
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
-use crate::EndpointParameterLocation;
+use crate::{ApiEndpoint, ApiEndpointParameterLocation};
 use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
@@ -158,7 +158,8 @@ struct HttpRouterNode {
 pub struct HttpEndpoint {
     /** Caller-supplied handler */
     pub handler: Box<dyn RouteHandler>,
-    pub parameters: Vec<EndpointParameter>,
+    pub parameters: Vec<ApiEndpointParameter>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug)]
@@ -296,13 +297,13 @@ impl HttpRouter {
      * URI `path`.  See the `HttpRouter` docs for information about how `path`
      * is processed.  Requests matching `path` will be resolved to `handler`.
      */
-    pub fn insert(
-        &mut self,
-        method: Method,
-        path: &str,
-        handler: Box<dyn RouteHandler>,
-        parameters: Vec<EndpointParameter>,
-    ) {
+    pub fn insert(&mut self, endpoint: ApiEndpoint) {
+        let method = endpoint.method;
+        let path = endpoint.path;
+        let handler = endpoint.handler;
+        let description = endpoint.description.map(|s| s.to_string());
+        let parameters = endpoint.parameters;
+
         let all_segments = HttpRouter::path_to_segments(path);
         let mut varnames: BTreeSet<String> = BTreeSet::new();
 
@@ -406,6 +407,7 @@ impl HttpRouter {
         node.methods.insert(methodname, HttpEndpoint {
             handler: handler,
             parameters: parameters,
+            description: description,
         });
     }
 
@@ -494,6 +496,7 @@ impl HttpRouter {
                 other => panic!("unexpected method `{}`", other),
             };
             let mut operation = openapiv3::Operation::default();
+            operation.description = endpoint.description.clone();
 
             operation.parameters = endpoint
                 .parameters
@@ -501,7 +504,7 @@ impl HttpRouter {
                 .map(|param| {
                     let parameter_data = openapiv3::ParameterData {
                         name: param.name.clone(),
-                        description: None,
+                        description: param.description.clone(),
                         required: true,
                         deprecated: None,
                         format: openapiv3::ParameterSchemaOrContent::Schema(
@@ -518,7 +521,7 @@ impl HttpRouter {
                         examples: indexmap::map::IndexMap::new(),
                     };
                     match param.inn {
-                        EndpointParameterLocation::Query => {
+                        ApiEndpointParameterLocation::Query => {
                             openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Query {
                                     parameter_data: parameter_data,
@@ -528,7 +531,7 @@ impl HttpRouter {
                                 },
                             )
                         }
-                        EndpointParameterLocation::Path => {
+                        ApiEndpointParameterLocation::Path => {
                             openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Path {
                                     parameter_data: parameter_data,

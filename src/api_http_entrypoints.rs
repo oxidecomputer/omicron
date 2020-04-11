@@ -18,7 +18,7 @@ use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::ApiDescription;
-use dropshot::Endpoint;
+use dropshot::ApiEndpoint;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -32,38 +32,42 @@ use dropshot_endpoint::endpoint;
 use dropshot_endpoint::ExtractorParameter;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
-    api.register(Endpoint::new(api_projects_get, Method::GET, "/projects"));
-    api.register(Endpoint::new(api_projects_post, Method::POST, "/projects"));
+    api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"));
+    api.register(ApiEndpoint::new(
+        api_projects_post,
+        Method::POST,
+        "/projects",
+    ));
 
     api.register(api_projects_get_project);
 
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_projects_delete_project,
         Method::DELETE,
         "/projects/{project_id}",
     ));
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_projects_put_project,
         Method::PUT,
         "/projects/{project_id}",
     ));
 
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_project_instances_get,
         Method::GET,
         "/projects/{project_id}/instances",
     ));
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_project_instances_post,
         Method::POST,
         "/projects/{project_id}/instances",
     ));
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_project_instances_get_instance,
         Method::GET,
         "/projects/{project_id}/instances/{instance_id}",
     ));
-    api.register(Endpoint::new(
+    api.register(ApiEndpoint::new(
         api_project_instances_delete_instance,
         Method::DELETE,
         "/projects/{project_id}/instances/{instance_id}",
@@ -133,11 +137,12 @@ async fn api_projects_post(
 
 #[derive(Deserialize, ExtractorParameter)]
 struct ProjectPathParam {
+    /// The project's unique ID.
     project_id: String,
 }
 
-/*
- * "GET /project/{project_id}": fetch a specific project
+/**
+ * Fetch a specific project
  */
 #[endpoint {
     method = GET,

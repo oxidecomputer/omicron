@@ -122,7 +122,9 @@ use super::http_util::http_read_body;
 use super::http_util::CONTENT_TYPE_JSON;
 use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::DropshotState;
-use crate::api_description::{EndpointParameter, EndpointParameterLocation};
+use crate::api_description::{
+    ApiEndpointParameter, ApiEndpointParameterLocation,
+};
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -195,7 +197,7 @@ pub trait Extractor: Send + Sync + Sized {
         rqctx: Arc<RequestContext>,
     ) -> Result<Self, HttpError>;
 
-    fn generate() -> Vec<EndpointParameter>;
+    fn generate() -> Vec<ApiEndpointParameter>;
 }
 
 /**
@@ -212,7 +214,8 @@ macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
             Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
         }
 
-        fn generate() -> Vec<EndpointParameter> {
+        fn generate() -> Vec<ApiEndpointParameter> {
+            #[allow(unused_mut)]
             let mut v = vec![];
             $( v.append(&mut $T::generate()); )*
             v
@@ -223,9 +226,11 @@ macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
 impl_derived_for_tuple!();
 impl_derived_for_tuple!(T1);
 impl_derived_for_tuple!(T1, T2);
+impl_derived_for_tuple!(T1, T2, T3);
 
 pub trait ExtractorParameter: DeserializeOwned {
-    fn generate(inn: EndpointParameterLocation) -> Vec<EndpointParameter>;
+    fn generate(inn: ApiEndpointParameterLocation)
+        -> Vec<ApiEndpointParameter>;
 }
 
 /**
@@ -415,6 +420,7 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params {
 impl_HttpHandlerFunc_for_func_with_params!();
 impl_HttpHandlerFunc_for_func_with_params!((0, T0));
 impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2));
+impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2), (2, T3));
 
 /**
  * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams, ResponseType>` in a
@@ -633,8 +639,8 @@ where
         http_request_load_query(&request)
     }
 
-    fn generate() -> Vec<EndpointParameter> {
-        QueryType::generate(EndpointParameterLocation::Query)
+    fn generate() -> Vec<ApiEndpointParameter> {
+        QueryType::generate(ApiEndpointParameterLocation::Query)
     }
 }
 
@@ -680,8 +686,8 @@ where
         })
     }
 
-    fn generate() -> Vec<EndpointParameter> {
-        PathType::generate(EndpointParameterLocation::Path)
+    fn generate() -> Vec<ApiEndpointParameter> {
+        PathType::generate(ApiEndpointParameterLocation::Path)
     }
 }
 
@@ -757,7 +763,7 @@ where
         http_request_load_json_body(rqctx).await
     }
 
-    fn generate() -> Vec<EndpointParameter> {
+    fn generate() -> Vec<ApiEndpointParameter> {
         vec![]
     }
 }
