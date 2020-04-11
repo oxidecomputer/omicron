@@ -23,11 +23,12 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HttpError;
-use dropshot::HttpRouteHandler;
 use dropshot::Json;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::CONTENT_TYPE_JSON;
+use dropshot_endpoint::endpoint;
+use dropshot_endpoint::ExtractorParameter;
 use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
@@ -347,28 +348,16 @@ async fn test_demo3json() {
  * Demo handler functions
  */
 pub fn register_test_endpoints(api: &mut ApiDescription) {
-    api.register(
-        Method::GET,
-        "/testing/demo1",
-        HttpRouteHandler::new(demo_handler_args_1),
-    );
-    api.register(
-        Method::GET,
-        "/testing/demo2query",
-        HttpRouteHandler::new(demo_handler_args_2query),
-    );
-    api.register(
-        Method::GET,
-        "/testing/demo2json",
-        HttpRouteHandler::new(demo_handler_args_2json),
-    );
-    api.register(
-        Method::GET,
-        "/testing/demo3",
-        HttpRouteHandler::new(demo_handler_args_3),
-    );
+    api.register(demo_handler_args_1);
+    api.register(demo_handler_args_2query);
+    api.register(demo_handler_args_2json);
+    api.register(demo_handler_args_3);
 }
 
+#[endpoint {
+    method = GET,
+    path = "/testing/demo1",
+}]
 async fn demo_handler_args_1(
     _rqctx: Arc<RequestContext>,
 ) -> Result<Response<Body>, HttpError> {
@@ -378,12 +367,15 @@ async fn demo_handler_args_1(
         .body("demo_handler_args_1\n".into())?)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ExtractorParameter)]
 pub struct DemoQueryArgs {
     pub test1: String,
     pub test2: Option<u32>,
 }
-
+#[endpoint {
+    method = GET,
+    path = "/testing/demo2query",
+}]
 async fn demo_handler_args_2query(
     _rqctx: Arc<RequestContext>,
     query: Query<DemoQueryArgs>,
@@ -394,12 +386,15 @@ async fn demo_handler_args_2query(
         .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ExtractorParameter)]
 pub struct DemoJsonBody {
     pub test1: String,
     pub test2: Option<u32>,
 }
-
+#[endpoint {
+    method = GET,
+    path = "/testing/demo2json",
+}]
 async fn demo_handler_args_2json(
     _rqctx: Arc<RequestContext>,
     json: Json<DemoJsonBody>,
@@ -410,11 +405,15 @@ async fn demo_handler_args_2json(
         .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, ExtractorParameter)]
 pub struct DemoJsonAndQuery {
     pub query: DemoQueryArgs,
     pub json: DemoJsonBody,
 }
+#[endpoint {
+    method = GET,
+    path = "/testing/demo3",
+}]
 async fn demo_handler_args_3(
     _rqctx: Arc<RequestContext>,
     query: Query<DemoQueryArgs>,

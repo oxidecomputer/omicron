@@ -183,6 +183,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono 0.4.11",
+ "dropshot_endpoint",
  "futures",
  "hostname 0.3.1",
  "http",

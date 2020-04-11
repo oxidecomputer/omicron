@@ -2,7 +2,6 @@
  * Routes incoming HTTP requests to handler functions
  */
 
-use super::api_description::ApiEndpointParameter;
 use super::error::HttpError;
 use super::handler::RouteHandler;
 
@@ -21,6 +20,7 @@ use std::collections::BTreeSet;
  * ```
  * use http::Method;
  * use http::StatusCode;
+ * use dropshot::ApiEndpoint;
  * use dropshot::HttpError;
  * use dropshot::HttpRouteHandler;
  * use dropshot::HttpRouter;
@@ -45,10 +45,16 @@ use std::collections::BTreeSet;
  * {
  *      // Create a router and register a few routes.
  *      let mut router = HttpRouter::new();
- *      router.insert(Method::GET, "/projects",
- *          HttpRouteHandler::new(demo_handler));
- *      router.insert(Method::GET, "/projects/{project_id}",
- *          HttpRouteHandler::new(demo_handler));
+ *      router.insert(ApiEndpoint::new(
+ *          demo_handler,
+ *          Method::GET,
+ *          "/projects",
+ *      ));
+ *      router.insert(ApiEndpoint::new(
+ *          demo_handler,
+ *          Method::GET,
+ *          "/projects/{project_id}",
+ *      ));
  *
  *      // Basic lookup for a literal path.
  *      let lookup: RouterLookupResult = router.lookup_route(
@@ -290,11 +296,8 @@ impl HttpRouter {
      * is processed.  Requests matching `path` will be resolved to `handler`.
      */
     pub fn insert(&mut self, endpoint: ApiEndpoint) {
-        let method = endpoint.method;
-        let path = endpoint.path;
-        let handler = endpoint.handler;
-        let description = endpoint.description.map(|s| s.to_string());
-        let parameters = endpoint.parameters;
+        let method = endpoint.method.clone();
+        let path = endpoint.path.clone();
 
         let all_segments = HttpRouter::path_to_segments(path.as_str());
         let mut varnames: BTreeSet<String> = BTreeSet::new();
@@ -396,11 +399,7 @@ impl HttpRouter {
             );
         }
 
-        node.methods.insert(methodname, HttpEndpoint {
-            handler: handler,
-            parameters: parameters,
-            description: description,
-        });
+        node.methods.insert(methodname, endpoint);
     }
 
     /**
@@ -553,7 +552,7 @@ impl HttpRouter {
  * blank string and an iterator over the root node's children.
  */
 pub struct HttpRouterIter<'a> {
-    method: Box<dyn Iterator<Item = (&'a String, &'a HttpEndpoint)> + 'a>,
+    method: Box<dyn Iterator<Item = (&'a String, &'a ApiEndpoint)> + 'a>,
     path: Vec<(
         PathSegment,
         Box<dyn Iterator<Item = (PathSegment, &'a Box<HttpRouterNode>)> + 'a>,
@@ -612,7 +611,7 @@ impl<'a> HttpRouterIter<'a> {
 }
 
 impl<'a> Iterator for HttpRouterIter<'a> {
-    type Item = (String, String, &'a HttpEndpoint);
+    type Item = (String, String, &'a ApiEndpoint);
 
     fn next(&mut self) -> Option<Self::Item> {
         // If there are no path components left then we've reached the end of
@@ -657,6 +656,7 @@ mod test {
     use super::super::handler::RequestContext;
     use super::super::handler::RouteHandler;
     use super::HttpRouter;
+    use crate::ApiEndpoint;
     use http::Method;
     use http::StatusCode;
     use hyper::Body;
@@ -677,13 +677,27 @@ mod test {
         HttpRouteHandler::new_with_name(test_handler, name)
     }
 
+    fn new_endpoint(
+        handler: Box<dyn RouteHandler>,
+        method: Method,
+        path: &str,
+    ) -> ApiEndpoint {
+        ApiEndpoint {
+            handler: handler,
+            method: method,
+            path: path.to_string(),
+            parameters: vec![],
+            description: None,
+        }
+    }
+
     #[test]
     #[should_panic(
         expected = "HTTP URI path segment variable name cannot be empty"
     )]
     fn test_variable_name_empty() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/foo/{}", new_handler());
+        router.insert(new_endpoint(new_handler(), Method::GET, "/foo/{}"));
     }
 
     #[test]
@@ -692,7 +706,11 @@ mod test {
     )]
     fn test_variable_name_bad_end() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/foo/{asdf/foo", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/foo/{asdf/foo",
+        ));
     }
 
     #[test]
@@ -701,7 +719,11 @@ mod test {
     )]
     fn test_variable_name_bad_start() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/foo/asdf}/foo", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/foo/asdf}/foo",
+        ));
     }
 
     #[test]
@@ -709,8 +731,8 @@ mod test {
                                duplicate route for method \"GET\"")]
     fn test_duplicate_route1() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/boo", new_handler());
-        router.insert(Method::GET, "/boo", new_handler());
+        router.insert(new_endpoint(new_handler(), Method::GET, "/boo"));
+        router.insert(new_endpoint(new_handler(), Method::GET, "/boo"));
     }
 
     #[test]
@@ -718,8 +740,8 @@ mod test {
                                duplicate route for method \"GET\"")]
     fn test_duplicate_route2() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/foo/bar", new_handler());
-        router.insert(Method::GET, "/foo//bar", new_handler());
+        router.insert(new_endpoint(new_handler(), Method::GET, "/foo/bar"));
+        router.insert(new_endpoint(new_handler(), Method::GET, "/foo//bar"));
     }
 
     #[test]
@@ -727,8 +749,8 @@ mod test {
                                duplicate route for method \"GET\"")]
     fn test_duplicate_route3() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/", new_handler());
-        router.insert(Method::GET, "//", new_handler());
+        router.insert(new_endpoint(new_handler(), Method::GET, "/"));
+        router.insert(new_endpoint(new_handler(), Method::GET, "//"));
     }
 
     #[test]
@@ -736,7 +758,11 @@ mod test {
                                variable name \"id\" is used more than once")]
     fn test_duplicate_varname() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/projects/{id}/insts/{id}", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/{id}/insts/{id}",
+        ));
     }
 
     #[test]
@@ -746,8 +772,16 @@ mod test {
                                this")]
     fn test_inconsistent_varname() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/projects/{project_id}", new_handler());
-        router.insert(Method::GET, "/projects/{id}", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/{project_id}",
+        ));
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/{id}",
+        ));
     }
 
     #[test]
@@ -757,8 +791,16 @@ mod test {
                                exists for a literal path segment")]
     fn test_variable_after_literal() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/projects/default", new_handler());
-        router.insert(Method::GET, "/projects/{id}", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/default",
+        ));
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/{id}",
+        ));
     }
 
     #[test]
@@ -768,8 +810,16 @@ mod test {
                                path segment (variable name: \"id\")")]
     fn test_literal_after_variable() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/projects/{id}", new_handler());
-        router.insert(Method::GET, "/projects/default", new_handler());
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/{id}",
+        ));
+        router.insert(new_endpoint(
+            new_handler(),
+            Method::GET,
+            "/projects/default",
+        ));
     }
 
     #[test]
@@ -793,7 +843,7 @@ mod test {
          * Insert a route into the middle of the tree.  This will let us look at
          * parent nodes, sibling nodes, and child nodes.
          */
-        router.insert(Method::GET, "/foo/bar", new_handler());
+        router.insert(new_endpoint(new_handler(), Method::GET, "/foo/bar"));
         assert!(router.lookup_route(&Method::GET, "/foo/bar").is_ok());
         assert!(router.lookup_route(&Method::GET, "/foo/bar/").is_ok());
         assert!(router.lookup_route(&Method::GET, "//foo/bar").is_ok());
@@ -833,7 +883,7 @@ mod test {
          * already.  Other test cases examine the errors in more detail.
          */
         assert!(router.lookup_route(&Method::GET, "/").is_err());
-        router.insert(Method::GET, "/", new_handler_named("h1"));
+        router.insert(new_endpoint(new_handler_named("h1"), Method::GET, "/"));
         let result = router.lookup_route(&Method::GET, "/").unwrap();
         assert_eq!(result.handler.label(), "h1");
         assert!(result.variables.is_empty());
@@ -851,7 +901,7 @@ mod test {
          * third method.
          */
         assert!(router.lookup_route(&Method::PUT, "/").is_err());
-        router.insert(Method::PUT, "/", new_handler_named("h2"));
+        router.insert(new_endpoint(new_handler_named("h2"), Method::PUT, "/"));
         let result = router.lookup_route(&Method::PUT, "/").unwrap();
         assert_eq!(result.handler.label(), "h2");
         assert!(result.variables.is_empty());
@@ -866,7 +916,11 @@ mod test {
          * path, whichever name we use for it.
          */
         assert!(router.lookup_route(&Method::GET, "/foo").is_err());
-        router.insert(Method::GET, "/foo", new_handler_named("h3"));
+        router.insert(new_endpoint(
+            new_handler_named("h3"),
+            Method::GET,
+            "/foo",
+        ));
         let result = router.lookup_route(&Method::PUT, "/").unwrap();
         assert_eq!(result.handler.label(), "h2");
         assert!(result.variables.is_empty());
@@ -899,7 +953,11 @@ mod test {
          */
         let mut router = HttpRouter::new();
         assert!(router.lookup_route(&Method::GET, "/not{a}variable").is_err());
-        router.insert(Method::GET, "/not{a}variable", new_handler_named("h4"));
+        router.insert(new_endpoint(
+            new_handler_named("h4"),
+            Method::GET,
+            "/not{a}variable",
+        ));
         let result =
             router.lookup_route(&Method::GET, "/not{a}variable").unwrap();
         assert_eq!(result.handler.label(), "h4");
@@ -914,11 +972,11 @@ mod test {
          * Basic test using a variable.
          */
         let mut router = HttpRouter::new();
-        router.insert(
+        router.insert(new_endpoint(
+            new_handler_named("h5"),
             Method::GET,
             "/projects/{project_id}",
-            new_handler_named("h5"),
-        );
+        ));
         assert!(router.lookup_route(&Method::GET, "/projects").is_err());
         assert!(router.lookup_route(&Method::GET, "/projects/").is_err());
         let result =
@@ -953,12 +1011,12 @@ mod test {
          * Exercise a case with multiple variables.
          */
         let mut router = HttpRouter::new();
-        router.insert(
+        router.insert(new_endpoint(
+            new_handler_named("h6"),
             Method::GET,
             "/projects/{project_id}/instances/{instance_id}/fwrules/\
              {fwrule_id}/info",
-            new_handler_named("h6"),
-        );
+        ));
         let result = router
             .lookup_route(
                 &Method::GET,
@@ -983,11 +1041,11 @@ mod test {
          * assign a variable to the empty string.
          */
         let mut router = HttpRouter::new();
-        router.insert(
+        router.insert(new_endpoint(
+            new_handler_named("h7"),
             Method::GET,
             "/projects/{project_id}/instances",
-            new_handler_named("h7"),
-        );
+        ));
         assert!(router
             .lookup_route(&Method::GET, "/projects/instances")
             .is_err());
@@ -1006,20 +1064,24 @@ mod test {
     #[test]
     fn test_iter_null() {
         let router = HttpRouter::new();
-        let ret: Vec<_> = router.iter().collect();
+        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![]);
     }
 
     #[test]
     fn test_iter() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/", new_handler_named("root"));
-        router.insert(
+        router.insert(new_endpoint(
+            new_handler_named("root"),
+            Method::GET,
+            "/",
+        ));
+        router.insert(new_endpoint(
+            new_handler_named("i"),
             Method::GET,
             "/projects/{project_id}/instances",
-            new_handler_named("i"),
-        );
-        let ret: Vec<_> = router.iter().collect();
+        ));
+        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![
             ("/".to_string(), "GET".to_string(),),
             ("/projects/{project_id}/instances".to_string(), "GET".to_string(),),
@@ -1029,9 +1091,17 @@ mod test {
     #[test]
     fn test_iter2() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/", new_handler_named("root_get"));
-        router.insert(Method::POST, "/", new_handler_named("root_post"));
-        let ret: Vec<_> = router.iter().collect();
+        router.insert(new_endpoint(
+            new_handler_named("root_get"),
+            Method::GET,
+            "/",
+        ));
+        router.insert(new_endpoint(
+            new_handler_named("root_post"),
+            Method::POST,
+            "/",
+        ));
+        let ret: Vec<_> = router.iter().map(|x| (x.0, x.1)).collect();
         assert_eq!(ret, vec![
             ("/".to_string(), "GET".to_string(),),
             ("/".to_string(), "POST".to_string(),),
@@ -1041,8 +1111,16 @@ mod test {
     #[test]
     fn test_openapi() {
         let mut router = HttpRouter::new();
-        router.insert(Method::GET, "/", new_handler_named("root_get"));
-        router.insert(Method::POST, "/", new_handler_named("root_post"));
+        router.insert(new_endpoint(
+            new_handler_named("root_get"),
+            Method::GET,
+            "/",
+        ));
+        router.insert(new_endpoint(
+            new_handler_named("root_post"),
+            Method::POST,
+            "/",
+        ));
 
         router.print_openapi();
     }

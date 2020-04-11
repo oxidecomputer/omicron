@@ -88,7 +88,7 @@ fn do_endpoint(
 
         // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
         // `#name` to be passed into `ApiDescription::register()`
-        impl From<#name> for ApiEndpoint {
+        impl From<#name> for dropshot::ApiEndpoint {
             fn from(_: #name) -> Self {
                 #ast
 
