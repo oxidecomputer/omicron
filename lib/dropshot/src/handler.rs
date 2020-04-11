@@ -228,7 +228,7 @@ impl_derived_for_tuple!(T1);
 impl_derived_for_tuple!(T1, T2);
 impl_derived_for_tuple!(T1, T2, T3);
 
-pub trait ExtractorParameter: DeserializeOwned {
+pub trait ExtractedParameter: DeserializeOwned {
     fn generate(inn: ApiEndpointParameterLocation)
         -> Vec<ApiEndpointParameter>;
 }
@@ -602,7 +602,7 @@ fn http_request_load_query<QueryType: Send + Sync>(
     request: &Request<Body>,
 ) -> Result<Query<QueryType>, HttpError>
 where
-    QueryType: ExtractorParameter,
+    QueryType: ExtractedParameter,
 {
     let raw_query_string = request.uri().query().unwrap_or("");
     /*
@@ -630,7 +630,7 @@ where
 #[async_trait]
 impl<QueryType> Extractor for Query<QueryType>
 where
-    QueryType: ExtractorParameter + Send + Sync + 'static,
+    QueryType: ExtractedParameter + Send + Sync + 'static,
 {
     async fn from_request(
         rqctx: Arc<RequestContext>,
@@ -675,7 +675,7 @@ impl<PathType: Send + Sync> Path<PathType> {
 #[async_trait]
 impl<PathType> Extractor for Path<PathType>
 where
-    PathType: ExtractorParameter + Send + Sync + 'static,
+    PathType: ExtractedParameter + Send + Sync + 'static,
 {
     async fn from_request(
         rqctx: Arc<RequestContext>,

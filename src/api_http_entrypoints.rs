@@ -29,7 +29,7 @@ use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot_endpoint::endpoint;
-use dropshot_endpoint::ExtractorParameter;
+use dropshot_endpoint::ExtractedParameter;
 
 pub fn api_register_entrypoints(api: &mut ApiDescription) {
     api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"));
@@ -135,7 +135,7 @@ async fn api_projects_post(
     Ok(HttpResponseCreated(project.to_view()))
 }
 
-#[derive(Deserialize, ExtractorParameter)]
+#[derive(Deserialize, ExtractedParameter)]
 struct ProjectPathParam {
     /// The project's unique ID.
     project_id: String,
@@ -253,7 +253,7 @@ async fn api_project_instances_post(
     Ok(HttpResponseCreated(instance.to_view()))
 }
 
-#[derive(Deserialize, ExtractorParameter)]
+#[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     project_id: String,
     instance_id: String,

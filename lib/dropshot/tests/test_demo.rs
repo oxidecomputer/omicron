@@ -28,7 +28,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::CONTENT_TYPE_JSON;
 use dropshot_endpoint::endpoint;
-use dropshot_endpoint::ExtractorParameter;
+use dropshot_endpoint::ExtractedParameter;
 use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
@@ -367,7 +367,7 @@ async fn demo_handler_args_1(
         .body("demo_handler_args_1\n".into())?)
 }
 
-#[derive(Serialize, Deserialize, ExtractorParameter)]
+#[derive(Serialize, Deserialize, ExtractedParameter)]
 pub struct DemoQueryArgs {
     pub test1: String,
     pub test2: Option<u32>,
@@ -386,7 +386,7 @@ async fn demo_handler_args_2query(
         .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
 }
 
-#[derive(Debug, Serialize, Deserialize, ExtractorParameter)]
+#[derive(Debug, Serialize, Deserialize, ExtractedParameter)]
 pub struct DemoJsonBody {
     pub test1: String,
     pub test2: Option<u32>,
@@ -405,7 +405,7 @@ async fn demo_handler_args_2json(
         .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
 }
 
-#[derive(Deserialize, Serialize, ExtractorParameter)]
+#[derive(Deserialize, Serialize, ExtractedParameter)]
 pub struct DemoJsonAndQuery {
     pub query: DemoQueryArgs,
     pub json: DemoJsonBody,

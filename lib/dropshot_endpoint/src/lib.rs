@@ -107,7 +107,7 @@ fn do_endpoint(
     Ok(stream.into())
 }
 
-#[proc_macro_derive(ExtractorParameter)]
+#[proc_macro_derive(ExtractedParameter)]
 pub fn derive_parameter(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
@@ -136,7 +136,7 @@ pub fn derive_parameter(
                             name: #name.to_string(),
                             inn: _in.clone(),
                             description: #doc ,
-                            required: true, // TODO look at option
+                            required: true, // TODO look for Option type
                             examples: vec![],
                         }
                     }
@@ -153,7 +153,7 @@ pub fn derive_parameter(
     for tp in cont.generics.type_params() {
         let ident = &tp.ident;
         let pred: syn::WherePredicate = syn::parse2(quote! {
-            #ident : dropshot::ExtractorParameter
+            #ident : dropshot::ExtractedParameter
         })
         .unwrap();
         generics.make_where_clause().predicates.push(pred);
@@ -162,7 +162,7 @@ pub fn derive_parameter(
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let stream = quote! {
-        impl #impl_generics dropshot::ExtractorParameter for #name #ty_generics
+        impl #impl_generics dropshot::ExtractedParameter for #name #ty_generics
         #where_clause
         {
             fn generate(_in: dropshot::ApiEndpointParameterLocation)

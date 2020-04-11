@@ -11,7 +11,7 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::datastore::RackDataStore;
-use dropshot_endpoint::ExtractorParameter;
+use dropshot_endpoint::ExtractedParameter;
 use futures::future::ready;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
@@ -40,7 +40,7 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
 
-#[derive(Deserialize, ExtractorParameter)]
+#[derive(Deserialize, ExtractedParameter)]
 pub struct PaginationParams<NameType> {
     pub marker: Option<NameType>,
     pub limit: Option<usize>,
