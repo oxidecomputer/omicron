@@ -55,22 +55,22 @@ pub fn endpoint(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    match do_endpoint(attr, item) {
-        Ok(result) => result,
+    match do_endpoint(attr.into(), item.into()) {
+        Ok(result) => result.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
 fn do_endpoint(
-    attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> Result<proc_macro::TokenStream, Error> {
+    attr: TokenStream,
+    item: TokenStream,
+) -> Result<TokenStream, Error> {
     let metadata = from_tokenstream::<Metadata>(&TokenStream::from(attr))?;
 
     let method = metadata.method.as_str();
     let path = metadata.path;
 
-    let ast: ItemFn = syn::parse(item)?;
+    let ast: ItemFn = syn::parse2(item)?;
 
     let name = &ast.sig.ident;
     let method_ident = format_ident!("{}", method);
@@ -114,24 +114,33 @@ fn do_endpoint(
     Ok(stream.into())
 }
 
+/// Derive the implementation for dropshot::ExtractedParameter
 #[proc_macro_derive(ExtractedParameter, attributes(dropshot))]
 pub fn derive_parameter(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
+    do_derive_parameter(&input).unwrap_or_else(to_compile_errors).into()
+}
 
+fn do_derive_parameter(
+    input: &DeriveInput,
+) -> Result<TokenStream, Vec<syn::Error>> {
     let ctxt = Ctxt::new();
 
-    let cont = Container::from_ast(&ctxt, &input, Derive::Deserialize).unwrap();
-    // TODO error checking
-    let _ = ctxt.check();
+    let cont = match Container::from_ast(&ctxt, input, Derive::Deserialize) {
+        Some(cont) => cont,
+        None => return Err(ctxt.check().unwrap_err()),
+    };
+
+    ctxt.check()?;
 
     let dropshot = get_crate(get_crate_attr(&cont));
 
     let fields = cont
         .data
         .all_fields()
-        .map(|f| {
+        .filter_map(|f| {
             match &f.member {
                 syn::Member::Named(ident) => {
                     let doc = extract_doc_from_attrs(&f.original.attrs)
@@ -140,7 +149,7 @@ pub fn derive_parameter(
                             |s| quote! { Some(#s.to_string()) },
                         );
                     let name = ident.to_string();
-                    quote! {
+                    Some(quote! {
                         #dropshot::ApiEndpointParameter {
                             name: #name.to_string(),
                             inn: _in.clone(),
@@ -148,9 +157,9 @@ pub fn derive_parameter(
                             required: true, // TODO look for Option type
                             examples: vec![],
                         }
-                    }
+                    })
                 }
-                _ => quote! {},
+                _ => None,
             }
         })
         .collect::<Vec<_>>();
@@ -162,9 +171,9 @@ pub fn derive_parameter(
     for tp in cont.generics.type_params() {
         let ident = &tp.ident;
         let pred: syn::WherePredicate = syn::parse2(quote! {
-            #ident : #dropshot::ExtractedParameter
+            #ident : serde::de::DeserializeOwned
         })
-        .unwrap();
+        .map_err(|e| vec![e])?;
         generics.make_where_clause().predicates.push(pred);
     }
 
@@ -174,15 +183,16 @@ pub fn derive_parameter(
         impl #impl_generics #dropshot::ExtractedParameter for #name #ty_generics
         #where_clause
         {
-            fn generate(_in: #dropshot::ApiEndpointParameterLocation)
-                -> Vec<#dropshot::ApiEndpointParameter>
+            fn generate(
+                _in: #dropshot::ApiEndpointParameterLocation,
+            ) -> Vec<#dropshot::ApiEndpointParameter>
             {
-                vec![ #(#fields),* ]
+                vec![ #(#fields,)* ]
             }
         }
     };
 
-    stream.into()
+    Ok(stream.into())
 }
 
 fn get_crate(var: Option<String>) -> TokenStream {
@@ -270,4 +280,135 @@ fn extract_doc_from_attrs(attrs: &Vec<syn::Attribute>) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    #[test]
+    fn test_endpoint1() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                fn handler_xyz() {}
+            }
+            .into(),
+        );
+        let expected = quote! {
+            #[allow(non_camel_case_types, missing_docs)]
+            pub struct handler_xyz {}
+            #[allow(non_upper_case_globals, missing_docs)]
+            const handler_xyz: handler_xyz = handler_xyz {};
+            impl From<handler_xyz> for dropshot::ApiEndpoint {
+                fn from(_: handler_xyz) -> Self {
+                    fn handler_xyz() {}
+                    #[allow(unused_mut)]
+                    let mut endpoint =
+                        dropshot::ApiEndpoint::new(
+                            handler_xyz,
+                            Method::GET,
+                            "/a/b/c",
+                        );
+                    endpoint
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), ret.unwrap().to_string());
+    }
+
+    #[test]
+    fn test_endpoint2() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("expected `fn`", msg);
+    }
+
+    #[test]
+    fn test_endpoint3() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = /a/b/c
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("expected a string, but found `/`", msg);
+    }
+
+    #[test]
+    fn test_endpoint4() {
+        let ret = do_endpoint(
+            quote! {
+                methud = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                const POTATO = "potato";
+            }
+            .into(),
+        );
+
+        let msg = format!("{}", ret.err().unwrap());
+        assert_eq!("extraneous member `methud`", msg);
+    }
+
+    #[test]
+    fn test_derive_parameter() {
+        let ret = do_derive_parameter(
+            &syn::parse2::<syn::DeriveInput>(quote! {
+                struct Foo {
+                    a: String,
+                    b: String,
+                }
+            })
+            .unwrap(),
+        );
+
+        let expected = quote! {
+            impl dropshot::ExtractedParameter for Foo {
+                fn generate(
+                    _in: dropshot::ApiEndpointParameterLocation,
+                ) -> Vec<dropshot::ApiEndpointParameter> {
+                    vec![
+                        dropshot::ApiEndpointParameter {
+                            name: "a".to_string(),
+                            inn: _in.clone(),
+                            description: None,
+                            required: true,
+                            examples: vec![],
+                        },
+                        dropshot::ApiEndpointParameter {
+                            name: "b".to_string(),
+                            inn: _in.clone(),
+                            description: None,
+                            required: true,
+                            examples: vec![],
+                        },
+                    ]
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), ret.unwrap().to_string());
+    }
+}
