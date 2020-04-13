@@ -32,7 +32,9 @@ extern crate slog;
  */
 pub fn dropshot_api() -> ApiDescription {
     let mut api = ApiDescription::new();
-    let _ = api_http_entrypoints::api_register_entrypoints(&mut api);
+    if let Err(err) = api_http_entrypoints::api_register_entrypoints(&mut api) {
+        panic!("failed to register entrypoints: {}", err);
+    }
     api
 }
 

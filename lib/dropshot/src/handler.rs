@@ -122,9 +122,8 @@ use super::http_util::http_read_body;
 use super::http_util::CONTENT_TYPE_JSON;
 use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::DropshotState;
-use crate::api_description::{
-    ApiEndpointParameter, ApiEndpointParameterLocation,
-};
+use crate::api_description::ApiEndpointParameter;
+use crate::api_description::ApiEndpointParameterLocation;
 
 use async_trait::async_trait;
 use bytes::BufMut;
