@@ -57,4 +57,5 @@ pub use router::HttpRouter;
 pub use router::RouterLookupResult;
 
 extern crate dropshot_endpoint;
-pub use dropshot_endpoint::*;
+pub use dropshot_endpoint::endpoint;
+pub use dropshot_endpoint::ExtractedParameter;

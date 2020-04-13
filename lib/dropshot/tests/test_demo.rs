@@ -348,10 +348,10 @@ async fn test_demo3json() {
  * Demo handler functions
  */
 pub fn register_test_endpoints(api: &mut ApiDescription) {
-    let _ = api.register(demo_handler_args_1);
-    let _ = api.register(demo_handler_args_2query);
-    let _ = api.register(demo_handler_args_2json);
-    let _ = api.register(demo_handler_args_3);
+    api.register(demo_handler_args_1).unwrap();
+    api.register(demo_handler_args_2query).unwrap();
+    api.register(demo_handler_args_2json).unwrap();
+    api.register(demo_handler_args_3).unwrap();
 }
 
 #[endpoint {
