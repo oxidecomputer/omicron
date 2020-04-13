@@ -78,7 +78,9 @@ pub struct ApiDescription {
 
 impl ApiDescription {
     pub fn new() -> Self {
-        ApiDescription { router: HttpRouter::new() }
+        ApiDescription {
+            router: HttpRouter::new(),
+        }
     }
 
     /**

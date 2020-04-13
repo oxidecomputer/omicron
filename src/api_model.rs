@@ -69,14 +69,10 @@ pub enum ApiResourceType {
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(
-            f,
-            "{}",
-            match self {
-                ApiResourceType::Project => "project",
-                ApiResourceType::Instance => "instance",
-            }
-        )
+        write!(f, "{}", match self {
+            ApiResourceType::Project => "project",
+            ApiResourceType::Instance => "instance",
+        })
     }
 }
 
@@ -242,7 +238,9 @@ pub struct ApiProject {
 impl ApiObject for ApiProject {
     type View = ApiProjectView;
     fn to_view(&self) -> ApiProjectView {
-        ApiProjectView { identity: self.identity.clone() }
+        ApiProjectView {
+            identity: self.identity.clone(),
+        }
     }
 }
 
