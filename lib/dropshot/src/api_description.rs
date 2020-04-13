@@ -115,7 +115,38 @@ impl ApiDescription {
             .collect::<HashSet<_>>();
 
         if path != vars {
-            return Err("path parameters are inconsistent".to_string());
+            let mut p = path
+                .difference(&vars)
+                .into_iter()
+                .map(|s| *s)
+                .collect::<Vec<_>>();
+            let mut v = vars
+                .difference(&path)
+                .into_iter()
+                .map(|s| *s)
+                .collect::<Vec<_>>();
+            p.sort();
+            v.sort();
+
+            return match (p.is_empty(), v.is_empty()) {
+                (false, true) => Err(format!(
+                    "{} {}",
+                    "path parameters are not consumed",
+                    p.join(","),
+                )),
+                (true, false) => Err(format!(
+                    "{} {}",
+                    "specified parameters do not appear in the path",
+                    v.join(",")
+                )),
+                _ => Err(format!(
+                    "{} {} and {} {}",
+                    "path parameters are not consumed",
+                    p.join(","),
+                    "specified parameters do not appear in the path",
+                    v.join(",")
+                )),
+            };
         }
 
         self.router.insert(e);
@@ -289,13 +320,47 @@ mod test {
     }
 
     #[test]
-    fn test_badpath() {
+    fn test_badpath1() {
         let mut api = ApiDescription::new();
         let ret = api.register(ApiEndpoint::new(
             test_badpath_handler,
             Method::GET,
             "/",
         ));
-        assert_eq!(ret, Err("path parameters are inconsistent".to_string()));
+        assert_eq!(
+            ret,
+            Err("specified parameters do not appear in the path a,b"
+                .to_string())
+        )
+    }
+
+    #[test]
+    fn test_badpath2() {
+        let mut api = ApiDescription::new();
+        let ret = api.register(ApiEndpoint::new(
+            test_badpath_handler,
+            Method::GET,
+            "/{a}/{aa}/{b}/{bb}",
+        ));
+        assert_eq!(
+            ret,
+            Err("path parameters are not consumed aa,bb".to_string())
+        );
+    }
+
+    #[test]
+    fn test_badpath3() {
+        let mut api = ApiDescription::new();
+        let ret = api.register(ApiEndpoint::new(
+            test_badpath_handler,
+            Method::GET,
+            "/{c}/{d}",
+        ));
+        assert_eq!(
+            ret,
+            Err("path parameters are not consumed c,d and specified \
+                 parameters do not appear in the path a,b"
+                .to_string())
+        );
     }
 }
