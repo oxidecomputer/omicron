@@ -10,8 +10,10 @@ use http::Method;
 use std::collections::HashSet;
 
 /**
- * An Endpoint represents a single API endpoint associated with an
- * ApiDescription.
+ * ApiEndpoint represents a single API endpoint associated with an
+ * ApiDescription. It has a handler, HTTP method (e.g. GET, POST), and a path--
+ * provided explicitly--as well as parameters and a description which can be
+ * inferred from function parameter types and doc comments (respectively).
  */
 #[derive(Debug)]
 pub struct ApiEndpoint {
@@ -43,6 +45,11 @@ impl<'a> ApiEndpoint {
     }
 }
 
+/**
+ * ApiEndpointParameter the discrete path and query parameters for a given API
+ * endpoint. These are typically derived from the members of stucts used as
+ * parameters to handler functions.
+ */
 #[derive(Debug)]
 pub struct ApiEndpointParameter {
     pub name: String,
@@ -71,9 +78,7 @@ pub struct ApiDescription {
 
 impl ApiDescription {
     pub fn new() -> Self {
-        ApiDescription {
-            router: HttpRouter::new(),
-        }
+        ApiDescription { router: HttpRouter::new() }
     }
 
     /**
@@ -116,6 +121,9 @@ impl ApiDescription {
         Ok(())
     }
 
+    /**
+     * Emit the OpenAPI Spec document describing this API in its JSON form.
+     */
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
 
