@@ -5,12 +5,6 @@
  */
 
 use crate::api_error::ApiError;
-use crate::rack::CreateResult;
-use crate::rack::DeleteResult;
-use crate::rack::ListResult;
-use crate::rack::LookupResult;
-use crate::rack::PaginationParams;
-use crate::rack::UpdateResult;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
@@ -21,6 +15,12 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
+use crate::rack::CreateResult;
+use crate::rack::DeleteResult;
+use crate::rack::ListResult;
+use crate::rack::LookupResult;
+use crate::rack::PaginationParams;
+use crate::rack::UpdateResult;
 use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
@@ -238,11 +238,7 @@ impl RackDataStore {
     ) -> LookupResult<ApiInstance> {
         let projects = self.projects_by_name.lock().await;
         /* TODO-cleanup we're just doing this to handle the error case */
-        collection_lookup(
-            &projects,
-            project_name,
-            ApiResourceType::Project,
-        )?;
+        collection_lookup(&projects, project_name, ApiResourceType::Project)?;
         let project_instances = self.instances_by_project_name.lock().await;
         let instances = project_instances
             .get(project_name)

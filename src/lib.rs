@@ -9,17 +9,17 @@
 mod api_config;
 mod api_error;
 mod api_http_entrypoints;
-mod rack;
 pub mod api_model;
 mod datastore;
+mod rack;
 
 pub use api_config::ApiServerConfig;
-use rack::OxideRack;
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;
 use api_model::ApiProjectCreateParams;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
+use rack::OxideRack;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
