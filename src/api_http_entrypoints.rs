@@ -19,7 +19,6 @@ use crate::rack::PaginationParams;
 use crate::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::ApiEndpoint;
 use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -34,46 +33,15 @@ use dropshot::RequestContext;
 pub fn api_register_entrypoints(
     api: &mut ApiDescription,
 ) -> Result<(), String> {
-    api.register(ApiEndpoint::new(api_projects_get, Method::GET, "/projects"))?;
-    api.register(ApiEndpoint::new(
-        api_projects_post,
-        Method::POST,
-        "/projects",
-    ))?;
-
+    api.register(api_projects_get)?;
+    api.register(api_projects_post)?;
     api.register(api_projects_get_project)?;
-
-    api.register(ApiEndpoint::new(
-        api_projects_delete_project,
-        Method::DELETE,
-        "/projects/{project_id}",
-    ))?;
-    api.register(ApiEndpoint::new(
-        api_projects_put_project,
-        Method::PUT,
-        "/projects/{project_id}",
-    ))?;
-
-    api.register(ApiEndpoint::new(
-        api_project_instances_get,
-        Method::GET,
-        "/projects/{project_id}/instances",
-    ))?;
-    api.register(ApiEndpoint::new(
-        api_project_instances_post,
-        Method::POST,
-        "/projects/{project_id}/instances",
-    ))?;
-    api.register(ApiEndpoint::new(
-        api_project_instances_get_instance,
-        Method::GET,
-        "/projects/{project_id}/instances/{instance_id}",
-    ))?;
-    api.register(ApiEndpoint::new(
-        api_project_instances_delete_instance,
-        Method::DELETE,
-        "/projects/{project_id}/instances/{instance_id}",
-    ))?;
+    api.register(api_projects_delete_project)?;
+    api.register(api_projects_put_project)?;
+    api.register(api_project_instances_get)?;
+    api.register(api_project_instances_post)?;
+    api.register(api_project_instances_get_instance)?;
+    api.register(api_project_instances_delete_instance)?;
 
     Ok(())
 }
@@ -111,9 +79,13 @@ pub fn api_register_entrypoints(
  *    PUT    /projects/{project_id}     -> api_projects_put_project()
  */
 
-/*
- * "GET /projects": list all projects
+/**
+ * List all projects.
  */
+#[endpoint {
+     method = GET,
+     path = "/projects",
+ }]
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
     query_params: Query<PaginationParams<ApiName>>,
@@ -126,9 +98,13 @@ async fn api_projects_get(
     Ok(HttpResponseOkObjectList(view_list))
 }
 
-/*
- * "POST /projects": create a new project
+/**
+ * Create a new project.
  */
+#[endpoint {
+    method = POST,
+    path = "/projects"
+}]
 async fn api_projects_post(
     rqctx: Arc<RequestContext>,
     new_project: Json<ApiProjectCreateParams>,
@@ -166,9 +142,13 @@ async fn api_projects_get_project(
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
-/*
- * "DELETE /project/{project_id}": delete a specific project
+/**
+ * Delete a specific project.
  */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_id}",
+ }]
 async fn api_projects_delete_project(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
@@ -182,8 +162,8 @@ async fn api_projects_delete_project(
     Ok(HttpResponseDeleted())
 }
 
-/*
- * "PUT /project/{project_id}": update a specific project
+/**
+ * Update a specific project.
  *
  * TODO-correctness: Is it valid for PUT to accept application/json that's a
  * subset of what the resource actually represents?  If not, is that a problem?
@@ -191,6 +171,10 @@ async fn api_projects_delete_project(
  * having this be a slightly different content-type (e.g.,
  * "application/json-patch")?  We should see what other APIs do.
  */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_id}",
+ }]
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
@@ -210,9 +194,13 @@ async fn api_projects_put_project(
  * Instances
  */
 
-/*
- * "GET /project/{project_id}/instances": list instances in a project
+/**
+ * List instances in a project.
  */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_id}/instances",
+ }]
 async fn api_project_instances_get(
     rqctx: Arc<RequestContext>,
     query_params: Query<PaginationParams<ApiName>>,
@@ -230,8 +218,9 @@ async fn api_project_instances_get(
     Ok(HttpResponseOkObjectList(view_list))
 }
 
-/*
- * "POST /project/{project_id}/instances": create instance in a project
+/**
+ * Create an instance in a project.
+ *
  * TODO-correctness This is supposed to be async.  Is that right?  We can create
  * the instance immediately -- it's just not booted yet.  Maybe the boot
  * operation is what's a separate operation_id.  What about the response code
@@ -240,6 +229,10 @@ async fn api_project_instances_get(
  * a "reboot" operation would return a 202 Accepted because there's no actual
  * resource created?
  */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_id}/instances",
+ }]
 async fn api_project_instances_post(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
@@ -263,9 +256,13 @@ struct InstancePathParam {
     instance_id: String,
 }
 
-/*
- * "GET /project/{project_id}/instances/{instance_id}"
+/**
+ * Get an instance in a project.
  */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_id}/instances/{instance_id}",
+ }]
 async fn api_project_instances_get_instance(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
@@ -282,9 +279,13 @@ async fn api_project_instances_get_instance(
     Ok(HttpResponseOkObject(instance.to_view()))
 }
 
-/*
- * "DELETE /project/{project_id}/instances/{instance_id}"
+/**
+ * Delete an instance from a project.
  */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_id}/instances/{instance_id}",
+ }]
 async fn api_project_instances_delete_instance(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
