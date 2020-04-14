@@ -2,6 +2,7 @@
  * Smoke tests against the API server.
  *
  * This file defines a very basic set of tests against the API.
+ * TODO-coverage add test for racks
  */
 
 use http::method::Method;
@@ -75,8 +76,8 @@ async fn test_basic_failures() {
         .await
         .expect_err("expected error");
     assert_eq!(
-        "unsupported value for \"project_id\": name must begin with an ASCII \
-         lowercase character",
+        "bad parameter in URL path: name must begin with an ASCII lowercase \
+         character",
         error.message
     );
 
@@ -144,9 +145,8 @@ async fn test_basic_failures() {
         .await
         .expect_err("expected error");
     assert_eq!(
-        "unsupported value for \"instance_id\": name contains invalid \
-         character: \"_\" (allowed characters are lowercase ASCII, digits, \
-         and \"-\")",
+        "bad parameter in URL path: name contains invalid character: \"_\" \
+         (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
 
@@ -162,9 +162,8 @@ async fn test_basic_failures() {
         .await
         .expect_err("expected error");
     assert_eq!(
-        "unsupported value for \"instance_id\": name contains invalid \
-         character: \"_\" (allowed characters are lowercase ASCII, digits, \
-         and \"-\")",
+        "bad parameter in URL path: name contains invalid character: \"_\" \
+         (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
 }

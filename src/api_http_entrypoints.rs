@@ -57,11 +57,11 @@ pub fn api_register_entrypoints(
  * Generally, HTTP resources are grouped within some collection.  For a
  * relatively simple example:
  *
- *   GET    /projects               (list the projects in the collection)
- *   POST   /projects               (create a project in the collection)
- *   GET    /projects/{project_id}  (look up a project in the collection)
- *   DELETE /projects/{project_id}  (delete a project in the collection)
- *   PUT    /projects/{project_id}  (update a project in the collection)
+ *   GET    /projects                 (list the projects in the collection)
+ *   POST   /projects                 (create a project in the collection)
+ *   GET    /projects/{project_name}  (look up a project in the collection)
+ *   DELETE /projects/{project_name}  (delete a project in the collection)
+ *   PUT    /projects/{project_name}  (update a project in the collection)
  *
  * There's a naming convention for the functions that implement these API entry
  * points.  When operating on the collection itself, we use:
@@ -79,9 +79,9 @@ pub fn api_register_entrypoints(
  *
  * For examples:
  *
- *    DELETE /projects/{project_id}     -> api_projects_delete_project()
- *    GET    /projects/{project_id}     -> api_projects_get_project()
- *    PUT    /projects/{project_id}     -> api_projects_put_project()
+ *    DELETE /projects/{project_name}   -> api_projects_delete_project()
+ *    GET    /projects/{project_name}   -> api_projects_get_project()
+ *    PUT    /projects/{project_name}   -> api_projects_put_project()
  */
 
 /**
@@ -123,7 +123,7 @@ async fn api_projects_post(
 #[derive(Deserialize, ExtractedParameter)]
 struct ProjectPathParam {
     /// The project's unique ID.
-    project_id: String,
+    project_name: ApiName,
 }
 
 /**
@@ -131,7 +131,7 @@ struct ProjectPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_id}",
+    path = "/projects/{project_name}",
 }]
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
@@ -140,9 +140,8 @@ async fn api_projects_get_project(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let path = path_params.into_inner();
-    let project_id =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
-    let project: Arc<ApiProject> = rack.project_lookup(&project_id).await?;
+    let project_name = &path.project_name;
+    let project: Arc<ApiProject> = rack.project_lookup(&project_name).await?;
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -151,7 +150,7 @@ async fn api_projects_get_project(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_id}",
+     path = "/projects/{project_name}",
  }]
 async fn api_projects_delete_project(
     rqctx: Arc<RequestContext>,
@@ -160,9 +159,8 @@ async fn api_projects_delete_project(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let params = path_params.into_inner();
-    let project_id =
-        ApiName::from_param(params.project_id.clone(), "project_id")?;
-    rack.project_delete(&project_id).await?;
+    let project_name = &params.project_name;
+    rack.project_delete(&project_name).await?;
     Ok(HttpResponseDeleted())
 }
 
@@ -177,7 +175,7 @@ async fn api_projects_delete_project(
  */
 #[endpoint {
      method = PUT,
-     path = "/projects/{project_id}",
+     path = "/projects/{project_name}",
  }]
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
@@ -187,10 +185,10 @@ async fn api_projects_put_project(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let path = path_params.into_inner();
-    let project_id =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
-    let newproject =
-        rack.project_update(&project_id, &updated_project.into_inner()).await?;
+    let project_name = &path.project_name;
+    let newproject = rack
+        .project_update(&project_name, &updated_project.into_inner())
+        .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
 }
 
@@ -203,7 +201,7 @@ async fn api_projects_put_project(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_id}/instances",
+     path = "/projects/{project_name}/instances",
  }]
 async fn api_project_instances_get(
     rqctx: Arc<RequestContext>,
@@ -213,9 +211,8 @@ async fn api_project_instances_get(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let query = query_params.into_inner();
-    let path: ProjectPathParam = path_params.into_inner();
-    let project_name =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
     let instance_stream =
         rack.project_list_instances(&project_name, &query).await?;
     let view_list = to_view_list(instance_stream).await;
@@ -235,7 +232,7 @@ async fn api_project_instances_get(
  */
 #[endpoint {
      method = POST,
-     path = "/projects/{project_id}/instances",
+     path = "/projects/{project_name}/instances",
  }]
 async fn api_project_instances_post(
     rqctx: Arc<RequestContext>,
@@ -245,8 +242,7 @@ async fn api_project_instances_post(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let path = path_params.into_inner();
-    let project_name =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
+    let project_name = &path.project_name;
     let new_instance_params = &new_instance.into_inner();
     let instance = rack
         .project_create_instance(&project_name, &new_instance_params)
@@ -256,8 +252,8 @@ async fn api_project_instances_post(
 
 #[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
-    project_id: String,
-    instance_id: String,
+    project_name: ApiName,
+    instance_name: ApiName,
 }
 
 /**
@@ -265,7 +261,7 @@ struct InstancePathParam {
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_id}/instances/{instance_id}",
+     path = "/projects/{project_name}/instances/{instance_name}",
  }]
 async fn api_project_instances_get_instance(
     rqctx: Arc<RequestContext>,
@@ -274,12 +270,10 @@ async fn api_project_instances_get_instance(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let path = path_params.into_inner();
-    let project_id =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
-    let instance_id =
-        ApiName::from_param(path.instance_id.clone(), "instance_id")?;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
     let instance: Arc<ApiInstance> =
-        rack.project_lookup_instance(&project_id, &instance_id).await?;
+        rack.project_lookup_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseOkObject(instance.to_view()))
 }
 
@@ -288,7 +282,7 @@ async fn api_project_instances_get_instance(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_id}/instances/{instance_id}",
+     path = "/projects/{project_name}/instances/{instance_name}",
  }]
 async fn api_project_instances_delete_instance(
     rqctx: Arc<RequestContext>,
@@ -297,11 +291,9 @@ async fn api_project_instances_delete_instance(
     let apictx = ApiContext::from_request(&rqctx);
     let rack = &apictx.rack;
     let path = path_params.into_inner();
-    let project_id =
-        ApiName::from_param(path.project_id.clone(), "project_id")?;
-    let instance_id =
-        ApiName::from_param(path.instance_id.clone(), "instance_id")?;
-    rack.project_delete_instance(&project_id, &instance_id).await?;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    rack.project_delete_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseDeleted())
 }
 
