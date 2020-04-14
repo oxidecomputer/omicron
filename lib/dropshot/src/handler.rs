@@ -6,40 +6,49 @@
  * All endpoint handler functions must be `async` (that is, must return
  * a `Future`) and must return something that can be turned into a
  * `Result<Response<Body>, HttpError>`.  Ignoring the return values for a
- * minute, handler functions must have one of the following signatures:
+ * minute, handler functions must have a signature that matches this pattern:
  *
- * 1. `f(rqctx: Arc<RequestContext>)`
- * 2. `f(rqctx: Arc<RequestContext>, query: Query<Q>)`
- * 3. `f(rqctx: Arc<RequestContext>, json: Json<J>)`
- * 4. `f(rqctx: Arc<RequestContext>, query: Query<Q>, json: Json<J>)`
+ * ```ignore
+ * f(
+ *      rqctx: Arc<RequestContext>,
+ *      [query_params: Query<Q>,]
+ *      [path_params: Path<P>,]
+ *      [body_param: Json<J>,]
+ * ) -> Result<HttpResponse, HttpError>
+ * ```
  *
- * See "Extractors" below for more on the types `Query` and `Json`.
+ * Note that, other than the RequestContext, parameters may appear in any order.
+ * See "Extractors" below for more on the types `Query`, `Path`, and `Json`.
  *
  * We allow for variation in the function arguments not so much for programmer
  * convenience (since parsing the query string or JSON body could be implemented
- * in line or two of code each, with the right helper functions) but rather so
+ * in a line or two of code each, with the right helper functions) but rather so
  * that the type signature of the handler function can be programmatically
  * analyzed to generate an OpenAPI snippet for this endpoint.  This approach of
  * treating the server implementation as the source of truth for the API
- * specification ensures that at least in many important ways, the
- * implementation cannot diverge from the spec without us knowing it.
+ * specification ensures that--at least in many important ways--the
+ * implementation cannot diverge from the spec.
  *
  *
  * ## Extractors
  *
- * The types `Query` and `Json` are called _extractors_ because they cause
- * information to be pulled out of the request and made available to the handler
- * function.
+ * The types `Query`, `Path`, and `Json` are called _Extractors_ because they
+ * cause information to be pulled out of the request and made available to the
+ * handler function.
  *
- * * `Query` extracts parameters from a query string, deserializing them into
- *   an instance of type `Q`.  `Q` must implement `serde::Deserialize`.
- * * `Json` extracts content from the request body by parsing the body as JSON
- *   and deserializing it into a type `J`.  `J` must implement
- *   `serde::Deserialize`.
+ * * `Query<Q>` extracts parameters from a query string, deserializing them into
+ *    an instance of type `Q`. `Q` must implement `serde::Deserialize` and
+ *    `dropshot::ExtractedParameter`.
+ * * `Path<P>` extracts parameters from HTTP path, deserializing them into
+ *    an instance of type `P`. `P` must implement `serde::Deserialize` and
+ *    `dropshot::ExtractedParameter`.
+ * * `Json<J>` extracts content from the request body by parsing the body as
+ *   JSON and deserializing it into an instance of type `J`. `J` must implement
+ *   `serde::Deserialize` and `dropshot::ExtractedParameter`.
  *
- * If the handler takes a `Query<Q>` or a `Json<J>` and the corresponding
- * extraction cannot be completed, the request fails with status code 400 and an
- * error message reflecting a validation error.
+ * If the handler takes a `Query<Q>`, `Path<P>`, or a `Json<J>` and the
+ * corresponding extraction cannot be completed, the request fails with status
+ * code 400 and an error message reflecting a validation error.
  *
  * As with any serde-deserializable type, you can make fields optional by having
  * the corresponding property of the type be an `Option`.  Here's an example of
