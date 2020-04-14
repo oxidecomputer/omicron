@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Build
       run: cargo build --verbose
-    - uses: action-rs/toolchain@v1.0.6
+    - uses: actions-rs/toolchain@v1
       with:
         toolchain: nightly
         default: false
