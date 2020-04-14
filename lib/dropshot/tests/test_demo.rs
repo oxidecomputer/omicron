@@ -24,6 +24,7 @@ use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HttpError;
 use dropshot::Json;
+use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::CONTENT_TYPE_JSON;
@@ -36,6 +37,7 @@ use hyper::Response;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
+use uuid::Uuid;
 
 async fn test_setup(test_name: &str) -> TestContext {
     /*
@@ -88,7 +90,7 @@ async fn test_demo1() {
         .await
         .expect("expected success");
     let body = read_string(&mut response).await;
-    assert_eq!(body, "demo_handler_args_1\n");
+    assert_eq!(body, "\"demo_handler_args_1\"");
     testctx.teardown().await;
 }
 
@@ -345,6 +347,122 @@ async fn test_demo3json() {
 }
 
 /*
+ * The "demo_path_param_string" handler takes just a single string path
+ * parameter.
+ */
+#[tokio::test]
+async fn test_demo_path_param_string() {
+    let testctx = test_setup("demo_path_param_string").await;
+
+    /*
+     * Simple error cases.  All of these should produce 404 "Not Found" errors.
+     */
+    let bad_paths = vec![
+        /* missing path parameter (won't match route) */
+        "/testing/demo_path_string",
+        /* missing path parameter (won't match route) */
+        "/testing/demo_path_string/",
+        /* missing path parameter (won't match route) */
+        "/testing/demo_path_string//",
+        /* extra path segment (won't match route) */
+        "/testing/demo_path_string/okay/then",
+    ];
+
+    for bad_path in bad_paths {
+        let error = testctx
+            .client_testctx
+            .make_request_with_body(
+                Method::GET,
+                bad_path,
+                Body::empty(),
+                StatusCode::NOT_FOUND,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.message, "Not Found");
+    }
+
+    /*
+     * Success cases (use the path parameter).
+     * TODO-coverage verify whether the values below are encoded correctly in
+     * all the right places.  It's a little surprising that they come back
+     * encoded.
+     */
+    let okay_paths = vec![
+        ("/testing/demo_path_string/okay", "okay"),
+        ("/testing/demo_path_string/okay/", "okay"),
+        ("/testing/demo_path_string//okay", "okay"),
+        ("/testing/demo_path_string//okay//", "okay"),
+        ("/testing/demo_path_string//%7Bevil%7D", "%7Bevil%7D"),
+        (
+            "/testing/demo_path_string//%7Bsurprisingly_okay",
+            "%7Bsurprisingly_okay",
+        ),
+        (
+            "/testing/demo_path_string//surprisingly_okay%7D",
+            "surprisingly_okay%7D",
+        ),
+    ];
+
+    for (okay_path, matched_part) in okay_paths {
+        let mut response = testctx
+            .client_testctx
+            .make_request_with_body(
+                Method::GET,
+                okay_path,
+                Body::empty(),
+                StatusCode::OK,
+            )
+            .await
+            .unwrap();
+        let json: DemoPathString = read_json(&mut response).await;
+        assert_eq!(json.test1, matched_part);
+    }
+}
+
+/*
+ * The "demo_path_param_uuid" handler takes just a single uuid path parameter.
+ */
+#[tokio::test]
+async fn test_demo_path_param_uuid() {
+    let testctx = test_setup("demo_path_param_uuid").await;
+
+    /*
+     * Error case: not a valid uuid.  The other error cases are the same as for
+     * the string-valued path parameter and they're tested above.
+     */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            "/testing/demo_path_uuid/abcd",
+            Body::empty(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.message.starts_with("bad parameter in URL path:"));
+
+    /*
+     * Success case (use the Uuid)
+     */
+    let uuid_str = "e7de8ccc-8938-43fa-8404-a040a0836ee4";
+    let valid_path = format!("/testing/demo_path_uuid/{}", uuid_str);
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &valid_path,
+            Body::empty(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let json: DemoPathUuid = read_json(&mut response).await;
+    assert_eq!(json.test1.to_string(), uuid_str);
+}
+
+/*
  * Demo handler functions
  */
 pub fn register_test_endpoints(api: &mut ApiDescription) {
@@ -352,6 +470,19 @@ pub fn register_test_endpoints(api: &mut ApiDescription) {
     api.register(demo_handler_args_2query).unwrap();
     api.register(demo_handler_args_2json).unwrap();
     api.register(demo_handler_args_3).unwrap();
+    api.register(demo_handler_path_param_string).unwrap();
+    api.register(demo_handler_path_param_uuid).unwrap();
+
+    /*
+     * We don't need to exhaustively test these cases, as they're tested by unit
+     * tests.
+     */
+    let error = api.register(demo_handler_path_param_impossible).unwrap_err();
+    assert_eq!(
+        error,
+        "path parameters are not consumed (different_param_name) and \
+         specified parameters do not appear in the path (test1)"
+    );
 }
 
 #[endpoint {
@@ -361,10 +492,7 @@ pub fn register_test_endpoints(api: &mut ApiDescription) {
 async fn demo_handler_args_1(
     _rqctx: Arc<RequestContext>,
 ) -> Result<Response<Body>, HttpError> {
-    Ok(Response::builder()
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .status(StatusCode::OK)
-        .body("demo_handler_args_1\n".into())?)
+    http_echo(&"demo_handler_args_1")
 }
 
 #[derive(Serialize, Deserialize, ExtractedParameter)]
@@ -380,10 +508,7 @@ async fn demo_handler_args_2query(
     _rqctx: Arc<RequestContext>,
     query: Query<DemoQueryArgs>,
 ) -> Result<Response<Body>, HttpError> {
-    Ok(Response::builder()
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .status(StatusCode::OK)
-        .body(serde_json::to_string(&query.into_inner()).unwrap().into())?)
+    http_echo(&query.into_inner())
 }
 
 #[derive(Debug, Serialize, Deserialize, ExtractedParameter)]
@@ -399,10 +524,7 @@ async fn demo_handler_args_2json(
     _rqctx: Arc<RequestContext>,
     json: Json<DemoJsonBody>,
 ) -> Result<Response<Body>, HttpError> {
-    Ok(Response::builder()
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .status(StatusCode::OK)
-        .body(serde_json::to_string(&json.into_inner()).unwrap().into())?)
+    http_echo(&json.into_inner())
 }
 
 #[derive(Deserialize, Serialize, ExtractedParameter)]
@@ -423,8 +545,57 @@ async fn demo_handler_args_3(
         query: query.into_inner(),
         json: json.into_inner(),
     };
+    http_echo(&combined)
+}
+
+#[derive(Deserialize, Serialize, ExtractedParameter)]
+pub struct DemoPathString {
+    pub test1: String,
+}
+#[endpoint {
+    method = GET,
+    path = "/testing/demo_path_string/{test1}",
+}]
+async fn demo_handler_path_param_string(
+    _rqctx: Arc<RequestContext>,
+    path_params: Path<DemoPathString>,
+) -> Result<Response<Body>, HttpError> {
+    http_echo(&path_params.into_inner())
+}
+
+#[derive(Deserialize, Serialize, ExtractedParameter)]
+pub struct DemoPathUuid {
+    pub test1: Uuid,
+}
+#[endpoint {
+    method = GET,
+    path = "/testing/demo_path_uuid/{test1}",
+}]
+async fn demo_handler_path_param_uuid(
+    _rqctx: Arc<RequestContext>,
+    path_params: Path<DemoPathUuid>,
+) -> Result<Response<Body>, HttpError> {
+    http_echo(&path_params.into_inner())
+}
+
+#[derive(Deserialize, Serialize, ExtractedParameter)]
+pub struct DemoPathImpossible {
+    pub test1: String,
+}
+#[endpoint {
+    method = GET,
+    path = "/testing/demo_path_impossible/{different_param_name}",
+}]
+async fn demo_handler_path_param_impossible(
+    _rqctx: Arc<RequestContext>,
+    path_params: Path<DemoPathImpossible>,
+) -> Result<Response<Body>, HttpError> {
+    http_echo(&path_params.into_inner())
+}
+
+fn http_echo<T: Serialize>(t: &T) -> Result<Response<Body>, HttpError> {
     Ok(Response::builder()
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
         .status(StatusCode::OK)
-        .body(serde_json::to_string(&combined).unwrap().into())?)
+        .body(serde_json::to_string(t).unwrap().into())?)
 }

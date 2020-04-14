@@ -128,15 +128,15 @@ impl ApiDescription {
 
             return match (p.is_empty(), v.is_empty()) {
                 (false, true) => Err(format!(
-                    "{} {}",
+                    "{} ({})",
                     "path parameters are not consumed", pp,
                 )),
                 (true, false) => Err(format!(
-                    "{} {}",
+                    "{} ({})",
                     "specified parameters do not appear in the path", vv,
                 )),
                 _ => Err(format!(
-                    "{} {} and {} {}",
+                    "{} ({}) and {} ({})",
                     "path parameters are not consumed",
                     pp,
                     "specified parameters do not appear in the path",
@@ -325,7 +325,7 @@ mod test {
         ));
         assert_eq!(
             ret,
-            Err("specified parameters do not appear in the path a,b"
+            Err("specified parameters do not appear in the path (a,b)"
                 .to_string())
         )
     }
@@ -340,7 +340,7 @@ mod test {
         ));
         assert_eq!(
             ret,
-            Err("path parameters are not consumed aa,bb".to_string())
+            Err("path parameters are not consumed (aa,bb)".to_string())
         );
     }
 
@@ -354,8 +354,8 @@ mod test {
         ));
         assert_eq!(
             ret,
-            Err("path parameters are not consumed c,d and specified \
-                 parameters do not appear in the path a,b"
+            Err("path parameters are not consumed (c,d) and specified \
+                 parameters do not appear in the path (a,b)"
                 .to_string())
         );
     }
