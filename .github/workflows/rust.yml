@@ -24,6 +24,6 @@ jobs:
         default: false
         components: rustfmt
     - name: Check style
-      run: cargo +nightly fmt --check
+      run: cargo +nightly fmt -- --check
     - name: Run tests
       run: cargo test --verbose
