@@ -13,6 +13,9 @@ This repo houses a prototype for the Oxide Rack API.  See:
 
 == Status
 
+image::https://github.com/oxidecomputer/oxide-api-prototype/workflows/Rust/badge.svg[Automated
+testing status]
+
 The code here is still rough, but the following are implemented:
 
 * actual API: basic CRUD support for projects and instances
