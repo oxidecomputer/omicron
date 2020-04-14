@@ -5,6 +5,7 @@
 use dropshot::test_util::TestContext;
 use oxide_api_prototype::ApiServerConfig;
 use std::path::Path;
+use uuid::Uuid;
 
 /**
  * Set up a `TestContext` for running tests against the API server.
@@ -24,7 +25,9 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let config = ApiServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let api = oxide_api_prototype::dropshot_api();
-    let apictx = oxide_api_prototype::ApiContext::new();
+    let rack_id_str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+    let rack_id = Uuid::parse_str(rack_id_str).unwrap();
+    let apictx = oxide_api_prototype::ApiContext::new(&rack_id);
     oxide_api_prototype::populate_initial_data(&apictx).await;
     TestContext::new(test_name, api, apictx, &config.dropshot, &config.log)
         .await

@@ -5,15 +5,18 @@
 use http::Method;
 use serde::Deserialize;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
+use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
-use crate::api_model::{ApiProject, ApiProjectView};
+use crate::api_model::ApiProjectView;
+use crate::api_model::ApiRackView;
 use crate::rack::to_view_list;
 use crate::rack::PaginationParams;
 use crate::ApiContext;
@@ -42,6 +45,8 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_post)?;
     api.register(api_project_instances_get_instance)?;
     api.register(api_project_instances_delete_instance)?;
+    api.register(api_hardware_racks_get)?;
+    api.register(api_hardware_racks_get_rack)?;
 
     Ok(())
 }
@@ -138,7 +143,6 @@ async fn api_projects_get_project(
     let project_id =
         ApiName::from_param(path.project_id.clone(), "project_id")?;
     let project: Arc<ApiProject> = rack.project_lookup(&project_id).await?;
-
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -299,4 +303,51 @@ async fn api_project_instances_delete_instance(
         ApiName::from_param(path.instance_id.clone(), "instance_id")?;
     rack.project_delete_instance(&project_id, &instance_id).await?;
     Ok(HttpResponseDeleted())
+}
+
+/*
+ * Racks
+ */
+
+/**
+ * List racks in the system.
+ */
+#[endpoint {
+     method = GET,
+     path = "/hardware/racks",
+ }]
+async fn api_hardware_racks_get(
+    rqctx: Arc<RequestContext>,
+    params_raw: Query<PaginationParams<Uuid>>,
+) -> Result<HttpResponseOkObjectList<ApiRackView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let rack = &apictx.rack;
+    let params = params_raw.into_inner();
+    let rack_stream = rack.racks_list(&params).await?;
+    let view_list = to_view_list(rack_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
+
+#[derive(Deserialize, ExtractedParameter)]
+struct RackPathParam {
+    /** The rack's unique ID. */
+    rack_id: Uuid,
+}
+
+/**
+ * Fetch information about a particular rack.
+ */
+#[endpoint {
+    method = GET,
+    path = "/hardware/racks/{rack_id}",
+}]
+async fn api_hardware_racks_get_rack(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<RackPathParam>,
+) -> Result<HttpResponseOkObject<ApiRackView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let rack = &apictx.rack;
+    let path = path_params.into_inner();
+    let rack_info = rack.rack_lookup(&path.rack_id).await?;
+    Ok(HttpResponseOkObject(rack_info.to_view()))
 }

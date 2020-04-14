@@ -12,6 +12,7 @@ mod api_http_entrypoints;
 pub mod api_model;
 mod datastore;
 mod rack;
+mod server_controller;
 
 pub use api_config::ApiServerConfig;
 use api_model::ApiIdentityMetadataCreateParams;
@@ -20,6 +21,7 @@ use api_model::ApiProjectCreateParams;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
 use rack::OxideRack;
+use server_controller::ServerController;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -55,7 +57,7 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
         .map_err(|message| format!("initializing logger: {}", message))?;
     info!(log, "starting server");
 
-    let apictx = ApiContext::new();
+    let apictx = ApiContext::new(&Uuid::new_v4());
 
     populate_initial_data(&apictx).await;
 
@@ -82,9 +84,9 @@ pub struct ApiContext {
 }
 
 impl ApiContext {
-    pub fn new() -> Arc<ApiContext> {
+    pub fn new(rack_id: &Uuid) -> Arc<ApiContext> {
         Arc::new(ApiContext {
-            rack: Arc::new(OxideRack::new()),
+            rack: Arc::new(OxideRack::new_with_id(rack_id)),
         })
     }
 
@@ -131,5 +133,16 @@ pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
         )
         .await
         .unwrap();
+    }
+
+    let demo_controllers = vec![
+        "b6d65341-167c-41df-9b5c-41cded99c229",
+        "2335aceb-969e-4abc-bbba-b0d3b44bc82e",
+        "dae9faf7-5b13-4334-85ed-6a53d0835414",
+    ];
+    for uuidstr in demo_controllers {
+        let uuid = Uuid::parse_str(uuidstr).unwrap();
+        let sc = ServerController::new_simulated_with_id(&uuid);
+        rack.add_server_controller(sc).await;
     }
 }

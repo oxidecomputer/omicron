@@ -65,6 +65,7 @@ pub trait ApiObject {
 pub enum ApiResourceType {
     Project,
     Instance,
+    Rack,
 }
 
 impl Display for ApiResourceType {
@@ -72,6 +73,7 @@ impl Display for ApiResourceType {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
             ApiResourceType::Instance => "instance",
+            ApiResourceType::Rack => "rack",
         })
     }
 }
@@ -427,6 +429,35 @@ pub struct ApiInstanceCreateParams {
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
+}
+
+/*
+ * RACKS
+ */
+
+/**
+ * Concrete type for a Rack in the API.  Note that this type is not really used
+ * for anything.  See `OxideRack` for details.
+ */
+pub struct ApiRack {
+    pub id: Uuid,
+}
+
+impl ApiObject for ApiRack {
+    type View = ApiRackView;
+    fn to_view(&self) -> ApiRackView {
+        ApiRackView {
+            id: self.id.clone(),
+        }
+    }
+}
+
+/**
+ * Represents a Rack in the API.  See RFD for field details.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiRackView {
+    pub id: Uuid,
 }
 
 #[cfg(test)]

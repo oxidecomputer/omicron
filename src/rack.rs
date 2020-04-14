@@ -10,12 +10,17 @@ use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
+use crate::api_model::ApiRack;
+use crate::api_model::ApiResourceType;
 use crate::datastore::RackDataStore;
+use crate::server_controller::ServerController;
 use dropshot::ExtractedParameter;
 use futures::future::ready;
+use futures::lock::Mutex;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -68,10 +73,29 @@ pub async fn to_view_list<T: ApiObject>(
  * Right now, this is mostly a wrapper around the data store because this server
  * doesn't do much beyond CRUD operations.  However, higher-level functionality
  * could go here, including caching of objects.
+ *
+ * TODO It may be worthwhile to separate the Control Plane from the Rack early.
+ * Right now, this conflates both.
  */
 pub struct OxideRack {
+    /** uuid for this rack (TODO should also be in persistent storage) */
+    id: Uuid,
+
+    /** cached ApiRack structure representing this rack. */
+    api_rack: Arc<ApiRack>,
+
     /** persistent storage for resources in the rack */
     datastore: RackDataStore,
+
+    /**
+     * List of controllers in this server.
+     * TODO This ought to have some representation in the data store as well so
+     * that we don't simply forget about servers that aren't currently up.
+     * We'll need to think about the interface between this program and the
+     * servers and how we discover them, both when they initially show up and
+     * when we come up.
+     */
+    server_controllers: Mutex<BTreeMap<Uuid, ServerController>>,
 }
 
 /*
@@ -83,11 +107,26 @@ pub struct OxideRack {
  * TODO audit logging ought to be part of this structure and its functions
  */
 impl OxideRack {
-    pub fn new() -> OxideRack {
+    pub fn new_with_id(id: &Uuid) -> OxideRack {
         OxideRack {
+            id: id.clone(),
+            api_rack: Arc::new(ApiRack {
+                id: id.clone(),
+            }),
             datastore: RackDataStore::new(),
+            server_controllers: Mutex::new(BTreeMap::new()),
         }
     }
+
+    pub async fn add_server_controller(&self, sc: ServerController) {
+        let mut scs = self.server_controllers.lock().await;
+        assert!(!scs.contains_key(&sc.id));
+        scs.insert(sc.id.clone(), sc);
+    }
+
+    /*
+     * Projects
+     */
 
     pub async fn project_create(
         &self,
@@ -168,5 +207,37 @@ impl OxideRack {
         self.datastore
             .project_delete_instance(project_name, instance_name)
             .await
+    }
+
+    /*
+     * Racks.  We simulate just one for now.
+     */
+
+    fn as_rack(&self) -> Arc<ApiRack> {
+        Arc::clone(&self.api_rack)
+    }
+
+    pub async fn racks_list(
+        &self,
+        pagparams: &PaginationParams<Uuid>,
+    ) -> ListResult<ApiRack> {
+        if let Some(marker) = pagparams.marker {
+            if marker > self.id {
+                return Ok(futures::stream::empty().boxed());
+            }
+        }
+
+        Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
+    }
+
+    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
+        if *rack_id == self.id {
+            Ok(self.as_rack())
+        } else {
+            Err(ApiError::ObjectNotFound {
+                type_name: ApiResourceType::Rack,
+                object_name: rack_id.to_string(),
+            })
+        }
     }
 }
