@@ -2,9 +2,14 @@
  * Describes the endpoints and handler functions in your API
  */
 
-use crate::handler::{HttpHandlerFunc, HttpResponseWrap};
+use crate::handler::HttpHandlerFunc;
+use crate::handler::HttpResponseWrap;
+use crate::router::path_to_segments;
 use crate::router::HttpRouter;
-use crate::{Extractor, HttpRouteHandler, RouteHandler};
+use crate::router::PathSegment;
+use crate::Extractor;
+use crate::HttpRouteHandler;
+use crate::RouteHandler;
 
 use http::Method;
 use std::collections::HashSet;
@@ -94,57 +99,48 @@ impl ApiDescription {
 
         // Gather up the path parameters and the path variable components, and
         // make sure they're identical.
-        let path = e
-            .path
-            .split("/")
-            .filter_map(|segment| {
-                if segment.starts_with("{") && segment.ends_with("}") {
-                    Some(&segment[1..segment.len() - 1])
-                } else {
-                    None
-                }
+        let path = path_to_segments(&e.path)
+            .iter()
+            .filter_map(|segment| match PathSegment::from(segment) {
+                PathSegment::Varname(v) => Some(v),
+                _ => None,
             })
             .collect::<HashSet<_>>();
         let vars = e
             .parameters
             .iter()
             .filter_map(|p| match p.inn {
-                ApiEndpointParameterLocation::Path => Some(p.name.as_str()),
+                ApiEndpointParameterLocation::Path => Some(p.name.clone()),
                 _ => None,
             })
             .collect::<HashSet<_>>();
 
         if path != vars {
-            let mut p = path
-                .difference(&vars)
-                .into_iter()
-                .map(|s| *s)
-                .collect::<Vec<_>>();
-            let mut v = vars
-                .difference(&path)
-                .into_iter()
-                .map(|s| *s)
-                .collect::<Vec<_>>();
+            let mut p = path.difference(&vars).into_iter().collect::<Vec<_>>();
+            let mut v = vars.difference(&path).into_iter().collect::<Vec<_>>();
             p.sort();
             v.sort();
+
+            let pp =
+                p.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(",");
+            let vv =
+                v.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(",");
 
             return match (p.is_empty(), v.is_empty()) {
                 (false, true) => Err(format!(
                     "{} {}",
-                    "path parameters are not consumed",
-                    p.join(","),
+                    "path parameters are not consumed", pp,
                 )),
                 (true, false) => Err(format!(
                     "{} {}",
-                    "specified parameters do not appear in the path",
-                    v.join(",")
+                    "specified parameters do not appear in the path", vv,
                 )),
                 _ => Err(format!(
                     "{} {} and {} {}",
                     "path parameters are not consumed",
-                    p.join(","),
+                    pp,
                     "specified parameters do not appear in the path",
-                    v.join(",")
+                    vv,
                 )),
             };
         }

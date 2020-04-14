@@ -174,7 +174,7 @@ enum HttpRouterEdges {
  * latter indicated by being wrapped in braces.
  */
 #[derive(Debug)]
-enum PathSegment {
+pub enum PathSegment {
     /** a path segment for a literal string */
     Literal(String),
     /** a path segment for a variable */
@@ -188,7 +188,7 @@ impl PathSegment {
      * corresponding `PathSegment`, which basically means determining whether
      * it's a variable or a literal.
      */
-    fn from(segment: &String) -> PathSegment {
+    pub fn from(segment: &str) -> PathSegment {
         if segment.starts_with("{") || segment.ends_with("}") {
             assert!(
                 segment.starts_with("{"),
@@ -203,9 +203,7 @@ impl PathSegment {
                 "HTTP URI path segment variable name cannot be empty"
             );
 
-            PathSegment::Varname(
-                (&segment.as_str()[1..segment.len() - 1]).into(),
-            )
+            PathSegment::Varname((&segment[1..segment.len() - 1]).to_string())
         } else {
             PathSegment::Literal(segment.to_string())
         }
@@ -244,52 +242,6 @@ impl HttpRouter {
     }
 
     /**
-     * Helper function for taking a Uri path and producing a `Vec<String>` of
-     * URL-encoded strings, each representing one segment of the path.
-     */
-    fn path_to_segments(path: &str) -> Vec<String> {
-        /*
-         * We're given the "path" portion of a URI and we want to construct an
-         * array of the segments of the path.   Relevant references:
-         *
-         *    RFC 7230 HTTP/1.1 Syntax and Routing
-         *             (particularly: 2.7.3 on normalization)
-         *    RFC 3986 Uniform Resource Identifier (URI): Generic Syntax
-         *             (particularly: 6.2.2 on comparison)
-         *
-         * TODO-hardening We should revisit this.  We want to consider a few
-         * things:
-         * - whether our input is already (still?) percent-encoded or not
-         * - whether our returned representation is percent-encoded or not
-         * - what it means (and what we should do) if the path does not begin
-         *   with a leading "/"
-         * - whether we want to collapse consecutive "/" characters
-         *   (presumably we do, both at the start of the path and later)
-         * - how to handle paths that end in "/" (in some cases, ought this send
-         *   a 300-level redirect?)
-         * - are there other normalization considerations? e.g., ".", ".."
-         *
-         * It seems obvious to reach for the Rust "url" crate.  That crate
-         * parses complete URLs, which include a scheme and authority section
-         * that does not apply here.  We could certainly make one up (e.g.,
-         * "http://127.0.0.1") and construct a URL whose path matches the path
-         * we were given.  However, while it seems natural that our internal
-         * representation would not be percent-encoded, the "url" crate
-         * percent-encodes any path that it's given.  Further, we probably want
-         * to treat consecutive "/" characters as equivalent to a single "/",
-         * but that crate treats them separately (which is not unreasonable,
-         * since it's not clear that the above RFCs say anything about whether
-         * empty segments should be ignored).  The net result is that that crate
-         * doesn't buy us much here, but it does create more work, so we'll just
-         * split it ourselves.
-         */
-        path.split("/")
-            .filter(|segment| segment.len() > 0)
-            .map(String::from)
-            .collect()
-    }
-
-    /**
      * Configure a route for HTTP requests based on the HTTP `method` and
      * URI `path`.  See the `HttpRouter` docs for information about how `path`
      * is processed.  Requests matching `path` will be resolved to `handler`.
@@ -298,12 +250,12 @@ impl HttpRouter {
         let method = endpoint.method.clone();
         let path = endpoint.path.clone();
 
-        let all_segments = HttpRouter::path_to_segments(path.as_str());
+        let all_segments = path_to_segments(path.as_str());
         let mut varnames: BTreeSet<String> = BTreeSet::new();
 
         let mut node: &mut Box<HttpRouterNode> = &mut self.root;
         for raw_segment in all_segments {
-            let segment = PathSegment::from(&raw_segment);
+            let segment = PathSegment::from(raw_segment);
 
             node = match segment {
                 PathSegment::Literal(lit) => {
@@ -417,7 +369,7 @@ impl HttpRouter {
         method: &'b Method,
         path: &'b str,
     ) -> Result<RouterLookupResult<'a>, HttpError> {
-        let all_segments = HttpRouter::path_to_segments(path);
+        let all_segments = path_to_segments(path);
         let mut node: &Box<HttpRouterNode> = &self.root;
         let mut variables: BTreeMap<String, String> = BTreeMap::new();
 
@@ -572,6 +524,48 @@ impl<'a> Iterator for HttpRouterIter<'a> {
             }
         }
     }
+}
+
+/**
+ * Helper function for taking a Uri path and producing a `Vec<String>` of
+ * URL-encoded strings, each representing one segment of the path.
+ */
+pub fn path_to_segments(path: &str) -> Vec<&str> {
+    /*
+     * We're given the "path" portion of a URI and we want to construct an
+     * array of the segments of the path.   Relevant references:
+     *
+     *    RFC 7230 HTTP/1.1 Syntax and Routing
+     *             (particularly: 2.7.3 on normalization)
+     *    RFC 3986 Uniform Resource Identifier (URI): Generic Syntax
+     *             (particularly: 6.2.2 on comparison)
+     *
+     * TODO-hardening We should revisit this.  We want to consider a few things:
+     * - whether our input is already (still?) percent-encoded or not
+     * - whether our returned representation is percent-encoded or not
+     * - what it means (and what we should do) if the path does not begin with
+     *   a leading "/"
+     * - whether we want to collapse consecutive "/" characters (presumably we
+     *   do, both at the start of the path and later)
+     * - how to handle paths that end in "/" (in some cases, ought this send a
+     *   300-level redirect?)
+     * - are there other normalization considerations? e.g., ".", ".."
+     *
+     * It seems obvious to reach for the Rust "url" crate. That crate parses
+     * complete URLs, which include a scheme and authority section that does
+     * not apply here. We could certainly make one up (e.g.,
+     * "http://127.0.0.1") and construct a URL whose path matches the path we
+     * were given. However, while it seems natural that our internal
+     * representation would not be percent-encoded, the "url" crate
+     * percent-encodes any path that it's given. Further, we probably want to
+     * treat consecutive "/" characters as equivalent to a single "/", but that
+     * crate treats them separately (which is not unreasonable, since it's not
+     * clear that the above RFCs say anything about whether empty segments
+     * should be ignored). The net result is that that crate doesn't buy us
+     * much here, but it does create more work, so we'll just split it
+     * ourselves.
+     */
+    path.split("/").filter(|segment| !segment.is_empty()).collect::<Vec<_>>()
 }
 
 #[cfg(test)]
