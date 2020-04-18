@@ -1,5 +1,5 @@
 /*!
- * HTTP-agnostic interface to an Oxide Rack
+ * HTTP-agnostic interface to an Oxide system
  */
 
 use crate::api_error::ApiError;
@@ -12,7 +12,7 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
-use crate::datastore::RackDataStore;
+use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
 use dropshot::ExtractedParameter;
 use futures::future::ready;
@@ -68,24 +68,21 @@ pub async fn to_view_list<T: ApiObject>(
 }
 
 /**
- * Represents the state of the Oxide rack that we're managing.
+ * Represents the state of the Oxide system that we're managing.
  *
  * Right now, this is mostly a wrapper around the data store because this server
  * doesn't do much beyond CRUD operations.  However, higher-level functionality
  * could go here, including caching of objects.
- *
- * TODO It may be worthwhile to separate the Control Plane from the Rack early.
- * Right now, this conflates both.
  */
-pub struct OxideRack {
+pub struct OxideController {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
-    /** cached ApiRack structure representing this rack. */
+    /** cached ApiRack structure representing the single rack. */
     api_rack: Arc<ApiRack>,
 
-    /** persistent storage for resources in the rack */
-    datastore: RackDataStore,
+    /** persistent storage for resources in the control plane */
+    datastore: ControlDataStore,
 
     /**
      * List of controllers in this server.
@@ -106,14 +103,14 @@ pub struct OxideRack {
  * TODO update and delete need to accommodate both with-etag and don't-care
  * TODO audit logging ought to be part of this structure and its functions
  */
-impl OxideRack {
-    pub fn new_with_id(id: &Uuid) -> OxideRack {
-        OxideRack {
+impl OxideController {
+    pub fn new_with_id(id: &Uuid) -> OxideController {
+        OxideController {
             id: id.clone(),
             api_rack: Arc::new(ApiRack {
                 id: id.clone(),
             }),
-            datastore: RackDataStore::new(),
+            datastore: ControlDataStore::new(),
             server_controllers: Mutex::new(BTreeMap::new()),
         }
     }

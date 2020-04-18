@@ -17,8 +17,8 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
 use crate::api_model::ApiRackView;
-use crate::rack::to_view_list;
-use crate::rack::PaginationParams;
+use crate::controller::to_view_list;
+use crate::controller::PaginationParams;
 use crate::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -96,9 +96,9 @@ async fn api_projects_get(
     query_params: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOkObjectList<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let query = query_params.into_inner();
-    let project_stream = rack.projects_list(&query).await?;
+    let project_stream = controller.projects_list(&query).await?;
     let view_list = to_view_list(project_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -115,8 +115,8 @@ async fn api_projects_post(
     new_project: Json<ApiProjectCreateParams>,
 ) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
-    let project = rack.project_create(&new_project.into_inner()).await?;
+    let controller = &apictx.controller;
+    let project = controller.project_create(&new_project.into_inner()).await?;
     Ok(HttpResponseCreated(project.to_view()))
 }
 
@@ -138,10 +138,10 @@ async fn api_projects_get_project(
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project: Arc<ApiProject> = rack.project_lookup(&project_name).await?;
+    let project: Arc<ApiProject> = controller.project_lookup(&project_name).await?;
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -157,10 +157,10 @@ async fn api_projects_delete_project(
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let params = path_params.into_inner();
     let project_name = &params.project_name;
-    rack.project_delete(&project_name).await?;
+    controller.project_delete(&project_name).await?;
     Ok(HttpResponseDeleted())
 }
 
@@ -183,10 +183,10 @@ async fn api_projects_put_project(
     updated_project: Json<ApiProjectUpdateParams>,
 ) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let newproject = rack
+    let newproject = controller
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
@@ -209,12 +209,12 @@ async fn api_project_instances_get(
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOkObjectList<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_stream =
-        rack.project_list_instances(&project_name, &query).await?;
+        controller.project_list_instances(&project_name, &query).await?;
     let view_list = to_view_list(instance_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -240,11 +240,11 @@ async fn api_project_instances_post(
     new_instance: Json<ApiInstanceCreateParams>,
 ) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let new_instance_params = &new_instance.into_inner();
-    let instance = rack
+    let instance = controller
         .project_create_instance(&project_name, &new_instance_params)
         .await?;
     Ok(HttpResponseCreated(instance.to_view()))
@@ -268,12 +268,12 @@ async fn api_project_instances_get_instance(
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance: Arc<ApiInstance> =
-        rack.project_lookup_instance(&project_name, &instance_name).await?;
+        controller.project_lookup_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseOkObject(instance.to_view()))
 }
 
@@ -289,11 +289,11 @@ async fn api_project_instances_delete_instance(
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    rack.project_delete_instance(&project_name, &instance_name).await?;
+    controller.project_delete_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseDeleted())
 }
 
@@ -313,9 +313,9 @@ async fn api_hardware_racks_get(
     params_raw: Query<PaginationParams<Uuid>>,
 ) -> Result<HttpResponseOkObjectList<ApiRackView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let params = params_raw.into_inner();
-    let rack_stream = rack.racks_list(&params).await?;
+    let rack_stream = controller.racks_list(&params).await?;
     let view_list = to_view_list(rack_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
@@ -338,8 +338,8 @@ async fn api_hardware_racks_get_rack(
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOkObject<ApiRackView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let path = path_params.into_inner();
-    let rack_info = rack.rack_lookup(&path.rack_id).await?;
+    let rack_info = controller.rack_lookup(&path.rack_id).await?;
     Ok(HttpResponseOkObject(rack_info.to_view()))
 }

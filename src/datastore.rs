@@ -1,5 +1,5 @@
 /*!
- * Data storage interfaces for resources in the Oxide Rack.  Currently, this
+ * Data storage interfaces for resources in the Oxide system.  Currently, this
  * just stores data in-memory, but the intent is to move this towards something
  * more like a distributed database.
  */
@@ -15,12 +15,12 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
-use crate::rack::CreateResult;
-use crate::rack::DeleteResult;
-use crate::rack::ListResult;
-use crate::rack::LookupResult;
-use crate::rack::PaginationParams;
-use crate::rack::UpdateResult;
+use crate::controller::CreateResult;
+use crate::controller::DeleteResult;
+use crate::controller::ListResult;
+use crate::controller::LookupResult;
+use crate::controller::PaginationParams;
+use crate::controller::UpdateResult;
 use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
@@ -28,17 +28,17 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub struct RackDataStore {
-    /** projects in the rack, indexed by name */
+pub struct ControlDataStore {
+    /** projects in the system, indexed by name */
     projects_by_name: Mutex<BTreeMap<ApiName, Arc<ApiProject>>>,
     /** project instances, indexed by project name, then by instance name */
     instances_by_project_name:
         Mutex<BTreeMap<ApiName, BTreeMap<ApiName, Arc<ApiInstance>>>>,
 }
 
-impl RackDataStore {
-    pub fn new() -> RackDataStore {
-        RackDataStore {
+impl ControlDataStore {
+    pub fn new() -> ControlDataStore {
+        ControlDataStore {
             projects_by_name: Mutex::new(BTreeMap::new()),
             instances_by_project_name: Mutex::new(BTreeMap::new()),
         }

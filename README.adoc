@@ -135,12 +135,11 @@ The implementation is divided into several subsystems:
 == TODO
 
 * Working on instances
-** Update?
+** Support for update?
 ** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
 ** Other thoughts:
 * Repo cleanup
-* CI/CD?
 ** incorporate openapi directly into this subcrate
 ** rename "lib" to something else (e.g., "local_deps")
 ** Dropshot itself should be documented

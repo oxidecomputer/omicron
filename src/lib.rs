@@ -11,7 +11,7 @@ mod api_error;
 mod api_http_entrypoints;
 pub mod api_model;
 mod datastore;
-mod rack;
+mod controller;
 mod server_controller;
 
 pub use api_config::ApiServerConfig;
@@ -20,7 +20,7 @@ use api_model::ApiName;
 use api_model::ApiProjectCreateParams;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
-use rack::OxideRack;
+use controller::OxideController;
 use server_controller::ServerController;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -80,13 +80,13 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
  * API request handler functions.
  */
 pub struct ApiContext {
-    pub rack: Arc<OxideRack>,
+    pub controller: Arc<OxideController>,
 }
 
 impl ApiContext {
     pub fn new(rack_id: &Uuid) -> Arc<ApiContext> {
         Arc::new(ApiContext {
-            rack: Arc::new(OxideRack::new_with_id(rack_id)),
+            controller: Arc::new(OxideController::new_with_id(rack_id)),
         })
     }
 
@@ -112,7 +112,7 @@ impl ApiContext {
  * demo initialization script or the like.
  */
 pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
-    let rack = &apictx.rack;
+    let controller = &apictx.controller;
     let demo_projects: Vec<(&str, &str)> = vec![
         ("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1"),
         ("4f57c123-3bda-4fae-94a2-46a9632d40b6", "simproject2"),
@@ -121,7 +121,7 @@ pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
 
     for (new_uuid, new_name) in demo_projects {
         let name_validated = ApiName::try_from(new_name).unwrap();
-        rack.project_create_with_id(
+        controller.project_create_with_id(
             Uuid::parse_str(new_uuid).unwrap(),
             &ApiProjectCreateParams {
                 identity: ApiIdentityMetadataCreateParams {
@@ -143,6 +143,6 @@ pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
     for uuidstr in demo_controllers {
         let uuid = Uuid::parse_str(uuidstr).unwrap();
         let sc = ServerController::new_simulated_with_id(&uuid);
-        rack.add_server_controller(sc).await;
+        controller.add_server_controller(sc).await;
     }
 }
