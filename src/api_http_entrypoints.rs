@@ -141,7 +141,8 @@ async fn api_projects_get_project(
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project: Arc<ApiProject> = controller.project_lookup(&project_name).await?;
+    let project: Arc<ApiProject> =
+        controller.project_lookup(&project_name).await?;
     Ok(HttpResponseOkObject(project.to_view()))
 }
 
@@ -272,8 +273,9 @@ async fn api_project_instances_get_instance(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let instance: Arc<ApiInstance> =
-        controller.project_lookup_instance(&project_name, &instance_name).await?;
+    let instance: Arc<ApiInstance> = controller
+        .project_lookup_instance(&project_name, &instance_name)
+        .await?;
     Ok(HttpResponseOkObject(instance.to_view()))
 }
 
