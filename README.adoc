@@ -135,13 +135,17 @@ The implementation is divided into several subsystems:
 == TODO
 
 * Working on instances
+** building a real simulator in server_controller.rs -- see the XXX there.
+** note: I think I'm updating the internal instance state, but we need a way to
+   feed that back to the Controller.
 ** Support for update?
 ** Build infrastructure for supporting async operations (boot, halt, reboot),
     checking on status, etc.
 ** Other thoughts:
 * Repo cleanup
-** incorporate openapi directly into this subcrate
+** should we consider switching to sync?
 ** rename "lib" to something else (e.g., "local_deps")
+** incorporate openapi directly into this subcrate
 ** Dropshot itself should be documented
 ** separate out api_model_data.rs?
 * Flesh out more endpoints and simulator

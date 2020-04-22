@@ -293,6 +293,23 @@ pub enum ApiInstanceState {
     Stopped,
     Repairing,
     Failed,
+    Destroyed,
+}
+
+impl Display for ApiInstanceState {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        let label = match self {
+            ApiInstanceState::Starting => "starting",
+            ApiInstanceState::Running => "running",
+            ApiInstanceState::Stopping => "stopping",
+            ApiInstanceState::Stopped => "stopped",
+            ApiInstanceState::Repairing => "repairing",
+            ApiInstanceState::Failed => "failed",
+            ApiInstanceState::Destroyed => "destroyed",
+        };
+
+        write!(f, "{}", label)
+    }
 }
 
 /** Represents the number of CPUs in an instance. */
@@ -344,6 +361,7 @@ impl ApiByteCount {
 /**
  * Represents an instance (VM) in the API
  */
+#[derive(Debug)]
 pub struct ApiInstance {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,

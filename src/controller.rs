@@ -20,6 +20,7 @@ use futures::lock::Mutex;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use serde::Deserialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -78,6 +79,9 @@ pub struct OxideController {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
+    /** general server log */
+    log: Logger,
+
     /** cached ApiRack structure representing the single rack. */
     api_rack: Arc<ApiRack>,
 
@@ -92,7 +96,7 @@ pub struct OxideController {
      * servers and how we discover them, both when they initially show up and
      * when we come up.
      */
-    server_controllers: Mutex<BTreeMap<Uuid, ServerController>>,
+    server_controllers: Mutex<BTreeMap<Uuid, Arc<ServerController>>>,
 }
 
 /*
@@ -104,9 +108,10 @@ pub struct OxideController {
  * TODO audit logging ought to be part of this structure and its functions
  */
 impl OxideController {
-    pub fn new_with_id(id: &Uuid) -> OxideController {
+    pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
         OxideController {
             id: id.clone(),
+            log: log,
             api_rack: Arc::new(ApiRack {
                 id: id.clone(),
             }),
@@ -118,7 +123,9 @@ impl OxideController {
     pub async fn add_server_controller(&self, sc: ServerController) {
         let mut scs = self.server_controllers.lock().await;
         assert!(!scs.contains_key(&sc.id));
-        scs.insert(sc.id.clone(), sc);
+        info!(self.log, "registered server controller";
+            "server_uuid" => sc.id.to_string());
+        scs.insert(sc.id.clone(), Arc::new(sc));
     }
 
     /*
@@ -170,6 +177,18 @@ impl OxideController {
      * Instances
      */
 
+    async fn server_allocate_instance<'se, 'params>(
+        &'se self,
+        servers: &'se BTreeMap<Uuid, Arc<ServerController>>,
+        _project: Arc<ApiProject>,
+        _params: &'params ApiInstanceCreateParams,
+    ) -> Result<&'se Arc<ServerController>, ApiError> {
+        /* TODO replace this with a real allocation policy. */
+        servers.values().nth(0).ok_or_else(|| ApiError::ResourceNotAvailable {
+            message: String::from("no servers available for new Instance"),
+        })
+    }
+
     pub async fn project_list_instances(
         &self,
         project_name: &ApiName,
@@ -183,7 +202,16 @@ impl OxideController {
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
-        self.datastore.project_create_instance(project_name, params).await
+        let project = self.project_lookup(project_name).await?;
+        let servers = self.server_controllers.lock().await;
+        let sc =
+            self.server_allocate_instance(&servers, project, params).await?;
+        let instance = self
+            .datastore
+            .project_create_instance(project_name, params)
+            .await?;
+        sc.instance_ensure(Arc::clone(&instance)).await?;
+        Ok(instance)
     }
 
     pub async fn project_lookup_instance(

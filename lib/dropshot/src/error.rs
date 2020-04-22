@@ -159,7 +159,16 @@ impl HttpError {
         HttpError {
             status_code: code,
             external_message: code.canonical_reason().unwrap().to_string(),
-            internal_message: message_internal.clone(),
+            internal_message: message_internal,
+        }
+    }
+
+    pub fn for_unavail(message_internal: String) -> Self {
+        let code = http::StatusCode::SERVICE_UNAVAILABLE;
+        HttpError {
+            status_code: code,
+            external_message: code.canonical_reason().unwrap().to_string(),
+            internal_message: message_internal,
         }
     }
 

@@ -53,11 +53,12 @@ pub fn run_openapi() {
 pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let log = config
         .log
-        .to_logger("oxide-api")
+        .to_logger("oxide-controller")
         .map_err(|message| format!("initializing logger: {}", message))?;
     info!(log, "starting server");
 
-    let apictx = ApiContext::new(&Uuid::new_v4());
+    let dropshot_log = log.new(o!("component" => "dropshot"));
+    let apictx = ApiContext::new(&Uuid::new_v4(), log);
 
     populate_initial_data(&apictx).await;
 
@@ -65,7 +66,7 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
         &config.dropshot,
         dropshot_api(),
         apictx,
-        &log,
+        &dropshot_log,
     )
     .map_err(|error| format!("initializing server: {}", error))?;
 
@@ -81,12 +82,17 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
  */
 pub struct ApiContext {
     pub controller: Arc<OxideController>,
+    pub log: slog::Logger,
 }
 
 impl ApiContext {
-    pub fn new(rack_id: &Uuid) -> Arc<ApiContext> {
+    pub fn new(rack_id: &Uuid, log: slog::Logger) -> Arc<ApiContext> {
         Arc::new(ApiContext {
-            controller: Arc::new(OxideController::new_with_id(rack_id)),
+            controller: Arc::new(OxideController::new_with_id(
+                rack_id,
+                log.new(o!("component" => "controller")),
+            )),
+            log: log,
         })
     }
 
@@ -143,7 +149,10 @@ pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
     ];
     for uuidstr in demo_controllers {
         let uuid = Uuid::parse_str(uuidstr).unwrap();
-        let sc = ServerController::new_simulated_with_id(&uuid);
+        let sc = ServerController::new_simulated_with_id(
+            &uuid,
+            apictx.log.new(o!("server_controller" => uuid.to_string())),
+        );
         controller.add_server_controller(sc).await;
     }
 }

@@ -23,6 +23,9 @@ pub enum ApiError {
         label: String,
         message: String,
     },
+    ResourceNotAvailable {
+        message: String,
+    },
 }
 
 impl From<ApiError> for HttpError {
@@ -55,6 +58,10 @@ impl From<ApiError> for HttpError {
                     format!("unsupported value for \"{}\": {}", label, message);
                 HttpError::for_bad_request(message)
             }
+
+            ApiError::ResourceNotAvailable {
+                message,
+            } => HttpError::for_unavail(message),
         }
     }
 }
