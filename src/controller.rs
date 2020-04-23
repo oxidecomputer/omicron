@@ -312,12 +312,11 @@ impl ControllerScApi {
     ) {
         let datastore = &self.controller.datastore;
         let log = &self.controller.log;
-        let result = datastore.instance_update_internal(
-            id,
-            &ApiInstanceUpdateInternal {
+        let result = datastore
+            .instance_update_internal(id, &ApiInstanceUpdateInternal {
                 state: new_instance_state.clone(),
-            },
-        ).await;
+            })
+            .await;
 
         if let Err(error) = result {
             warn!(log, "failed to update instance from server controller";

@@ -358,8 +358,10 @@ impl ControlDataStore {
             (instance_name.clone(), instance)
         };
 
-        let instances = data.instances_by_project_id.get_mut(
-            &new_instance.project_id).unwrap();
+        let instances = data
+            .instances_by_project_id
+            .get_mut(&new_instance.project_id)
+            .unwrap();
         instances
             .insert(instance_name.clone(), Arc::clone(&new_instance))
             .unwrap();

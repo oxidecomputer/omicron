@@ -454,7 +454,7 @@ pub struct ApiInstanceUpdateParams {
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceUpdateInternal {
-    pub state: ApiInstanceState
+    pub state: ApiInstanceState,
 }
 
 /*

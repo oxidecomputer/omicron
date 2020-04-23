@@ -242,9 +242,10 @@ pub struct LogContext {
 }
 
 impl LogContext {
-    pub fn new(test_name: &str, initial_config_logging: &ConfigLogging)
-        -> LogContext
-    {
+    pub fn new(
+        test_name: &str,
+        initial_config_logging: &ConfigLogging,
+    ) -> LogContext {
         /*
          * Set up logging.  If the caller requested a file path, assert that the
          * path matches our sentinel (just to improve debuggability -- otherwise
