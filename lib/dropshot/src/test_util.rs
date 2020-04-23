@@ -232,43 +232,19 @@ impl ClientTestContext {
 }
 
 /*
- * TestContext is used to manage a matched server and client for the common
- * test-case pattern of setting up a logger, server, and client and tearing them
- * all down at the end.
+ * LogContext encapsulates the log-related parts of a TestContext.  This is
+ * separated because some callers may need to set up logging before setting up
+ * the TestContext.
  */
-pub struct TestContext {
-    pub client_testctx: ClientTestContext,
-    pub server: HttpServer,
+pub struct LogContext {
     pub log: Logger,
-    server_task: JoinHandle<Result<(), hyper::error::Error>>,
     log_path: Option<PathBuf>,
 }
 
-impl TestContext {
-    /**
-     * Instantiate a new test context with a logger determined by
-     * `config_logging` and the Dropshot config determined by `config_dropshot`.
-     * Note that if `config_logging` indicates a file destination, the path MUST
-     * be the string "UNUSED".  It will be replaced with a path uniquely
-     * generated for each TestContext.
-     */
-    pub async fn new(
-        test_name: &str,
-        api: ApiDescription,
-        private: Arc<dyn Any + Send + Sync + 'static>,
-        config_dropshot: &ConfigDropshot,
-        initial_config_logging: &ConfigLogging,
-    ) -> TestContext {
-        /*
-         * The local bind address TCP port needs to be zero in the test suite or
-         * else concurrent tests may fail to bind.
-         */
-        assert_eq!(
-            0,
-            config_dropshot.bind_address.port(),
-            "test suite only supports binding on port 0 (any available port)"
-        );
-
+impl LogContext {
+    pub fn new(test_name: &str, initial_config_logging: &ConfigLogging)
+        -> LogContext
+    {
         /*
          * Set up logging.  If the caller requested a file path, assert that the
          * path matches our sentinel (just to improve debuggability -- otherwise
@@ -307,10 +283,54 @@ impl TestContext {
         };
 
         let log = log_config.to_logger(test_name).unwrap();
+        LogContext {
+            log: log,
+            log_path: log_path,
+        }
+    }
+}
+
+/*
+ * TestContext is used to manage a matched server and client for the common
+ * test-case pattern of setting up a logger, server, and client and tearing them
+ * all down at the end.
+ */
+pub struct TestContext {
+    pub client_testctx: ClientTestContext,
+    pub server: HttpServer,
+    pub log: Logger,
+    server_task: JoinHandle<Result<(), hyper::error::Error>>,
+    log_context: LogContext,
+}
+
+impl TestContext {
+    /**
+     * Instantiate a new test context with a logger determined by
+     * `config_logging` and the Dropshot config determined by `config_dropshot`.
+     * Note that if `config_logging` indicates a file destination, the path MUST
+     * be the string "UNUSED".  It will be replaced with a path uniquely
+     * generated for each TestContext.
+     */
+    pub fn new(
+        api: ApiDescription,
+        private: Arc<dyn Any + Send + Sync + 'static>,
+        config_dropshot: &ConfigDropshot,
+        log_context: LogContext,
+    ) -> TestContext {
+        /*
+         * The local bind address TCP port needs to be zero in the test suite or
+         * else concurrent tests may fail to bind.
+         */
+        assert_eq!(
+            0,
+            config_dropshot.bind_address.port(),
+            "test suite only supports binding on port 0 (any available port)"
+        );
 
         /*
          * Set up the server itself.
          */
+        let log = log_context.log.new(o!());
         let mut server =
             HttpServer::new(&config_dropshot, api, private, &log).unwrap();
         let server_task = server.run();
@@ -324,7 +344,7 @@ impl TestContext {
             server,
             log,
             server_task,
-            log_path,
+            log_context,
         }
     }
 
@@ -335,7 +355,7 @@ impl TestContext {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
         join_result.expect("server stopped with an error");
-        if let Some(log_path) = self.log_path {
+        if let Some(ref log_path) = self.log_context.log_path {
             fs::remove_file(log_path).unwrap();
         }
     }

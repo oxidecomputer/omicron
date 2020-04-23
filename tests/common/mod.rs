@@ -2,6 +2,7 @@
  * Shared automated testing facilities
  */
 
+use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use oxide_api_prototype::ApiServerConfig;
 use std::path::Path;
@@ -27,8 +28,9 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let api = oxide_api_prototype::dropshot_api();
     let rack_id_str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
     let rack_id = Uuid::parse_str(rack_id_str).unwrap();
-    let apictx = oxide_api_prototype::ApiContext::new(&rack_id);
+    let logctx = LogContext::new(test_name, &config.log);
+    let log = logctx.log.new(o!());
+    let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
     oxide_api_prototype::populate_initial_data(&apictx).await;
-    TestContext::new(test_name, api, apictx, &config.dropshot, &config.log)
-        .await
+    TestContext::new(api, apictx, &config.dropshot, logctx)
 }

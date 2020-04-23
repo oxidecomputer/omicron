@@ -16,6 +16,7 @@
 
 use dropshot::test_util::read_json;
 use dropshot::test_util::read_string;
+use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
@@ -39,7 +40,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-async fn test_setup(test_name: &str) -> TestContext {
+fn test_setup(test_name: &str) -> TestContext {
     /*
      * The IP address to which we bind can be any local IP, but we use
      * 127.0.0.1 because we know it's present, it shouldn't expose this server
@@ -61,15 +62,14 @@ async fn test_setup(test_name: &str) -> TestContext {
 
     let mut api = ApiDescription::new();
     register_test_endpoints(&mut api);
+    let logctx = LogContext::new(test_name, &config_logging);
 
     TestContext::new(
-        test_name,
         api,
         Arc::new(0),
         &config_dropshot,
-        &config_logging,
+        logctx,
     )
-    .await
 }
 
 /*
@@ -78,7 +78,7 @@ async fn test_setup(test_name: &str) -> TestContext {
  */
 #[tokio::test]
 async fn test_demo1() {
-    let testctx = test_setup("demo1").await;
+    let testctx = test_setup("demo1");
     let mut response = testctx
         .client_testctx
         .make_request(
@@ -103,7 +103,7 @@ async fn test_demo1() {
  */
 #[tokio::test]
 async fn test_demo2query() {
-    let testctx = test_setup("demo2query").await;
+    let testctx = test_setup("demo2query");
 
     /* Test case: optional field missing */
     let mut response = testctx
@@ -193,7 +193,7 @@ async fn test_demo2query() {
  */
 #[tokio::test]
 async fn test_demo2json() {
-    let testctx = test_setup("demo2json").await;
+    let testctx = test_setup("demo2json");
 
     /* Test case: optional field */
     let input = DemoJsonBody {
@@ -286,7 +286,7 @@ async fn test_demo2json() {
  */
 #[tokio::test]
 async fn test_demo3json() {
-    let testctx = test_setup("demo3json").await;
+    let testctx = test_setup("demo3json");
 
     /* Test case: everything filled in. */
     let json_input = DemoJsonBody {
@@ -352,7 +352,7 @@ async fn test_demo3json() {
  */
 #[tokio::test]
 async fn test_demo_path_param_string() {
-    let testctx = test_setup("demo_path_param_string").await;
+    let testctx = test_setup("demo_path_param_string");
 
     /*
      * Simple error cases.  All of these should produce 404 "Not Found" errors.
@@ -425,7 +425,7 @@ async fn test_demo_path_param_string() {
  */
 #[tokio::test]
 async fn test_demo_path_param_uuid() {
-    let testctx = test_setup("demo_path_param_uuid").await;
+    let testctx = test_setup("demo_path_param_uuid");
 
     /*
      * Error case: not a valid uuid.  The other error cases are the same as for

@@ -27,6 +27,9 @@ use dropshot::test_util::read_ndjson;
 pub mod common;
 use common::test_setup;
 
+#[macro_use]
+extern crate slog;
+
 #[tokio::test]
 async fn test_basic_failures() {
     let testctx = test_setup("basic_failures").await;
