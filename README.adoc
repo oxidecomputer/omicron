@@ -135,17 +135,13 @@ The implementation is divided into several subsystems:
 == TODO
 
 * Working on instances
-** broke test suite -- need to resolve circular dependency that ApiContext has a
-   logger but the tests don't have one until after they create a TestContext.
 ** building out simulator in src/server_controller.rs.
-** clean up what I've got so far?
-** Need some kind of channel for providing feedback from server controller back
-   to API.  This is rather a big architectural question.
-** Is that the same as: infrastructure for supporting async operations (boot,
-   halt, reboot), checking on status, etc.
-** Support for update of instances (i.e., PUT)
+*** clean up what I've got so far
+**** self-review
+**** documentation
+**** TODOs, XXXs
 ** Add tests for what I've got so far
-** log context interface in the Dropshot test suite kind of sucks
+** the new log context interface in the Dropshot test suite kind of sucks
 * Repo cleanup
 ** should we consider switching to sync?
 ** rename "lib" to something else (e.g., "local_deps")
@@ -153,6 +149,7 @@ The implementation is divided into several subsystems:
 ** Dropshot itself should be documented
 ** separate out api_model_data.rs?
 * Flesh out more endpoints and simulator
+** support for update of instances (i.e., PUT)?
 * Write out road map
 * General work:
 ** OpenAPI support: Rust macros, tooling to generate spec, client librar(ies),

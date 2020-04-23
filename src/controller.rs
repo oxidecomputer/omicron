@@ -5,6 +5,8 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceState;
+use crate::api_model::ApiInstanceUpdateInternal;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
@@ -206,12 +208,40 @@ impl OxideController {
         let servers = self.server_controllers.lock().await;
         let sc =
             self.server_allocate_instance(&servers, project, params).await?;
-        let instance = self
+        let instance_created = self
             .datastore
             .project_create_instance(project_name, params)
             .await?;
-        sc.instance_ensure(Arc::clone(&instance)).await?;
-        Ok(instance)
+
+        /*
+         * TODO-cleanup There's are slightly different Instance states here: we
+         * create an instance in the "Starting" state, but we tell the server
+         * controller that we want it in the "Running" state.  A few things
+         * might be cleaner if we explicitly separated out the parts of
+         * ApiInstance that are managed by the backend and then had an
+         * "instance_created.with_backend_state(...)" to do this transformation.
+         * We could use the reverse in notify_instance_updated().
+         *
+         * Another way to think about this is that we create the Instance in the
+         * datastore with state Creating.  Then we immediately try to move it to
+         * Running using ServerController.instance_ensure().  That call
+         * immediately notifies us that the state is now Starting and then later
+         * notifies us when the state becomes Running.  That more precisely
+         * reflects the state at various points and allows any component to
+         * crash and come back with the right state.  We may want to paper over
+         * the Creating state in the database so that users don't see it?
+         */
+        let instance_wanted = Arc::new(ApiInstance {
+            identity: instance_created.identity.clone(),
+            project_id: instance_created.project_id.clone(),
+            ncpus: instance_created.ncpus,
+            memory: instance_created.memory,
+            boot_disk_size: instance_created.boot_disk_size,
+            hostname: instance_created.hostname.clone(),
+            state: ApiInstanceState::Running,
+        });
+        sc.instance_ensure(instance_wanted).await?;
+        Ok(instance_created)
     }
 
     pub async fn project_lookup_instance(
@@ -259,10 +289,45 @@ impl OxideController {
         if *rack_id == self.id {
             Ok(self.as_rack())
         } else {
-            Err(ApiError::ObjectNotFound {
-                type_name: ApiResourceType::Rack,
-                object_name: rack_id.to_string(),
-            })
+            Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
+        }
+    }
+
+    pub fn as_sc_api(self: &Arc<OxideController>) -> ControllerScApi {
+        ControllerScApi {
+            controller: Arc::clone(self),
+        }
+    }
+}
+
+pub struct ControllerScApi {
+    controller: Arc<OxideController>,
+}
+
+impl ControllerScApi {
+    pub async fn notify_instance_updated(
+        &self,
+        id: &Uuid,
+        new_instance_state: &ApiInstanceState,
+    ) {
+        let datastore = &self.controller.datastore;
+        let log = &self.controller.log;
+        let result = datastore.instance_update_internal(
+            id,
+            &ApiInstanceUpdateInternal {
+                state: new_instance_state.clone(),
+            },
+        ).await;
+
+        if let Err(error) = result {
+            warn!(log, "failed to update instance from server controller";
+                "instance_id" => %id,
+                "new_state" => %new_instance_state,
+                "error" => ?error);
+        } else {
+            debug!(log, "instance updated by server controller";
+                "instance_id" => %id,
+                "new_state" => %new_instance_state);
         }
     }
 }

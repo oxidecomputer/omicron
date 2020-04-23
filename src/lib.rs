@@ -152,6 +152,7 @@ pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
         let sc = ServerController::new_simulated_with_id(
             &uuid,
             apictx.log.new(o!("server_controller" => uuid.to_string())),
+            controller.as_sc_api(),
         );
         controller.add_server_controller(sc).await;
     }

@@ -5,6 +5,7 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceState;
+use crate::controller::ControllerScApi;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
@@ -27,6 +28,7 @@ use uuid::Uuid;
 pub struct ServerController {
     pub id: Uuid,
 
+    ctlsc: ControllerScApi,
     log: Logger,
     instances: Mutex<BTreeMap<Uuid, SimInstance>>,
 }
@@ -59,10 +61,10 @@ impl SimInstance {
         }
     }
 
-    fn with_state(self, new_state: SimInstanceTransitionState) -> SimInstance {
+    fn with_state(self, new_state: &SimInstanceTransitionState) -> SimInstance {
         SimInstance {
             log: self.log,
-            transition_state: new_state,
+            transition_state: new_state.clone(),
             channel_tx: self.channel_tx,
             task: self.task,
         }
@@ -164,15 +166,179 @@ impl fmt::Debug for SimInstanceTransitionState {
     }
 }
 
+impl SimInstanceTransitionState {
+    fn transition_start(
+        &self,
+        target: Arc<ApiInstance>,
+    ) -> (SimInstanceTransitionState, Option<ApiInstanceState>) {
+        let mut dropped: Option<ApiInstanceState> = None;
+
+        let next_transition_state = match self {
+            SimInstanceTransitionState::Creating {
+                target: old_target,
+            } => SimInstanceTransitionState::CreatingWithPending {
+                intermediate: Arc::clone(old_target),
+                target: target,
+            },
+
+            SimInstanceTransitionState::CreatingWithPending {
+                intermediate: old_intermediate,
+                target: old_target,
+            } => {
+                dropped = Some(old_target.state.clone());
+                SimInstanceTransitionState::CreatingWithPending {
+                    intermediate: Arc::clone(old_intermediate),
+                    target,
+                }
+            }
+
+            SimInstanceTransitionState::Transitioning {
+                previous,
+                target: old_target,
+            } => SimInstanceTransitionState::TransitioningWithPending {
+                previous: Arc::clone(previous),
+                intermediate: Arc::clone(old_target),
+                target,
+            },
+
+            SimInstanceTransitionState::TransitioningWithPending {
+                previous,
+                intermediate,
+                target: old_target,
+            } => {
+                dropped = Some(old_target.state.clone());
+                SimInstanceTransitionState::TransitioningWithPending {
+                    previous: Arc::clone(previous),
+                    intermediate: Arc::clone(intermediate),
+                    target,
+                }
+            }
+
+            SimInstanceTransitionState::AtRest {
+                current,
+            } => SimInstanceTransitionState::Transitioning {
+                previous: Arc::clone(current),
+                target,
+            },
+        };
+
+        (next_transition_state, dropped)
+    }
+
+    fn transition_finish(&self) -> SimInstanceTransitionState {
+        match self {
+            SimInstanceTransitionState::Creating {
+                target,
+            } => SimInstanceTransitionState::AtRest {
+                current: Arc::clone(target),
+            },
+
+            SimInstanceTransitionState::CreatingWithPending {
+                intermediate,
+                target,
+            } => SimInstanceTransitionState::Transitioning {
+                previous: Arc::clone(intermediate),
+                target: Arc::clone(target),
+            },
+
+            SimInstanceTransitionState::Transitioning {
+                previous: _,
+                target,
+            } => SimInstanceTransitionState::AtRest {
+                current: Arc::clone(target),
+            },
+
+            SimInstanceTransitionState::TransitioningWithPending {
+                previous: _,
+                intermediate,
+                target,
+            } => SimInstanceTransitionState::Transitioning {
+                previous: Arc::clone(intermediate),
+                target: Arc::clone(target),
+            },
+
+            SimInstanceTransitionState::AtRest {
+                ..
+            } => panic!("no instance state transition in progress"),
+        }
+    }
+
+    fn current_instance(&self) -> Arc<ApiInstance> {
+        let current_instance = match self {
+            SimInstanceTransitionState::Creating {
+                ..
+            } => {
+                panic!("no current instance while Creating");
+            }
+
+            SimInstanceTransitionState::CreatingWithPending {
+                ..
+            } => {
+                panic!("no current instance while Creating");
+            }
+
+            SimInstanceTransitionState::Transitioning {
+                previous, ..
+            } => previous,
+
+            SimInstanceTransitionState::TransitioningWithPending {
+                previous,
+                ..
+            } => previous,
+
+            SimInstanceTransitionState::AtRest {
+                current,
+            } => current,
+        };
+
+        Arc::clone(current_instance)
+    }
+
+    fn transition_pending(&self) -> bool {
+        match self {
+            SimInstanceTransitionState::Creating {
+                ..
+            } => false,
+            SimInstanceTransitionState::CreatingWithPending {
+                ..
+            } => true,
+            SimInstanceTransitionState::Transitioning {
+                ..
+            } => false,
+            SimInstanceTransitionState::TransitioningWithPending {
+                ..
+            } => true,
+            SimInstanceTransitionState::AtRest {
+                ..
+            } => false,
+        }
+    }
+
+    fn at_rest_destroyed(&self) -> bool {
+        if let SimInstanceTransitionState::AtRest {
+            current,
+        } = self
+        {
+            current.state == ApiInstanceState::Destroyed
+        } else {
+            false
+        }
+    }
+}
+
 impl ServerController {
     /** Constructs a simulated ServerController with the given uuid. */
-    pub fn new_simulated_with_id(id: &Uuid, log: Logger) -> ServerController {
+    pub fn new_simulated_with_id(
+        id: &Uuid,
+        log: Logger,
+        ctlsc: ControllerScApi,
+    ) -> ServerController {
         info!(log, "created server controller");
 
         ServerController {
             id: id.clone(),
             log: log,
-
+            ctlsc: ctlsc,
             instances: Mutex::new(BTreeMap::new()),
         }
     }
@@ -223,54 +389,8 @@ impl ServerController {
         let mut next_instance = {
             if let Some(current_instance) = maybe_current_instance {
                 let orig_state = current_instance.transition_state.clone();
-                let mut dropped: Option<ApiInstanceState> = None;
-
-                let next_state = match &current_instance.transition_state {
-                    SimInstanceTransitionState::Creating {
-                        target: old_target,
-                    } => SimInstanceTransitionState::CreatingWithPending {
-                        intermediate: Arc::clone(old_target),
-                        target: target,
-                    },
-                    SimInstanceTransitionState::CreatingWithPending {
-                        intermediate: old_intermediate,
-                        target: old_target,
-                    } => {
-                        dropped = Some(old_target.state.clone());
-                        SimInstanceTransitionState::CreatingWithPending {
-                            intermediate: Arc::clone(old_intermediate),
-                            target,
-                        }
-                    }
-                    SimInstanceTransitionState::Transitioning {
-                        previous,
-                        target: old_target,
-                    } => SimInstanceTransitionState::TransitioningWithPending {
-                        previous: Arc::clone(previous),
-                        intermediate: Arc::clone(old_target),
-                        target,
-                    },
-                    SimInstanceTransitionState::TransitioningWithPending {
-                        previous,
-                        intermediate,
-                        target: old_target,
-                    } => {
-                        dropped = Some(old_target.state.clone());
-                        SimInstanceTransitionState::TransitioningWithPending {
-                            previous: Arc::clone(previous),
-                            intermediate: Arc::clone(intermediate),
-                            target,
-                        }
-                    }
-                    SimInstanceTransitionState::AtRest {
-                        current,
-                    } => SimInstanceTransitionState::Transitioning {
-                        previous: Arc::clone(current),
-                        target,
-                    },
-                };
-
-                let next = current_instance.with_state(next_state);
+                let (next_state, dropped) = orig_state.transition_start(target);
+                let next = current_instance.with_state(&next_state);
 
                 info!(next.log, "instance_ensure (existing)";
                     "initial" => ?orig_state,
@@ -342,82 +462,55 @@ impl ServerController {
     }
 
     async fn instance_poke(&self, id: Uuid) {
-        let mut instances = self.instances.lock().await;
-        let current_instance = instances.remove(&id).unwrap();
-        let orig_state = current_instance.transition_state.clone();
-        let (next_state, need_more) = match &current_instance.transition_state {
-            SimInstanceTransitionState::Creating {
-                target,
-            } => (
-                SimInstanceTransitionState::AtRest {
-                    current: Arc::clone(target),
-                },
-                false,
-            ),
+        let (new_state, to_destroy) = {
+            /* Do as little as possible with the lock held. */
+            let mut instances = self.instances.lock().await;
+            let current_instance = instances.remove(&id).unwrap();
+            let orig_state = &current_instance.transition_state;
+            let next_state = orig_state.transition_finish();
 
-            SimInstanceTransitionState::CreatingWithPending {
-                intermediate,
-                target,
-            } => (
-                SimInstanceTransitionState::Transitioning {
-                    previous: Arc::clone(intermediate),
-                    target: Arc::clone(target),
-                },
-                true,
-            ),
+            info!(current_instance.log, "instance transitioning";
+                "previously" => ?orig_state,
+                "now" => ?next_state,
+            );
 
-            SimInstanceTransitionState::Transitioning {
-                previous: _,
-                target,
-            } => (
-                SimInstanceTransitionState::AtRest {
-                    current: Arc::clone(target),
-                },
-                false,
-            ),
-
-            SimInstanceTransitionState::TransitioningWithPending {
-                previous: _,
-                intermediate,
-                target,
-            } => (
-                SimInstanceTransitionState::Transitioning {
-                    previous: Arc::clone(intermediate),
-                    target: Arc::clone(target),
-                },
-                true,
-            ),
-
-            SimInstanceTransitionState::AtRest {
-                current: _,
-            } => panic!("instance_poke(): instance already at rest"),
+            let next_instance_state =
+                next_state.current_instance().state.clone();
+            if next_state.at_rest_destroyed() {
+                info!(current_instance.log, "instance came to rest destroyed");
+                (next_instance_state, Some(current_instance))
+            } else {
+                let mut next_instance =
+                    current_instance.with_state(&next_state);
+                if next_state.transition_pending() {
+                    next_instance.notify();
+                }
+                instances.insert(id.clone(), next_instance);
+                (next_instance_state, None)
+            }
         };
 
-        info!(current_instance.log, "transitioning";
-            "previously" => ?orig_state,
-            "now" => ?next_state,
-        );
+        /*
+         * Notify the controller that the instance state has changed.
+         * TODO-correctness: how do we make sure that the latest state is
+         * reflected in the database if two of these calls are processed out of
+         * order? And that we don't clobber other database state changes?  Maybe
+         * we say that the SC (us) are authoritative, but only for certain
+         * values.  Then we can provide a generation number or even maybe a
+         * timestamp with this request that OXCP can use to make sure the latest
+         * state is reflected.
+         * TODO-correctness: how will state be correctly updated if OXCP or the
+         * data storage system are down right now?  Something will need to
+         * resolve that asynchronously.
+         */
+        self.ctlsc.notify_instance_updated(&id, &new_state).await;
 
-        if let SimInstanceTransitionState::AtRest {
-            ref current,
-        } = next_state
-        {
-            if current.state == ApiInstanceState::Destroyed {
-                assert!(!need_more);
-                info!(
-                    current_instance.log,
-                    "cleaning up (came to rest destroyed)"
-                );
-                current_instance.cleanup().await;
-                return;
-            }
+        /*
+         * If the instance came to rest destroyed, complete any async cleanup
+         * needed now.
+         */
+        if let Some(destroyed_instance) = to_destroy {
+            destroyed_instance.cleanup().await;
         }
-
-        let mut next_instance = current_instance.with_state(next_state);
-        if need_more {
-            next_instance.notify();
-        }
-
-        instances.insert(id.clone(), next_instance);
     }
 }

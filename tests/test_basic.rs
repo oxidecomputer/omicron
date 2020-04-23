@@ -61,7 +61,7 @@ async fn test_basic_failures() {
         )
         .await
         .expect_err("expected error");
-    assert_eq!("not found: project \"nonexistent\"", error.message);
+    assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /*
      * Error case: GET /projects/-invalid-name
@@ -121,7 +121,7 @@ async fn test_basic_failures() {
         )
         .await
         .expect_err("expected error");
-    assert_eq!("not found: project \"nonexistent\"", error.message);
+    assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /* Error case: fetch an instance in a nonexistent project. */
     let error = testctx
@@ -134,7 +134,7 @@ async fn test_basic_failures() {
         )
         .await
         .expect_err("expected error");
-    assert_eq!("not found: project \"nonexistent\"", error.message);
+    assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /* Error case: fetch an instance with an invalid name. */
     let error = testctx
@@ -563,7 +563,10 @@ async fn test_instances() {
         )
         .await
         .unwrap_err();
-    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        "not found: instance with name \"just-rainsticks\""
+    );
 
     /* Ditto if we try to delete one. */
     let error = testctx
@@ -576,7 +579,10 @@ async fn test_instances() {
         )
         .await
         .unwrap_err();
-    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        "not found: instance with name \"just-rainsticks\""
+    );
 
     /* Create an instance. */
     let new_instance = ApiInstanceCreateParams {
@@ -673,7 +679,10 @@ async fn test_instances() {
         )
         .await
         .unwrap_err();
-    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        "not found: instance with name \"just-rainsticks\""
+    );
 
     /* Try to delete it again.  This should fail with a 404, too. */
     let error = testctx
@@ -686,7 +695,10 @@ async fn test_instances() {
         )
         .await
         .unwrap_err();
-    assert_eq!(error.message, "not found: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        "not found: instance with name \"just-rainsticks\""
+    );
 
     /* List instances again.  We should find none. */
     let mut response = testctx

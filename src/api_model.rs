@@ -449,6 +449,14 @@ pub struct ApiInstanceUpdateParams {
     pub identity: ApiIdentityMetadataUpdateParams,
 }
 
+/**
+ * Represents the properties of an ApiInstance that can be updated internally.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceUpdateInternal {
+    pub state: ApiInstanceState
+}
+
 /*
  * RACKS
  */
