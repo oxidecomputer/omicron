@@ -207,6 +207,10 @@ impl OxideController {
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
         let project = self.project_lookup(project_name).await?;
+
+        /*
+         * Allocate a server and retrieve our handle to its SC.
+         */
         let sc = {
             let servers = self.server_controllers.lock().await;
             let arc = self
@@ -214,36 +218,54 @@ impl OxideController {
                 .await?;
             Arc::clone(arc)
         };
+
+        /*
+         * The order of operations here is slightly subtle:
+         *
+         * 1. We want to record the new instance in the database before telling
+         *    the SC about it.  This record will have state "Creating" to
+         *    distinguish it from other runtime states.  If we crash after this
+         *    point, there will be a record in the database for the instance,
+         *    but it won't be running, since no SC knows about it.
+         *    TODO-robustness we could look for it here and resume creation if
+         *    we find it.  That would potentially handle a case where the
+         *    client is retrying their create request.  On the other hand, we
+         *    need some way to either clean this up or resume creation even if
+         *    the caller _doesn't_ retry this request.  How will we know it's
+         *    been abandoned?  (Maybe it doesn't matter that much, since the
+         *    following operations are either idempotent or we can tell that
+         *    they've conflicted with somebody else who's fixing the problem.)
+         *
+         * 2. We want to tell the SC about this Instance and have the SC start
+         *    it up.  The SC should reply immediately that it's starting the
+         *    instance, and we immediately record this into the database, now
+         *    with state "Starting".
+         *
+         * 3. Some time later (after this function has completed), the SC will
+         *    notify us that the Instance has changed states to "Running".
+         *    We'll record this into the database.
+         */
         let runtime = ApiInstanceRuntimeState {
             run_state: ApiInstanceState::Creating,
             server_uuid: sc.id,
             gen: 1,
             time_updated: Utc::now(),
         };
+
+        /*
+         * Store the first revision of the Instance into the database.  This
+         * will have state "Creating".
+         */
         let instance_created = self
             .datastore
             .project_create_instance(project_name, params, &runtime)
             .await?;
+        let id = instance_created.identity.id.clone();
 
         /*
-         * TODO-cleanup There are slightly different Instance states here: we
-         * create an instance in the "Starting" state, but we tell the server
-         * controller that we want it in the "Running" state.  A few things
-         * might be cleaner if we explicitly separated out the parts of
-         * ApiInstance that are managed by the backend and then had an
-         * "instance_created.with_backend_state(...)" to do this transformation.
-         * We could use the reverse in notify_instance_updated().
-         *
-         * Another way to think about this is that we create the Instance in the
-         * datastore with state Creating.  Then we immediately try to move it to
-         * Running using ServerController.instance_ensure().  That call
-         * immediately notifies us that the state is now Starting and then later
-         * notifies us when the state becomes Running.  That more precisely
-         * reflects the state at various points and allows any component to
-         * crash and come back with the right state.  We may want to paper over
-         * the Creating state in the database so that users don't see it?
+         * Notify the SC, which will return an updated runtime state (which
+         * should be "Starting".
          */
-        let id = instance_created.identity.id.clone();
         let runtime_state = sc
             .instance_ensure(instance_created, &ApiInstanceRuntimeStateParams {
                 run_state: Some(ApiInstanceState::Running),
@@ -251,6 +273,10 @@ impl OxideController {
                 gen: runtime.gen + 1,
             })
             .await?;
+
+        /*
+         * Update the database to reflect the new "Starting" state.
+         */
         let instance_updated = self
             .datastore
             .instance_update_internal(&id, &runtime_state)
