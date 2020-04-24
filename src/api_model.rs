@@ -287,6 +287,7 @@ pub struct ApiProjectUpdateParams {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiInstanceState {
+    Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
     Stopping,
@@ -299,6 +300,7 @@ pub enum ApiInstanceState {
 impl Display for ApiInstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         let label = match self {
+            ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
             ApiInstanceState::Stopping => "stopping",
@@ -377,8 +379,12 @@ pub struct ApiInstance {
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
-    /** current runtime state of the instance */
-    pub state: ApiInstanceState,
+    /** last user-requested state for this instance */
+    pub state_requested: ApiInstanceState, /* TODO should be separate type? */
+
+    /** state owned by the data plane */
+    pub runtime: ApiInstanceRuntimeState,
+
     /* TODO-completeness: add disks, network, tags, metrics */
 }
 
@@ -392,7 +398,42 @@ impl ApiObject for ApiInstance {
             memory: self.memory,
             boot_disk_size: self.boot_disk_size,
             hostname: self.hostname.clone(),
-            state: self.state.clone(),
+            runtime: self.runtime.to_view(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiInstanceRuntimeState {
+    /** runtime state of the instance */
+    pub run_state: ApiInstanceState,
+    /** which server is running this instance */
+    pub server_uuid: Uuid,
+    /** generation number for this state */
+    pub gen: u64,
+    /** timestamp for this information */
+    pub time_updated: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiInstanceRuntimeStateParams {
+    pub run_state: Option<ApiInstanceState>,
+    pub server_uuid: Option<Uuid>,
+    pub gen: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceRuntimeStateView {
+    pub run_state: ApiInstanceState,
+    pub run_state_updated: DateTime<Utc>,
+}
+
+impl ApiObject for ApiInstanceRuntimeState {
+    type View = ApiInstanceRuntimeStateView;
+    fn to_view(&self) -> ApiInstanceRuntimeStateView {
+        ApiInstanceRuntimeStateView {
+            run_state: self.run_state.clone(),
+            run_state_updated: self.time_updated,
         }
     }
 }
@@ -417,8 +458,9 @@ pub struct ApiInstanceView {
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
-    /** current runtime state of the instance */
-    pub state: ApiInstanceState,
+
+    #[serde(flatten)]
+    pub runtime: ApiInstanceRuntimeStateView,
 }
 
 /**
@@ -447,14 +489,6 @@ pub struct ApiInstanceCreateParams {
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
-}
-
-/**
- * Represents the properties of an ApiInstance that can be updated internally.
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ApiInstanceUpdateInternal {
-    pub state: ApiInstanceState,
 }
 
 /*

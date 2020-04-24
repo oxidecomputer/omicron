@@ -137,9 +137,9 @@ The implementation is divided into several subsystems:
 * Working on instances
 ** building out simulator in src/server_controller.rs.
 *** clean up what I've got so far
+**** TODOs, XXXs
 **** self-review
 **** documentation
-**** TODOs, XXXs
 ** Add tests for what I've got so far
 ** the new log context interface in the Dropshot test suite kind of sucks
 * Repo cleanup

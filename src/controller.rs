@@ -5,8 +5,9 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiInstanceUpdateInternal;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
@@ -16,6 +17,7 @@ use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
+use chrono::Utc;
 use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::lock::Mutex;
@@ -205,16 +207,26 @@ impl OxideController {
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
         let project = self.project_lookup(project_name).await?;
-        let servers = self.server_controllers.lock().await;
-        let sc =
-            self.server_allocate_instance(&servers, project, params).await?;
+        let sc = {
+            let servers = self.server_controllers.lock().await;
+            let arc = self
+                .server_allocate_instance(&servers, project, params)
+                .await?;
+            Arc::clone(arc)
+        };
+        let runtime = ApiInstanceRuntimeState {
+            run_state: ApiInstanceState::Creating,
+            server_uuid: sc.id,
+            gen: 1,
+            time_updated: Utc::now(),
+        };
         let instance_created = self
             .datastore
-            .project_create_instance(project_name, params)
+            .project_create_instance(project_name, params, &runtime)
             .await?;
 
         /*
-         * TODO-cleanup There's are slightly different Instance states here: we
+         * TODO-cleanup There are slightly different Instance states here: we
          * create an instance in the "Starting" state, but we tell the server
          * controller that we want it in the "Running" state.  A few things
          * might be cleaner if we explicitly separated out the parts of
@@ -231,17 +243,19 @@ impl OxideController {
          * crash and come back with the right state.  We may want to paper over
          * the Creating state in the database so that users don't see it?
          */
-        let instance_wanted = Arc::new(ApiInstance {
-            identity: instance_created.identity.clone(),
-            project_id: instance_created.project_id.clone(),
-            ncpus: instance_created.ncpus,
-            memory: instance_created.memory,
-            boot_disk_size: instance_created.boot_disk_size,
-            hostname: instance_created.hostname.clone(),
-            state: ApiInstanceState::Running,
-        });
-        sc.instance_ensure(instance_wanted).await?;
-        Ok(instance_created)
+        let id = instance_created.identity.id.clone();
+        let runtime_state = sc
+            .instance_ensure(instance_created, &ApiInstanceRuntimeStateParams {
+                run_state: Some(ApiInstanceState::Running),
+                server_uuid: None,
+                gen: runtime.gen + 1,
+            })
+            .await?;
+        let instance_updated = self
+            .datastore
+            .instance_update_internal(&id, &runtime_state)
+            .await?;
+        Ok(instance_updated)
     }
 
     pub async fn project_lookup_instance(
@@ -308,25 +322,22 @@ impl ControllerScApi {
     pub async fn notify_instance_updated(
         &self,
         id: &Uuid,
-        new_instance_state: &ApiInstanceState,
+        new_runtime_state: &ApiInstanceRuntimeState,
     ) {
         let datastore = &self.controller.datastore;
         let log = &self.controller.log;
-        let result = datastore
-            .instance_update_internal(id, &ApiInstanceUpdateInternal {
-                state: new_instance_state.clone(),
-            })
-            .await;
+        let result =
+            datastore.instance_update_internal(id, &new_runtime_state).await;
 
         if let Err(error) = result {
             warn!(log, "failed to update instance from server controller";
                 "instance_id" => %id,
-                "new_state" => %new_instance_state,
+                "new_state" => %new_runtime_state.run_state,
                 "error" => ?error);
         } else {
             debug!(log, "instance updated by server controller";
                 "instance_id" => %id,
-                "new_state" => %new_instance_state);
+                "new_state" => %new_runtime_state.run_state);
         }
     }
 }

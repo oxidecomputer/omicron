@@ -776,7 +776,7 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
         instance2.boot_disk_size.to_bytes()
     );
     assert_eq!(instance1.hostname, instance2.hostname);
-    assert_eq!(instance1.state, instance2.state);
+    assert_eq!(instance1.runtime.run_state, instance2.runtime.run_state);
 }
 
 fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata) {

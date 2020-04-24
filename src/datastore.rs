@@ -8,8 +8,8 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiInstanceUpdateInternal;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -219,6 +219,7 @@ impl ControlDataStore {
         &self,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
+        runtime: &ApiInstanceRuntimeState,
     ) -> CreateResult<ApiInstance> {
         let now = Utc::now();
         let newname = params.identity.name.clone();
@@ -259,8 +260,18 @@ impl ControlDataStore {
             memory: params.memory,
             boot_disk_size: params.boot_disk_size,
             hostname: params.hostname.clone(),
-            /* TODO-debug: add state timestamp */
-            state: ApiInstanceState::Starting,
+            /*
+             * TODO-cleanup This is very nitty, but choosing the initial state
+             * to be "Running" is a policy of the caller, not us.  They should
+             * provide that.  However, we're not ready to go quite so far as to
+             * require that the _user_ provide that.  And right now, whatever
+             * the user provides is exactly what gets passed through to here.
+             * We may need another layer, but we already have so many
+             * (InstanceCreateParams, Instance, InstanceView) that we're
+             * reluctant to add another one yet just for this case.
+             */
+            state_requested: ApiInstanceState::Running,
+            runtime: runtime.clone(),
         });
 
         instances.insert(newname, Arc::clone(&instance));
@@ -336,7 +347,7 @@ impl ControlDataStore {
     pub async fn instance_update_internal(
         &self,
         id: &Uuid,
-        new_params: &ApiInstanceUpdateInternal,
+        new_runtime: &ApiInstanceRuntimeState,
     ) -> UpdateResult<ApiInstance> {
         let mut data = self.data.lock().await;
         let (instance_name, new_instance) = {
@@ -353,7 +364,8 @@ impl ControlDataStore {
                 memory: old_instance.memory,
                 boot_disk_size: old_instance.boot_disk_size,
                 hostname: old_instance.hostname.clone(),
-                state: new_params.state.clone(),
+                state_requested: old_instance.state_requested.clone(),
+                runtime: new_runtime.clone(),
             });
             (instance_name.clone(), instance)
         };

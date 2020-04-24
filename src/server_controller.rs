@@ -4,8 +4,11 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstance;
+use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiInstanceState;
 use crate::controller::ControllerScApi;
+use chrono::Utc;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
@@ -39,7 +42,8 @@ pub struct ServerController {
  */
 struct SimInstance {
     log: Logger,
-    transition_state: SimInstanceTransitionState,
+    api_instance: Arc<ApiInstance>,
+    transition: SimInstanceTransitionState,
     channel_tx: Sender<()>,
     task: JoinHandle<()>,
 }
@@ -53,8 +57,9 @@ impl SimInstance {
     ) -> SimInstance {
         SimInstance {
             log: log,
-            transition_state: SimInstanceTransitionState::Creating {
-                target: Arc::clone(api_instance),
+            api_instance: Arc::clone(api_instance),
+            transition: SimInstanceTransitionState::AtRest {
+                current: api_instance.runtime.clone(),
             },
             channel_tx: tx,
             task: task,
@@ -64,7 +69,8 @@ impl SimInstance {
     fn with_state(self, new_state: &SimInstanceTransitionState) -> SimInstance {
         SimInstance {
             log: self.log,
-            transition_state: new_state.clone(),
+            api_instance: Arc::clone(&self.api_instance),
+            transition: new_state.clone(),
             channel_tx: self.channel_tx,
             task: self.task,
         }
@@ -106,49 +112,30 @@ impl SimInstance {
 
 #[derive(Clone)]
 enum SimInstanceTransitionState {
-    Creating {
-        target: Arc<ApiInstance>,
-    },
-    CreatingWithPending {
-        intermediate: Arc<ApiInstance>,
-        target: Arc<ApiInstance>,
-    },
     Transitioning {
-        previous: Arc<ApiInstance>,
-        target: Arc<ApiInstance>,
+        previous: ApiInstanceRuntimeState,
+        target: ApiInstanceRuntimeStateParams,
     },
     TransitioningWithPending {
-        previous: Arc<ApiInstance>,
-        intermediate: Arc<ApiInstance>,
-        target: Arc<ApiInstance>,
+        previous: ApiInstanceRuntimeState,
+        intermediate: ApiInstanceRuntimeStateParams,
+        target: ApiInstanceRuntimeStateParams,
     },
     AtRest {
-        current: Arc<ApiInstance>,
+        current: ApiInstanceRuntimeState,
     },
 }
 
 impl fmt::Debug for SimInstanceTransitionState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SimInstanceTransitionState::Creating {
-                target,
-            } => write!(f, "creating instance with state \"{}\"", target.state),
-            SimInstanceTransitionState::CreatingWithPending {
-                intermediate,
-                target,
-            } => write!(
-                f,
-                "creating instance with state \"{}\", then transitioning to \
-                 \"{}\"",
-                intermediate.state, target.state
-            ),
             SimInstanceTransitionState::Transitioning {
                 previous,
                 target,
             } => write!(
                 f,
-                "transitioning from \"{}\" to \"{}\"",
-                previous.state, target.state
+                "transitioning from \"{}\" to \"{:?}\"",
+                previous.run_state, target
             ),
             SimInstanceTransitionState::TransitioningWithPending {
                 previous,
@@ -156,12 +143,12 @@ impl fmt::Debug for SimInstanceTransitionState {
                 target,
             } => write!(
                 f,
-                "transitioning from \"{}\" to \"{}\", and then to \"{}\"",
-                previous.state, intermediate.state, target.state
+                "transitioning from \"{}\" to \"{:?}\", and then to \"{:?}\"",
+                previous.run_state, intermediate, target
             ),
             SimInstanceTransitionState::AtRest {
                 current,
-            } => write!(f, "at rest in state \"{}\"", current.state),
+            } => write!(f, "at rest in state \"{}\"", current.run_state),
         }
     }
 }
@@ -169,35 +156,18 @@ impl fmt::Debug for SimInstanceTransitionState {
 impl SimInstanceTransitionState {
     fn transition_start(
         &self,
-        target: Arc<ApiInstance>,
-    ) -> (SimInstanceTransitionState, Option<ApiInstanceState>) {
-        let mut dropped: Option<ApiInstanceState> = None;
+        target: ApiInstanceRuntimeStateParams,
+    ) -> (SimInstanceTransitionState, Option<ApiInstanceRuntimeStateParams>)
+    {
+        let mut dropped: Option<ApiInstanceRuntimeStateParams> = None;
 
-        let next_transition_state = match self {
-            SimInstanceTransitionState::Creating {
-                target: old_target,
-            } => SimInstanceTransitionState::CreatingWithPending {
-                intermediate: Arc::clone(old_target),
-                target: target,
-            },
-
-            SimInstanceTransitionState::CreatingWithPending {
-                intermediate: old_intermediate,
-                target: old_target,
-            } => {
-                dropped = Some(old_target.state.clone());
-                SimInstanceTransitionState::CreatingWithPending {
-                    intermediate: Arc::clone(old_intermediate),
-                    target,
-                }
-            }
-
+        let next_transition = match self {
             SimInstanceTransitionState::Transitioning {
                 previous,
                 target: old_target,
             } => SimInstanceTransitionState::TransitioningWithPending {
-                previous: Arc::clone(previous),
-                intermediate: Arc::clone(old_target),
+                previous: previous.clone(),
+                intermediate: old_target.clone(),
                 target,
             },
 
@@ -206,10 +176,10 @@ impl SimInstanceTransitionState {
                 intermediate,
                 target: old_target,
             } => {
-                dropped = Some(old_target.state.clone());
+                dropped = Some(old_target.clone());
                 SimInstanceTransitionState::TransitioningWithPending {
-                    previous: Arc::clone(previous),
-                    intermediate: Arc::clone(intermediate),
+                    previous: previous.clone(),
+                    intermediate: intermediate.clone(),
                     target,
                 }
             }
@@ -217,44 +187,31 @@ impl SimInstanceTransitionState {
             SimInstanceTransitionState::AtRest {
                 current,
             } => SimInstanceTransitionState::Transitioning {
-                previous: Arc::clone(current),
+                previous: current.clone(),
                 target,
             },
         };
 
-        (next_transition_state, dropped)
+        (next_transition, dropped)
     }
 
     fn transition_finish(&self) -> SimInstanceTransitionState {
         match self {
-            SimInstanceTransitionState::Creating {
-                target,
-            } => SimInstanceTransitionState::AtRest {
-                current: Arc::clone(target),
-            },
-
-            SimInstanceTransitionState::CreatingWithPending {
-                intermediate,
-                target,
-            } => SimInstanceTransitionState::Transitioning {
-                previous: Arc::clone(intermediate),
-                target: Arc::clone(target),
-            },
-
             SimInstanceTransitionState::Transitioning {
-                previous: _,
+                previous,
                 target,
             } => SimInstanceTransitionState::AtRest {
-                current: Arc::clone(target),
+                // XXX function for this
+                current: next_runtime_state(previous, target),
             },
 
             SimInstanceTransitionState::TransitioningWithPending {
-                previous: _,
+                previous,
                 intermediate,
                 target,
             } => SimInstanceTransitionState::Transitioning {
-                previous: Arc::clone(intermediate),
-                target: Arc::clone(target),
+                previous: next_runtime_state(previous, intermediate),
+                target: target.clone(),
             },
 
             SimInstanceTransitionState::AtRest {
@@ -263,20 +220,8 @@ impl SimInstanceTransitionState {
         }
     }
 
-    fn current_instance(&self) -> Arc<ApiInstance> {
-        let current_instance = match self {
-            SimInstanceTransitionState::Creating {
-                ..
-            } => {
-                panic!("no current instance while Creating");
-            }
-
-            SimInstanceTransitionState::CreatingWithPending {
-                ..
-            } => {
-                panic!("no current instance while Creating");
-            }
-
+    fn current_state(&self) -> ApiInstanceRuntimeState {
+        let current_state = match self {
             SimInstanceTransitionState::Transitioning {
                 previous, ..
             } => previous,
@@ -291,17 +236,11 @@ impl SimInstanceTransitionState {
             } => current,
         };
 
-        Arc::clone(current_instance)
+        current_state.clone()
     }
 
     fn transition_pending(&self) -> bool {
         match self {
-            SimInstanceTransitionState::Creating {
-                ..
-            } => false,
-            SimInstanceTransitionState::CreatingWithPending {
-                ..
-            } => true,
             SimInstanceTransitionState::Transitioning {
                 ..
             } => false,
@@ -319,7 +258,7 @@ impl SimInstanceTransitionState {
             current,
         } = self
         {
-            current.state == ApiInstanceState::Destroyed
+            current.run_state == ApiInstanceState::Destroyed
         } else {
             false
         }
@@ -350,7 +289,8 @@ impl ServerController {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         api_instance: Arc<ApiInstance>,
-    ) -> Result<(), ApiError> {
+        target: &ApiInstanceRuntimeStateParams,
+    ) -> Result<ApiInstanceRuntimeState, ApiError> {
         let mut instances = self.instances.lock().await;
 
         /*
@@ -367,91 +307,136 @@ impl ServerController {
          * the new target.  Note that we will not enqueue more than one
          * transition -- if one is already enqueued and this call requests a new
          * one, then the queued transition is abandoned.
-         *
-         * To achieve this, we store:
-         *
-         *   * `current`: always the current runtime state.  This is never
-         *     directly changed by this function.
-         *
-         *   * `target`: always the desired final state.  This is always
-         *      replaced with every call to this function.
-         *
-         *   * `current_transition`: represents the ongoing transition from the
-         *     current state to the next state.  The next state may not be the
-         *     `target`, if a state transition was ongoing when this function is
-         *     invoked.  As a simulation, we might remain transitioning either
-         *     for a fixed period of time or until some internal API call
-         *     indicates that the transition should complete.
          */
         let id = api_instance.identity.id.clone();
-        let target = Arc::clone(&api_instance);
         let maybe_current_instance = instances.remove(&id);
         let mut next_instance = {
-            if let Some(current_instance) = maybe_current_instance {
-                let orig_state = current_instance.transition_state.clone();
-                let (next_state, dropped) = orig_state.transition_start(target);
-                let next = current_instance.with_state(&next_state);
+            let current_instance = {
+                if let Some(current_instance) = maybe_current_instance {
+                    current_instance
+                } else {
+                    /*
+                     * Create a new Instance.
+                     *
+                     * The channel below is used to send a message to a
+                     * background task to simulate an Instance state transition
+                     * by sleeping for some interval and then updating the
+                     * Instance state.  Note that when the background task
+                     * updates the Instance state after sleeping, it invokes
+                     * `instance_poke()`, which looks at the current state and
+                     * the target next state.  These are computed (in
+                     * `instance_ensure()`) in such a way as to avoid queueing
+                     * up multiple sequential transitions.
+                     *
+                     * The net result of this is that we don't need (or want) a
+                     * channel buffer larger than 1.  That's because if we were
+                     * to queue up multiple messages in the buffer, the net
+                     * effect would be exactly the same as if just one message
+                     * were queued.  As part of processing that message, the
+                     * receiver will wind up handling all state transitions
+                     * requested up to the point where the first message is
+                     * read.  If another transition is requested after that
+                     * point, another message will be enqueued and the receiver
+                     * will process that transition then.  There's no need to
+                     * queue more than one message.  Even stronger: we don't
+                     * want a larger buffer because that would only cause extra
+                     * laps through the sleep cycle, which just wastes resources
+                     * and increases the latency for processing the next real
+                     * transition request.
+                     */
+                    let (tx, rx) = futures::channel::mpsc::channel(0);
+                    let idc = id.clone();
+                    let selfc = Arc::clone(&self);
 
-                info!(next.log, "instance_ensure (existing)";
-                    "initial" => ?orig_state,
-                    "requested" => ?api_instance,
-                    "next_state" => ?next.transition_state,
-                    "dropped_transition" => ?dropped,
-                );
+                    let task = tokio::spawn(async move {
+                        selfc.instance_sim(idc, rx).await;
+                    });
 
-                next
-            } else {
-                /*
-                 * Create a new Instance.
-                 *
-                 * The channel below is used to send a message to a background
-                 * task to simulate an Instance state transition by sleeping for
-                 * some interval and then updating the Instance state.  Note
-                 * that when the background task updates the Instance state
-                 * after sleeping, it invokes `instance_poke()`, which looks at
-                 * the current state and the target next state.  These are
-                 * computed (in `instance_ensure()`) in such a way as to avoid
-                 * queueing up multiple sequential transitions.
-                 *
-                 * The net result of this is that we don't need (or want) a
-                 * channel buffer larger than 1.  That's because if we were to
-                 * queue up multiple messages in the buffer, the net effect
-                 * would be exactly the same as if just one message were queued.
-                 * As part of processing that message, the receiver will wind up
-                 * handling all state transitions requested up to the point
-                 * where the first message is read.  If another transition is
-                 * requested after that point, another message will be enqueued
-                 * and the receiver will process that transition then.  There's
-                 * no need to queue more than one message.  Even stronger: we
-                 * don't want a larger buffer because that would only cause
-                 * extra laps through the sleep cycle, which just wastes
-                 * resources and increases the latency for processing the next
-                 * real transition request.
-                 */
-                let (tx, rx) = futures::channel::mpsc::channel(0);
-                let idc = id.clone();
-                let selfc = Arc::clone(&self);
+                    let mut instance = SimInstance::new(
+                        &api_instance,
+                        self.log.new(o!("instance_id" => idc.to_string())),
+                        tx,
+                        task,
+                    );
 
-                let task = tokio::spawn(async move {
-                    selfc.instance_sim(idc, rx).await;
-                });
+                    /*
+                     * TODO we need to rethink this a little bit.  We need to
+                     * consider the set of valid next states that we can be
+                     * given (say: running, stopped, destroyed but NOT created,
+                     * starting, or stopping).  Then we need to figure out what
+                     * the appropriate next state is, given our current state.
+                     * If we want to be Running and we're asked to be Running,
+                     * we don't need to do anything.  If we want to be Running
+                     * and we're currently Started, we need to go through
+                     * Starting.  We may _also_ need to keep track of the
+                     * desired next state (e.g., Starting -> Started), unless
+                     * it's always unambiguous and we can just assume we know
+                     * it (e.g., Starting is always followed by Started).
+                     *
+                     * We already have a bunch of logic to keep track of the
+                     * next user-requested state (and queue only one of those
+                     * requests).  But there are two levels of "next" state we
+                     * need to consider: that one, and the intermediate next
+                     * state described above.
+                     *
+                     * TODO an additional complexity here is the generation
+                     * numbers.  The caller provided us one (do we really need
+                     * it in the params?) but we need to use that one for an
+                     * intermediate state and produce another one.  Maybe the
+                     * caller should be providing us a base one to go on as a
+                     * precondition, and we should be careful not to re-evaluate
+                     * the precondition after we've completed our intermediate
+                     * state change, lest we fail spuriously.
+                     *
+                     * For now, we hardcode the one case we care about
+                     * simulating right now.
+                     */
+                    if api_instance.runtime.run_state
+                        == ApiInstanceState::Creating
+                        && target.run_state == Some(ApiInstanceState::Running)
+                    {
+                        /* Transition from "creating" to "starting". */
+                        let (trans2, _) = instance.transition.transition_start(
+                            ApiInstanceRuntimeStateParams {
+                                run_state: Some(ApiInstanceState::Starting),
+                                server_uuid: None,
+                                gen: target.gen,
+                            },
+                        );
+                        let inst2 = instance.with_state(&trans2);
+                        let trans3 = trans2.transition_finish();
+                        let inst3 = inst2.with_state(&trans3);
 
-                let next = SimInstance::new(
-                    &api_instance,
-                    self.log.new(o!("instance_id" => idc.to_string())),
-                    tx,
-                    task,
-                );
-                info!(next.log, "instance_ensure (new)";
-                    "requested" => ?api_instance,
-                    "transition" => ?next.transition_state);
-                next
-            }
+                        /* Begin transition from "starting" to "running". */
+                        let (trans4, _) =
+                            inst3.transition.transition_start(target.clone());
+                        let inst4 = inst3.with_state(&trans4);
+                        instance = inst4;
+                    }
+
+                    debug!(instance.log, "instance_ensure (new instance)";
+                        "initial_state" => ?api_instance);
+                    instance
+                }
+            };
+
+            let before = current_instance.transition.clone();
+            let (after, dropped) = before.transition_start(target.clone());
+            let next = current_instance.with_state(&after);
+
+            info!(next.log, "instance_ensure";
+                "initial" => ?before,
+                "next_state" => ?next.transition,
+                "dropped_transition" => ?dropped.map(|d| d.run_state),
+            );
+
+            next
         };
 
         next_instance.notify();
+        let rv = next_instance.transition.current_state().clone();
         instances.insert(id.clone(), next_instance);
-        Ok(())
+        Ok(rv)
     }
 
     async fn instance_sim(&self, id: Uuid, mut rx: Receiver<()>) {
@@ -466,23 +451,22 @@ impl ServerController {
             /* Do as little as possible with the lock held. */
             let mut instances = self.instances.lock().await;
             let current_instance = instances.remove(&id).unwrap();
-            let orig_state = &current_instance.transition_state;
-            let next_state = orig_state.transition_finish();
+            let orig_transition = &current_instance.transition;
+            let next_transition = orig_transition.transition_finish();
 
             info!(current_instance.log, "instance transitioning";
-                "previously" => ?orig_state,
-                "now" => ?next_state,
+                "previously" => ?orig_transition,
+                "now" => ?next_transition,
             );
 
-            let next_instance_state =
-                next_state.current_instance().state.clone();
-            if next_state.at_rest_destroyed() {
+            let next_instance_state = next_transition.current_state();
+            if next_transition.at_rest_destroyed() {
                 info!(current_instance.log, "instance came to rest destroyed");
                 (next_instance_state, Some(current_instance))
             } else {
                 let mut next_instance =
-                    current_instance.with_state(&next_state);
-                if next_state.transition_pending() {
+                    current_instance.with_state(&next_transition);
+                if next_transition.transition_pending() {
                     next_instance.notify();
                 }
                 instances.insert(id.clone(), next_instance);
@@ -512,5 +496,25 @@ impl ServerController {
         if let Some(destroyed_instance) = to_destroy {
             destroyed_instance.cleanup().await;
         }
+    }
+}
+
+fn next_runtime_state(
+    start: &ApiInstanceRuntimeState,
+    params: &ApiInstanceRuntimeStateParams,
+) -> ApiInstanceRuntimeState {
+    ApiInstanceRuntimeState {
+        run_state: params
+            .run_state
+            .as_ref()
+            .unwrap_or(&start.run_state)
+            .clone(),
+        server_uuid: params
+            .server_uuid
+            .as_ref()
+            .unwrap_or(&start.server_uuid)
+            .clone(),
+        gen: start.gen + 1,
+        time_updated: Utc::now(),
     }
 }
