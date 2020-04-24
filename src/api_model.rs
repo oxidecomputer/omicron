@@ -384,7 +384,6 @@ pub struct ApiInstance {
 
     /** state owned by the data plane */
     pub runtime: ApiInstanceRuntimeState,
-
     /* TODO-completeness: add disks, network, tags, metrics */
 }
 
