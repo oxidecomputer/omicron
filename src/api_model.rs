@@ -314,6 +314,27 @@ impl Display for ApiInstanceState {
     }
 }
 
+impl ApiInstanceState {
+    /**
+     * Returns true if the given state represents a fully stopped Instance.
+     * This means that a transition from an is_not_stopped() state must go
+     * through Stopping.
+     */
+    pub fn is_stopped(&self) -> bool {
+        match self {
+            ApiInstanceState::Starting => false,
+            ApiInstanceState::Running => false,
+            ApiInstanceState::Stopping => false,
+
+            ApiInstanceState::Creating => true,
+            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Repairing => true,
+            ApiInstanceState::Failed => true,
+            ApiInstanceState::Destroyed => true,
+        }
+    }
+}
+
 /** Represents the number of CPUs in an instance. */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceCpuCount(pub usize);

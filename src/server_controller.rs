@@ -15,7 +15,6 @@ use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -55,16 +54,42 @@ pub struct ServerController {
 struct SimInstance {
     /** debug log */
     log: Logger,
-    /** description of the Instance, as we last saw it */
-    api_instance: Arc<ApiInstance>,
-    /** tracks the simulated transition of this Instance between run states */
-    transition: SimInstanceTransitionState,
+    /** current runtime state of the instance */
+    current_run_state: ApiInstanceRuntimeState,
+    /** requested runtime state of the instance */
+    requested_run_state: Option<ApiInstanceRuntimeStateParams>,
+
     /** background task that handles simulated transitions */
     task: JoinHandle<()>,
     /** channel for transmitting to the background task */
     channel_tx: Sender<()>,
 }
 
+/**
+ * Buffer size for channel used to communicate with each SimInstance's
+ * background task.  Messages sent on this channel trigger the task to simulate
+ * an Instance state transition by sleeping for some interval and then updating
+ * the Instance state.  Note that when the background task updates the Instance
+ * state after sleeping, it always looks at the current state to decide what to
+ * do.  As a result, we never need to queue up more than one transition.  In
+ * turn, tha tmeans we don't need (or want) a channel buffer larger than 1.
+ * If we were to queue up multiple messages in the buffer, the net effect would
+ * be exactly the same as if just one message were queued.  (Because of what we
+ * said above, as part of processing that message, the receiver will wind up
+ * handling all state transitions requested up to the point where the first
+ * message is read.  If another transition is requested after that point,
+ * another message will be enqueued and the receiver will process that
+ * transition then.  There's no need to queue more than one message.)  Even
+ * stronger: we don't want a larger buffer because that would only cause extra
+ * laps through the sleep cycle, which just wastes resources and increases the
+ * latency for processing the next real transition request.
+ */
+const SIM_INSTANCE_CHANNEL_BUFFER_SIZE: usize = 0;
+
+/**
+ * TODO-coverage: unit tests for SimInstance could cover a lot of ground,
+ * especially if we add an at_rest() function.
+ */
 impl SimInstance {
     /** Create a new `SimInstance`. */
     fn new(
@@ -75,59 +100,150 @@ impl SimInstance {
     ) -> SimInstance {
         SimInstance {
             log: log,
-            api_instance: Arc::clone(api_instance),
-            transition: SimInstanceTransitionState::AtRest {
-                current: api_instance.runtime.clone(),
-            },
-            channel_tx: tx,
+            current_run_state: api_instance.runtime.clone(),
+            requested_run_state: None,
             task: task,
+            channel_tx: tx,
         }
     }
 
-    /**
-     * Consuming the `SimInstance` and return a new `SimInstance` with the
-     * requested `transition`.
-     */
-    fn now_transitioning(
-        self,
-        transition: &SimInstanceTransitionState,
-    ) -> SimInstance {
-        SimInstance {
-            log: self.log,
-            api_instance: Arc::clone(&self.api_instance),
-            transition: transition.clone(),
-            channel_tx: self.channel_tx,
-            task: self.task,
-        }
-    }
+    fn transition(
+        &mut self,
+        target: &ApiInstanceRuntimeStateParams,
+    ) -> Option<ApiInstanceRuntimeStateParams> {
+        let state_before = &self.current_run_state.run_state;
+        let dropped = self.requested_run_state.replace(target.clone());
 
-    /**
-     * Begins simulating the current transition by sending a message to the
-     * background task.
-     */
-    fn begin_simulated_transition(&mut self) {
-        let result = self.channel_tx.try_send(());
-        if let Err(error) = result {
+        let state_after = match target.run_state {
+            /* There's nothing to do if the target run state isn't changing. */
+            None => return dropped,
+            Some(ref target_run_state) if target_run_state == state_before => {
+                return dropped
+            }
             /*
-             * There are a few possible error cases:
-             *
-             * (1) We failed to send the message because the channel's buffer is
-             *     full.  All we need to guarantee in the first place is that
-             *     the receiver will receive a message at least once after this
-             *     function is invoked.  If there's a message in the buffer, we
-             *     don't need to do anything else here.
-             * (2) We failed to send the message because the channel is
-             *     disconnected.  This would be a programmer error -- the
-             *     contract between us and the receiver is that we shut down the
-             *     channel first.  As a result, we panic if we find this case.
-             * (3) We failed to send the message for some other reason.  This
-             *     appears impossible at the time of this writing.   It would be
-             *     nice if the returned error type were implemented in a way
-             *     that we could identify this case at compile time (e.g., using
-             *     an enum), but that's not currently the case.
+             * Several states are basically illegal to request, but if they're
+             * requested, we just try to do something reasonable.
+             * TODO-cleanup use a different type?
              */
-            assert!(!error.is_disconnected());
-            assert!(error.is_full());
+            Some(ApiInstanceState::Creating) => &ApiInstanceState::Running,
+            Some(ApiInstanceState::Starting) => &ApiInstanceState::Running,
+            Some(ApiInstanceState::Stopping) => &ApiInstanceState::Stopped,
+
+            /* This is the most common case. */
+            Some(ref target_run_state) => target_run_state,
+        };
+
+        let (immed_next_state, need_async) =
+            if state_before.is_stopped() && !state_after.is_stopped() {
+                (&ApiInstanceState::Starting, true)
+            } else if !state_before.is_stopped() && state_after.is_stopped() {
+                (&ApiInstanceState::Stopping, true)
+            } else {
+                (state_after, false)
+            };
+
+        self.current_run_state = ApiInstanceRuntimeState {
+            run_state: immed_next_state.clone(),
+            server_uuid: self.current_run_state.server_uuid,
+            gen: self.current_run_state.gen + 1,
+            time_updated: Utc::now(),
+        };
+
+        /*
+         * If this is an asynchronous transition, notify the background task to
+         * simulate it.
+         */
+        if need_async {
+            let result = self.channel_tx.try_send(());
+            if let Err(error) = result {
+                /*
+                 * There are a few possible error cases:
+                 *
+                 * (1) We failed to send the message because the channel's
+                 *     buffer is full.  All we need to guarantee in the first
+                 *     place is that the receiver will receive a message at
+                 *     least once after this function is invoked.  If there's a
+                 *     message in the buffer, we don't need to do anything else
+                 *     here.
+                 *
+                 * (2) We failed to send the message because the channel is
+                 *     disconnected.  This would be a programmer error -- the
+                 *     contract between us and the receiver is that we shut down
+                 *     the channel first.  As a result, we panic if we find this
+                 *     case.
+                 *
+                 * (3) We failed to send the message for some other reason.
+                 *     This appears impossible at the time of this writing.   It
+                 *     would be nice if the returned error type were implemented
+                 *     in a way that we could identify this case at compile time
+                 *     (e.g., using an enum), but that's not currently the case.
+                 */
+                assert!(!error.is_disconnected());
+                assert!(error.is_full());
+            }
+        }
+
+        dropped
+    }
+
+    fn transition_finish(&mut self) {
+        let requested_run_state = match self.requested_run_state.take() {
+            /*
+             * Somebody must have requested a state change while we were
+             * simulating a previous asynchronous one.  By definition, the new
+             * one must also be asynchronous, and the first of the two calls to
+             * `transition_finish()` will complete the new transition.  The
+             * second one will find us here.
+             * TODO-cleanup We could probably eliminate this case by not
+             * sending a message to the background task if we were already in an
+             * async transition.
+             */
+            None => return,
+            Some(run_state) => run_state,
+        };
+
+        /*
+         * The `self.transition()` function ensures a few invariants:
+         *
+         * (1) If the requested transition is synchronous (i.e., not simulated),
+         *     then the change is immediately applied and
+         *     `self.requested_run_state` is `None`.
+         *
+         * (2) Otherwise, the requested transition is asynchronous (i.e., will
+         *     be simulated), in which case the current state is set to an
+         *     either "Starting" (for boot) or "Stopping" (for halt).  By
+         *     construction, the requested state must be "Running" or "Stopped",
+         *     respectively.
+         *
+         * Since we checked above whether `self.requested_run_state` was
+         * non-None, we know that we're in case (2) above and we can assert
+         * these invariants.
+         */
+        let run_state_before = &self.current_run_state.run_state;
+        let run_state_after = requested_run_state.run_state.unwrap();
+        match run_state_before {
+            ApiInstanceState::Starting => {
+                assert_eq!(run_state_after, ApiInstanceState::Running)
+            }
+            ApiInstanceState::Stopping => {
+                assert_eq!(run_state_after, ApiInstanceState::Stopped)
+            }
+            _ => panic!("async transition started for unexpected state"),
+        };
+
+        /*
+         * Having verified all that, we can update the Instance's state.  The
+         * generation number does not change because this update is not a
+         * user-requested one.
+         */
+        let new_server_uuid = requested_run_state
+            .server_uuid
+            .unwrap_or(self.current_run_state.server_uuid);
+        self.current_run_state = ApiInstanceRuntimeState {
+            run_state: run_state_after.clone(),
+            server_uuid: new_server_uuid,
+            gen: self.current_run_state.gen,
+            time_updated: Utc::now(),
         }
     }
 
@@ -140,160 +256,6 @@ impl SimInstance {
         let mut tx = self.channel_tx;
         tx.close_channel();
         task.await.unwrap();
-    }
-}
-
-#[derive(Clone)]
-enum SimInstanceTransitionState {
-    Transitioning {
-        previous: ApiInstanceRuntimeState,
-        target: ApiInstanceRuntimeStateParams,
-    },
-    TransitioningWithPending {
-        previous: ApiInstanceRuntimeState,
-        intermediate: ApiInstanceRuntimeStateParams,
-        target: ApiInstanceRuntimeStateParams,
-    },
-    AtRest {
-        current: ApiInstanceRuntimeState,
-    },
-}
-
-impl fmt::Debug for SimInstanceTransitionState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SimInstanceTransitionState::Transitioning {
-                previous,
-                target,
-            } => write!(
-                f,
-                "transitioning from \"{}\" to \"{:?}\"",
-                previous.run_state, target
-            ),
-            SimInstanceTransitionState::TransitioningWithPending {
-                previous,
-                intermediate,
-                target,
-            } => write!(
-                f,
-                "transitioning from \"{}\" to \"{:?}\", and then to \"{:?}\"",
-                previous.run_state, intermediate, target
-            ),
-            SimInstanceTransitionState::AtRest {
-                current,
-            } => write!(f, "at rest in state \"{}\"", current.run_state),
-        }
-    }
-}
-
-impl SimInstanceTransitionState {
-    fn transition_start(
-        &self,
-        target: ApiInstanceRuntimeStateParams,
-    ) -> (SimInstanceTransitionState, Option<ApiInstanceRuntimeStateParams>)
-    {
-        let mut dropped: Option<ApiInstanceRuntimeStateParams> = None;
-
-        let next_transition = match self {
-            SimInstanceTransitionState::Transitioning {
-                previous,
-                target: old_target,
-            } => SimInstanceTransitionState::TransitioningWithPending {
-                previous: previous.clone(),
-                intermediate: old_target.clone(),
-                target,
-            },
-
-            SimInstanceTransitionState::TransitioningWithPending {
-                previous,
-                intermediate,
-                target: old_target,
-            } => {
-                dropped = Some(old_target.clone());
-                SimInstanceTransitionState::TransitioningWithPending {
-                    previous: previous.clone(),
-                    intermediate: intermediate.clone(),
-                    target,
-                }
-            }
-
-            SimInstanceTransitionState::AtRest {
-                current,
-            } => SimInstanceTransitionState::Transitioning {
-                previous: current.clone(),
-                target,
-            },
-        };
-
-        (next_transition, dropped)
-    }
-
-    fn transition_finish(&self) -> SimInstanceTransitionState {
-        match self {
-            SimInstanceTransitionState::Transitioning {
-                previous,
-                target,
-            } => SimInstanceTransitionState::AtRest {
-                current: next_runtime_state(previous, target),
-            },
-
-            SimInstanceTransitionState::TransitioningWithPending {
-                previous,
-                intermediate,
-                target,
-            } => SimInstanceTransitionState::Transitioning {
-                previous: next_runtime_state(previous, intermediate),
-                target: target.clone(),
-            },
-
-            SimInstanceTransitionState::AtRest {
-                ..
-            } => panic!("no instance state transition in progress"),
-        }
-    }
-
-    fn current_state(&self) -> ApiInstanceRuntimeState {
-        let current_state = match self {
-            SimInstanceTransitionState::Transitioning {
-                previous, ..
-            } => previous,
-
-            SimInstanceTransitionState::TransitioningWithPending {
-                previous,
-                ..
-            } => previous,
-
-            SimInstanceTransitionState::AtRest {
-                current,
-            } => current,
-        };
-
-        current_state.clone()
-    }
-
-    fn transition_pending(&self) -> bool {
-        match self {
-            SimInstanceTransitionState::Transitioning {
-                ..
-            } => false,
-            SimInstanceTransitionState::TransitioningWithPending {
-                ..
-            } => true,
-            SimInstanceTransitionState::AtRest {
-                ..
-            } => false,
-        }
-    }
-
-    fn at_rest_destroyed(&self) -> bool {
-        if let SimInstanceTransitionState::AtRest {
-            current,
-        } = self
-        {
-            current.run_state == ApiInstanceState::Destroyed
-        } else {
-            false
-        }
     }
 }
 
@@ -315,8 +277,17 @@ impl ServerController {
     }
 
     /**
-     * Idempotently ensures that the given instance exists on this host in the
-     * given state.
+     * Idempotently ensures that the given API Instance (described by
+     * `api_instance`) exists on this server in the given runtime state
+     * (described by `target`).
+     * TODO-correctness What's the semantics of the generation number in the
+     * "target" here?  It seems like if the API receives one of these, the
+     * generation number ought to be a base to be compared against (i.e., a
+     * precondition).  However, by the time we get here, this call is supposed
+     * to be idempotent, so we shouldn't have a precondition.  Nor is it
+     * meaningful to have this be propagated to the RuntimeState (!Params).
+     * _That_ generation number should only be incremented when the backend (us)
+     * actually changes the runtime state.
      */
     pub async fn instance_ensure(
         self: &Arc<Self>,
@@ -342,133 +313,38 @@ impl ServerController {
          */
         let id = api_instance.identity.id.clone();
         let maybe_current_instance = instances.remove(&id);
-        let mut next_instance = {
-            let current_instance = {
-                if let Some(current_instance) = maybe_current_instance {
-                    current_instance
-                } else {
-                    /*
-                     * Create a new Instance.
-                     *
-                     * The channel below is used to send a message to a
-                     * background task to simulate an Instance state transition
-                     * by sleeping for some interval and then updating the
-                     * Instance state.  Note that when the background task
-                     * updates the Instance state after sleeping, it invokes
-                     * `instance_poke()`, which looks at the current state and
-                     * the target next state.  These are computed (in
-                     * `instance_ensure()`) in such a way as to avoid queueing
-                     * up multiple sequential transitions.
-                     *
-                     * The net result of this is that we don't need (or want) a
-                     * channel buffer larger than 1.  That's because if we were
-                     * to queue up multiple messages in the buffer, the net
-                     * effect would be exactly the same as if just one message
-                     * were queued.  As part of processing that message, the
-                     * receiver will wind up handling all state transitions
-                     * requested up to the point where the first message is
-                     * read.  If another transition is requested after that
-                     * point, another message will be enqueued and the receiver
-                     * will process that transition then.  There's no need to
-                     * queue more than one message.  Even stronger: we don't
-                     * want a larger buffer because that would only cause extra
-                     * laps through the sleep cycle, which just wastes resources
-                     * and increases the latency for processing the next real
-                     * transition request.
-                     */
-                    let (tx, rx) = futures::channel::mpsc::channel(0);
-                    let idc = id.clone();
-                    let selfc = Arc::clone(&self);
-
-                    let task = tokio::spawn(async move {
-                        selfc.instance_sim(idc, rx).await;
-                    });
-
-                    let mut instance = SimInstance::new(
-                        &api_instance,
-                        self.log.new(o!("instance_id" => idc.to_string())),
-                        tx,
-                        task,
-                    );
-
-                    /*
-                     * TODO we need to rethink this a little bit.  We need to
-                     * consider the set of valid next states that we can be
-                     * given (say: running, stopped, destroyed but NOT created,
-                     * starting, or stopping).  Then we need to figure out what
-                     * the appropriate next state is, given our current state.
-                     * If we want to be Running and we're asked to be Running,
-                     * we don't need to do anything.  If we want to be Running
-                     * and we're currently Started, we need to go through
-                     * Starting.  We may _also_ need to keep track of the
-                     * desired next state (e.g., Starting -> Started), unless
-                     * it's always unambiguous and we can just assume we know
-                     * it (e.g., Starting is always followed by Started).
-                     *
-                     * We already have a bunch of logic to keep track of the
-                     * next user-requested state (and queue only one of those
-                     * requests).  But there are two levels of "next" state we
-                     * need to consider: that one, and the intermediate next
-                     * state described above.
-                     *
-                     * TODO an additional complexity here is the generation
-                     * numbers.  The caller provided us one (do we really need
-                     * it in the params?) but we need to use that one for an
-                     * intermediate state and produce another one.  Maybe the
-                     * caller should be providing us a base one to go on as a
-                     * precondition, and we should be careful not to re-evaluate
-                     * the precondition after we've completed our intermediate
-                     * state change, lest we fail spuriously.
-                     *
-                     * For now, we hardcode the one case we care about
-                     * simulating right now.
-                     */
-                    if api_instance.runtime.run_state
-                        == ApiInstanceState::Creating
-                        && target.run_state == Some(ApiInstanceState::Running)
-                    {
-                        /* Transition from "creating" to "starting". */
-                        let (trans2, _) = instance.transition.transition_start(
-                            ApiInstanceRuntimeStateParams {
-                                run_state: Some(ApiInstanceState::Starting),
-                                server_uuid: None,
-                                gen: target.gen,
-                            },
-                        );
-                        let inst2 = instance.now_transitioning(&trans2);
-                        let trans3 = trans2.transition_finish();
-                        let inst3 = inst2.now_transitioning(&trans3);
-
-                        /* Begin transition from "starting" to "running". */
-                        let (trans4, _) =
-                            inst3.transition.transition_start(target.clone());
-                        let inst4 = inst3.now_transitioning(&trans4);
-                        instance = inst4;
-                    }
-
-                    debug!(instance.log, "instance_ensure (new instance)";
-                        "initial_state" => ?api_instance);
-                    instance
-                }
-            };
-
-            let before = current_instance.transition.clone();
-            let (after, dropped) = before.transition_start(target.clone());
-            let next = current_instance.now_transitioning(&after);
-
-            info!(next.log, "instance_ensure";
-                "initial" => ?before,
-                "next_state" => ?next.transition,
-                "dropped_transition" => ?dropped.map(|d| d.run_state),
-            );
-
-            next
+        let mut instance = {
+            if let Some(current_instance) = maybe_current_instance {
+                current_instance
+            } else {
+                /* Create a new Instance. */
+                let (tx, rx) = futures::channel::mpsc::channel(
+                    SIM_INSTANCE_CHANNEL_BUFFER_SIZE,
+                );
+                let idc = id.clone();
+                let selfc = Arc::clone(&self);
+                let task = tokio::spawn(async move {
+                    selfc.instance_sim(idc, rx).await;
+                });
+                let log = self.log.new(o!("instance_id" => idc.to_string()));
+                debug!(log, "instance_ensure (new instance)";
+                    "initial_state" => ?api_instance);
+                SimInstance::new(&api_instance, log, tx, task)
+            }
         };
 
-        next_instance.begin_simulated_transition();
-        let rv = next_instance.transition.current_state().clone();
-        instances.insert(id.clone(), next_instance);
-        Ok(rv)
+        let before = instance.current_run_state.clone();
+        let dropped = instance.transition(target);
+        let after = instance.current_run_state.clone();
+
+        info!(instance.log, "instance_ensure";
+            "initial" => ?before,
+            "next_state" => ?after,
+            "dropped_transition" => ?dropped.map(|d| d.run_state),
+        );
+
+        instances.insert(id.clone(), instance);
+        Ok(after)
     }
 
     async fn instance_sim(&self, id: Uuid, mut rx: Receiver<()>) {
@@ -482,27 +358,23 @@ impl ServerController {
         let (new_state, to_destroy) = {
             /* Do as little as possible with the lock held. */
             let mut instances = self.instances.lock().await;
-            let current_instance = instances.remove(&id).unwrap();
-            let orig_transition = &current_instance.transition;
-            let next_transition = orig_transition.transition_finish();
-
-            info!(current_instance.log, "instance transitioning";
-                "previously" => ?orig_transition,
-                "now" => ?next_transition,
+            let mut instance = instances.remove(&id).unwrap();
+            let before = instance.current_run_state.clone();
+            instance.transition_finish();
+            let after = instance.current_run_state.clone();
+            info!(instance.log, "instance transitioning";
+                "previously" => ?before,
+                "now" => ?after,
             );
 
-            let next_instance_state = next_transition.current_state();
-            if next_transition.at_rest_destroyed() {
-                info!(current_instance.log, "instance came to rest destroyed");
-                (next_instance_state, Some(current_instance))
+            if instance.requested_run_state.is_none()
+                && after.run_state == ApiInstanceState::Destroyed
+            {
+                info!(instance.log, "instance came to rest destroyed");
+                (after, Some(instance))
             } else {
-                let mut next_instance =
-                    current_instance.now_transitioning(&next_transition);
-                if next_transition.transition_pending() {
-                    next_instance.begin_simulated_transition();
-                }
-                instances.insert(id.clone(), next_instance);
-                (next_instance_state, None)
+                instances.insert(id.clone(), instance);
+                (after, None)
             }
         };
 
@@ -528,25 +400,5 @@ impl ServerController {
         if let Some(destroyed_instance) = to_destroy {
             destroyed_instance.cleanup().await;
         }
-    }
-}
-
-fn next_runtime_state(
-    start: &ApiInstanceRuntimeState,
-    params: &ApiInstanceRuntimeStateParams,
-) -> ApiInstanceRuntimeState {
-    ApiInstanceRuntimeState {
-        run_state: params
-            .run_state
-            .as_ref()
-            .unwrap_or(&start.run_state)
-            .clone(),
-        server_uuid: params
-            .server_uuid
-            .as_ref()
-            .unwrap_or(&start.server_uuid)
-            .clone(),
-        gen: start.gen + 1,
-        time_updated: Utc::now(),
     }
 }
