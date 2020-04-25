@@ -52,16 +52,20 @@ pub struct ServerController {
  * "running".
  */
 struct SimInstance {
-    /** debug log */
-    log: Logger,
-    /** current runtime state of the instance */
+    /** Current runtime state of the instance */
     current_run_state: ApiInstanceRuntimeState,
-    /** requested runtime state of the instance */
+    /**
+     * Requested runtime state of the instance.  This field is non-None if and
+     * only if we're currently simulating an asynchronous transition (e.g., boot
+     * or halt).
+     */
     requested_run_state: Option<ApiInstanceRuntimeStateParams>,
 
-    /** background task that handles simulated transitions */
+    /** Debug log */
+    log: Logger,
+    /** Background task that handles simulated transitions */
     task: JoinHandle<()>,
-    /** channel for transmitting to the background task */
+    /** Channel for transmitting to the background task */
     channel_tx: Sender<()>,
 }
 
@@ -99,40 +103,65 @@ impl SimInstance {
         task: JoinHandle<()>,
     ) -> SimInstance {
         SimInstance {
-            log: log,
             current_run_state: api_instance.runtime.clone(),
             requested_run_state: None,
+            log: log,
             task: task,
             channel_tx: tx,
         }
     }
 
+    /**
+     * Transition this Instance to state `target`.  In some cases, the
+     * transition may happen immediately (e.g., going from "Stopped" to
+     * "Destroyed").  In other cases, as when going from "Stopped" to "Running",
+     * we immediately transition to an intermediate state ("Starting", in this
+     * case), simulate the transition, and some time later update to the desired
+     * state.
+     *
+     * This function supports transitions that don't change the state at all
+     * (either because the requested state change was `None` -- maybe we were
+     * changing some other runtime state parameter -- or because we're already
+     * in the desired state).
+     */
     fn transition(
         &mut self,
         target: &ApiInstanceRuntimeStateParams,
     ) -> Option<ApiInstanceRuntimeStateParams> {
+        /*
+         * In all cases, set `requested_run_state` to the new target.  If there
+         * was already a requested run state, we will return this to the caller
+         * so that they can log a possible dropped transition.  This is only
+         * useful for debugging.
+         */
+        let dropped = self.requested_run_state.take();
         let state_before = &self.current_run_state.run_state;
-        let dropped = self.requested_run_state.replace(target.clone());
-
         let state_after = match target.run_state {
             /* There's nothing to do if the target run state isn't changing. */
             None => return dropped,
             Some(ref target_run_state) if target_run_state == state_before => {
                 return dropped
             }
+
             /*
-             * Several states are basically illegal to request, but if they're
-             * requested, we just try to do something reasonable.
-             * TODO-cleanup use a different type?
+             * For intermediate states (which don't really make sense to
+             * request), just try to do the closest reasonable thing.
+             * TODO-cleanup Use a different type here.
              */
             Some(ApiInstanceState::Creating) => &ApiInstanceState::Running,
             Some(ApiInstanceState::Starting) => &ApiInstanceState::Running,
             Some(ApiInstanceState::Stopping) => &ApiInstanceState::Stopped,
 
-            /* This is the most common case. */
+            /* This is the most common interesting case. */
             Some(ref target_run_state) => target_run_state,
         };
 
+        /*
+         * Depending on what state we're in and what state we're going to, we
+         * may need to transition to an intermediate state before we can get to
+         * the requested state.  In that case, we'll asynchronously simulate the
+         * transition.
+         */
         let (immed_next_state, need_async) =
             if state_before.is_stopped() && !state_after.is_stopped() {
                 (&ApiInstanceState::Starting, true)
@@ -142,42 +171,52 @@ impl SimInstance {
                 (state_after, false)
             };
 
+        /*
+         * Update the current state to reflect what we've decided -- either
+         * going directly to the requested state or to an intermediate state.
+         * We apply any change to "server_uuid" immediately, even if the
+         * requested transition is otherwise asynchronous.
+         * TODO-correctness what should we actually do with a request that
+         * changes the server_uuid?  Between that and the generation number
+         * making no sense in the ApiInstanceRuntimeStateParams, maybe we need a
+         * separate type here that doesn't have either of those two fields.
+         */
+        let new_server_uuid = target
+            .server_uuid
+            .as_ref()
+            .unwrap_or(&self.current_run_state.server_uuid)
+            .clone();
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
-            server_uuid: self.current_run_state.server_uuid,
+            server_uuid: new_server_uuid,
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
         };
 
         /*
          * If this is an asynchronous transition, notify the background task to
-         * simulate it.
+         * simulate it.  There are a few possible error cases:
+         *
+         * (1) We fail to send the message because the channel's buffer is full.
+         *     All we need to guarantee in the first place is that the receiver
+         *     will receive a message at least once after this function is
+         *     invoked.  If there's already a message in the buffer, we don't
+         *     need to do anything else to achieve that.
+         *
+         * (2) We fail to send the message because the channel is disconnected.
+         *     This would be a programmer error -- the contract between us and
+         *     the receiver is that we shut down the channel first.  As a
+         *     result, we panic if we find this case.
+         *
+         * (3) We failed to send the message for some other reason.  This
+         *     appears impossible at the time of this writing.   It would be
+         *     nice if the returned error type were implemented in a way that we
+         *     could identify this case at compile time (e.g., using an enum),
+         *     but that's not currently the case.
          */
         if need_async {
             let result = self.channel_tx.try_send(());
             if let Err(error) = result {
-                /*
-                 * There are a few possible error cases:
-                 *
-                 * (1) We failed to send the message because the channel's
-                 *     buffer is full.  All we need to guarantee in the first
-                 *     place is that the receiver will receive a message at
-                 *     least once after this function is invoked.  If there's a
-                 *     message in the buffer, we don't need to do anything else
-                 *     here.
-                 *
-                 * (2) We failed to send the message because the channel is
-                 *     disconnected.  This would be a programmer error -- the
-                 *     contract between us and the receiver is that we shut down
-                 *     the channel first.  As a result, we panic if we find this
-                 *     case.
-                 *
-                 * (3) We failed to send the message for some other reason.
-                 *     This appears impossible at the time of this writing.   It
-                 *     would be nice if the returned error type were implemented
-                 *     in a way that we could identify this case at compile time
-                 *     (e.g., using an enum), but that's not currently the case.
-                 */
                 assert!(!error.is_disconnected());
                 assert!(error.is_full());
             }
@@ -186,6 +225,9 @@ impl SimInstance {
         dropped
     }
 
+    /**
+     * Finish simulating a "boot" or "halt" transition.
+     */
     fn transition_finish(&mut self) {
         let requested_run_state = match self.requested_run_state.take() {
             /*
@@ -203,21 +245,12 @@ impl SimInstance {
         };
 
         /*
-         * The `self.transition()` function ensures a few invariants:
-         *
-         * (1) If the requested transition is synchronous (i.e., not simulated),
-         *     then the change is immediately applied and
-         *     `self.requested_run_state` is `None`.
-         *
-         * (2) Otherwise, the requested transition is asynchronous (i.e., will
-         *     be simulated), in which case the current state is set to an
-         *     either "Starting" (for boot) or "Stopping" (for halt).  By
-         *     construction, the requested state must be "Running" or "Stopped",
-         *     respectively.
-         *
-         * Since we checked above whether `self.requested_run_state` was
-         * non-None, we know that we're in case (2) above and we can assert
-         * these invariants.
+         * As documented above, `self.requested_run_state` is only non-None when
+         * there's an asynchronous (simulated) transition in progress, and the
+         * only such transitions start at "Starting" or "Stopping" and go to
+         * "Running" or "Stopped", respectively.  Since we checked
+         * `self.requested_run_state` above, we know we're in one of these two
+         * transitions and assert that here.
          */
         let run_state_before = &self.current_run_state.run_state;
         let run_state_after = requested_run_state.run_state.unwrap();
@@ -232,30 +265,21 @@ impl SimInstance {
         };
 
         /*
-         * Having verified all that, we can update the Instance's state.  The
-         * generation number does not change because this update is not a
-         * user-requested one.
+         * Having verified all that, we can update the Instance's state.
+         * "server_uuid" was already updated in `transition()`.
          */
-        let new_server_uuid = requested_run_state
-            .server_uuid
-            .unwrap_or(self.current_run_state.server_uuid);
+        if let Some(requested_server_uuid) = requested_run_state.server_uuid {
+            assert_eq!(
+                requested_server_uuid,
+                self.current_run_state.server_uuid
+            );
+        }
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: run_state_after.clone(),
-            server_uuid: new_server_uuid,
-            gen: self.current_run_state.gen,
+            server_uuid: self.current_run_state.server_uuid,
+            gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
         }
-    }
-
-    async fn cleanup(self) {
-        /*
-         * TODO-debug It would be nice to have visibility into instances that
-         * are cleaning up in case we have to debug resource leaks here.
-         */
-        let task = self.task;
-        let mut tx = self.channel_tx;
-        tx.close_channel();
-        task.await.unwrap();
     }
 }
 
@@ -294,24 +318,8 @@ impl ServerController {
         api_instance: Arc<ApiInstance>,
         target: &ApiInstanceRuntimeStateParams,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        let mut instances = self.instances.lock().await;
-
-        /*
-         * A `SimInstance` simulates an actual Instance.  While the controller
-         * can change the `ApiInstance`'s state instantly on a whim, a real
-         * Instance cannot change states so quickly -- it takes time to boot,
-         * shut down, etc.  That means we need to consider state transitions as
-         * well as just the states.
-         *
-         * We define the semantics of this call that if no state transition is
-         * in progress, then we will begin a new one from the current state to
-         * the target state.  If a state transition is already in progress, then
-         * we will wait for it to complete and then begin a new transition to
-         * the new target.  Note that we will not enqueue more than one
-         * transition -- if one is already enqueued and this call requests a new
-         * one, then the queued transition is abandoned.
-         */
         let id = api_instance.identity.id.clone();
+        let mut instances = self.instances.lock().await;
         let maybe_current_instance = instances.remove(&id);
         let mut instance = {
             if let Some(current_instance) = maybe_current_instance {
@@ -347,6 +355,12 @@ impl ServerController {
         Ok(after)
     }
 
+    /**
+     * Body of the background task (one per `SimInstance`) that simulates
+     * Instance booting and halting.  Each time we read a message from the
+     * instance's channel, we sleep for a bit and then invoke `instance_poke()`
+     * to complete whatever transition is currently outstanding.
+     */
     async fn instance_sim(&self, id: Uuid, mut rx: Receiver<()>) {
         while let Some(_) = rx.next().await {
             tokio::time::delay_for(Duration::from_millis(1500)).await;
@@ -354,6 +368,10 @@ impl ServerController {
         }
     }
 
+    /**
+     * Invoked as part of simulation to complete whatever asynchronous
+     * transition is currently going on for instance `id`.
+     */
     async fn instance_poke(&self, id: Uuid) {
         let (new_state, to_destroy) = {
             /* Do as little as possible with the lock held. */
@@ -396,9 +414,15 @@ impl ServerController {
         /*
          * If the instance came to rest destroyed, complete any async cleanup
          * needed now.
+         * TODO-debug It would be nice to have visibility into instances that
+         * are cleaning up in case we have to debug resource leaks here.
+         * XXX Doesn't this create a deadlock?  We're going to wait for the
+         * background task to complete, but we're being run by the background
+         * task.
          */
-        if let Some(destroyed_instance) = to_destroy {
-            destroyed_instance.cleanup().await;
+        if let Some(mut destroyed_instance) = to_destroy {
+            destroyed_instance.channel_tx.close_channel();
+            destroyed_instance.task.await.unwrap();
         }
     }
 }

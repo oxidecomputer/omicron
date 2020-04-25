@@ -183,6 +183,7 @@ The implementation is divided into several subsystems:
 ** Pagination? (Opaque token?  What does Stripe do?)
 ** Hardening (see RFD 10)
 *** throttling / load shedding
+*** should various uses of serde_json allow additional fields?
 ** Automated testing
 *** General API testing: there's a lot of boilerplate in hand-generated tests
     for each kind of resource.  Would it be reasonable / possible to have a sort
