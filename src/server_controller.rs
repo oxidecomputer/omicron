@@ -22,33 +22,51 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /**
- * `ServerController` is our handle for the software service running on a
- * compute server that manages the control plane on that server.  The current
- * implementation is simulated directly in Rust.  The intent is that this object
- * will be implemented using requests to a remote server and the simulation
- * would be moved to the other side of the network.
+ * `ServerController` is a handle for the software service running on a compute
+ * server that manages the control plane on that server.  The current
+ * implementation simulates a server directly in this program.
+ *
+ * **It's important to be careful about the interface exposed by this struct.**
+ * The intent is for it to eventually be implemented using requests to a remote
+ * server.  The tighter the coupling that exists now, the harder this will be to
+ * move later.
  */
 pub struct ServerController {
+    /** unique id for this server */
     pub id: Uuid,
 
+    /** handle for the internal control plane API */
     ctlsc: ControllerScApi,
+    /** debug log */
     log: Logger,
+    /** collection of simulated instances, indexed by instance uuid */
     instances: Mutex<BTreeMap<Uuid, SimInstance>>,
 }
 
-/*
- * TODO-debug We need visibility into the runtime state of all this.  e.g.,
- * SimInstances that are in async cleanup().
+/**
+ * `SimInstance` simulates an Oxide Rack Instance (virtual machine), as created
+ * by the public API.
+ *
+ * We only simulate the Instance from the perspective of an API consumer, which
+ * means for example accepting a request to boot it, reporting the current state
+ * as "starting", and then some time later reporting that the state is
+ * "running".
  */
 struct SimInstance {
+    /** debug log */
     log: Logger,
+    /** description of the Instance, as we last saw it */
     api_instance: Arc<ApiInstance>,
+    /** tracks the simulated transition of this Instance between run states */
     transition: SimInstanceTransitionState,
-    channel_tx: Sender<()>,
+    /** background task that handles simulated transitions */
     task: JoinHandle<()>,
+    /** channel for transmitting to the background task */
+    channel_tx: Sender<()>,
 }
 
 impl SimInstance {
+    /** Create a new `SimInstance`. */
     fn new(
         api_instance: &Arc<ApiInstance>,
         log: Logger,
@@ -66,17 +84,28 @@ impl SimInstance {
         }
     }
 
-    fn with_state(self, new_state: &SimInstanceTransitionState) -> SimInstance {
+    /**
+     * Consuming the `SimInstance` and return a new `SimInstance` with the
+     * requested `transition`.
+     */
+    fn now_transitioning(
+        self,
+        transition: &SimInstanceTransitionState,
+    ) -> SimInstance {
         SimInstance {
             log: self.log,
             api_instance: Arc::clone(&self.api_instance),
-            transition: new_state.clone(),
+            transition: transition.clone(),
             channel_tx: self.channel_tx,
             task: self.task,
         }
     }
 
-    fn notify(&mut self) {
+    /**
+     * Begins simulating the current transition by sending a message to the
+     * background task.
+     */
+    fn begin_simulated_transition(&mut self) {
         let result = self.channel_tx.try_send(());
         if let Err(error) = result {
             /*
@@ -103,6 +132,10 @@ impl SimInstance {
     }
 
     async fn cleanup(self) {
+        /*
+         * TODO-debug It would be nice to have visibility into instances that
+         * are cleaning up in case we have to debug resource leaks here.
+         */
         let task = self.task;
         let mut tx = self.channel_tx;
         tx.close_channel();
@@ -201,7 +234,6 @@ impl SimInstanceTransitionState {
                 previous,
                 target,
             } => SimInstanceTransitionState::AtRest {
-                // XXX function for this
                 current: next_runtime_state(previous, target),
             },
 
@@ -403,14 +435,14 @@ impl ServerController {
                                 gen: target.gen,
                             },
                         );
-                        let inst2 = instance.with_state(&trans2);
+                        let inst2 = instance.now_transitioning(&trans2);
                         let trans3 = trans2.transition_finish();
-                        let inst3 = inst2.with_state(&trans3);
+                        let inst3 = inst2.now_transitioning(&trans3);
 
                         /* Begin transition from "starting" to "running". */
                         let (trans4, _) =
                             inst3.transition.transition_start(target.clone());
-                        let inst4 = inst3.with_state(&trans4);
+                        let inst4 = inst3.now_transitioning(&trans4);
                         instance = inst4;
                     }
 
@@ -422,7 +454,7 @@ impl ServerController {
 
             let before = current_instance.transition.clone();
             let (after, dropped) = before.transition_start(target.clone());
-            let next = current_instance.with_state(&after);
+            let next = current_instance.now_transitioning(&after);
 
             info!(next.log, "instance_ensure";
                 "initial" => ?before,
@@ -433,7 +465,7 @@ impl ServerController {
             next
         };
 
-        next_instance.notify();
+        next_instance.begin_simulated_transition();
         let rv = next_instance.transition.current_state().clone();
         instances.insert(id.clone(), next_instance);
         Ok(rv)
@@ -465,9 +497,9 @@ impl ServerController {
                 (next_instance_state, Some(current_instance))
             } else {
                 let mut next_instance =
-                    current_instance.with_state(&next_transition);
+                    current_instance.now_transitioning(&next_transition);
                 if next_transition.transition_pending() {
-                    next_instance.notify();
+                    next_instance.begin_simulated_transition();
                 }
                 instances.insert(id.clone(), next_instance);
                 (next_instance_state, None)

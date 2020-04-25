@@ -148,6 +148,7 @@ The implementation is divided into several subsystems:
 ** incorporate openapi directly into this subcrate
 ** Dropshot itself should be documented
 ** separate out api_model_data.rs?
+** use serde_json::StreamDeserializer where we use NDJSON
 * Flesh out more endpoints and simulator
 ** support for update of instances (i.e., PUT)?
 * Write out road map
