@@ -215,6 +215,7 @@ impl SimInstance {
          *     but that's not currently the case.
          */
         if need_async {
+            self.requested_run_state = Some(target.clone());
             let result = self.channel_tx.try_send(());
             if let Err(error) = result {
                 assert!(!error.is_disconnected());
