@@ -401,7 +401,7 @@ pub struct ApiInstance {
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
     /** last user-requested state for this instance */
-    pub state_requested: ApiInstanceState, /* TODO should be separate type? */
+    pub state_requested: ApiInstanceRuntimeStateParams,
 
     /** state owned by the data plane */
     pub runtime: ApiInstanceRuntimeState,

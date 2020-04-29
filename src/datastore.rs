@@ -9,7 +9,7 @@ use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceState;
+use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -34,15 +34,11 @@ pub struct ControlDataStore {
 }
 
 /*
- * TODO-cleanup:
- * - should projects_by_name refer to projects by Uuid instead so we don't have
- *   two datastructures with pointers to projects?
- * - could probably use an internal project_lookup_by_name and
- *   project_lookup_by_id that returns the project id, project name, ApiProject,
- *   _and_ list of instances.  Then use that consistently everywhere.  (What if
- *   we need the list of instances to be mutable?)
- * - should we actually wrap ^ up in a type?  That's not realistic for a real
- *   datastore.
+ * TODO-cleanup: We could clean up the interface for projects here by storing
+ * projects_by_id (a map from Uuid to Arc<ApiProject>).  We may want to change
+ * `projects_by_name` to map from ApiName to Uuid.  This will allow a clearer
+ * interface for getting information about a project by either id or name
+ * without duplicating a reference to the project.
  */
 struct CdsData {
     /** projects in the system, indexed by name */
@@ -219,7 +215,8 @@ impl ControlDataStore {
         &self,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
-        runtime: &ApiInstanceRuntimeState,
+        runtime_initial: &ApiInstanceRuntimeState,
+        runtime_wanted: &ApiInstanceRuntimeStateParams,
     ) -> CreateResult<ApiInstance> {
         let now = Utc::now();
         let newname = params.identity.name.clone();
@@ -260,18 +257,8 @@ impl ControlDataStore {
             memory: params.memory,
             boot_disk_size: params.boot_disk_size,
             hostname: params.hostname.clone(),
-            /*
-             * TODO-cleanup This is very nitty, but choosing the initial state
-             * to be "Running" is a policy of the caller, not us.  They should
-             * provide that.  However, we're not ready to go quite so far as to
-             * require that the _user_ provide that.  And right now, whatever
-             * the user provides is exactly what gets passed through to here.
-             * We may need another layer, but we already have so many
-             * (InstanceCreateParams, Instance, InstanceView) that we're
-             * reluctant to add another one yet just for this case.
-             */
-            state_requested: ApiInstanceState::Running,
-            runtime: runtime.clone(),
+            state_requested: runtime_wanted.clone(),
+            runtime: runtime_initial.clone(),
         });
 
         instances.insert(newname, Arc::clone(&instance));
@@ -331,7 +318,7 @@ impl ControlDataStore {
         Ok(())
     }
 
-    pub async fn instance_update_internal(
+    pub async fn instance_update_runtime(
         &self,
         id: &Uuid,
         new_runtime: &ApiInstanceRuntimeState,

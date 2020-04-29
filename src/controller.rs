@@ -256,9 +256,17 @@ impl OxideController {
          * Store the first revision of the Instance into the database.  This
          * will have state "Creating".
          */
+        let runtime_params = ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Running,
+        };
         let instance_created = self
             .datastore
-            .project_create_instance(project_name, params, &runtime)
+            .project_create_instance(
+                project_name,
+                params,
+                &runtime,
+                &runtime_params,
+            )
             .await?;
         let id = instance_created.identity.id.clone();
 
@@ -266,19 +274,14 @@ impl OxideController {
          * Notify the SC, which will return an updated runtime state (which
          * should be "Starting".
          */
-        let runtime_state = sc
-            .instance_ensure(instance_created, &ApiInstanceRuntimeStateParams {
-                run_state: ApiInstanceState::Running,
-            })
-            .await?;
+        let runtime_state =
+            sc.instance_ensure(instance_created, &runtime_params).await?;
 
         /*
          * Update the database to reflect the new "Starting" state.
          */
-        let instance_updated = self
-            .datastore
-            .instance_update_runtime(&id, &runtime_state)
-            .await?;
+        let instance_updated =
+            self.datastore.instance_update_runtime(&id, &runtime_state).await?;
         Ok(instance_updated)
     }
 
