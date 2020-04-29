@@ -331,19 +331,6 @@ impl ControlDataStore {
         Ok(())
     }
 
-    pub async fn instance_lookup_by_id(
-        &self,
-        instance_id: &Uuid,
-    ) -> LookupResult<ApiInstance> {
-        let data = self.data.lock().await;
-        let instance = collection_lookup_by_id(
-            &data.instances_by_id,
-            instance_id,
-            ApiResourceType::Instance,
-        )?;
-        Ok(Arc::clone(instance))
-    }
-
     pub async fn instance_update_internal(
         &self,
         id: &Uuid,
@@ -356,6 +343,22 @@ impl ControlDataStore {
                 id,
                 ApiResourceType::Instance,
             )?;
+
+            /*
+             * TODO-debug: log a big loud error if the generation numbers match
+             * but the states don't.
+             */
+            if old_instance.runtime.gen > new_runtime.gen {
+                let message = format!(
+                    "dropped instance runtime update to gen {} (already at \
+                     gen {})",
+                    old_instance.runtime.gen, new_runtime.gen
+                );
+                return Err(ApiError::InvalidRequest {
+                    message,
+                });
+            }
+
             let instance_name = &old_instance.identity.name;
             let instance = Arc::new(ApiInstance {
                 identity: old_instance.identity.clone(),

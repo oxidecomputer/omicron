@@ -270,7 +270,6 @@ impl OxideController {
             .instance_ensure(instance_created, &ApiInstanceRuntimeStateParams {
                 run_state: Some(ApiInstanceState::Running),
                 server_uuid: None,
-                gen: runtime.gen + 1,
             })
             .await?;
 

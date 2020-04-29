@@ -17,7 +17,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /**
@@ -63,8 +62,6 @@ struct SimInstance {
 
     /** Debug log */
     log: Logger,
-    /** Background task that handles simulated transitions */
-    task: JoinHandle<()>,
     /** Channel for transmitting to the background task */
     channel_tx: Sender<()>,
 }
@@ -73,12 +70,12 @@ struct SimInstance {
  * Buffer size for channel used to communicate with each SimInstance's
  * background task.  Messages sent on this channel trigger the task to simulate
  * an Instance state transition by sleeping for some interval and then updating
- * the Instance state.  Note that when the background task updates the Instance
- * state after sleeping, it always looks at the current state to decide what to
- * do.  As a result, we never need to queue up more than one transition.  In
- * turn, tha tmeans we don't need (or want) a channel buffer larger than 1.
- * If we were to queue up multiple messages in the buffer, the net effect would
- * be exactly the same as if just one message were queued.  (Because of what we
+ * the Instance state.  When the background task updates the Instance state
+ * after sleeping, it always looks at the current state to decide what to do.
+ * As a result, we never need to queue up more than one transition.  In turn,
+ * that means we don't need (or want) a channel buffer larger than 1.  If we
+ * were to queue up multiple messages in the buffer, the net effect would be
+ * exactly the same as if just one message were queued.  (Because of what we
  * said above, as part of processing that message, the receiver will wind up
  * handling all state transitions requested up to the point where the first
  * message is read.  If another transition is requested after that point,
@@ -100,13 +97,11 @@ impl SimInstance {
         api_instance: &Arc<ApiInstance>,
         log: Logger,
         tx: Sender<()>,
-        task: JoinHandle<()>,
     ) -> SimInstance {
         SimInstance {
             current_run_state: api_instance.runtime.clone(),
             requested_run_state: None,
             log: log,
-            task: task,
             channel_tx: tx,
         }
     }
@@ -132,7 +127,7 @@ impl SimInstance {
          * In all cases, set `requested_run_state` to the new target.  If there
          * was already a requested run state, we will return this to the caller
          * so that they can log a possible dropped transition.  This is only
-         * useful for debugging.
+         * intended for debugging.
          */
         let dropped = self.requested_run_state.take();
         let state_before = &self.current_run_state.run_state;
@@ -305,14 +300,6 @@ impl ServerController {
      * Idempotently ensures that the given API Instance (described by
      * `api_instance`) exists on this server in the given runtime state
      * (described by `target`).
-     * TODO-correctness What's the semantics of the generation number in the
-     * "target" here?  It seems like if the API receives one of these, the
-     * generation number ought to be a base to be compared against (i.e., a
-     * precondition).  However, by the time we get here, this call is supposed
-     * to be idempotent, so we shouldn't have a precondition.  Nor is it
-     * meaningful to have this be propagated to the RuntimeState (!Params).
-     * _That_ generation number should only be incremented when the backend (us)
-     * actually changes the runtime state.
      */
     pub async fn instance_ensure(
         self: &Arc<Self>,
@@ -332,13 +319,13 @@ impl ServerController {
                 );
                 let idc = id.clone();
                 let selfc = Arc::clone(&self);
-                let task = tokio::spawn(async move {
+                tokio::spawn(async move {
                     selfc.instance_sim(idc, rx).await;
                 });
                 let log = self.log.new(o!("instance_id" => idc.to_string()));
                 debug!(log, "instance_ensure (new instance)";
                     "initial_state" => ?api_instance);
-                SimInstance::new(&api_instance, log, tx, task)
+                SimInstance::new(&api_instance, log, tx)
             }
         };
 
@@ -417,13 +404,12 @@ impl ServerController {
          * needed now.
          * TODO-debug It would be nice to have visibility into instances that
          * are cleaning up in case we have to debug resource leaks here.
-         * XXX Doesn't this create a deadlock?  We're going to wait for the
-         * background task to complete, but we're being run by the background
-         * task.
+         * TODO-correctness Is it a problem that nobody waits on the background
+         * task?  If we did it here, we'd deadlock, since we're invoked from the
+         * background task.
          */
         if let Some(mut destroyed_instance) = to_destroy {
             destroyed_instance.channel_tx.close_channel();
-            destroyed_instance.task.await.unwrap();
         }
     }
 }

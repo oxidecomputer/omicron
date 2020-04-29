@@ -439,7 +439,6 @@ pub struct ApiInstanceRuntimeState {
 pub struct ApiInstanceRuntimeStateParams {
     pub run_state: Option<ApiInstanceState>,
     pub server_uuid: Option<Uuid>,
-    pub gen: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
