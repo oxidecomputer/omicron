@@ -132,9 +132,7 @@ impl SimInstance {
         let dropped = self.requested_run_state.take();
         let state_before = &self.current_run_state.run_state;
         let state_after = match target.run_state {
-            /* There's nothing to do if the target run state isn't changing. */
-            None => return dropped,
-            Some(ref target_run_state) if target_run_state == state_before => {
+            ref target_run_state if target_run_state == state_before => {
                 return dropped
             }
 
@@ -143,12 +141,12 @@ impl SimInstance {
              * request), just try to do the closest reasonable thing.
              * TODO-cleanup Use a different type here.
              */
-            Some(ApiInstanceState::Creating) => &ApiInstanceState::Running,
-            Some(ApiInstanceState::Starting) => &ApiInstanceState::Running,
-            Some(ApiInstanceState::Stopping) => &ApiInstanceState::Stopped,
+            ApiInstanceState::Creating => &ApiInstanceState::Running,
+            ApiInstanceState::Starting => &ApiInstanceState::Running,
+            ApiInstanceState::Stopping => &ApiInstanceState::Stopped,
 
             /* This is the most common interesting case. */
-            Some(ref target_run_state) => target_run_state,
+            ref target_run_state => target_run_state,
         };
 
         /*
@@ -169,21 +167,10 @@ impl SimInstance {
         /*
          * Update the current state to reflect what we've decided -- either
          * going directly to the requested state or to an intermediate state.
-         * We apply any change to "server_uuid" immediately, even if the
-         * requested transition is otherwise asynchronous.
-         * TODO-correctness what should we actually do with a request that
-         * changes the server_uuid?  Between that and the generation number
-         * making no sense in the ApiInstanceRuntimeStateParams, maybe we need a
-         * separate type here that doesn't have either of those two fields.
          */
-        let new_server_uuid = target
-            .server_uuid
-            .as_ref()
-            .unwrap_or(&self.current_run_state.server_uuid)
-            .clone();
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
-            server_uuid: new_server_uuid,
+            server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
         };
@@ -249,7 +236,7 @@ impl SimInstance {
          * transitions and assert that here.
          */
         let run_state_before = &self.current_run_state.run_state;
-        let run_state_after = requested_run_state.run_state.unwrap();
+        let run_state_after = requested_run_state.run_state;
         match run_state_before {
             ApiInstanceState::Starting => {
                 assert_eq!(run_state_after, ApiInstanceState::Running)
@@ -262,17 +249,10 @@ impl SimInstance {
 
         /*
          * Having verified all that, we can update the Instance's state.
-         * "server_uuid" was already updated in `transition()`.
          */
-        if let Some(requested_server_uuid) = requested_run_state.server_uuid {
-            assert_eq!(
-                requested_server_uuid,
-                self.current_run_state.server_uuid
-            );
-        }
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: run_state_after.clone(),
-            server_uuid: self.current_run_state.server_uuid,
+            server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
         }
