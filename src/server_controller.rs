@@ -41,6 +41,137 @@ pub struct ServerController {
     instances: Mutex<BTreeMap<Uuid, SimInstance>>,
 }
 
+impl ServerController {
+    /** Constructs a simulated ServerController with the given uuid. */
+    pub fn new_simulated_with_id(
+        id: &Uuid,
+        log: Logger,
+        ctlsc: ControllerScApi,
+    ) -> ServerController {
+        info!(log, "created server controller");
+
+        ServerController {
+            id: id.clone(),
+            log: log,
+            ctlsc: ctlsc,
+            instances: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /**
+     * Idempotently ensures that the given API Instance (described by
+     * `api_instance`) exists on this server in the given runtime state
+     * (described by `target`).
+     */
+    pub async fn instance_ensure(
+        self: &Arc<Self>,
+        api_instance: Arc<ApiInstance>,
+        target: &ApiInstanceRuntimeStateParams,
+    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        let id = api_instance.identity.id.clone();
+        let mut instances = self.instances.lock().await;
+        let maybe_current_instance = instances.remove(&id);
+        let mut instance = {
+            if let Some(current_instance) = maybe_current_instance {
+                current_instance
+            } else {
+                /* Create a new Instance. */
+                let (tx, rx) = futures::channel::mpsc::channel(
+                    SIM_INSTANCE_CHANNEL_BUFFER_SIZE,
+                );
+                let idc = id.clone();
+                let selfc = Arc::clone(&self);
+                tokio::spawn(async move {
+                    selfc.instance_sim(idc, rx).await;
+                });
+                let log = self.log.new(o!("instance_id" => idc.to_string()));
+                debug!(log, "instance_ensure (new instance)";
+                    "initial_state" => ?api_instance);
+                SimInstance::new(&api_instance, log, tx)
+            }
+        };
+
+        let before = instance.current_run_state.clone();
+        let dropped = instance.transition(target);
+        let after = instance.current_run_state.clone();
+
+        info!(instance.log, "instance_ensure";
+            "initial" => ?before,
+            "next_state" => ?after,
+            "dropped_transition" => ?dropped.map(|d| d.run_state),
+        );
+
+        instances.insert(id.clone(), instance);
+        Ok(after)
+    }
+
+    /**
+     * Body of the background task (one per `SimInstance`) that simulates
+     * Instance booting and halting.  Each time we read a message from the
+     * instance's channel, we sleep for a bit and then invoke `instance_poke()`
+     * to complete whatever transition is currently outstanding.
+     */
+    async fn instance_sim(&self, id: Uuid, mut rx: Receiver<()>) {
+        while let Some(_) = rx.next().await {
+            tokio::time::delay_for(Duration::from_millis(1500)).await;
+            self.instance_poke(id).await;
+        }
+    }
+
+    /**
+     * Invoked as part of simulation to complete whatever asynchronous
+     * transition is currently going on for instance `id`.
+     */
+    async fn instance_poke(&self, id: Uuid) {
+        let (new_state, to_destroy) = {
+            /* Do as little as possible with the lock held. */
+            let mut instances = self.instances.lock().await;
+            let mut instance = instances.remove(&id).unwrap();
+            let before = instance.current_run_state.clone();
+            instance.transition_finish();
+            let after = instance.current_run_state.clone();
+            info!(instance.log, "instance transitioning";
+                "previously" => ?before,
+                "now" => ?after,
+            );
+
+            if instance.requested_run_state.is_none()
+                && after.run_state == ApiInstanceState::Destroyed
+            {
+                info!(instance.log, "instance came to rest destroyed");
+                (after, Some(instance))
+            } else {
+                instances.insert(id.clone(), instance);
+                (after, None)
+            }
+        };
+
+        /*
+         * Notify the controller that the instance state has changed.  The
+         * server controller is authoritative for the runtime state, and we use
+         * a generation number here so that calls processed out of order do not
+         * settle on the wrong value.
+         * TODO-correctness: how will state be correctly updated if OXCP or the
+         * data storage system are down right now?  Something will need to
+         * resolve this asynchronously.
+         */
+        self.ctlsc.notify_instance_updated(&id, &new_state).await;
+
+        /*
+         * If the instance came to rest destroyed, complete any async cleanup
+         * needed now.
+         * TODO-debug It would be nice to have visibility into instances that
+         * are cleaning up in case we have to debug resource leaks here.
+         * TODO-correctness Is it a problem that nobody waits on the background
+         * task?  If we did it here, we'd deadlock, since we're invoked from the
+         * background task.
+         */
+        if let Some(mut destroyed_instance) = to_destroy {
+            destroyed_instance.channel_tx.close_channel();
+        }
+    }
+}
+
 /**
  * `SimInstance` simulates an Oxide Rack Instance (virtual machine), as created
  * by the public API.
@@ -255,137 +386,6 @@ impl SimInstance {
             server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
-        }
-    }
-}
-
-impl ServerController {
-    /** Constructs a simulated ServerController with the given uuid. */
-    pub fn new_simulated_with_id(
-        id: &Uuid,
-        log: Logger,
-        ctlsc: ControllerScApi,
-    ) -> ServerController {
-        info!(log, "created server controller");
-
-        ServerController {
-            id: id.clone(),
-            log: log,
-            ctlsc: ctlsc,
-            instances: Mutex::new(BTreeMap::new()),
-        }
-    }
-
-    /**
-     * Idempotently ensures that the given API Instance (described by
-     * `api_instance`) exists on this server in the given runtime state
-     * (described by `target`).
-     */
-    pub async fn instance_ensure(
-        self: &Arc<Self>,
-        api_instance: Arc<ApiInstance>,
-        target: &ApiInstanceRuntimeStateParams,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        let id = api_instance.identity.id.clone();
-        let mut instances = self.instances.lock().await;
-        let maybe_current_instance = instances.remove(&id);
-        let mut instance = {
-            if let Some(current_instance) = maybe_current_instance {
-                current_instance
-            } else {
-                /* Create a new Instance. */
-                let (tx, rx) = futures::channel::mpsc::channel(
-                    SIM_INSTANCE_CHANNEL_BUFFER_SIZE,
-                );
-                let idc = id.clone();
-                let selfc = Arc::clone(&self);
-                tokio::spawn(async move {
-                    selfc.instance_sim(idc, rx).await;
-                });
-                let log = self.log.new(o!("instance_id" => idc.to_string()));
-                debug!(log, "instance_ensure (new instance)";
-                    "initial_state" => ?api_instance);
-                SimInstance::new(&api_instance, log, tx)
-            }
-        };
-
-        let before = instance.current_run_state.clone();
-        let dropped = instance.transition(target);
-        let after = instance.current_run_state.clone();
-
-        info!(instance.log, "instance_ensure";
-            "initial" => ?before,
-            "next_state" => ?after,
-            "dropped_transition" => ?dropped.map(|d| d.run_state),
-        );
-
-        instances.insert(id.clone(), instance);
-        Ok(after)
-    }
-
-    /**
-     * Body of the background task (one per `SimInstance`) that simulates
-     * Instance booting and halting.  Each time we read a message from the
-     * instance's channel, we sleep for a bit and then invoke `instance_poke()`
-     * to complete whatever transition is currently outstanding.
-     */
-    async fn instance_sim(&self, id: Uuid, mut rx: Receiver<()>) {
-        while let Some(_) = rx.next().await {
-            tokio::time::delay_for(Duration::from_millis(1500)).await;
-            self.instance_poke(id).await;
-        }
-    }
-
-    /**
-     * Invoked as part of simulation to complete whatever asynchronous
-     * transition is currently going on for instance `id`.
-     */
-    async fn instance_poke(&self, id: Uuid) {
-        let (new_state, to_destroy) = {
-            /* Do as little as possible with the lock held. */
-            let mut instances = self.instances.lock().await;
-            let mut instance = instances.remove(&id).unwrap();
-            let before = instance.current_run_state.clone();
-            instance.transition_finish();
-            let after = instance.current_run_state.clone();
-            info!(instance.log, "instance transitioning";
-                "previously" => ?before,
-                "now" => ?after,
-            );
-
-            if instance.requested_run_state.is_none()
-                && after.run_state == ApiInstanceState::Destroyed
-            {
-                info!(instance.log, "instance came to rest destroyed");
-                (after, Some(instance))
-            } else {
-                instances.insert(id.clone(), instance);
-                (after, None)
-            }
-        };
-
-        /*
-         * Notify the controller that the instance state has changed.  The
-         * server controller is authoritative for the runtime state, and we use
-         * a generation number here so that calls processed out of order do not
-         * settle on the wrong value.
-         * TODO-correctness: how will state be correctly updated if OXCP or the
-         * data storage system are down right now?  Something will need to
-         * resolve this asynchronously.
-         */
-        self.ctlsc.notify_instance_updated(&id, &new_state).await;
-
-        /*
-         * If the instance came to rest destroyed, complete any async cleanup
-         * needed now.
-         * TODO-debug It would be nice to have visibility into instances that
-         * are cleaning up in case we have to debug resource leaks here.
-         * TODO-correctness Is it a problem that nobody waits on the background
-         * task?  If we did it here, we'd deadlock, since we're invoked from the
-         * background task.
-         */
-        if let Some(mut destroyed_instance) = to_destroy {
-            destroyed_instance.channel_tx.close_channel();
         }
     }
 }

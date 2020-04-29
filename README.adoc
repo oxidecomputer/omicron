@@ -135,8 +135,9 @@ The implementation is divided into several subsystems:
 == TODO
 
 * Working on instances
-** Add tests for SimInstance and other changes in my branch
+** Add tests for SimInstance
 * Repo cleanup
+** move TODO to another file
 ** rename "lib" to something else (e.g., "local_deps")
 ** incorporate openapi directly into this subcrate
 ** Dropshot itself should be documented
