@@ -13,6 +13,7 @@ pub mod api_model;
 mod controller;
 mod datastore;
 mod server_controller;
+mod test_util;
 
 pub use api_config::ApiServerConfig;
 use api_model::ApiIdentityMetadataCreateParams;

@@ -289,6 +289,12 @@ impl LogContext {
             log_path: log_path,
         }
     }
+
+    pub fn cleanup_successful(self) {
+        if let Some(ref log_path) = self.log_path {
+            fs::remove_file(log_path).unwrap();
+        }
+    }
 }
 
 /*
@@ -356,9 +362,7 @@ impl TestContext {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
         join_result.expect("server stopped with an error");
-        if let Some(ref log_path) = self.log_context.log_path {
-            fs::remove_file(log_path).unwrap();
-        }
+        self.log_context.cleanup_successful();
     }
 }
 

@@ -76,31 +76,22 @@ impl ServerController {
                 current_instance
             } else {
                 /* Create a new Instance. */
-                let (tx, rx) = futures::channel::mpsc::channel(
-                    SIM_INSTANCE_CHANNEL_BUFFER_SIZE,
-                );
                 let idc = id.clone();
+                let log = self.log.new(o!("instance_id" => idc.to_string()));
+                let (new_instance, rx) =
+                    SimInstance::new(&api_instance.runtime, log);
+
                 let selfc = Arc::clone(&self);
                 tokio::spawn(async move {
                     selfc.instance_sim(idc, rx).await;
                 });
-                let log = self.log.new(o!("instance_id" => idc.to_string()));
-                debug!(log, "instance_ensure (new instance)";
-                    "initial_state" => ?api_instance);
-                SimInstance::new(&api_instance, log, tx)
+
+                new_instance
             }
         };
 
-        let before = instance.current_run_state.clone();
-        let dropped = instance.transition(target);
+        instance.transition(target);
         let after = instance.current_run_state.clone();
-
-        info!(instance.log, "instance_ensure";
-            "initial" => ?before,
-            "next_state" => ?after,
-            "dropped_transition" => ?dropped.map(|d| d.run_state),
-        );
-
         instances.insert(id.clone(), instance);
         Ok(after)
     }
@@ -127,14 +118,8 @@ impl ServerController {
             /* Do as little as possible with the lock held. */
             let mut instances = self.instances.lock().await;
             let mut instance = instances.remove(&id).unwrap();
-            let before = instance.current_run_state.clone();
             instance.transition_finish();
             let after = instance.current_run_state.clone();
-            info!(instance.log, "instance transitioning";
-                "previously" => ?before,
-                "now" => ?after,
-            );
-
             if instance.requested_run_state.is_none()
                 && after.run_state == ApiInstanceState::Destroyed
             {
@@ -218,23 +203,25 @@ struct SimInstance {
  */
 const SIM_INSTANCE_CHANNEL_BUFFER_SIZE: usize = 0;
 
-/**
- * TODO-coverage: unit tests for SimInstance could cover a lot of ground,
- * especially if we add an at_rest() function.
- */
 impl SimInstance {
     /** Create a new `SimInstance`. */
     fn new(
-        api_instance: &Arc<ApiInstance>,
+        initial_runtime: &ApiInstanceRuntimeState,
         log: Logger,
-        tx: Sender<()>,
-    ) -> SimInstance {
-        SimInstance {
-            current_run_state: api_instance.runtime.clone(),
-            requested_run_state: None,
-            log: log,
-            channel_tx: tx,
-        }
+    ) -> (SimInstance, Receiver<()>) {
+        debug!(log, "created simulated instance";
+            "initial_state" => ?initial_runtime);
+        let (tx, rx) =
+            futures::channel::mpsc::channel(SIM_INSTANCE_CHANNEL_BUFFER_SIZE);
+        (
+            SimInstance {
+                current_run_state: initial_runtime.clone(),
+                requested_run_state: None,
+                log: log,
+                channel_tx: tx,
+            },
+            rx,
+        )
     }
 
     /**
@@ -261,10 +248,12 @@ impl SimInstance {
          * intended for debugging.
          */
         let dropped = self.requested_run_state.take();
-        let state_before = &self.current_run_state.run_state;
+        let state_before = self.current_run_state.run_state.clone();
         let state_after = match target.run_state {
-            ref target_run_state if target_run_state == state_before => {
-                return dropped
+            ref target_run_state if *target_run_state == state_before => {
+                debug!(self.log, "noop transition";
+                    "target" => ?target);
+                return dropped;
             }
 
             /*
@@ -305,6 +294,15 @@ impl SimInstance {
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
         };
+
+        debug!(self.log, "instance transition";
+            "state_before" => %state_before,
+            "state_after" => %state_after,
+            "immed_next_state" => %immed_next_state,
+            "dropped" => ?dropped,
+            "async" => %need_async,
+            "new_runtime" => ?self.current_run_state
+        );
 
         /*
          * If this is an asynchronous transition, notify the background task to
@@ -354,7 +352,11 @@ impl SimInstance {
              * sending a message to the background task if we were already in an
              * async transition.
              */
-            None => return,
+            None => {
+                debug!(self.log, "noop transition finish";
+                    "current_run_state" => %self.current_run_state.run_state);
+                return;
+            }
             Some(run_state) => run_state,
         };
 
@@ -362,18 +364,18 @@ impl SimInstance {
          * As documented above, `self.requested_run_state` is only non-None when
          * there's an asynchronous (simulated) transition in progress, and the
          * only such transitions start at "Starting" or "Stopping" and go to
-         * "Running" or "Stopped", respectively.  Since we checked
-         * `self.requested_run_state` above, we know we're in one of these two
-         * transitions and assert that here.
+         * "Running" or one of several stopped states, respectively.  Since we
+         * checked `self.requested_run_state` above, we know we're in one of
+         * these two transitions and assert that here.
          */
-        let run_state_before = &self.current_run_state.run_state;
+        let run_state_before = self.current_run_state.run_state.clone();
         let run_state_after = requested_run_state.run_state;
         match run_state_before {
             ApiInstanceState::Starting => {
-                assert_eq!(run_state_after, ApiInstanceState::Running)
+                assert_eq!(run_state_after, ApiInstanceState::Running);
             }
             ApiInstanceState::Stopping => {
-                assert_eq!(run_state_after, ApiInstanceState::Stopped)
+                assert!(run_state_after.is_stopped());
             }
             _ => panic!("async transition started for unexpected state"),
         };
@@ -386,6 +388,223 @@ impl SimInstance {
             server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
+        };
+
+        debug!(self.log, "simulated transition finish";
+            "state_before" => %run_state_before,
+            "state_after" => %run_state_after,
+            "new_runtime" => ?self.current_run_state
+        );
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::SimInstance;
+    use crate::api_model::ApiInstanceRuntimeState;
+    use crate::api_model::ApiInstanceRuntimeStateParams;
+    use crate::api_model::ApiInstanceState;
+    use crate::test_util::test_setup_log;
+    use chrono::Utc;
+    use dropshot::test_util::LogContext;
+    use futures::channel::mpsc::Receiver;
+
+    fn make_instance(
+        logctx: &LogContext,
+        initial_state: ApiInstanceState,
+    ) -> (SimInstance, Receiver<()>) {
+        let now = Utc::now();
+        let initial_runtime = {
+            ApiInstanceRuntimeState {
+                run_state: initial_state,
+                server_uuid: uuid::Uuid::new_v4(),
+                gen: 1,
+                time_updated: now,
+            }
+        };
+
+        SimInstance::new(&initial_runtime, logctx.log.new(o!()))
+    }
+
+    #[tokio::test]
+    async fn test_sim_instance() {
+        let logctx = test_setup_log("test_sim_instance").await;
+        let (mut instance, mut rx) =
+            make_instance(&logctx, ApiInstanceState::Creating);
+        let r1 = instance.current_run_state.clone();
+
+        info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
+        assert_eq!(r1.run_state, ApiInstanceState::Creating);
+        assert_eq!(r1.gen, 1);
+
+        /*
+         * There's no asynchronous transition going on yet so a
+         * transition_finish() shouldn't change anything.
+         */
+        assert!(instance.requested_run_state.is_none());
+        instance.transition_finish();
+        assert!(instance.requested_run_state.is_none());
+        assert_eq!(&r1.time_updated, &instance.current_run_state.time_updated);
+        assert_eq!(&r1.run_state, &instance.current_run_state.run_state);
+        assert_eq!(r1.gen, instance.current_run_state.gen);
+        assert!(rx.try_next().is_err());
+
+        /*
+         * We should be able to transition immediately to any other stopped
+         * state, including the one we're already in ("Creating")
+         */
+        let stopped_states = vec![
+            ApiInstanceState::Creating,
+            ApiInstanceState::Stopped,
+            ApiInstanceState::Repairing,
+            ApiInstanceState::Failed,
+            ApiInstanceState::Destroyed,
+        ];
+        let mut rprev = r1;
+        for state in stopped_states {
+            assert!(rprev.run_state.is_stopped());
+            let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+                run_state: state.clone(),
+            });
+            assert!(dropped.is_none());
+            assert!(instance.requested_run_state.is_none());
+            let rnext = instance.current_run_state.clone();
+            if state != rprev.run_state {
+                assert!(rnext.gen > rprev.gen);
+            }
+            assert!(rnext.time_updated >= rprev.time_updated);
+            assert_eq!(rnext.run_state, state);
+            assert!(rx.try_next().is_err());
+            rprev = rnext;
         }
+
+        /*
+         * Now, if we transition to "Running", we must go through the async
+         * process.
+         */
+        assert!(rprev.run_state.is_stopped());
+        assert!(rx.try_next().is_err());
+        let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Running,
+        });
+        assert!(dropped.is_none());
+        assert!(instance.requested_run_state.is_some());
+        assert!(rx.try_next().is_ok());
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_run_state.is_none());
+        assert!(rx.try_next().is_err());
+        assert_eq!(rprev.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * If we transition again to "Running", the process should complete
+         * immediately.
+         */
+        assert!(!rprev.run_state.is_stopped());
+        let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Running,
+        });
+        assert!(dropped.is_none());
+        assert!(instance.requested_run_state.is_none());
+        assert!(rx.try_next().is_err());
+        let rnext = instance.current_run_state.clone();
+        assert_eq!(rnext.gen, rprev.gen);
+        assert_eq!(rnext.time_updated, rprev.time_updated);
+        assert_eq!(rnext.run_state, rprev.run_state);
+        rprev = rnext;
+
+        /*
+         * If we go back to any stopped state, we go through the async process
+         * again.
+         */
+        assert!(!rprev.run_state.is_stopped());
+        assert!(rx.try_next().is_err());
+        let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Destroyed,
+        });
+        assert!(dropped.is_none());
+        assert!(instance.requested_run_state.is_some());
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_run_state.is_none());
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * Now let's test the behavior of dropping a transition.  We'll start
+         * transitioning back to "Running".  Then, while we're still in
+         * "Starting", will transition back to "Destroyed".  We should
+         * immediately go to "Stopping", and completing the transition should
+         * take us to "Destroyed".
+         */
+        assert!(rprev.run_state.is_stopped());
+        let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Running,
+        });
+        assert!(dropped.is_none());
+        assert!(instance.requested_run_state.is_some());
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        /*
+         * Interrupt the async transition with a new one.
+         */
+        let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Destroyed,
+        });
+        assert_eq!(dropped.unwrap().run_state, ApiInstanceState::Running);
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        rprev = rnext;
+
+        /*
+         * Finish the async transition.
+         */
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_run_state.is_none());
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_run_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        logctx.cleanup_successful();
     }
 }

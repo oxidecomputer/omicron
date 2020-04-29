@@ -1,5 +1,5 @@
 /*!
- * Shared automated testing facilities
+ * Shared integration testing facilities
  */
 
 use dropshot::test_util::LogContext;
