@@ -277,7 +277,7 @@ impl OxideController {
          */
         let instance_updated = self
             .datastore
-            .instance_update_internal(&id, &runtime_state)
+            .instance_update_runtime(&id, &runtime_state)
             .await?;
         Ok(instance_updated)
     }
@@ -338,11 +338,22 @@ impl OxideController {
     }
 }
 
+/**
+ * `ControllerScApi` represents the API exposed by the OxideController (OXCP)
+ * for use by ServerControllers.  Like `ServerController`, this is currently
+ * implemented directly in Rust, but the intent is for this to be a network call
+ * of some kind, so we should be careful about the kinds of interfaces exposed
+ * here.
+ */
 pub struct ControllerScApi {
     controller: Arc<OxideController>,
 }
 
 impl ControllerScApi {
+    /**
+     * Invoked by a server controller to publish an updated runtime state for an
+     * Instance.
+     */
     pub async fn notify_instance_updated(
         &self,
         id: &Uuid,
@@ -351,7 +362,7 @@ impl ControllerScApi {
         let datastore = &self.controller.datastore;
         let log = &self.controller.log;
         let result =
-            datastore.instance_update_internal(id, &new_runtime_state).await;
+            datastore.instance_update_runtime(id, &new_runtime_state).await;
 
         if let Err(error) = result {
             warn!(log, "failed to update instance from server controller";
