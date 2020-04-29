@@ -9,8 +9,8 @@
 
 use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
-use dropshot::ConfigLoggingLevel;
 use dropshot::ConfigLoggingIfExists;
+use dropshot::ConfigLoggingLevel;
 
 /*
  * This function is currently only used by unit tests.  We want the dead code
