@@ -365,17 +365,13 @@ impl ServerController {
         };
 
         /*
-         * Notify the controller that the instance state has changed.
-         * TODO-correctness: how do we make sure that the latest state is
-         * reflected in the database if two of these calls are processed out of
-         * order? And that we don't clobber other database state changes?  Maybe
-         * we say that the SC (us) are authoritative, but only for certain
-         * values.  Then we can provide a generation number or even maybe a
-         * timestamp with this request that OXCP can use to make sure the latest
-         * state is reflected.
+         * Notify the controller that the instance state has changed.  The
+         * server controller is authoritative for the runtime state, and we use
+         * a generation number here so that calls processed out of order do not
+         * settle on the wrong value.
          * TODO-correctness: how will state be correctly updated if OXCP or the
          * data storage system are down right now?  Something will need to
-         * resolve that asynchronously.
+         * resolve this asynchronously.
          */
         self.ctlsc.notify_instance_updated(&id, &new_state).await;
 
