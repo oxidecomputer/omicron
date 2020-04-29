@@ -5,6 +5,9 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
+use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiInstanceRuntimeStateParams;
+use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
@@ -14,12 +17,14 @@ use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
+use chrono::Utc;
 use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use serde::Deserialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -78,6 +83,9 @@ pub struct OxideController {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
+    /** general server log */
+    log: Logger,
+
     /** cached ApiRack structure representing the single rack. */
     api_rack: Arc<ApiRack>,
 
@@ -92,7 +100,7 @@ pub struct OxideController {
      * servers and how we discover them, both when they initially show up and
      * when we come up.
      */
-    server_controllers: Mutex<BTreeMap<Uuid, ServerController>>,
+    server_controllers: Mutex<BTreeMap<Uuid, Arc<ServerController>>>,
 }
 
 /*
@@ -104,9 +112,10 @@ pub struct OxideController {
  * TODO audit logging ought to be part of this structure and its functions
  */
 impl OxideController {
-    pub fn new_with_id(id: &Uuid) -> OxideController {
+    pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
         OxideController {
             id: id.clone(),
+            log: log,
             api_rack: Arc::new(ApiRack {
                 id: id.clone(),
             }),
@@ -118,7 +127,9 @@ impl OxideController {
     pub async fn add_server_controller(&self, sc: ServerController) {
         let mut scs = self.server_controllers.lock().await;
         assert!(!scs.contains_key(&sc.id));
-        scs.insert(sc.id.clone(), sc);
+        info!(self.log, "registered server controller";
+            "server_uuid" => sc.id.to_string());
+        scs.insert(sc.id.clone(), Arc::new(sc));
     }
 
     /*
@@ -170,6 +181,18 @@ impl OxideController {
      * Instances
      */
 
+    async fn server_allocate_instance<'se, 'params>(
+        &'se self,
+        servers: &'se BTreeMap<Uuid, Arc<ServerController>>,
+        _project: Arc<ApiProject>,
+        _params: &'params ApiInstanceCreateParams,
+    ) -> Result<&'se Arc<ServerController>, ApiError> {
+        /* TODO replace this with a real allocation policy. */
+        servers.values().nth(0).ok_or_else(|| ApiError::ResourceNotAvailable {
+            message: String::from("no servers available for new Instance"),
+        })
+    }
+
     pub async fn project_list_instances(
         &self,
         project_name: &ApiName,
@@ -183,7 +206,83 @@ impl OxideController {
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
-        self.datastore.project_create_instance(project_name, params).await
+        let project = self.project_lookup(project_name).await?;
+
+        /*
+         * Allocate a server and retrieve our handle to its SC.
+         */
+        let sc = {
+            let servers = self.server_controllers.lock().await;
+            let arc = self
+                .server_allocate_instance(&servers, project, params)
+                .await?;
+            Arc::clone(arc)
+        };
+
+        /*
+         * The order of operations here is slightly subtle:
+         *
+         * 1. We want to record the new instance in the database before telling
+         *    the SC about it.  This record will have state "Creating" to
+         *    distinguish it from other runtime states.  If we crash after this
+         *    point, there will be a record in the database for the instance,
+         *    but it won't be running, since no SC knows about it.
+         *    TODO-robustness we could look for it here and resume creation if
+         *    we find it.  That would potentially handle a case where the
+         *    client is retrying their create request.  On the other hand, we
+         *    need some way to either clean this up or resume creation even if
+         *    the caller _doesn't_ retry this request.  How will we know it's
+         *    been abandoned?  (Maybe it doesn't matter that much, since the
+         *    following operations are either idempotent or we can tell that
+         *    they've conflicted with somebody else who's fixing the problem.)
+         *
+         * 2. We want to tell the SC about this Instance and have the SC start
+         *    it up.  The SC should reply immediately that it's starting the
+         *    instance, and we immediately record this into the database, now
+         *    with state "Starting".
+         *
+         * 3. Some time later (after this function has completed), the SC will
+         *    notify us that the Instance has changed states to "Running".
+         *    We'll record this into the database.
+         */
+        let runtime = ApiInstanceRuntimeState {
+            run_state: ApiInstanceState::Creating,
+            server_uuid: sc.id,
+            gen: 1,
+            time_updated: Utc::now(),
+        };
+
+        /*
+         * Store the first revision of the Instance into the database.  This
+         * will have state "Creating".
+         */
+        let runtime_params = ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Running,
+        };
+        let instance_created = self
+            .datastore
+            .project_create_instance(
+                project_name,
+                params,
+                &runtime,
+                &runtime_params,
+            )
+            .await?;
+        let id = instance_created.identity.id.clone();
+
+        /*
+         * Notify the SC, which will return an updated runtime state (which
+         * should be "Starting".
+         */
+        let runtime_state =
+            sc.instance_ensure(instance_created, &runtime_params).await?;
+
+        /*
+         * Update the database to reflect the new "Starting" state.
+         */
+        let instance_updated =
+            self.datastore.instance_update_runtime(&id, &runtime_state).await?;
+        Ok(instance_updated)
     }
 
     pub async fn project_lookup_instance(
@@ -231,10 +330,52 @@ impl OxideController {
         if *rack_id == self.id {
             Ok(self.as_rack())
         } else {
-            Err(ApiError::ObjectNotFound {
-                type_name: ApiResourceType::Rack,
-                object_name: rack_id.to_string(),
-            })
+            Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
+        }
+    }
+
+    pub fn as_sc_api(self: &Arc<OxideController>) -> ControllerScApi {
+        ControllerScApi {
+            controller: Arc::clone(self),
+        }
+    }
+}
+
+/**
+ * `ControllerScApi` represents the API exposed by the OxideController (OXCP)
+ * for use by ServerControllers.  Like `ServerController`, this is currently
+ * implemented directly in Rust, but the intent is for this to be a network call
+ * of some kind, so we should be careful about the kinds of interfaces exposed
+ * here.
+ */
+pub struct ControllerScApi {
+    controller: Arc<OxideController>,
+}
+
+impl ControllerScApi {
+    /**
+     * Invoked by a server controller to publish an updated runtime state for an
+     * Instance.
+     */
+    pub async fn notify_instance_updated(
+        &self,
+        id: &Uuid,
+        new_runtime_state: &ApiInstanceRuntimeState,
+    ) {
+        let datastore = &self.controller.datastore;
+        let log = &self.controller.log;
+        let result =
+            datastore.instance_update_runtime(id, &new_runtime_state).await;
+
+        if let Err(error) = result {
+            warn!(log, "failed to update instance from server controller";
+                "instance_id" => %id,
+                "new_state" => %new_runtime_state.run_state,
+                "error" => ?error);
+        } else {
+            debug!(log, "instance updated by server controller";
+                "instance_id" => %id,
+                "new_state" => %new_runtime_state.run_state);
         }
     }
 }

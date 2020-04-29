@@ -2,8 +2,10 @@
  * API-specific error handling facilities.  See dropshot/error.rs for details.
  */
 
-use crate::api_model;
+use crate::api_model::ApiName;
+use crate::api_model::ApiResourceType;
 use dropshot::HttpError;
+use uuid::Uuid;
 
 /**
  * ApiError represents errors that can be generated within the API server.
@@ -11,18 +13,36 @@ use dropshot::HttpError;
  */
 #[derive(Debug, PartialEq)]
 pub enum ApiError {
-    ObjectNotFound {
-        type_name: api_model::ApiResourceType,
-        object_name: String,
-    },
-    ObjectAlreadyExists {
-        type_name: api_model::ApiResourceType,
-        object_name: String,
-    },
-    InvalidValue {
-        label: String,
-        message: String,
-    },
+    ObjectNotFound { type_name: ApiResourceType, lookup_type: LookupType },
+    ObjectAlreadyExists { type_name: ApiResourceType, object_name: String },
+    InvalidRequest { message: String },
+    InvalidValue { label: String, message: String },
+    ResourceNotAvailable { message: String },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum LookupType {
+    ByName(String),
+    ById(Uuid),
+}
+
+impl ApiError {
+    pub fn not_found_by_name(
+        type_name: ApiResourceType,
+        name: &ApiName,
+    ) -> ApiError {
+        ApiError::ObjectNotFound {
+            type_name: type_name,
+            lookup_type: LookupType::ByName(String::from(name.clone())),
+        }
+    }
+
+    pub fn not_found_by_id(type_name: ApiResourceType, id: &Uuid) -> ApiError {
+        ApiError::ObjectNotFound {
+            type_name: type_name,
+            lookup_type: LookupType::ById(id.clone()),
+        }
+    }
 }
 
 impl From<ApiError> for HttpError {
@@ -30,9 +50,16 @@ impl From<ApiError> for HttpError {
         match error {
             ApiError::ObjectNotFound {
                 type_name: t,
-                object_name: n,
+                lookup_type: lt,
             } => {
-                let message = format!("not found: {} \"{}\"", t, n);
+                let (lookup_field, lookup_value) = match lt {
+                    LookupType::ByName(name) => ("name", name),
+                    LookupType::ById(id) => ("id", id.to_string()),
+                };
+                let message = format!(
+                    "not found: {} with {} \"{}\"",
+                    t, lookup_field, lookup_value
+                );
                 HttpError::for_client_error(
                     http::StatusCode::NOT_FOUND,
                     message,
@@ -47,6 +74,10 @@ impl From<ApiError> for HttpError {
                 HttpError::for_bad_request(message)
             }
 
+            ApiError::InvalidRequest {
+                message,
+            } => HttpError::for_bad_request(message),
+
             ApiError::InvalidValue {
                 label,
                 message,
@@ -55,6 +86,10 @@ impl From<ApiError> for HttpError {
                     format!("unsupported value for \"{}\": {}", label, message);
                 HttpError::for_bad_request(message)
             }
+
+            ApiError::ResourceNotAvailable {
+                message,
+            } => HttpError::for_unavail(message),
         }
     }
 }

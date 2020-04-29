@@ -287,12 +287,52 @@ pub struct ApiProjectUpdateParams {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiInstanceState {
+    Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
     Stopping,
     Stopped,
     Repairing,
     Failed,
+    Destroyed,
+}
+
+impl Display for ApiInstanceState {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        let label = match self {
+            ApiInstanceState::Creating => "creating",
+            ApiInstanceState::Starting => "starting",
+            ApiInstanceState::Running => "running",
+            ApiInstanceState::Stopping => "stopping",
+            ApiInstanceState::Stopped => "stopped",
+            ApiInstanceState::Repairing => "repairing",
+            ApiInstanceState::Failed => "failed",
+            ApiInstanceState::Destroyed => "destroyed",
+        };
+
+        write!(f, "{}", label)
+    }
+}
+
+impl ApiInstanceState {
+    /**
+     * Returns true if the given state represents a fully stopped Instance.
+     * This means that a transition from an is_not_stopped() state must go
+     * through Stopping.
+     */
+    pub fn is_stopped(&self) -> bool {
+        match self {
+            ApiInstanceState::Starting => false,
+            ApiInstanceState::Running => false,
+            ApiInstanceState::Stopping => false,
+
+            ApiInstanceState::Creating => true,
+            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Repairing => true,
+            ApiInstanceState::Failed => true,
+            ApiInstanceState::Destroyed => true,
+        }
+    }
 }
 
 /** Represents the number of CPUs in an instance. */
@@ -344,6 +384,7 @@ impl ApiByteCount {
 /**
  * Represents an instance (VM) in the API
  */
+#[derive(Debug)]
 pub struct ApiInstance {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
@@ -359,8 +400,11 @@ pub struct ApiInstance {
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
-    /** current runtime state of the instance */
-    pub state: ApiInstanceState,
+    /** last user-requested state for this instance */
+    pub state_requested: ApiInstanceRuntimeStateParams,
+
+    /** state owned by the data plane */
+    pub runtime: ApiInstanceRuntimeState,
     /* TODO-completeness: add disks, network, tags, metrics */
 }
 
@@ -374,7 +418,51 @@ impl ApiObject for ApiInstance {
             memory: self.memory,
             boot_disk_size: self.boot_disk_size,
             hostname: self.hostname.clone(),
-            state: self.state.clone(),
+            runtime: self.runtime.to_view(),
+        }
+    }
+}
+
+/**
+ * The runtime state of an Instance is owned by the server controller running
+ * that Instance.
+ */
+#[derive(Clone, Debug)]
+pub struct ApiInstanceRuntimeState {
+    /** runtime state of the instance */
+    pub run_state: ApiInstanceState,
+    /** which server is running this instance */
+    pub server_uuid: Uuid,
+    /** generation number for this state */
+    pub gen: u64,
+    /** timestamp for this information */
+    pub time_updated: DateTime<Utc>,
+}
+
+/**
+ * RuntimeStateParams is used to request an Instance state change from a server
+ * controller.  Right now, it's only the run state that can be changed, though
+ * we could imagine supporting changing properties like "ncpus" here.  If we
+ * allow other properties here, we may want to make them Options so that callers
+ * don't have to know the prior state already.
+ */
+#[derive(Clone, Debug)]
+pub struct ApiInstanceRuntimeStateParams {
+    pub run_state: ApiInstanceState,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiInstanceRuntimeStateView {
+    pub run_state: ApiInstanceState,
+    pub run_state_updated: DateTime<Utc>,
+}
+
+impl ApiObject for ApiInstanceRuntimeState {
+    type View = ApiInstanceRuntimeStateView;
+    fn to_view(&self) -> ApiInstanceRuntimeStateView {
+        ApiInstanceRuntimeStateView {
+            run_state: self.run_state.clone(),
+            run_state_updated: self.time_updated,
         }
     }
 }
@@ -399,8 +487,9 @@ pub struct ApiInstanceView {
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
-    /** current runtime state of the instance */
-    pub state: ApiInstanceState,
+
+    #[serde(flatten)]
+    pub runtime: ApiInstanceRuntimeStateView,
 }
 
 /**
