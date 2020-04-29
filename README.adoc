@@ -135,20 +135,14 @@ The implementation is divided into several subsystems:
 == TODO
 
 * Working on instances
-** building out simulator in src/server_controller.rs.
-*** clean up what I've got so far
-**** TODOs, XXXs
-**** self-review
-**** documentation
-** Add tests for what I've got so far
-** the new log context interface in the Dropshot test suite kind of sucks
+** Add tests for SimInstance and other changes in my branch
 * Repo cleanup
-** should we consider switching to sync?
 ** rename "lib" to something else (e.g., "local_deps")
 ** incorporate openapi directly into this subcrate
 ** Dropshot itself should be documented
 ** separate out api_model_data.rs?
 ** use serde_json::StreamDeserializer where we use NDJSON
+* Should we consider switching to sync?
 * Flesh out more endpoints and simulator
 ** support for update of instances (i.e., PUT)?
 * Write out road map
