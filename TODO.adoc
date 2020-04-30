@@ -1,0 +1,77 @@
+:showtitle:
+:icons: font
+
+= TODO
+
+Repo cleanup:
+
+* Dropshot itself should be documented
+* separate out api_model_data.rs?
+* use serde_json::StreamDeserializer where we use NDJSON
+
+Should we consider switching to sync?
+
+Flesh out more endpoints and simulator:
+
+* support for update of instances (i.e., PUT)?
+
+Organize remaining work
+
+General work:
+
+* OpenAPI support: Rust macros, tooling to generate spec, client librar(ies),
+  CLI
+* Debugging / monitoring
+** Prometheus?
+** OpenTracing?  OpenTelemetry?
+** Dynamic tracing?
+** Core files?
+** Internal APIs for:
+*** showing connected clients, recent requests, ...?
+* Rack-Internal API?
+** Alerts?
+** Faults?  Support bundles?
+* Audit logging
+* Authentication
+* Authorization
+* Data storage
+* Other API changes
+** regions, AZs, etc. need to be added per RFD 24
+** /racks, /servers
+** are servers going to have uuids?  Will we need a bunch of operations like
+   Triton never really had around chassis swaps?
+** What's the scope of these servers?
+** CAP choices
+** Active/Active, Active/Passive, Consensus?
+* TLS
+* Versioning (header? path? translators for older versions?)
+* Pagination? (Opaque token?  What does Stripe do?)
+* Hardening (see RFD 10)
+** throttling / load shedding
+** should various uses of serde_json allow additional fields?
+* Automated testing
+** General API testing: there's a lot of boilerplate in hand-generated tests
+   for each kind of resource.  Would it be reasonable / possible to have a sort
+   of omnibus test that's given the OpenAPI spec (or something like it),
+   creates a hierarchy with at least one of every possible resource, and does
+   things like: For each possible resource
+*** attempt to (create, get, put, delete) one with an invalid name
+*** attempt to (GET, DELETE, PUT) one that does not exist
+*** attempt to create one with invalid JSON
+*** attempt to create one with a duplicate name of the one we know about
+*** exercise list operation with marker and limit (may need to create many of them)
+*** for each required input property:
+**** attempt to create a resource without that property
+*** for each input property: attempt to create a resource with invalid values
+    for that property
+*** list instances of that resource and expect to find the one we know about
+*** GET the one instance we know about
+*** DELETE the one instance we know about
+*** GET the one instance we know about again and expect it to fail
+*** list instances again and expect to find nothing
+** Basic functionality
+** Performance testing
+** Stress testing
+** Fault testing / under load
+** Fuzz testing
+* Security review

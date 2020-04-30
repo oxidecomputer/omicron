@@ -2,5 +2,6 @@
 **/*.rs.bk
 rusty-tags.vi
 README.html
+TODO.html
 logs
 /lib/*/target
