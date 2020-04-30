@@ -13,7 +13,7 @@ proc-macro2 = "*"
 quote = "*"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive_internals = "0.25"
-serde_tokenstream = { path = "../serde_tokenstream" }
+serde_tokenstream = { path = "serde_tokenstream" }
 syn = { version = "1.0.17", features = [ "parsing", "printing" ] }
 schemars = "0.7.0"
 

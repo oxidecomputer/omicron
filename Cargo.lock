@@ -695,7 +695,6 @@ dependencies = [
  "http",
  "hyper",
  "serde",
- "serde_tokenstream",
  "slog",
  "tokio",
  "toml",

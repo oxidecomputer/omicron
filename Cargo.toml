@@ -10,15 +10,14 @@ chrono = { version = "0.4", features = [ "serde" ] }
 clap = "2"
 futures = "0.3.1"
 http = "0.2.0"
-dropshot = { path = "lib/dropshot" }
+dropshot = { path = "dropshot" }
 hyper = "0.13"
 serde = { version = "1.0", features = [ "derive" ] }
-serde_tokenstream = { path = "lib/serde_tokenstream" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
 [workspace]
-members = [".", "lib/dropshot", "lib/dropshot_endpoint", "lib/serde_tokenstream"]
-default-members = [".", "lib/dropshot", "lib/dropshot_endpoint", "lib/serde_tokenstream"]
+members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
+default-members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
