@@ -3,52 +3,37 @@
 
 = TODO
 
-Repo cleanup:
+API endpoints:
 
-* Dropshot itself should be documented
-* separate out api_model_data.rs?
+* instance: boot/halt/reboot, destroy
+* `/servers`?
+* `/disks` and related endpoints
+* RFD 24: regions, AZs, etc
+* (lots more)
+
+Work queue (see also: existing GitHub issues):
+
 * use serde_json::StreamDeserializer where we use NDJSON
-
-Should we consider switching to sync?
-
-Flesh out more endpoints and simulator:
-
-* support for update of instances (i.e., PUT)?
-
-Organize remaining work
-
-General work:
-
-* OpenAPI support: Rust macros, tooling to generate spec, client librar(ies),
-  CLI
-* Debugging / monitoring
-** Prometheus?
-** OpenTracing?  OpenTelemetry?
-** Dynamic tracing?
-** Core files?
-** Internal APIs for:
-*** showing connected clients, recent requests, ...?
-* Rack-Internal API?
-** Alerts?
-** Faults?  Support bundles?
-* Audit logging
-* Authentication
-* Authorization
-* Data storage
-* Other API changes
-** regions, AZs, etc. need to be added per RFD 24
-** /racks, /servers
-** are servers going to have uuids?  Will we need a bunch of operations like
-   Triton never really had around chassis swaps?
-** What's the scope of these servers?
-** CAP choices
-** Active/Active, Active/Passive, Consensus?
-* TLS
-* Versioning (header? path? translators for older versions?)
-* Pagination? (Opaque token?  What does Stripe do?)
-* Hardening (see RFD 10)
-** throttling / load shedding
-** should various uses of serde_json allow additional fields?
+* document Dropshot
+* write some design documents
+* implement audit log
+* implement alerts
+* implement external user authentication
+* implement external user authorization mechanism
+* implement throttling and load shedding described in RFD 6
+* implement hardening in RFD 10
+* polish pagination mechanisms (opaque token?  What does Stripe do?)
+* integrate a real data storage backend
+* implement scheme for API versioning
+* debugging/monitoring: Prometheus?
+* debugging/monitoring: OpenTracing? OpenTelemetry?
+* debugging/monitoring: Dynamic tracing?
+* debugging/monitoring: Core files?
+** how to identify the requested version -- header or URI?
+** translators for older versions?
+** integration of supported API versions into build artifact?
+** Should all the uses of serde_json disallow unrecognized fields?  Should any?
+* settle on an approach for modification of resources and implement it once
 * Automated testing
 ** General API testing: there's a lot of boilerplate in hand-generated tests
    for each kind of resource.  Would it be reasonable / possible to have a sort
@@ -69,9 +54,28 @@ General work:
 *** DELETE the one instance we know about
 *** GET the one instance we know about again and expect it to fail
 *** list instances again and expect to find nothing
-** Basic functionality
-** Performance testing
-** Stress testing
-** Fault testing / under load
-** Fuzz testing
+
+External dependencies / open questions:
+
+* Should we consider switching to sync?
+* would like to require that servers have unique, immutable uuids
+* TLS:
+** How will we do TLS termination?
+** How will we manage server certificates?
+** How will we manage client certificates?
+* what data storage backend will we use?
+* flesh out several interfaces:
+** OXCP -> server controller
+** server controller -> OXCP (bootstrapping)
+** server controller -> OXCP (alerts, faults, support bundles, state changes)
+** internal -> OXCP: connected clients, recent requests, etc.
+* what does bootstrapping / key management look like?
+* what does internal authorization look like?
+
+Other activities:
+
+* Performance testing
+* Stress testing
+* Fault testing / under load
+* Fuzz testing
 * Security review
