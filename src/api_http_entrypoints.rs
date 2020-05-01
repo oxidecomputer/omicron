@@ -297,7 +297,7 @@ async fn api_project_instances_delete_instance(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    controller.project_delete_instance(&project_name, &instance_name).await?;
+    controller.project_destroy_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseDeleted())
 }
 

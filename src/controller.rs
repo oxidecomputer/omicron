@@ -283,6 +283,26 @@ impl OxideController {
         self.instance_set_runtime(instance_created, sc, &runtime_params).await
     }
 
+    pub async fn project_destroy_instance(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> DeleteResult {
+        /*
+         * TODO-robustness We need to figure out what to do with Destroyed
+         * instances?  Presumably we need to clean them up at some point, but
+         * not right away so that callers can see that they've been destroyed.
+         */
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
+        let sc = self.instance_sc(&instance).await?;
+        let runtime_params = ApiInstanceRuntimeStateParams {
+            run_state: ApiInstanceState::Destroyed,
+        };
+        self.instance_set_runtime(instance, sc, &runtime_params).await?;
+        Ok(())
+    }
+
     pub async fn project_lookup_instance(
         &self,
         project_name: &ApiName,

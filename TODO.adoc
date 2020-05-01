@@ -5,7 +5,6 @@
 
 API endpoints:
 
-* instance: reboot, destroy
 * `/servers`?
 * `/disks` and related endpoints
 * RFD 24: regions, AZs, etc
@@ -19,6 +18,8 @@ Work queue (see also: existing GitHub issues):
 * flesh out server controller as separate program
 ** this will actually make it easier to write automated tests
 ** then write automated tests for instance boot/halt
+* implement instance reboot (may require a way to request this directly to
+  SC)
 * make API fields consistent (camel case vs. snake case, use of timestamps)
 * implement audit log
 * implement alerts
