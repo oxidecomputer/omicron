@@ -384,7 +384,7 @@ impl ApiByteCount {
 /**
  * Represents an instance (VM) in the API
  */
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ApiInstance {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,

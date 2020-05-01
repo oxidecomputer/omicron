@@ -5,7 +5,7 @@
 
 API endpoints:
 
-* instance: boot/halt/reboot, destroy
+* instance: reboot, destroy
 * `/servers`?
 * `/disks` and related endpoints
 * RFD 24: regions, AZs, etc
@@ -16,6 +16,10 @@ Work queue (see also: existing GitHub issues):
 * use serde_json::StreamDeserializer where we use NDJSON
 * document Dropshot
 * write some design documents
+* flesh out server controller as separate program
+** this will actually make it easier to write automated tests
+** then write automated tests for instance boot/halt
+* make API fields consistent (camel case vs. snake case, use of timestamps)
 * implement audit log
 * implement alerts
 * implement external user authentication

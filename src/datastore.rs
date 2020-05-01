@@ -318,59 +318,55 @@ impl ControlDataStore {
         Ok(())
     }
 
-    pub async fn instance_update_runtime(
+    pub async fn instance_lookup_by_id(
         &self,
         id: &Uuid,
-        new_runtime: &ApiInstanceRuntimeState,
-    ) -> UpdateResult<ApiInstance> {
+    ) -> LookupResult<ApiInstance> {
+        let data = self.data.lock().await;
+        Ok(Arc::clone(collection_lookup_by_id(
+            &data.instances_by_id,
+            id,
+            ApiResourceType::Instance,
+        )?))
+    }
+
+    /*
+     * TODO-correctness This ought to take some kind of generation counter or
+     * etag that can be used for optimistic concurrency control inside the
+     * datastore.
+     * TODO-cleanup We really ought to refactor this so that you don't need to
+     * update two data structures.
+     */
+    pub async fn instance_update(
+        &self,
+        new_instance: Arc<ApiInstance>,
+    ) -> Result<(), ApiError> {
+        let id = new_instance.identity.id.clone();
+        let instance_name = new_instance.identity.name.clone();
         let mut data = self.data.lock().await;
-        let (instance_name, new_instance) = {
+        let old_name = {
             let old_instance = collection_lookup_by_id(
                 &data.instances_by_id,
-                id,
+                &id,
                 ApiResourceType::Instance,
             )?;
 
-            /*
-             * TODO-debug: log a big loud error if the generation numbers match
-             * but the states don't.
-             */
-            if old_instance.runtime.gen > new_runtime.gen {
-                let message = format!(
-                    "dropped instance runtime update to gen {} (already at \
-                     gen {})",
-                    old_instance.runtime.gen, new_runtime.gen
-                );
-                return Err(ApiError::InvalidRequest {
-                    message,
-                });
-            }
-
-            let instance_name = &old_instance.identity.name;
-            let instance = Arc::new(ApiInstance {
-                identity: old_instance.identity.clone(),
-                project_id: old_instance.project_id.clone(),
-                ncpus: old_instance.ncpus,
-                memory: old_instance.memory,
-                boot_disk_size: old_instance.boot_disk_size,
-                hostname: old_instance.hostname.clone(),
-                state_requested: old_instance.state_requested.clone(),
-                runtime: new_runtime.clone(),
-            });
-            (instance_name.clone(), instance)
+            assert_eq!(old_instance.identity.id, id);
+            old_instance.identity.name.clone()
         };
 
+        /*
+         * In case this update changes the name of the instance, remove it from
+         * the list of instances in the project and re-add it with the new name.
+         */
         let instances = data
             .instances_by_project_id
             .get_mut(&new_instance.project_id)
             .unwrap();
-        instances
-            .insert(instance_name.clone(), Arc::clone(&new_instance))
-            .unwrap();
-        data.instances_by_id
-            .insert(id.clone(), Arc::clone(&new_instance))
-            .unwrap();
-        Ok(new_instance)
+        instances.remove(&old_name).unwrap();
+        instances.insert(instance_name, Arc::clone(&new_instance));
+        data.instances_by_id.insert(id, Arc::clone(&new_instance)).unwrap();
+        Ok(())
     }
 }
 

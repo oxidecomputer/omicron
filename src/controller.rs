@@ -19,7 +19,9 @@ use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
 use chrono::Utc;
 use dropshot::ExtractedParameter;
+use dropshot::HttpError;
 use futures::future::ready;
+use futures::future::TryFutureExt;
 use futures::lock::Mutex;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
@@ -259,7 +261,7 @@ impl OxideController {
         let runtime_params = ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
         };
-        let instance_created = self
+        let mut instance_created = self
             .datastore
             .project_create_instance(
                 project_name,
@@ -268,21 +270,22 @@ impl OxideController {
                 &runtime_params,
             )
             .await?;
-        let id = instance_created.identity.id.clone();
 
         /*
          * Notify the SC, which will return an updated runtime state (which
          * should be "Starting".
          */
-        let runtime_state =
-            sc.instance_ensure(instance_created, &runtime_params).await?;
+        let runtime_state = sc
+            .instance_ensure(Arc::clone(&instance_created), &runtime_params)
+            .await?;
 
         /*
          * Update the database to reflect the new "Starting" state.
          */
-        let instance_updated =
-            self.datastore.instance_update_runtime(&id, &runtime_state).await?;
-        Ok(instance_updated)
+        let mut instance_ref = Arc::make_mut(&mut instance_created);
+        instance_ref.runtime = runtime_state.clone();
+        self.datastore.instance_update(Arc::clone(&instance_created)).await?;
+        Ok(instance_created)
     }
 
     pub async fn project_lookup_instance(
@@ -303,6 +306,142 @@ impl OxideController {
         self.datastore
             .project_delete_instance(project_name, instance_name)
             .await
+    }
+
+    fn check_runtime_change_allowed(
+        &self,
+        instance: &Arc<ApiInstance>,
+    ) -> Result<(), ApiError> {
+        /*
+         * Users are allowed to request a start or stop even if the instance is
+         * already in the desired state (or moving to it), and we will issue a
+         * request to the SC to make the state change in these cases in case the
+         * runtime state we saw here was stale.  However, users are not allowed
+         * to change the state of an instance that's failed or destroyed.
+         */
+        let run_state = &instance.runtime.run_state;
+        let allowed = match run_state {
+            ApiInstanceState::Creating => true,
+            ApiInstanceState::Starting => true,
+            ApiInstanceState::Running => true,
+            ApiInstanceState::Stopping => true,
+            ApiInstanceState::Stopped => true,
+
+            ApiInstanceState::Repairing => false,
+            ApiInstanceState::Failed => false,
+            ApiInstanceState::Destroyed => false,
+        };
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(ApiError::InvalidRequest {
+                message: format!(
+                    "instance cannot be stopped in state \"{}\"",
+                    run_state
+                ),
+            })
+        }
+    }
+
+    /**
+     * Returns the ServerController for the host where this Instance is running.
+     */
+    async fn instance_sc(
+        &self,
+        instance: &Arc<ApiInstance>,
+    ) -> Result<Arc<ServerController>, ApiError> {
+        let controllers = self.server_controllers.lock().await;
+        let scid = &instance.runtime.server_uuid;
+        Ok(Arc::clone(controllers.get(scid).ok_or_else(|| {
+            let message =
+                format!("no server controller for server_uuid \"{}\"", scid);
+            ApiError::ResourceNotAvailable {
+                message: message,
+            }
+        })?))
+    }
+
+    /**
+     * Make sure the given Instance is running.
+     */
+    pub async fn instance_start(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> UpdateResult<ApiInstance> {
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+
+        self.check_runtime_change_allowed(&instance)?;
+        self.instance_set_runtime(
+            Arc::clone(&instance),
+            self.instance_sc(&instance).await?,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+            },
+        )
+        .await
+    }
+
+    /*
+     * Make sure the given Instance is stopped.
+     */
+    pub async fn instance_stop(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> UpdateResult<ApiInstance> {
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+
+        self.check_runtime_change_allowed(&instance)?;
+        self.instance_set_runtime(
+            Arc::clone(&instance),
+            self.instance_sc(&instance).await?,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Stopped,
+            },
+        )
+        .await
+    }
+
+    /*
+     * TODO-correctness This has the same robustness issues as project_create()
+     * -- if we crash at the wrong time, a state change will never be effected.
+     * Maybe we don't actually need to record the state change ahead of time in
+     * the modification case?
+     */
+    async fn instance_set_runtime(
+        &self,
+        mut instance: Arc<ApiInstance>,
+        sc: Arc<ServerController>,
+        runtime_params: &ApiInstanceRuntimeStateParams,
+    ) -> UpdateResult<ApiInstance> {
+        /*
+         * First, record the requested state change into the database.
+         */
+        let instance_ref = Arc::make_mut(&mut instance);
+        instance_ref.state_requested = runtime_params.clone();
+        self.datastore.instance_update(Arc::clone(&instance)).await?;
+
+        /*
+         * Next, request the SC to begin the state change.
+         */
+        let new_runtime_state =
+            sc.instance_ensure(Arc::clone(&instance), &runtime_params).await?;
+
+        /*
+         * Update the database to reflect the new state.
+         */
+        let instance_ref = Arc::make_mut(&mut instance);
+        instance_ref.runtime = new_runtime_state.clone();
+        self.datastore.instance_update(Arc::clone(&instance)).await?;
+        Ok(instance)
     }
 
     /*
@@ -361,21 +500,55 @@ impl ControllerScApi {
         &self,
         id: &Uuid,
         new_runtime_state: &ApiInstanceRuntimeState,
-    ) {
+    ) -> Result<(), HttpError> {
         let datastore = &self.controller.datastore;
         let log = &self.controller.log;
-        let result =
-            datastore.instance_update_runtime(id, &new_runtime_state).await;
 
-        if let Err(error) = result {
-            warn!(log, "failed to update instance from server controller";
-                "instance_id" => %id,
-                "new_state" => %new_runtime_state.run_state,
-                "error" => ?error);
-        } else {
-            debug!(log, "instance updated by server controller";
-                "instance_id" => %id,
-                "new_state" => %new_runtime_state.run_state);
+        let result = datastore
+            .instance_lookup_by_id(id)
+            .and_then(|old_instance| {
+                let mut new_instance = (*old_instance).clone();
+                new_instance.runtime = new_runtime_state.clone();
+                datastore.instance_update(Arc::new(new_instance))
+            })
+            .await;
+
+        match result {
+            Ok(_) => {
+                debug!(log, "instance updated by server controller";
+                    "instance_id" => %id,
+                    "new_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            /*
+             * If the instance doesn't exist, swallow the error -- there's
+             * nothing to do here.
+             * TODO-robustness This could only be possible if we've removed an
+             * Instance from the datastore altogether.  When would we do that?
+             * We don't want to do it as soon as something's destroyed, I think,
+             * and in that case, we'd need some async task for cleaning these
+             * up.
+             */
+            Err(ApiError::ObjectNotFound {
+                ..
+            }) => {
+                warn!(log, "non-existent instance updated by server controller";
+                    "instance_id" => %id,
+                    "new_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            /*
+             * If the datastore is unavailable, propagate that to the caller.
+             */
+            Err(error) => {
+                warn!(log, "failed to update instance from server controller";
+                    "instance_id" => %id,
+                    "new_state" => %new_runtime_state.run_state,
+                    "error" => ?error);
+                Err(error.into())
+            }
         }
     }
 }

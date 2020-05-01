@@ -136,11 +136,10 @@ impl ServerController {
          * server controller is authoritative for the runtime state, and we use
          * a generation number here so that calls processed out of order do not
          * settle on the wrong value.
-         * TODO-correctness: how will state be correctly updated if OXCP or the
-         * data storage system are down right now?  Something will need to
-         * resolve this asynchronously.
+         * TODO-robustness: If this fails, we need to put it on some list of
+         * updates to retry later.
          */
-        self.ctlsc.notify_instance_updated(&id, &new_state).await;
+        self.ctlsc.notify_instance_updated(&id, &new_state).await.unwrap();
 
         /*
          * If the instance came to rest destroyed, complete any async cleanup

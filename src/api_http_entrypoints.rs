@@ -45,6 +45,8 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_post)?;
     api.register(api_project_instances_get_instance)?;
     api.register(api_project_instances_delete_instance)?;
+    api.register(api_project_instances_instance_stop)?;
+    api.register(api_project_instances_instance_start)?;
     api.register(api_hardware_racks_get)?;
     api.register(api_hardware_racks_get_rack)?;
 
@@ -297,6 +299,49 @@ async fn api_project_instances_delete_instance(
     let instance_name = &path.instance_name;
     controller.project_delete_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseDeleted())
+}
+
+/**
+ * Boot an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/start",
+}]
+async fn api_project_instances_instance_start(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance =
+        controller.instance_start(&project_name, &instance_name).await?;
+    Ok(HttpResponseOkObject(instance.to_view()))
+}
+
+/**
+ * Halt an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/stop",
+}]
+/* Our naming convention kind of falls apart here. */
+async fn api_project_instances_instance_stop(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance =
+        controller.instance_stop(&project_name, &instance_name).await?;
+    Ok(HttpResponseOkObject(instance.to_view()))
 }
 
 /*
