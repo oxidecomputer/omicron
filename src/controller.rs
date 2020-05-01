@@ -229,14 +229,23 @@ impl OxideController {
          *    distinguish it from other runtime states.  If we crash after this
          *    point, there will be a record in the database for the instance,
          *    but it won't be running, since no SC knows about it.
-         *    TODO-robustness we could look for it here and resume creation if
-         *    we find it.  That would potentially handle a case where the
-         *    client is retrying their create request.  On the other hand, we
-         *    need some way to either clean this up or resume creation even if
-         *    the caller _doesn't_ retry this request.  How will we know it's
-         *    been abandoned?  (Maybe it doesn't matter that much, since the
-         *    following operations are either idempotent or we can tell that
-         *    they've conflicted with somebody else who's fixing the problem.)
+         *    TODO-robustness How do we want to handle a crash at this point?
+         *    One approach would be to say that while an Instance exists in the
+         *    "Creating" state, it's not logically present yet.  Thus, if
+         *    we crash and leave a record here, there's a small resource leak of
+         *    sorts, but there's no problem from the user's perspective.  What
+         *    about use of the "name", which is user-controlled and unique?  We
+         *    could have the creation process look for an existing instance with
+         *    the same name in state "Creating", decide if it appears to be
+         *    abandoned by the control plane instance that was working on it,
+         *    and then simply delete it and proceed.  We might need to do this
+         *    in the Instance rename case as well.  Reliably deciding whether
+         *    the record is abandoned seems hard, though.  We would also
+         *    probably want something that proactively looks for these abandoned
+         *    records and removes them to eliminate the leakage.  A case to
+         *    consider is two concurrent attempts to create an Instance with the
+         *    same name.  Exactly one should win every time and we shouldn't
+         *    wind up with two Instances running at any point.
          *
          * 2. We want to tell the SC about this Instance and have the SC start
          *    it up.  The SC should reply immediately that it's starting the
@@ -261,7 +270,7 @@ impl OxideController {
         let runtime_params = ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
         };
-        let mut instance_created = self
+        let instance_created = self
             .datastore
             .project_create_instance(
                 project_name,
@@ -271,21 +280,7 @@ impl OxideController {
             )
             .await?;
 
-        /*
-         * Notify the SC, which will return an updated runtime state (which
-         * should be "Starting".
-         */
-        let runtime_state = sc
-            .instance_ensure(Arc::clone(&instance_created), &runtime_params)
-            .await?;
-
-        /*
-         * Update the database to reflect the new "Starting" state.
-         */
-        let mut instance_ref = Arc::make_mut(&mut instance_created);
-        instance_ref.runtime = runtime_state.clone();
-        self.datastore.instance_update(Arc::clone(&instance_created)).await?;
-        Ok(instance_created)
+        self.instance_set_runtime(instance_created, sc, &runtime_params).await
     }
 
     pub async fn project_lookup_instance(
@@ -410,11 +405,9 @@ impl OxideController {
         .await
     }
 
-    /*
-     * TODO-correctness This has the same robustness issues as project_create()
-     * -- if we crash at the wrong time, a state change will never be effected.
-     * Maybe we don't actually need to record the state change ahead of time in
-     * the modification case?
+    /**
+     * Modifies the runtime state of the Instance as requested.  This generally
+     * means booting or halting the Instance.
      */
     async fn instance_set_runtime(
         &self,
@@ -423,21 +416,12 @@ impl OxideController {
         runtime_params: &ApiInstanceRuntimeStateParams,
     ) -> UpdateResult<ApiInstance> {
         /*
-         * First, record the requested state change into the database.
-         */
-        let instance_ref = Arc::make_mut(&mut instance);
-        instance_ref.state_requested = runtime_params.clone();
-        self.datastore.instance_update(Arc::clone(&instance)).await?;
-
-        /*
-         * Next, request the SC to begin the state change.
+         * Ask the SC to begin the state change.  Then update the database to
+         * reflect the new intermediate state.
          */
         let new_runtime_state =
             sc.instance_ensure(Arc::clone(&instance), &runtime_params).await?;
 
-        /*
-         * Update the database to reflect the new state.
-         */
         let instance_ref = Arc::make_mut(&mut instance);
         instance_ref.runtime = new_runtime_state.clone();
         self.datastore.instance_update(Arc::clone(&instance)).await?;
