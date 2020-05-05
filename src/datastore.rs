@@ -108,10 +108,11 @@ impl ControlDataStore {
         name: &ApiName,
     ) -> LookupResult<ApiProject> {
         let data = self.data.lock().await;
-        let project = collection_lookup_by_name(
+        let project = collection_lookup(
             &data.projects_by_name,
             name,
             ApiResourceType::Project,
+            &ApiError::not_found_by_name,
         )?;
         Ok(Arc::clone(project))
     }
@@ -127,10 +128,11 @@ impl ControlDataStore {
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
         let mut data = self.data.lock().await;
         let project_id = {
-            let project = collection_lookup_by_name(
+            let project = collection_lookup(
                 &data.projects_by_name,
                 name,
                 ApiResourceType::Project,
+                &ApiError::not_found_by_name,
             )?;
 
             project.identity.id.clone()
@@ -199,10 +201,11 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance> {
         let data = self.data.lock().await;
-        let project = collection_lookup_by_name(
+        let project = collection_lookup(
             &data.projects_by_name,
             project_name,
             ApiResourceType::Project,
+            &ApiError::not_found_by_name,
         )?;
         let project_instances = &data.instances_by_project_id;
         let instances = project_instances
@@ -224,10 +227,11 @@ impl ControlDataStore {
         let mut data = self.data.lock().await;
 
         let project_id = {
-            let project = collection_lookup_by_name(
+            let project = collection_lookup(
                 &data.projects_by_name,
                 project_name,
                 ApiResourceType::Project,
+                &ApiError::not_found_by_name,
             )?;
             project.identity.id.clone()
         };
@@ -273,19 +277,21 @@ impl ControlDataStore {
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
         let data = self.data.lock().await;
-        let project = collection_lookup_by_name(
+        let project = collection_lookup(
             &data.projects_by_name,
             project_name,
             ApiResourceType::Project,
+            &ApiError::not_found_by_name,
         )?;
         let project_instances = &data.instances_by_project_id;
         let instances = project_instances
             .get(&project.identity.id)
             .expect("project existed but had no instance collection");
-        let instance = collection_lookup_by_name(
+        let instance = collection_lookup(
             &instances,
             instance_name,
             ApiResourceType::Instance,
+            &ApiError::not_found_by_name,
         )?;
         Ok(Arc::clone(instance))
     }
@@ -297,10 +303,11 @@ impl ControlDataStore {
     ) -> DeleteResult {
         let mut data = self.data.lock().await;
         let project_id = {
-            let project = collection_lookup_by_name(
+            let project = collection_lookup(
                 &data.projects_by_name,
                 project_name,
                 ApiResourceType::Project,
+                &ApiError::not_found_by_name,
             )?;
             project.identity.id.clone()
         };
@@ -323,10 +330,11 @@ impl ControlDataStore {
         id: &Uuid,
     ) -> LookupResult<ApiInstance> {
         let data = self.data.lock().await;
-        Ok(Arc::clone(collection_lookup_by_id(
+        Ok(Arc::clone(collection_lookup(
             &data.instances_by_id,
             id,
             ApiResourceType::Instance,
+            &ApiError::not_found_by_id,
         )?))
     }
 
@@ -345,10 +353,11 @@ impl ControlDataStore {
         let instance_name = new_instance.identity.name.clone();
         let mut data = self.data.lock().await;
         let old_name = {
-            let old_instance = collection_lookup_by_id(
+            let old_instance = collection_lookup(
                 &data.instances_by_id,
                 &id,
                 ApiResourceType::Instance,
+                &ApiError::not_found_by_id,
             )?;
 
             assert_eq!(old_instance.identity.id, id);
@@ -415,28 +424,14 @@ where
     Ok(futures::stream::iter(items).boxed())
 }
 
-/*
- * TODO-cleanup: for consistency and generality it would be nice if we could
- * make this take a KeyType type parameters, but I'm not sure how to specify the
- * bound that &KeyType: Into<String>
- */
-fn collection_lookup_by_name<'a, 'b, ValueType>(
-    tree: &'b BTreeMap<ApiName, Arc<ValueType>>,
-    name: &'a ApiName,
+fn collection_lookup<'a, 'b, KeyType, ValueType>(
+    tree: &'b BTreeMap<KeyType, Arc<ValueType>>,
+    lookup_key: &'a KeyType,
     resource_type: ApiResourceType,
-) -> Result<&'b Arc<ValueType>, ApiError> {
-    tree.get(name)
-        .ok_or_else(|| ApiError::not_found_by_name(resource_type, name))
-}
-
-/*
- * TODO-cleanup: see collection_lookup_by_id().  It'd be nice to commonize
- * these.
- */
-fn collection_lookup_by_id<'a, 'b, ValueType>(
-    tree: &'b BTreeMap<Uuid, Arc<ValueType>>,
-    id: &'a Uuid,
-    resource_type: ApiResourceType,
-) -> Result<&'b Arc<ValueType>, ApiError> {
-    tree.get(id).ok_or_else(|| ApiError::not_found_by_id(resource_type, id))
+    mkerror: &dyn Fn(ApiResourceType, &KeyType) -> ApiError,
+) -> Result<&'b Arc<ValueType>, ApiError>
+where
+    KeyType: std::cmp::Ord,
+{
+    tree.get(lookup_key).ok_or_else(|| mkerror(resource_type, lookup_key))
 }
