@@ -27,17 +27,19 @@ Work queue (see also: existing GitHub issues):
 * implement external user authorization mechanism
 * implement throttling and load shedding described in RFD 6
 * implement hardening in RFD 10
+* implement ETag / If-Match / If-None-Match
+* implement limits for all types of resources
 * polish pagination mechanisms (opaque token?  What does Stripe do?)
 * integrate a real data storage backend
 * implement scheme for API versioning
-* debugging/monitoring: Prometheus?
-* debugging/monitoring: OpenTracing? OpenTelemetry?
-* debugging/monitoring: Dynamic tracing?
-* debugging/monitoring: Core files?
 ** how to identify the requested version -- header or URI?
 ** translators for older versions?
 ** integration of supported API versions into build artifact?
 ** Should all the uses of serde_json disallow unrecognized fields?  Should any?
+* debugging/monitoring: Prometheus?
+* debugging/monitoring: OpenTracing? OpenTelemetry?
+* debugging/monitoring: Dynamic tracing?
+* debugging/monitoring: Core files?
 * settle on an approach for modification of resources and implement it once
 * Automated testing
 ** General API testing: there's a lot of boilerplate in hand-generated tests
