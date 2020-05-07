@@ -24,6 +24,7 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ExtractedParameter;
 use dropshot::HttpError;
+use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOkObject;
@@ -311,7 +312,7 @@ async fn api_project_instances_delete_instance(
 async fn api_project_instances_instance_start(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -319,7 +320,7 @@ async fn api_project_instances_instance_start(
     let instance_name = &path.instance_name;
     let instance =
         controller.instance_start(&project_name, &instance_name).await?;
-    Ok(HttpResponseOkObject(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.to_view()))
 }
 
 /**
@@ -333,7 +334,7 @@ async fn api_project_instances_instance_start(
 async fn api_project_instances_instance_stop(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
     let apictx = ApiContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -341,7 +342,7 @@ async fn api_project_instances_instance_stop(
     let instance_name = &path.instance_name;
     let instance =
         controller.instance_stop(&project_name, &instance_name).await?;
-    Ok(HttpResponseOkObject(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.to_view()))
 }
 
 /*

@@ -62,6 +62,7 @@ pub struct ServerConfig {
  * you've called close(), you shouldn't be able to call it again.
  */
 pub struct HttpServer {
+    app_state: Arc<DropshotState>,
     server_future: Option<
         Pin<Box<dyn Future<Output = Result<(), hyper::error::Error>> + Send>>,
     >,
@@ -145,10 +146,15 @@ impl HttpServer {
         });
 
         Ok(HttpServer {
+            app_state: app_state,
             server_future: Some(graceful.boxed()),
             local_addr: local_addr,
             close_channel: Some(tx),
         })
+    }
+
+    pub fn app_private(&self) -> Arc<dyn Any + Send + Sync + 'static> {
+        Arc::clone(&self.app_state.private)
     }
 }
 

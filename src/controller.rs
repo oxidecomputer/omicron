@@ -17,6 +17,7 @@ use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
+use async_trait::async_trait;
 use chrono::Utc;
 use dropshot::ExtractedParameter;
 use dropshot::HttpError;
@@ -75,6 +76,23 @@ pub async fn to_view_list<T: ApiObject>(
 }
 
 /**
+ * This trait is used to expose interfaces that we only want made available to
+ * the test suite.
+ */
+#[async_trait]
+pub trait OxideControllerTestInterfaces {
+    /**
+     * Returns the ServerController for an Instance from its id.  We may also
+     * want to split this up into instance_lookup_by_id() and instance_sc(), but
+     * after all it's a test suite special to begin with.
+     */
+    async fn instance_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerController>, ApiError>;
+}
+
+/**
  * Represents the state of the Oxide system that we're managing.
  *
  * Right now, this is mostly a wrapper around the data store because this server
@@ -126,12 +144,12 @@ impl OxideController {
         }
     }
 
-    pub async fn add_server_controller(&self, sc: ServerController) {
+    pub async fn add_server_controller(&self, sc: Arc<ServerController>) {
         let mut scs = self.server_controllers.lock().await;
         assert!(!scs.contains_key(&sc.id));
         info!(self.log, "registered server controller";
             "server_uuid" => sc.id.to_string());
-        scs.insert(sc.id.clone(), Arc::new(sc));
+        scs.insert(sc.id.clone(), sc);
     }
 
     /*
@@ -401,7 +419,7 @@ impl OxideController {
         .await
     }
 
-    /*
+    /**
      * Make sure the given Instance is stopped.
      */
     pub async fn instance_stop(
@@ -481,6 +499,17 @@ impl OxideController {
         ControllerScApi {
             controller: Arc::clone(self),
         }
+    }
+}
+
+#[async_trait]
+impl OxideControllerTestInterfaces for OxideController {
+    async fn instance_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerController>, ApiError> {
+        let instance = self.datastore.instance_lookup_by_id(id).await?;
+        self.instance_sc(&instance).await
     }
 }
 

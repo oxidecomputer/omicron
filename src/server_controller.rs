@@ -8,6 +8,7 @@ use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiInstanceState;
 use crate::controller::ControllerScApi;
+use async_trait::async_trait;
 use chrono::Utc;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
@@ -33,6 +34,9 @@ pub struct ServerController {
     /** unique id for this server */
     pub id: Uuid,
 
+    /** indicates how to simulate instance transitions */
+    pub sim_mode: ServerControllerSimMode,
+
     /** handle for the internal control plane API */
     ctlsc: ControllerScApi,
     /** debug log */
@@ -41,10 +45,17 @@ pub struct ServerController {
     instances: Mutex<BTreeMap<Uuid, SimInstance>>,
 }
 
+#[derive(Copy, Clone)]
+pub enum ServerControllerSimMode {
+    Auto,
+    Api,
+}
+
 impl ServerController {
     /** Constructs a simulated ServerController with the given uuid. */
     pub fn new_simulated_with_id(
         id: &Uuid,
+        sim_mode: ServerControllerSimMode,
         log: Logger,
         ctlsc: ControllerScApi,
     ) -> ServerController {
@@ -52,8 +63,9 @@ impl ServerController {
 
         ServerController {
             id: id.clone(),
-            log: log,
-            ctlsc: ctlsc,
+            sim_mode,
+            log,
+            ctlsc,
             instances: Mutex::new(BTreeMap::new()),
         }
     }
@@ -78,15 +90,23 @@ impl ServerController {
                 /* Create a new Instance. */
                 let idc = id.clone();
                 let log = self.log.new(o!("instance_id" => idc.to_string()));
-                let (new_instance, rx) =
-                    SimInstance::new(&api_instance.runtime, log);
 
-                let selfc = Arc::clone(&self);
-                tokio::spawn(async move {
-                    selfc.instance_sim(idc, rx).await;
-                });
-
-                new_instance
+                if let ServerControllerSimMode::Auto = self.sim_mode {
+                    let (instance, rx) = SimInstance::new_simulated_auto(
+                        &api_instance.runtime,
+                        log,
+                    );
+                    let selfc = Arc::clone(&self);
+                    tokio::spawn(async move {
+                        selfc.instance_sim(idc, rx).await;
+                    });
+                    instance
+                } else {
+                    SimInstance::new_simulated_explicit(
+                        &api_instance.runtime,
+                        log,
+                    )
+                }
             }
         };
 
@@ -150,9 +170,26 @@ impl ServerController {
          * task?  If we did it here, we'd deadlock, since we're invoked from the
          * background task.
          */
-        if let Some(mut destroyed_instance) = to_destroy {
-            destroyed_instance.channel_tx.close_channel();
+        if let Some(destroyed_instance) = to_destroy {
+            if let Some(mut tx) = destroyed_instance.channel_tx {
+                tx.close_channel();
+            }
         }
+    }
+}
+
+/**
+ * Trait used to expose interfaces for use only by the test suite.
+ */
+#[async_trait]
+pub trait ServerControllerTestInterfaces {
+    async fn instance_finish_transition(&self, id: Uuid);
+}
+
+#[async_trait]
+impl ServerControllerTestInterfaces for ServerController {
+    async fn instance_finish_transition(&self, id: Uuid) {
+        self.instance_poke(id).await
     }
 }
 
@@ -178,7 +215,7 @@ struct SimInstance {
     /** Debug log */
     log: Logger,
     /** Channel for transmitting to the background task */
-    channel_tx: Sender<()>,
+    channel_tx: Option<Sender<()>>,
 }
 
 /**
@@ -203,8 +240,12 @@ struct SimInstance {
 const SIM_INSTANCE_CHANNEL_BUFFER_SIZE: usize = 0;
 
 impl SimInstance {
-    /** Create a new `SimInstance`. */
-    fn new(
+    /**
+     * Create a new `SimInstance` with state transitions automatically
+     * simulated by a background task.  The caller is expected to provide the
+     * background task that reads from the channel and advances the simulation.
+     */
+    fn new_simulated_auto(
         initial_runtime: &ApiInstanceRuntimeState,
         log: Logger,
     ) -> (SimInstance, Receiver<()>) {
@@ -216,11 +257,31 @@ impl SimInstance {
             SimInstance {
                 current_run_state: initial_runtime.clone(),
                 requested_run_state: None,
-                log: log,
-                channel_tx: tx,
+                log,
+                channel_tx: Some(tx),
             },
             rx,
         )
+    }
+
+    /**
+     * Create a new `SimInstance` with state transitions simulated by explicit
+     * calls.  The only difference from the perspective of this struct is that
+     * we won't have a channel to which we send notifications when asynchronous
+     * state transitions begin.
+     */
+    fn new_simulated_explicit(
+        initial_runtime: &ApiInstanceRuntimeState,
+        log: Logger,
+    ) -> SimInstance {
+        debug!(log, "created simulated instance";
+            "initial_state" => ?initial_runtime);
+        SimInstance {
+            current_run_state: initial_runtime.clone(),
+            requested_run_state: None,
+            log,
+            channel_tx: None,
+        }
     }
 
     /**
@@ -326,10 +387,12 @@ impl SimInstance {
          */
         if need_async {
             self.requested_run_state = Some(target.clone());
-            let result = self.channel_tx.try_send(());
-            if let Err(error) = result {
-                assert!(!error.is_disconnected());
-                assert!(error.is_full());
+            if let Some(ref mut tx) = self.channel_tx {
+                let result = tx.try_send(());
+                if let Err(error) = result {
+                    assert!(!error.is_disconnected());
+                    assert!(error.is_full());
+                }
             }
         }
 
@@ -422,7 +485,7 @@ mod test {
             }
         };
 
-        SimInstance::new(&initial_runtime, logctx.log.new(o!()))
+        SimInstance::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
     }
 
     #[tokio::test]

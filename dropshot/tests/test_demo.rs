@@ -64,7 +64,7 @@ fn test_setup(test_name: &str) -> TestContext {
     register_test_endpoints(&mut api);
     let logctx = LogContext::new(test_name, &config_logging);
 
-    TestContext::new(api, Arc::new(0), &config_dropshot, logctx)
+    TestContext::new(api, Arc::new(0 as usize), &config_dropshot, logctx)
 }
 
 /*
@@ -74,6 +74,11 @@ fn test_setup(test_name: &str) -> TestContext {
 #[tokio::test]
 async fn test_demo1() {
     let testctx = test_setup("demo1");
+
+    let private = testctx.server.app_private();
+    let p = private.downcast::<usize>().expect("wrong type for private data");
+    assert_eq!(*p, 0);
+
     let mut response = testctx
         .client_testctx
         .make_request(

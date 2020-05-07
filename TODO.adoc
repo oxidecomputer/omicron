@@ -12,9 +12,6 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* make server controller directly accessible to test suite so that I can add
-  endpoints to simulate transitions (rather than using timeouts).  Then write
-  tests for instance boot/halt.
 * implement instance reboot (using new non-idempotent request to SC)
 * use serde_json::StreamDeserializer where we use NDJSON
 * document Dropshot

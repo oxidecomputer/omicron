@@ -27,6 +27,7 @@ pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::ExtractedParameter;
 pub use handler::Extractor;
+pub use handler::HttpResponseAccepted;
 pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
 pub use handler::HttpResponseOkObject;
