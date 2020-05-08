@@ -12,10 +12,9 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* use serde_json::StreamDeserializer where we use NDJSON
+* settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents
-* PUT should be idempotent and complete or else we should use PATCH
 * implement audit log
 * implement alerts
 * implement external user authentication
@@ -24,7 +23,10 @@ Work queue (see also: existing GitHub issues):
 * implement hardening in RFD 10
 * implement ETag / If-Match / If-None-Match
 * implement limits for all types of resources
-* polish pagination mechanisms (opaque token?  What does Stripe do?)
+* polish pagination interface
+** Decide if we want to use an opaque token or not.
+** If we stick with NDJSON, use serde_json::StreamDeserializer.  Maybe we should
+   just return a big object, though.
 * integrate a real data storage backend
 * implement scheme for API versioning
 ** how to identify the requested version -- header or URI?
@@ -35,7 +37,6 @@ Work queue (see also: existing GitHub issues):
 * debugging/monitoring: OpenTracing? OpenTelemetry?
 * debugging/monitoring: Dynamic tracing?
 * debugging/monitoring: Core files?
-* settle on an approach for modification of resources and implement it once
 * Automated testing
 ** General API testing: there's a lot of boilerplate in hand-generated tests
    for each kind of resource.  Would it be reasonable / possible to have a sort
