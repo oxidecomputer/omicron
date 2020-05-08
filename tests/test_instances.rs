@@ -184,36 +184,48 @@ async fn test_instances() {
      * not even the state timestamp.
      */
     let instance = instance_next;
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::POST,
-            &format!("{}/start", instance_url),
-            "".into(),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let instance_next = read_json::<ApiInstanceView>(&mut response).await;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Start).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&testctx, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
     /*
+     * Reboot the instance.
+     */
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(controller, &instance.identity.id).await;
+    let instance_next = instance_get(&testctx, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(controller, &instance.identity.id).await;
+    let instance_next = instance_get(&testctx, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    /*
      * Request a halt and verify both the immediate state and the finished state.
      */
     let instance = instance_next;
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::POST,
-            &format!("{}/stop", instance_url),
-            "".into(),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let instance_next = read_json::<ApiInstanceView>(&mut response).await;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
         instance_next.runtime.run_state_updated
@@ -234,20 +246,100 @@ async fn test_instances() {
      * not even the state timestamp.
      */
     let instance = instance_next;
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::POST,
-            &format!("{}/stop", instance_url),
-            "".into(),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let instance_next = read_json::<ApiInstanceView>(&mut response).await;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&testctx, &instance_url).await;
     instances_eq(&instance, &instance_next);
+
+    /*
+     * Attempt to reboot the halted instance.  This should fail.
+     */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &format!("{}/reboot", instance_url),
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "cannot reboot instance in state \"stopped\"");
+
+    /*
+     * Start the instance.  While it's starting, issue a reboot.  This should
+     * succeed, having stopped in between.
+     */
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Start).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(controller, &instance.identity.id).await;
+    let instance_next = instance_get(&testctx, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(controller, &instance.identity.id).await;
+    let instance_next = instance_get(&testctx, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    /*
+     * Stop the instance.  While it's stopping, issue a reboot.  This should
+     * fail because you cannot stop an instance that's en route to a stopped
+     * state.
+     */
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
+
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &format!("{}/reboot", instance_url),
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
+    let instance = instance_next;
+    instance_simulate(controller, &instance.identity.id).await;
+    let instance_next = instance_get(&testctx, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
+    assert!(
+        instance_next.runtime.run_state_updated
+            > instance.runtime.run_state_updated
+    );
 
     /* Delete the instance. */
     testctx
@@ -266,6 +358,60 @@ async fn test_instances() {
      * deleting.  We need to figure out how these actually get cleaned up from
      * the API namespace when this happens.
      */
+
+    /*
+     * Once more, try to reboot it.  This should not work on a destroyed
+     * instance.  (This will likely be an invalid test after we figure out how
+     * to make DELETE remove the instance from the namespace, but it's still
+     * useful to exercise this case now.)
+     */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &format!("{}/reboot", instance_url),
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "instance state cannot be changed from state \"destroyed\""
+    );
+
+    /*
+     * Similarly, we should not be able to start or stop the instance.
+     */
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &format!("{}/start", instance_url),
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "instance state cannot be changed from state \"destroyed\""
+    );
+
+    let error = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &format!("{}/stop", instance_url),
+            "".into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "instance state cannot be changed from state \"destroyed\""
+    );
 
     /*
      * The rest of these examples attempt to create invalid instances.  We don't
@@ -315,6 +461,9 @@ async fn test_instances() {
     testctx.teardown().await;
 }
 
+/**
+ * Convenience function to fetch the current state of an instance.
+ */
 async fn instance_get(
     testctx: &TestContext,
     instance_url: &str,
@@ -326,6 +475,37 @@ async fn instance_get(
             &instance_url,
             "".into(),
             StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    read_json::<ApiInstanceView>(&mut response).await
+}
+
+/**
+ * Convenience function for starting, stopping, or rebooting an instance.
+ */
+enum InstanceOp {
+    Start,
+    Stop,
+    Reboot,
+}
+async fn instance_post(
+    testctx: &TestContext,
+    instance_url: &str,
+    which: InstanceOp,
+) -> ApiInstanceView {
+    let url = format!("{}/{}", instance_url, match which {
+        InstanceOp::Start => "start",
+        InstanceOp::Stop => "stop",
+        InstanceOp::Reboot => "reboot",
+    });
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::POST,
+            &url,
+            "".into(),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();

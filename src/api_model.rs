@@ -400,8 +400,6 @@ pub struct ApiInstance {
     pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the instance. */
     pub hostname: String, /* TODO-cleanup different type? */
-    /** last user-requested state for this instance */
-    pub state_requested: ApiInstanceRuntimeStateParams,
 
     /** state owned by the data plane */
     pub runtime: ApiInstanceRuntimeState,
@@ -431,6 +429,8 @@ impl ApiObject for ApiInstance {
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the instance */
     pub run_state: ApiInstanceState,
+    /** indicates whether a reboot is currently in progress */
+    pub reboot_in_progress: bool,
     /** which server is running this instance */
     pub server_uuid: Uuid,
     /** generation number for this state */
@@ -449,6 +449,7 @@ pub struct ApiInstanceRuntimeState {
 #[derive(Clone, Debug)]
 pub struct ApiInstanceRuntimeStateParams {
     pub run_state: ApiInstanceState,
+    pub reboot_wanted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

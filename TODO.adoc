@@ -12,7 +12,6 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* implement instance reboot (using new non-idempotent request to SC)
 * use serde_json::StreamDeserializer where we use NDJSON
 * document Dropshot
 * write some design documents

@@ -276,6 +276,7 @@ impl OxideController {
          */
         let runtime = ApiInstanceRuntimeState {
             run_state: ApiInstanceState::Creating,
+            reboot_in_progress: false,
             server_uuid: sc.id,
             gen: 1,
             time_updated: Utc::now(),
@@ -285,20 +286,19 @@ impl OxideController {
          * Store the first revision of the Instance into the database.  This
          * will have state "Creating".
          */
-        let runtime_params = ApiInstanceRuntimeStateParams {
-            run_state: ApiInstanceState::Running,
-        };
         let instance_created = self
             .datastore
-            .project_create_instance(
-                project_name,
-                params,
-                &runtime,
-                &runtime_params,
-            )
+            .project_create_instance(project_name, params, &runtime)
             .await?;
-
-        self.instance_set_runtime(instance_created, sc, &runtime_params).await
+        self.instance_set_runtime(
+            instance_created,
+            sc,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            },
+        )
+        .await
     }
 
     pub async fn project_destroy_instance(
@@ -316,6 +316,7 @@ impl OxideController {
         let sc = self.instance_sc(&instance).await?;
         let runtime_params = ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Destroyed,
+            reboot_wanted: false,
         };
         self.instance_set_runtime(instance, sc, &runtime_params).await?;
         Ok(())
@@ -370,7 +371,7 @@ impl OxideController {
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
-                    "instance cannot be stopped in state \"{}\"",
+                    "instance state cannot be changed from state \"{}\"",
                     run_state
                 ),
             })
@@ -396,6 +397,43 @@ impl OxideController {
     }
 
     /**
+     * Reboot the specified instance.
+     */
+    pub async fn instance_reboot(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> UpdateResult<ApiInstance> {
+        /*
+         * To implement reboot, we issue a call to the server controller to
+         * set a runtime state with "reboot_wanted".  We cannot simply stop the
+         * Instance and start it again here because if we crash in the meantime,
+         * we might leave it stopped.
+         *
+         * When an instance is rebooted, the "reboot_in_progress" remains set on
+         * the runtime state as it transitions to "Stopping" and "Stopped".  This
+         * flag is cleared when the state goes to "Starting".  This way, even if
+         * the whole rack powered off while this was going on, we would never
+         * lose track of the fact that this Instance was supposed to be running.
+         */
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+
+        self.check_runtime_change_allowed(&instance)?;
+        self.instance_set_runtime(
+            Arc::clone(&instance),
+            self.instance_sc(&instance).await?,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            },
+        )
+        .await
+    }
+
+    /**
      * Make sure the given Instance is running.
      */
     pub async fn instance_start(
@@ -414,6 +452,7 @@ impl OxideController {
             self.instance_sc(&instance).await?,
             &ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
             },
         )
         .await
@@ -438,6 +477,7 @@ impl OxideController {
             self.instance_sc(&instance).await?,
             &ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Stopped,
+                reboot_wanted: false,
             },
         )
         .await
