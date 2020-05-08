@@ -431,6 +431,8 @@ impl ApiObject for ApiInstance {
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the instance */
     pub run_state: ApiInstanceState,
+    /** indicates whether a reboot is currently in progress */
+    pub reboot_in_progress: bool,
     /** which server is running this instance */
     pub server_uuid: Uuid,
     /** generation number for this state */
@@ -449,6 +451,7 @@ pub struct ApiInstanceRuntimeState {
 #[derive(Clone, Debug)]
 pub struct ApiInstanceRuntimeStateParams {
     pub run_state: ApiInstanceState,
+    pub reboot_wanted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

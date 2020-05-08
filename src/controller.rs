@@ -276,6 +276,7 @@ impl OxideController {
          */
         let runtime = ApiInstanceRuntimeState {
             run_state: ApiInstanceState::Creating,
+            reboot_in_progress: false,
             server_uuid: sc.id,
             gen: 1,
             time_updated: Utc::now(),
@@ -287,6 +288,7 @@ impl OxideController {
          */
         let runtime_params = ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
+            reboot_wanted: false,
         };
         let instance_created = self
             .datastore
@@ -316,6 +318,7 @@ impl OxideController {
         let sc = self.instance_sc(&instance).await?;
         let runtime_params = ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Destroyed,
+            reboot_wanted: false,
         };
         self.instance_set_runtime(instance, sc, &runtime_params).await?;
         Ok(())
@@ -370,7 +373,7 @@ impl OxideController {
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
-                    "instance cannot be stopped in state \"{}\"",
+                    "instance state cannot be changed from state \"{}\"",
                     run_state
                 ),
             })
@@ -435,18 +438,16 @@ impl OxideController {
             .project_lookup_instance(project_name, instance_name)
             .await?;
 
-        /*
-         * Ask the SC to begin the state change.  Then update the database to
-         * reflect the new intermediate state.
-         */
         self.check_runtime_change_allowed(&instance)?;
-        let sc = self.instance_sc(&instance).await?;
-        let new_runtime_state = sc.instance_reboot(Arc::clone(&instance)).await?;
-        let mut new_instance = Arc::clone(&instance);
-        let instance_ref = Arc::make_mut(&mut new_instance);
-        instance_ref.runtime = new_runtime_state.clone();
-        self.datastore.instance_update(Arc::clone(&instance)).await?;
-        Ok(instance)
+        self.instance_set_runtime(
+            Arc::clone(&instance),
+            self.instance_sc(&instance).await?,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            },
+        )
+        .await
     }
 
     /**
@@ -468,6 +469,7 @@ impl OxideController {
             self.instance_sc(&instance).await?,
             &ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
             },
         )
         .await
@@ -492,6 +494,7 @@ impl OxideController {
             self.instance_sc(&instance).await?,
             &ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Stopped,
+                reboot_wanted: false,
             },
         )
         .await

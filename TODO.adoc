@@ -4,11 +4,8 @@
 = TODO
 
 Current status:
-* implement instance reboot (using new non-idempotent request to SC)
-** it doesn't work:
-*** the response should show state "Stopping", but it doesn't
-*** the instance seems to come to rest in state "Stopped", which is wrong
-** there are some XXXs to fix, then write some tests
+* implement instance reboot
+** write tests
 
 API endpoints:
 

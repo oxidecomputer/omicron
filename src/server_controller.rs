@@ -7,7 +7,6 @@ use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiResourceType;
 use crate::controller::ControllerScApi;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -81,12 +80,22 @@ impl ServerController {
         api_instance: Arc<ApiInstance>,
         target: &ApiInstanceRuntimeStateParams,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        if target.reboot_wanted && target.run_state != ApiInstanceState::Running
+        {
+            return Err(ApiError::InvalidRequest {
+                message: String::from(
+                    "cannot reboot to a state other than \"running\"",
+                ),
+            });
+        }
+
         let id = api_instance.identity.id.clone();
         let mut instances = self.instances.lock().await;
         let maybe_current_instance = instances.remove(&id);
-        let mut instance = {
+
+        let (mut instance, is_new) = {
             if let Some(current_instance) = maybe_current_instance {
-                current_instance
+                (current_instance, false)
             } else {
                 /* Create a new Instance. */
                 let idc = id.clone();
@@ -101,117 +110,35 @@ impl ServerController {
                     tokio::spawn(async move {
                         selfc.instance_sim(idc, rx).await;
                     });
-                    instance
+                    (instance, true)
                 } else {
-                    SimInstance::new_simulated_explicit(
-                        &api_instance.runtime,
-                        log,
+                    (
+                        SimInstance::new_simulated_explicit(
+                            &api_instance.runtime,
+                            log,
+                        ),
+                        true,
                     )
                 }
             }
         };
 
-        instance.transition(target);
-        let after = instance.current_run_state.clone();
-        instances.insert(id.clone(), instance);
-        Ok(after)
-    }
-
-    /**
-     * Non-idempotent call to reboot an instance.  The semantics of a reboot are
-     * that the system will be stopped and begin a fresh boot process that
-     * begins _after_ this call is made.  Think of the intended use-case of
-     * having changed the instance's image or configuration and then rebooting
-     * it to pick up that config.  It's important that the boot process begin
-     * after this call completes -- otherwise, you couldn't be sure that the
-     * boot process picked up your expected changes.  However, it's not
-     * important that the stopping process begins after this call is made.  In
-     * particular, if we're currently in the "stopping" phase of a previous
-     * reboot request, we don't have to do anything at all here because by
-     * definition there will be a new boot process started after this call
-     * completes.
-     *
-     * Intuitively, we want the above to hold as long as the user's desired
-     * state for the instance is running.  Otherwise, the request is invalid --
-     * you can't reboot an instance that's stopped.
-     *
-     * Putting these requirements together, this means:
-     *
-     * * If the instance is running, we'll stop it and then start it again.
-     * * If the instance is starting, we will begin stopping it immediately and
-     *   then start it again.
-     * * If the instance is stopped, this call is not valid.
-     *
-     * What if the instance is stopping?  It depends.  If it's going to come to
-     * rest in a stopped state, then the call should be invalid -- this is just
-     * like the case of trying to reboot a stopped instance.  On the other hand,
-     * if the instance is currently stopping only as part of a previous reboot
-     * operation, we should allow this request -- and simply do nothing (as
-     * explained above).
-     */
-    pub async fn instance_reboot(
-        self: &Arc<Self>,
-        api_instance: Arc<ApiInstance>,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        /* TODO-cleanup This implementation leaves much to be desired. */
-        let id = api_instance.identity.id.clone();
-        let mut instances = self.instances.lock().await;
-        let mut instance = instances.remove(&id).ok_or_else(|| {
-            ApiError::not_found_by_id(ApiResourceType::Instance, &id)
-        })?;
-
-        let current_run_state = &instance.current_run_state.run_state;
-        let target_run_state = instance.requested_run_state.as_ref();
-
-        /*
-         * When we first see a "Creating" instance in this module we always move
-         * it immediately to "Running", and there's no way to transition back to
-         * "Creating".  So we should never see "Creating" here.
-         */
-        assert_ne!(*current_run_state, ApiInstanceState::Creating);
-
-        /*
-         * Reboot is not allowed if:
-         *
-         * - we're in a stopped state (which are all at-rest states)
-         * - we're "Stopping" en route to anything other than "Stopped"
-         *   (because these are all terminal stopped states)
-         * - we're "Stopping" en route to "Stopped" and it's not because we're
-         *   currentely processing a previous reboot request
-         */
-        let rv = if current_run_state.is_stopped()
-            || (*current_run_state == ApiInstanceState::Stopping
-                && (target_run_state.unwrap().run_state
-                    != ApiInstanceState::Stopped
-                    || !instance.reboot_in_progress))
+        let current_state = &instance.current_run_state.run_state;
+        let rv = if target.reboot_wanted
+            && !is_new
+            && *current_state != ApiInstanceState::Starting
+            && *current_state != ApiInstanceState::Running
+            && (*current_state != ApiInstanceState::Stopping
+                || !instance.current_run_state.reboot_in_progress)
         {
-            let message = format!(
-                "cannot reboot instance in state \"{}\"",
-                current_run_state
-            );
-            warn!(instance.log, "reboot: request failed: {}", message);
             Err(ApiError::InvalidRequest {
-                message,
+                message: format!(
+                    "cannot reboot instance in state \"{}\"",
+                    current_state
+                ),
             })
-        } else if *current_run_state == ApiInstanceState::Starting
-            || *current_run_state == ApiInstanceState::Running
-        {
-            /* Immediately begin the reboot. */
-            info!(instance.log, "reboot: starting");
-            instance.reboot_in_progress = true;
-            instance.transition(&ApiInstanceRuntimeStateParams {
-                run_state: ApiInstanceState::Stopped,
-            });
-            Ok(instance.current_run_state.clone())
         } else {
-            /* We're already processing a reboot.  No action needed. */
-            assert_eq!(*current_run_state, ApiInstanceState::Stopping);
-            assert_eq!(
-                target_run_state.unwrap().run_state,
-                ApiInstanceState::Stopped
-            );
-            assert!(instance.reboot_in_progress);
-            info!(instance.log, "reboot: already in progress");
+            instance.transition(target);
             Ok(instance.current_run_state.clone())
         };
 
@@ -319,12 +246,6 @@ struct SimInstance {
     log: Logger,
     /** Channel for transmitting to the background task */
     channel_tx: Option<Sender<()>>,
-    /**
-     * True if a reboot is currently in progress.  This is set when we
-     * transition to "Stopping" as part of a reboot and it's cleared when we
-     * transition back to "Starting".
-     */
-    reboot_in_progress: bool,
 }
 
 /**
@@ -366,7 +287,6 @@ impl SimInstance {
             SimInstance {
                 current_run_state: initial_runtime.clone(),
                 requested_run_state: None,
-                reboot_in_progress: false,
                 log,
                 channel_tx: Some(tx),
             },
@@ -389,14 +309,13 @@ impl SimInstance {
         SimInstance {
             current_run_state: initial_runtime.clone(),
             requested_run_state: None,
-            reboot_in_progress: false,
             log,
             channel_tx: None,
         }
     }
 
     /**
-     * Transition this Instance to state `target`.  In some cases, the
+     * Transition this Instance to state `given_target`.  In some cases, the
      * transition may happen immediately (e.g., going from "Stopped" to
      * "Destroyed").  In other cases, as when going from "Stopped" to "Running",
      * we immediately transition to an intermediate state ("Starting", in this
@@ -410,7 +329,7 @@ impl SimInstance {
      */
     fn transition(
         &mut self,
-        target: &ApiInstanceRuntimeStateParams,
+        given_target: &ApiInstanceRuntimeStateParams,
     ) -> Option<ApiInstanceRuntimeStateParams> {
         /*
          * In all cases, set `requested_run_state` to the new target.  If there
@@ -419,20 +338,8 @@ impl SimInstance {
          * intended for debugging.
          */
         let dropped = self.requested_run_state.take();
-
-        /*
-         * Any requested transition causes us to abandon a reboot in progress.
-         */
-        self.reboot_in_progress = false;
-
         let state_before = self.current_run_state.run_state.clone();
-        let state_after = match target.run_state {
-            ref target_run_state if *target_run_state == state_before => {
-                debug!(self.log, "noop transition";
-                    "target" => ?target);
-                return dropped;
-            }
-
+        let mut state_after = match given_target.run_state {
             /*
              * For intermediate states (which don't really make sense to
              * request), just try to do the closest reasonable thing.
@@ -445,6 +352,48 @@ impl SimInstance {
             /* This is the most common interesting case. */
             ref target_run_state => target_run_state,
         };
+
+        /*
+         * There's nothing to do if the current and target states are the same
+         * AND either:
+         *
+         * - there's neither a reboot pending nor a reboot requested
+         * - there's both a reboot pending and a reboot requested and
+         *   the current reboot is still in the "Stopping" phase
+         *
+         * Otherwise, even if the states match, we may need to take action to
+         * begin or cancel a reboot.
+         *
+         * Reboot can only be requested with a target state of "Running".
+         * It doesn't make sense to reboot to any other state.
+         * TODO-debug log a warning in this case or make it impossible to
+         * represent?  Or validate it sooner?  TODO-cleanup if we create a
+         * separate ApiInstanceStateRequested as discussed elsewhere, the
+         * `Running` state could have a boolean indicating whether a reboot
+         * is requested first.
+         */
+        let reb_pending = self.current_run_state.reboot_in_progress;
+        let reb_wanted = *state_after == ApiInstanceState::Running
+            && given_target.reboot_wanted;
+        if *state_after == state_before
+            && ((!reb_pending && !reb_wanted)
+                || (reb_pending
+                    && reb_wanted
+                    && state_before == ApiInstanceState::Stopping))
+        {
+            debug!(self.log, "noop transition"; "target" => ?given_target);
+            return dropped;
+        }
+
+        /*
+         * If we're doing a reboot, then we've already verified that the target
+         * run state is "Running", but for the rest of this function we'll treat
+         * it like a transition to "Stopped" (with an extra bit telling us later
+         * to transition again to Running).
+         */
+        if reb_wanted {
+            state_after = &ApiInstanceState::Stopped;
+        }
 
         /*
          * Depending on what state we're in and what state we're going to, we
@@ -467,6 +416,7 @@ impl SimInstance {
          */
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
+            reboot_in_progress: reb_wanted,
             server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
@@ -503,11 +453,10 @@ impl SimInstance {
          *     but that's not currently the case.
          */
         if need_async {
-            /*
-             * XXX target.clone() is wrong if we were invoked with Stopping or
-             * Starting -- it should be rewritten to use state_after
-             */
-            self.requested_run_state = Some(target.clone());
+            self.requested_run_state = Some(ApiInstanceRuntimeStateParams {
+                run_state: state_after.clone(),
+                reboot_wanted: reb_wanted,
+            });
             if let Some(ref mut tx) = self.channel_tx {
                 let result = tx.try_send(());
                 if let Err(error) = result {
@@ -556,10 +505,18 @@ impl SimInstance {
         match run_state_before {
             ApiInstanceState::Starting => {
                 assert_eq!(run_state_after, ApiInstanceState::Running);
-                assert!(!self.reboot_in_progress);
+                assert!(!requested_run_state.reboot_wanted);
             }
             ApiInstanceState::Stopping => {
                 assert!(run_state_after.is_stopped());
+                assert_eq!(
+                    requested_run_state.reboot_wanted,
+                    self.current_run_state.reboot_in_progress
+                );
+                assert!(
+                    !requested_run_state.reboot_wanted
+                        || run_state_after == ApiInstanceState::Stopped
+                );
             }
             _ => panic!("async transition started for unexpected state"),
         };
@@ -569,6 +526,7 @@ impl SimInstance {
          */
         self.current_run_state = ApiInstanceRuntimeState {
             run_state: run_state_after.clone(),
+            reboot_in_progress: requested_run_state.reboot_wanted,
             server_uuid: self.current_run_state.server_uuid.clone(),
             gen: self.current_run_state.gen + 1,
             time_updated: Utc::now(),
@@ -580,19 +538,11 @@ impl SimInstance {
             "new_runtime" => ?self.current_run_state
         );
 
-        if self.reboot_in_progress {
-            /*
-             * XXX we need to notify the controller about this intermediate
-             * state change but we don't have a handle to the SC in order to do
-             * that.
-             */
-            assert_eq!(
-                self.current_run_state.run_state,
-                ApiInstanceState::Stopped
-            );
-            self.reboot_in_progress = false;
+        if self.current_run_state.reboot_in_progress {
+            assert_eq!(run_state_after, ApiInstanceState::Stopped);
             self.transition(&ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
             });
         }
     }
@@ -617,6 +567,7 @@ mod test {
         let initial_runtime = {
             ApiInstanceRuntimeState {
                 run_state: initial_state,
+                reboot_in_progress: false,
                 server_uuid: uuid::Uuid::new_v4(),
                 gen: 1,
                 time_updated: now,
@@ -651,10 +602,10 @@ mod test {
 
         /*
          * We should be able to transition immediately to any other stopped
-         * state, including the one we're already in ("Creating")
+         * state.  We can't do this for "Creating" because transition() treats
+         * that as a transition to "Running".
          */
         let stopped_states = vec![
-            ApiInstanceState::Creating,
             ApiInstanceState::Stopped,
             ApiInstanceState::Repairing,
             ApiInstanceState::Failed,
@@ -665,6 +616,7 @@ mod test {
             assert!(rprev.run_state.is_stopped());
             let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
                 run_state: state.clone(),
+                reboot_wanted: false,
             });
             assert!(dropped.is_none());
             assert!(instance.requested_run_state.is_none());
@@ -686,6 +638,7 @@ mod test {
         assert!(rx.try_next().is_err());
         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
+            reboot_wanted: false,
         });
         assert!(dropped.is_none());
         assert!(instance.requested_run_state.is_some());
@@ -717,6 +670,7 @@ mod test {
         assert!(!rprev.run_state.is_stopped());
         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
+            reboot_wanted: false,
         });
         assert!(dropped.is_none());
         assert!(instance.requested_run_state.is_none());
@@ -735,6 +689,7 @@ mod test {
         assert!(rx.try_next().is_err());
         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Destroyed,
+            reboot_wanted: false,
         });
         assert!(dropped.is_none());
         assert!(instance.requested_run_state.is_some());
@@ -767,6 +722,7 @@ mod test {
         assert!(rprev.run_state.is_stopped());
         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Running,
+            reboot_wanted: false,
         });
         assert!(dropped.is_none());
         assert!(instance.requested_run_state.is_some());
@@ -782,6 +738,7 @@ mod test {
          */
         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
             run_state: ApiInstanceState::Destroyed,
+            reboot_wanted: false,
         });
         assert_eq!(dropped.unwrap().run_state, ApiInstanceState::Running);
         let rnext = instance.current_run_state.clone();
