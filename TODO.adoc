@@ -61,6 +61,13 @@ Work queue (see also: existing GitHub issues):
 External dependencies / open questions:
 
 * Should we consider switching to sync?
+* Should we create a more first-class notion of objects in the API?
+** This would be a good way to enforce built-in limits.
+** This would be a good way to enforce uniformity of pagination.
+** If each resource provides a way to construct ETags, we could provide
+   automatic implementation of If-Match, etc.
+** With the right interface, we could provide automatic implementations of PUT
+   or PATCH with JSON Merge Patch and JSON Patch given any one of these.
 * would like to require that servers have unique, immutable uuids
 * TLS:
 ** How will we do TLS termination?
