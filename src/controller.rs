@@ -286,21 +286,19 @@ impl OxideController {
          * Store the first revision of the Instance into the database.  This
          * will have state "Creating".
          */
-        let runtime_params = ApiInstanceRuntimeStateParams {
-            run_state: ApiInstanceState::Running,
-            reboot_wanted: false,
-        };
         let instance_created = self
             .datastore
-            .project_create_instance(
-                project_name,
-                params,
-                &runtime,
-                &runtime_params,
-            )
+            .project_create_instance(project_name, params, &runtime)
             .await?;
-
-        self.instance_set_runtime(instance_created, sc, &runtime_params).await
+        self.instance_set_runtime(
+            instance_created,
+            sc,
+            &ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            },
+        )
+        .await
     }
 
     pub async fn project_destroy_instance(
@@ -408,30 +406,15 @@ impl OxideController {
     ) -> UpdateResult<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the server controller to
-         * execute the reboot.  We cannot simply stop the Instance and start it
-         * again because if we crash in the meantime, we might leave it stopped.
-         * XXX TODO-correctness Would it make more sense to put
-         * "reboot_requested" as a boolean in the runtime state params and
-         * runtime state?  That way, we could treat it like other state
-         * transitions, making a single idempotent call to the SC to execute it.
-         * If we and the SC crashed, we could never wind up in a state where the
-         * instance was stopped and not coming back up.  Right now, consider
-         * this sequence:
+         * set a runtime state with "reboot_wanted".  We cannot simply stop the
+         * Instance and start it again here because if we crash in the meantime,
+         * we might leave it stopped.
          *
-         * - we make the "reboot" call to the SC
-         * - SC stops the instance
-         * - SC notifies us that the state is "Stopped"
-         * - the "Stopped" state is recorded in the database
-         * - SC begins starting the instance
-         * - rack powers off (i.e., both OXCP and the SC)
-         *
-         * At this point when we come back up, we'll think the instance is
-         * supposed to be stopped and we won't start it again.  That's bad!  The
-         * only way to avoid this is if the runtime state for "Stopped" includes
-         * a bit indicating that a reboot is in progress.  (This would also let
-         * us indicate that to consumers of the API, which might be handy in
-         * case they request the instance while it's "stopped" and think that
-         * it's come to rest stopped rather than rebooting.)
+         * When an instance is rebooted, the "reboot_in_progress" remains set on
+         * the runtime state as it transitions to "Stopping" and "Stopped".  This
+         * flag is cleared when the state goes to "Starting".  This way, even if
+         * the whole rack powered off while this was going on, we would never
+         * lose track of the fact that this Instance was supposed to be running.
          */
         let instance = self
             .datastore

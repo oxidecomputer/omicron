@@ -9,7 +9,6 @@ use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -219,7 +218,6 @@ impl ControlDataStore {
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
-        runtime_wanted: &ApiInstanceRuntimeStateParams,
     ) -> CreateResult<ApiInstance> {
         let now = Utc::now();
         let newname = params.identity.name.clone();
@@ -261,7 +259,6 @@ impl ControlDataStore {
             memory: params.memory,
             boot_disk_size: params.boot_disk_size,
             hostname: params.hostname.clone(),
-            state_requested: runtime_wanted.clone(),
             runtime: runtime_initial.clone(),
         });
 
