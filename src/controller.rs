@@ -396,6 +396,60 @@ impl OxideController {
     }
 
     /**
+     * Reboot the specified instance.
+     */
+    pub async fn instance_reboot(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> UpdateResult<ApiInstance> {
+        /*
+         * To implement reboot, we issue a call to the server controller to
+         * execute the reboot.  We cannot simply stop the Instance and start it
+         * again because if we crash in the meantime, we might leave it stopped.
+         * XXX TODO-correctness Would it make more sense to put
+         * "reboot_requested" as a boolean in the runtime state params and
+         * runtime state?  That way, we could treat it like other state
+         * transitions, making a single idempotent call to the SC to execute it.
+         * If we and the SC crashed, we could never wind up in a state where the
+         * instance was stopped and not coming back up.  Right now, consider
+         * this sequence:
+         *
+         * - we make the "reboot" call to the SC
+         * - SC stops the instance
+         * - SC notifies us that the state is "Stopped"
+         * - the "Stopped" state is recorded in the database
+         * - SC begins starting the instance
+         * - rack powers off (i.e., both OXCP and the SC)
+         *
+         * At this point when we come back up, we'll think the instance is
+         * supposed to be stopped and we won't start it again.  That's bad!  The
+         * only way to avoid this is if the runtime state for "Stopped" includes
+         * a bit indicating that a reboot is in progress.  (This would also let
+         * us indicate that to consumers of the API, which might be handy in
+         * case they request the instance while it's "stopped" and think that
+         * it's come to rest stopped rather than rebooting.)
+         */
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+
+        /*
+         * Ask the SC to begin the state change.  Then update the database to
+         * reflect the new intermediate state.
+         */
+        self.check_runtime_change_allowed(&instance)?;
+        let sc = self.instance_sc(&instance).await?;
+        let new_runtime_state = sc.instance_reboot(Arc::clone(&instance)).await?;
+        let mut new_instance = Arc::clone(&instance);
+        let instance_ref = Arc::make_mut(&mut new_instance);
+        instance_ref.runtime = new_runtime_state.clone();
+        self.datastore.instance_update(Arc::clone(&instance)).await?;
+        Ok(instance)
+    }
+
+    /**
      * Make sure the given Instance is running.
      */
     pub async fn instance_start(

@@ -7,6 +7,7 @@ use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateParams;
 use crate::api_model::ApiInstanceState;
+use crate::api_model::ApiResourceType;
 use crate::controller::ControllerScApi;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -117,6 +118,108 @@ impl ServerController {
     }
 
     /**
+     * Non-idempotent call to reboot an instance.  The semantics of a reboot are
+     * that the system will be stopped and begin a fresh boot process that
+     * begins _after_ this call is made.  Think of the intended use-case of
+     * having changed the instance's image or configuration and then rebooting
+     * it to pick up that config.  It's important that the boot process begin
+     * after this call completes -- otherwise, you couldn't be sure that the
+     * boot process picked up your expected changes.  However, it's not
+     * important that the stopping process begins after this call is made.  In
+     * particular, if we're currently in the "stopping" phase of a previous
+     * reboot request, we don't have to do anything at all here because by
+     * definition there will be a new boot process started after this call
+     * completes.
+     *
+     * Intuitively, we want the above to hold as long as the user's desired
+     * state for the instance is running.  Otherwise, the request is invalid --
+     * you can't reboot an instance that's stopped.
+     *
+     * Putting these requirements together, this means:
+     *
+     * * If the instance is running, we'll stop it and then start it again.
+     * * If the instance is starting, we will begin stopping it immediately and
+     *   then start it again.
+     * * If the instance is stopped, this call is not valid.
+     *
+     * What if the instance is stopping?  It depends.  If it's going to come to
+     * rest in a stopped state, then the call should be invalid -- this is just
+     * like the case of trying to reboot a stopped instance.  On the other hand,
+     * if the instance is currently stopping only as part of a previous reboot
+     * operation, we should allow this request -- and simply do nothing (as
+     * explained above).
+     */
+    pub async fn instance_reboot(
+        self: &Arc<Self>,
+        api_instance: Arc<ApiInstance>,
+    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        /* TODO-cleanup This implementation leaves much to be desired. */
+        let id = api_instance.identity.id.clone();
+        let mut instances = self.instances.lock().await;
+        let mut instance = instances.remove(&id).ok_or_else(|| {
+            ApiError::not_found_by_id(ApiResourceType::Instance, &id)
+        })?;
+
+        let current_run_state = &instance.current_run_state.run_state;
+        let target_run_state = instance.requested_run_state.as_ref();
+
+        /*
+         * When we first see a "Creating" instance in this module we always move
+         * it immediately to "Running", and there's no way to transition back to
+         * "Creating".  So we should never see "Creating" here.
+         */
+        assert_ne!(*current_run_state, ApiInstanceState::Creating);
+
+        /*
+         * Reboot is not allowed if:
+         *
+         * - we're in a stopped state (which are all at-rest states)
+         * - we're "Stopping" en route to anything other than "Stopped"
+         *   (because these are all terminal stopped states)
+         * - we're "Stopping" en route to "Stopped" and it's not because we're
+         *   currentely processing a previous reboot request
+         */
+        let rv = if current_run_state.is_stopped()
+            || (*current_run_state == ApiInstanceState::Stopping
+                && (target_run_state.unwrap().run_state
+                    != ApiInstanceState::Stopped
+                    || !instance.reboot_in_progress))
+        {
+            let message = format!(
+                "cannot reboot instance in state \"{}\"",
+                current_run_state
+            );
+            warn!(instance.log, "reboot: request failed: {}", message);
+            Err(ApiError::InvalidRequest {
+                message,
+            })
+        } else if *current_run_state == ApiInstanceState::Starting
+            || *current_run_state == ApiInstanceState::Running
+        {
+            /* Immediately begin the reboot. */
+            info!(instance.log, "reboot: starting");
+            instance.reboot_in_progress = true;
+            instance.transition(&ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Stopped,
+            });
+            Ok(instance.current_run_state.clone())
+        } else {
+            /* We're already processing a reboot.  No action needed. */
+            assert_eq!(*current_run_state, ApiInstanceState::Stopping);
+            assert_eq!(
+                target_run_state.unwrap().run_state,
+                ApiInstanceState::Stopped
+            );
+            assert!(instance.reboot_in_progress);
+            info!(instance.log, "reboot: already in progress");
+            Ok(instance.current_run_state.clone())
+        };
+
+        instances.insert(id.clone(), instance);
+        rv
+    }
+
+    /**
      * Body of the background task (one per `SimInstance`) that simulates
      * Instance booting and halting.  Each time we read a message from the
      * instance's channel, we sleep for a bit and then invoke `instance_poke()`
@@ -216,6 +319,12 @@ struct SimInstance {
     log: Logger,
     /** Channel for transmitting to the background task */
     channel_tx: Option<Sender<()>>,
+    /**
+     * True if a reboot is currently in progress.  This is set when we
+     * transition to "Stopping" as part of a reboot and it's cleared when we
+     * transition back to "Starting".
+     */
+    reboot_in_progress: bool,
 }
 
 /**
@@ -257,6 +366,7 @@ impl SimInstance {
             SimInstance {
                 current_run_state: initial_runtime.clone(),
                 requested_run_state: None,
+                reboot_in_progress: false,
                 log,
                 channel_tx: Some(tx),
             },
@@ -279,6 +389,7 @@ impl SimInstance {
         SimInstance {
             current_run_state: initial_runtime.clone(),
             requested_run_state: None,
+            reboot_in_progress: false,
             log,
             channel_tx: None,
         }
@@ -308,6 +419,12 @@ impl SimInstance {
          * intended for debugging.
          */
         let dropped = self.requested_run_state.take();
+
+        /*
+         * Any requested transition causes us to abandon a reboot in progress.
+         */
+        self.reboot_in_progress = false;
+
         let state_before = self.current_run_state.run_state.clone();
         let state_after = match target.run_state {
             ref target_run_state if *target_run_state == state_before => {
@@ -386,6 +503,10 @@ impl SimInstance {
          *     but that's not currently the case.
          */
         if need_async {
+            /*
+             * XXX target.clone() is wrong if we were invoked with Stopping or
+             * Starting -- it should be rewritten to use state_after
+             */
             self.requested_run_state = Some(target.clone());
             if let Some(ref mut tx) = self.channel_tx {
                 let result = tx.try_send(());
@@ -435,6 +556,7 @@ impl SimInstance {
         match run_state_before {
             ApiInstanceState::Starting => {
                 assert_eq!(run_state_after, ApiInstanceState::Running);
+                assert!(!self.reboot_in_progress);
             }
             ApiInstanceState::Stopping => {
                 assert!(run_state_after.is_stopped());
@@ -457,6 +579,22 @@ impl SimInstance {
             "state_after" => %run_state_after,
             "new_runtime" => ?self.current_run_state
         );
+
+        if self.reboot_in_progress {
+            /*
+             * XXX we need to notify the controller about this intermediate
+             * state change but we don't have a handle to the SC in order to do
+             * that.
+             */
+            assert_eq!(
+                self.current_run_state.run_state,
+                ApiInstanceState::Stopped
+            );
+            self.reboot_in_progress = false;
+            self.transition(&ApiInstanceRuntimeStateParams {
+                run_state: ApiInstanceState::Running,
+            });
+        }
     }
 }
 

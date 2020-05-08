@@ -46,8 +46,9 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_post)?;
     api.register(api_project_instances_get_instance)?;
     api.register(api_project_instances_delete_instance)?;
-    api.register(api_project_instances_instance_stop)?;
+    api.register(api_project_instances_instance_reboot)?;
     api.register(api_project_instances_instance_start)?;
+    api.register(api_project_instances_instance_stop)?;
     api.register(api_hardware_racks_get)?;
     api.register(api_hardware_racks_get_rack)?;
 
@@ -300,6 +301,27 @@ async fn api_project_instances_delete_instance(
     let instance_name = &path.instance_name;
     controller.project_destroy_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseDeleted())
+}
+
+/**
+ * Reboot an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/reboot",
+}]
+async fn api_project_instances_instance_reboot(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance =
+        controller.instance_reboot(&project_name, &instance_name).await?;
+    Ok(HttpResponseAccepted(instance.to_view()))
 }
 
 /**

@@ -21,3 +21,8 @@ uuid = { version = "0.8", features = [ "serde", "v4" ] }
 [workspace]
 members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
 default-members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
+
+[profile.dev]
+panic = "abort"
+[profile.release]
+panic = "abort"
