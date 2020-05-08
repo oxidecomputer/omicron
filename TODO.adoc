@@ -3,10 +3,6 @@
 
 = TODO
 
-Current status:
-* implement instance reboot
-** write tests
-
 API endpoints:
 
 * `/servers`?
