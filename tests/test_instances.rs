@@ -175,8 +175,8 @@ async fn test_instances() {
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     /*
@@ -198,8 +198,8 @@ async fn test_instances() {
         instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -207,8 +207,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -216,8 +216,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     /*
@@ -228,8 +228,8 @@ async fn test_instances() {
         instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -237,8 +237,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     /*
@@ -276,8 +276,8 @@ async fn test_instances() {
         instance_post(&testctx, &instance_url, InstanceOp::Start).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -285,8 +285,8 @@ async fn test_instances() {
         instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -294,8 +294,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let instance = instance_next;
@@ -303,8 +303,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     /*
@@ -317,8 +317,8 @@ async fn test_instances() {
         instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     let error = testctx
@@ -337,8 +337,8 @@ async fn test_instances() {
     let instance_next = instance_get(&testctx, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
-        instance_next.runtime.run_state_updated
-            > instance.runtime.run_state_updated
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
     );
 
     /* Delete the instance. */
@@ -528,8 +528,8 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
     assert_eq!(instance1.hostname, instance2.hostname);
     assert_eq!(instance1.runtime.run_state, instance2.runtime.run_state);
     assert_eq!(
-        instance1.runtime.run_state_updated,
-        instance2.runtime.run_state_updated
+        instance1.runtime.time_run_state_updated,
+        instance2.runtime.time_run_state_updated
     );
 }
 

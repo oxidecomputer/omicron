@@ -16,7 +16,6 @@ Work queue (see also: existing GitHub issues):
 * document Dropshot
 * write some design documents
 * PUT should be idempotent and complete or else we should use PATCH
-* make API fields consistent (camel case vs. snake case, use of timestamps)
 * implement audit log
 * implement alerts
 * implement external user authentication
@@ -82,3 +81,7 @@ Other activities:
 * Fault testing / under load
 * Fuzz testing
 * Security review
+
+Nice-to-haves:
+
+* API consistency checks: e.g., camel case every where

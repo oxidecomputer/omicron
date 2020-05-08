@@ -203,12 +203,14 @@ pub struct ApiIdentityMetadata {
     pub time_modified: DateTime<Utc>,
 }
 
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
 }
 
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
@@ -249,6 +251,7 @@ impl ApiObject for ApiProject {
 /**
  * Represents the properties of an ApiProject that can be seen by end users.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
     /* TODO is flattening here the intent in RFD 4? */
@@ -259,6 +262,7 @@ pub struct ApiProjectView {
 /**
  * Represents the create-time parameters for an ApiProject.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
@@ -268,6 +272,7 @@ pub struct ApiProjectCreateParams {
 /**
  * Represents the properties of an ApiProject that can be updated by end users.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectUpdateParams {
     #[serde(flatten)]
@@ -452,10 +457,11 @@ pub struct ApiInstanceRuntimeStateParams {
     pub reboot_wanted: bool,
 }
 
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateView {
     pub run_state: ApiInstanceState,
-    pub run_state_updated: DateTime<Utc>,
+    pub time_run_state_updated: DateTime<Utc>,
 }
 
 impl ApiObject for ApiInstanceRuntimeState {
@@ -463,7 +469,7 @@ impl ApiObject for ApiInstanceRuntimeState {
     fn to_view(&self) -> ApiInstanceRuntimeStateView {
         ApiInstanceRuntimeStateView {
             run_state: self.run_state.clone(),
-            run_state_updated: self.time_updated,
+            time_run_state_updated: self.time_updated,
         }
     }
 }
@@ -471,6 +477,7 @@ impl ApiObject for ApiInstanceRuntimeState {
 /**
  * Represents the properties of an `ApiInstance` that can be seen by end users.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceView {
     /* TODO is flattening here the intent in RFD 4? */
@@ -499,6 +506,7 @@ pub struct ApiInstanceView {
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
@@ -515,6 +523,7 @@ pub struct ApiInstanceCreateParams {
  * the key properties to be updated only by a separate "resize" API that would
  * be async.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
@@ -545,6 +554,7 @@ impl ApiObject for ApiRack {
 /**
  * Represents a Rack in the API.  See RFD for field details.
  */
+#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiRackView {
     pub id: Uuid,
