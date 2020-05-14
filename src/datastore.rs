@@ -379,7 +379,11 @@ impl ControlDataStore {
 /**
  * List a page of items from a collection.
  */
-async fn collection_list<KeyType, ValueType>(
+/*
+ * TODO-cleanup this is only public because we haven't built servers into the
+ * datastore yet so the controller needs this interface.
+ */
+pub async fn collection_list<KeyType, ValueType>(
     tree: &BTreeMap<KeyType, Arc<ValueType>>,
     pagparams: &PaginationParams<KeyType>,
 ) -> ListResult<ValueType>

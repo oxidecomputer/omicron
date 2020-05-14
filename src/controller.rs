@@ -15,6 +15,8 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
+use crate::api_model::ApiServer;
+use crate::datastore::collection_list;
 use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
 use async_trait::async_trait;
@@ -533,6 +535,45 @@ impl OxideController {
         } else {
             Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
         }
+    }
+
+    /*
+     * Servers.
+     * TODO-completeness: Eventually, we'll want servers to be stored in the
+     * database, with a controlled process for adopting them, decommissioning
+     * them, etc.  For now, we expose an ApiServer for each ServerController
+     * that we've got.
+     */
+    pub async fn servers_list(
+        &self,
+        pagparams: &PaginationParams<Uuid>,
+    ) -> ListResult<ApiServer> {
+        let controllers = self.server_controllers.lock().await;
+        let servers = collection_list(&controllers, pagparams)
+            .await?
+            .filter(|maybe_object| ready(maybe_object.is_ok()))
+            .map(|sc| {
+                Ok(Arc::new(ApiServer {
+                    id: sc.unwrap().id,
+                }))
+            })
+            .collect::<Vec<Result<Arc<ApiServer>, ApiError>>>()
+            .await;
+        Ok(futures::stream::iter(servers).boxed())
+    }
+
+    pub async fn server_lookup(
+        &self,
+        server_id: &Uuid,
+    ) -> LookupResult<ApiServer> {
+        let controllers = self.server_controllers.lock().await;
+        let sc = controllers.get(server_id).ok_or_else(|| {
+            ApiError::not_found_by_id(ApiResourceType::Server, server_id)
+        })?;
+
+        Ok(Arc::new(ApiServer {
+            id: sc.id,
+        }))
     }
 
     pub fn as_sc_api(self: &Arc<OxideController>) -> ControllerScApi {

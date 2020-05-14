@@ -66,6 +66,7 @@ pub enum ApiResourceType {
     Project,
     Instance,
     Rack,
+    Server,
 }
 
 impl Display for ApiResourceType {
@@ -74,6 +75,7 @@ impl Display for ApiResourceType {
             ApiResourceType::Project => "project",
             ApiResourceType::Instance => "instance",
             ApiResourceType::Rack => "rack",
+            ApiResourceType::Server => "server",
         })
     }
 }
@@ -557,6 +559,32 @@ impl ApiObject for ApiRack {
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiRackView {
+    pub id: Uuid,
+}
+
+/*
+ * SERVERS
+ */
+
+/**
+ * Concrete type for a Server in the API.
+ */
+pub struct ApiServer {
+    pub id: Uuid,
+}
+
+impl ApiObject for ApiServer {
+    type View = ApiServerView;
+    fn to_view(&self) -> ApiServerView {
+        ApiServerView {
+            id: self.id.clone(),
+        }
+    }
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiServerView {
     pub id: Uuid,
 }
 
