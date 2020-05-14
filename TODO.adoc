@@ -5,7 +5,6 @@
 
 API endpoints:
 
-* `/servers`?
 * `/disks` and related endpoints
 * RFD 24: regions, AZs, etc
 * (lots more)
@@ -15,6 +14,8 @@ Work queue (see also: existing GitHub issues):
 * settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents
+* implement server controller as separate program (would be a better demo of
+  what's really going on internally)
 * implement audit log
 * implement alerts
 * implement external user authentication
@@ -74,11 +75,6 @@ External dependencies / open questions:
 ** How will we manage server certificates?
 ** How will we manage client certificates?
 * what data storage backend will we use?
-* flesh out several interfaces:
-** OXCP -> server controller
-** server controller -> OXCP (bootstrapping)
-** server controller -> OXCP (alerts, faults, support bundles, state changes)
-** internal -> OXCP: connected clients, recent requests, etc.
 * what does bootstrapping / key management look like?
 * what does internal authorization look like?
 
