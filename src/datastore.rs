@@ -410,14 +410,7 @@ impl ControlDataStore {
         let project_disks = disks_by_project
             .get(&project_id)
             .expect("project existed but had no disk collection");
-        let disks = {
-            let selected_uuids = collection_list_vec(&project_disks, &pagparams);
-            selected_uuids
-                .iter()
-                .map(|uuid| Ok(Arc::clone(all_disks.get(uuid).unwrap())))
-                .collect::<Vec<Result<Arc<ApiDisk>, ApiError>>>()
-        };
-        Ok(futures::stream::iter(disks).boxed())
+        collection_list_via_id(&project_disks, &pagparams, &all_disks).await
     }
 
     pub async fn disk_create(
@@ -513,13 +506,15 @@ where
 }
 
 /* XXX commonize */
-pub fn collection_list_vec<KeyType, ValueType>(
-    tree: &BTreeMap<KeyType, ValueType>,
+pub async fn collection_list_via_id<KeyType, IdType, ValueType>(
+    search_tree: &BTreeMap<KeyType, IdType>,
     pagparams: &PaginationParams<KeyType>,
-) -> Vec<ValueType>
+    value_tree: &BTreeMap<IdType, Arc<ValueType>>,
+) -> ListResult<ValueType>
 where
     KeyType: std::cmp::Ord,
-    ValueType: Clone + Send + Sync + 'static,
+    IdType: std::cmp::Ord,
+    ValueType: Send + Sync + 'static,
 {
     /* TODO-cleanup this logic should be in a wrapper function? */
     let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
@@ -529,14 +524,15 @@ where
      * caller is holding a lock, they'll be able to release it right away.  This
      * also makes the lifetime of the return value much easier.
      */
-    let collect_items = |iter: &mut dyn Iterator<
-        Item = (&KeyType, &ValueType),
-    >| {
-        iter.take(limit).map(|(_, item)| item.clone()).collect::<Vec<ValueType>>()
-    };
+    let collect_items =
+        |iter: &mut dyn Iterator<Item = (&KeyType, &IdType)>| {
+            iter.take(limit)
+                .map(|(_, item)| Ok(Arc::clone(value_tree.get(item).unwrap())))
+                .collect::<Vec<Result<Arc<ValueType>, ApiError>>>()
+        };
 
-    match &pagparams.marker {
-        None => collect_items(&mut tree.iter()),
+    let items = match &pagparams.marker {
+        None => collect_items(&mut search_tree.iter()),
         /*
          * NOTE: This range is inclusive on the low end because that
          * makes it easier for the client to know that it hasn't missed
@@ -548,6 +544,10 @@ where
          * items that were present for the whole scan, which seems like
          * the main constraint.
          */
-        Some(start_value) => collect_items(&mut tree.range(start_value..)),
-    }
+        Some(start_value) => {
+            collect_items(&mut search_tree.range(start_value..))
+        }
+    };
+
+    Ok(futures::stream::iter(items).boxed())
 }
