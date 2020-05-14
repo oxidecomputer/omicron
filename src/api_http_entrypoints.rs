@@ -7,6 +7,8 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::api_model::ApiDiskCreateParams;
+use crate::api_model::ApiDiskView;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
@@ -43,6 +45,10 @@ pub fn api_register_entrypoints(
     api.register(api_projects_get_project)?;
     api.register(api_projects_delete_project)?;
     api.register(api_projects_put_project)?;
+
+    api.register(api_project_disks_get)?;
+    api.register(api_project_disks_post)?;
+
     api.register(api_project_instances_get)?;
     api.register(api_project_instances_post)?;
     api.register(api_project_instances_get_instance)?;
@@ -197,6 +203,57 @@ async fn api_projects_put_project(
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
+}
+
+/*
+ * Disks
+ */
+
+/**
+ * List disks in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn api_project_disks_get(
+    rqctx: Arc<RequestContext>,
+    query_params: Query<PaginationParams<ApiName>>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOkObjectList<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_stream =
+        controller.project_list_disks(project_name, &query).await?;
+    let view_list = to_view_list(disk_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
+
+/**
+ * Create a disk in a project.
+ *
+ * TODO-correctness See note about instance create.  This should be async.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn api_project_disks_post(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
+    new_disk: Json<ApiDiskCreateParams>,
+) -> Result<HttpResponseCreated<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_disk_params = &new_disk.into_inner();
+    let disk =
+        controller.project_create_disk(&project_name, &new_disk_params).await?;
+    Ok(HttpResponseCreated(disk.to_view()))
 }
 
 /*

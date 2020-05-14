@@ -3,6 +3,10 @@
  */
 
 use crate::api_error::ApiError;
+use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskCreateParams;
+use crate::api_model::ApiDiskState;
+use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
@@ -197,6 +201,43 @@ impl OxideController {
         new_params: &ApiProjectUpdateParams,
     ) -> UpdateResult<ApiProject> {
         self.datastore.project_update(name, new_params).await
+    }
+
+    /*
+     * Disks
+     */
+
+    pub async fn project_list_disks(
+        &self,
+        project_name: &ApiName,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiDisk> {
+        self.datastore.project_list_disks(project_name, pagparams).await
+    }
+
+    pub async fn project_create_disk(
+        &self,
+        project_name: &ApiName,
+        params: &ApiDiskCreateParams,
+    ) -> CreateResult<ApiDisk> {
+        let now = Utc::now();
+        let project = self.project_lookup(project_name).await?;
+        let disk = Arc::new(ApiDisk {
+            identity: ApiIdentityMetadata {
+                id: Uuid::new_v4(),
+                name: params.identity.name.clone(),
+                description: params.identity.description.clone(),
+                time_created: now.clone(),
+                time_modified: now.clone(),
+            },
+            project_id: project.identity.id.clone(),
+            create_snapshot_id: params.snapshot_id.clone(),
+            size: params.size.clone(),
+            state: ApiDiskState::Creating,
+        });
+
+        let disk_created = self.datastore.disk_create(disk).await?;
+        Ok(disk_created)
     }
 
     /*

@@ -64,6 +64,7 @@ pub trait ApiObject {
 #[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
     Project,
+    Disk,
     Instance,
     Rack,
     Server,
@@ -73,6 +74,7 @@ impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
+            ApiResourceType::Disk => "disk",
             ApiResourceType::Instance => "instance",
             ApiResourceType::Rack => "rack",
             ApiResourceType::Server => "server",
@@ -530,6 +532,83 @@ pub struct ApiInstanceCreateParams {
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
+}
+
+/*
+ * DISKS
+ */
+
+/**
+ * Represents a disk (network block device) in the API.
+ */
+pub struct ApiDisk {
+    /** common identifying metadata */
+    pub identity: ApiIdentityMetadata,
+    /** id for the project containing this disk */
+    pub project_id: Uuid,
+    /**
+     * id for the snapshot from which this disk was created (None means a blank
+     * disk)
+     */
+    pub create_snapshot_id: Option<Uuid>,
+    /** size of the disk */
+    pub size: ApiByteCount,
+    /** runtime state of the disk */
+    pub state: ApiDiskState,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskView {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
+    pub project_id: Uuid,
+    pub snapshot_id: Option<Uuid>,
+    pub size: ApiByteCount,
+    pub state: ApiDiskState,
+    pub device_path: String,
+}
+
+impl ApiObject for ApiDisk {
+    type View = ApiDiskView;
+    fn to_view(&self) -> ApiDiskView {
+        /*
+         * TODO-correctness: can the name always be used as a path like this
+         * or might it need to be sanitized?
+         */
+        let device_path =
+            format!("/mnt/{}", String::from(self.identity.name.clone()),);
+        ApiDiskView {
+            identity: self.identity.clone(),
+            project_id: self.project_id.clone(),
+            snapshot_id: self.create_snapshot_id.clone(),
+            size: self.size.clone(),
+            state: self.state.clone(),
+            device_path,
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiDiskState {
+    Creating,
+    Attaching,
+    Attached,
+    Detaching,
+    Detached,
+    Deleting,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskCreateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataCreateParams,
+    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
+    pub size: ApiByteCount,
 }
 
 /*

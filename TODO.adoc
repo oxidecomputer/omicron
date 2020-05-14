@@ -3,6 +3,14 @@
 
 = TODO
 
+Current status:
+
+* implement disks
+** create basic model types
+** create API endpoints to create (sync?), get, list, delete (sync?)
+** create API endpoints to attach, detach
+** make create/delete/attach/detach async?
+
 API endpoints:
 
 * `/disks` and related endpoints

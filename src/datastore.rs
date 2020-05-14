@@ -5,6 +5,7 @@
  */
 
 use crate::api_error::ApiError;
+use crate::api_model::ApiDisk;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
@@ -47,6 +48,11 @@ struct CdsData {
         BTreeMap<Uuid, BTreeMap<ApiName, Arc<ApiInstance>>>,
     /** project instances, indexed by Uuid */
     instances_by_id: BTreeMap<Uuid, Arc<ApiInstance>>,
+
+    /** disks, indexed by Uuid */
+    disks_by_id: BTreeMap<Uuid, Arc<ApiDisk>>,
+    /** index mapping project name to tree of disks for that project. */
+    disks_by_project_id: BTreeMap<Uuid, BTreeMap<ApiName, Uuid>>,
 }
 
 impl ControlDataStore {
@@ -56,6 +62,8 @@ impl ControlDataStore {
                 projects_by_name: BTreeMap::new(),
                 instances_by_project_id: BTreeMap::new(),
                 instances_by_id: BTreeMap::new(),
+                disks_by_id: BTreeMap::new(),
+                disks_by_project_id: BTreeMap::new(),
             }),
         }
     }
@@ -76,6 +84,7 @@ impl ControlDataStore {
 
         let mut data = self.data.lock().await;
         assert!(!data.instances_by_project_id.contains_key(&new_uuid));
+        assert!(!data.disks_by_project_id.contains_key(&new_uuid));
         if data.projects_by_name.contains_key(&newname) {
             return Err(ApiError::ObjectAlreadyExists {
                 type_name: ApiResourceType::Project,
@@ -98,7 +107,8 @@ impl ControlDataStore {
         let rv = Arc::clone(&project);
         let projects_by_name = &mut data.projects_by_name;
         projects_by_name.insert(newname.clone(), project);
-        data.instances_by_project_id.insert(new_uuid, BTreeMap::new());
+        data.instances_by_project_id.insert(new_uuid.clone(), BTreeMap::new());
+        data.disks_by_project_id.insert(new_uuid, BTreeMap::new());
         Ok(rv)
     }
 
@@ -145,6 +155,7 @@ impl ControlDataStore {
         }
 
         data.instances_by_project_id.remove(&project_id).unwrap();
+        data.disks_by_project_id.remove(&project_id).unwrap();
         data.projects_by_name.remove(name).unwrap();
         Ok(())
     }
@@ -374,6 +385,70 @@ impl ControlDataStore {
         data.instances_by_id.insert(id, Arc::clone(&new_instance)).unwrap();
         Ok(())
     }
+
+    /*
+     * Disks
+     */
+
+    pub async fn project_list_disks(
+        &self,
+        project_name: &ApiName,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiDisk> {
+        let data = self.data.lock().await;
+        let project_id = {
+            let project = collection_lookup(
+                &data.projects_by_name,
+                &project_name,
+                ApiResourceType::Project,
+                &ApiError::not_found_by_name,
+            )?;
+            project.identity.id.clone()
+        };
+        let all_disks = &data.disks_by_id;
+        let disks_by_project = &data.disks_by_project_id;
+        let project_disks = disks_by_project
+            .get(&project_id)
+            .expect("project existed but had no disk collection");
+        let disks = {
+            let selected_uuids = collection_list_vec(&project_disks, &pagparams);
+            selected_uuids
+                .iter()
+                .map(|uuid| Ok(Arc::clone(all_disks.get(uuid).unwrap())))
+                .collect::<Vec<Result<Arc<ApiDisk>, ApiError>>>()
+        };
+        Ok(futures::stream::iter(disks).boxed())
+    }
+
+    pub async fn disk_create(
+        &self,
+        disk: Arc<ApiDisk>,
+    ) -> CreateResult<ApiDisk> {
+        let mut data = self.data.lock().await;
+
+        let disk_id = &disk.identity.id;
+        if let Some(_) = data.disks_by_id.get(&disk_id) {
+            panic!("attempted to add disk that already exists");
+        }
+
+        let project_id = &disk.project_id;
+        let project_disks =
+            data.disks_by_project_id.get_mut(project_id).ok_or_else(|| {
+                ApiError::not_found_by_id(ApiResourceType::Project, project_id)
+            })?;
+
+        let disk_name = &disk.identity.name;
+        if let Some(_) = project_disks.get(&disk_name) {
+            return Err(ApiError::ObjectAlreadyExists {
+                type_name: ApiResourceType::Disk,
+                object_name: String::from(disk_name.clone()),
+            });
+        }
+
+        project_disks.insert(disk_name.clone(), disk_id.clone());
+        data.disks_by_id.insert(disk_id.clone(), Arc::clone(&disk));
+        Ok(disk)
+    }
 }
 
 /**
@@ -435,4 +510,44 @@ where
     KeyType: std::cmp::Ord,
 {
     tree.get(lookup_key).ok_or_else(|| mkerror(resource_type, lookup_key))
+}
+
+/* XXX commonize */
+pub fn collection_list_vec<KeyType, ValueType>(
+    tree: &BTreeMap<KeyType, ValueType>,
+    pagparams: &PaginationParams<KeyType>,
+) -> Vec<ValueType>
+where
+    KeyType: std::cmp::Ord,
+    ValueType: Clone + Send + Sync + 'static,
+{
+    /* TODO-cleanup this logic should be in a wrapper function? */
+    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
+
+    /*
+     * We assemble the list of results that we're going to return now.  If the
+     * caller is holding a lock, they'll be able to release it right away.  This
+     * also makes the lifetime of the return value much easier.
+     */
+    let collect_items = |iter: &mut dyn Iterator<
+        Item = (&KeyType, &ValueType),
+    >| {
+        iter.take(limit).map(|(_, item)| item.clone()).collect::<Vec<ValueType>>()
+    };
+
+    match &pagparams.marker {
+        None => collect_items(&mut tree.iter()),
+        /*
+         * NOTE: This range is inclusive on the low end because that
+         * makes it easier for the client to know that it hasn't missed
+         * some items in the namespace.  This does mean that clients
+         * have to know to skip the first item on each page because
+         * it'll be the same as the last item on the previous page.
+         * TODO-cleanup would it be a problem to just make this an
+         * exclusive bound?  It seems like you couldn't fail to see any
+         * items that were present for the whole scan, which seems like
+         * the main constraint.
+         */
+        Some(start_value) => collect_items(&mut tree.range(start_value..)),
+    }
 }
