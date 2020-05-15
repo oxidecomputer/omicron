@@ -237,6 +237,22 @@ impl OxideController {
         });
 
         let disk_created = self.datastore.disk_create(disk).await?;
+
+        /*
+         * This is a little hokey.  We'd like to simulate an asynchronous
+         * transition from "Creating" to "Detached".  For instances, the
+         * simulation lives in a simulated server controller.  Here, the analog
+         * might be a simulated disk control plane.  But that doesn't exist yet,
+         * and we don't even know what APIs it would provide yet.  So we just
+         * carry out the simplest possible "simulation" here: we'll return to
+         * the client a structure describing a disk in state "Creating", but by
+         * the time we do so, we've already updated the internal representation
+         * to "Created".
+         */
+        let mut new_disk = (*disk_created).clone();
+        new_disk.state = ApiDiskState::Detached;
+        self.datastore.disk_update(Arc::new(new_disk)).await?;
+
         Ok(disk_created)
     }
 

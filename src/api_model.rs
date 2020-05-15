@@ -541,6 +541,7 @@ pub struct ApiInstanceUpdateParams {
 /**
  * Represents a disk (network block device) in the API.
  */
+#[derive(Clone, Debug)]
 pub struct ApiDisk {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
