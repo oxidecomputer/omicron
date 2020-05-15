@@ -240,6 +240,14 @@ impl OxideController {
         Ok(disk_created)
     }
 
+    pub async fn project_lookup_disk(
+        &self,
+        project_name: &ApiName,
+        disk_name: &ApiName,
+    ) -> LookupResult<ApiDisk> {
+        self.datastore.project_lookup_disk(project_name, disk_name).await
+    }
+
     /*
      * Instances
      */

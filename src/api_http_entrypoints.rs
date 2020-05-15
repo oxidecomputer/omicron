@@ -48,6 +48,7 @@ pub fn api_register_entrypoints(
 
     api.register(api_project_disks_get)?;
     api.register(api_project_disks_post)?;
+    api.register(api_project_disks_get_disk)?;
 
     api.register(api_project_instances_get)?;
     api.register(api_project_instances_post)?;
@@ -254,6 +255,33 @@ async fn api_project_disks_post(
     let disk =
         controller.project_create_disk(&project_name, &new_disk_params).await?;
     Ok(HttpResponseCreated(disk.to_view()))
+}
+
+#[derive(Deserialize, ExtractedParameter)]
+struct DiskPathParam {
+    project_name: ApiName,
+    disk_name: ApiName,
+}
+
+/**
+ * Fetch a single disk in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks/{disk_name}",
+ }]
+async fn api_project_disks_get_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseOkObject<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_name = &path.disk_name;
+    let disk =
+        controller.project_lookup_disk(&project_name, &disk_name).await?;
+    Ok(HttpResponseOkObject(disk.to_view()))
 }
 
 /*

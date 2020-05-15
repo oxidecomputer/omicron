@@ -9,7 +9,15 @@ Current status:
 ** create basic model types
 ** create API endpoints to create (sync?), get, list, delete (sync?)
 ** create API endpoints to attach, detach
-** make create/delete/attach/detach async?
+*** probably need a field in the disk that is the instance it's attached to
+*** attach/detach can use a mechanism similar to instance_ensure() to load a
+    disk on a server controller.
+*** might disks want a "faulted" state as well?
+*** will probably want a runtime state of the disk that includes bits related to
+    attach/destroy.  Cases to handle include:
+**** attach while creating
+**** destroy while creating, attaching, detaching, or detached
+** implement async "creating"?
 
 API endpoints:
 
@@ -24,6 +32,12 @@ Work queue (see also: existing GitHub issues):
 * write some design documents
 * implement server controller as separate program (would be a better demo of
   what's really going on internally)
+* implement behavior of server restarting (e.g., server controller starting up)
+** This probably isn't necessary for the big demo, but it would help validate
+   some of the architectural choices.  Current thinking is that this will notify
+   OXCP of the restart, and OXCP will find instances that are supposed to be on
+   that server and run instance_ensure().  It will also want to do that for the
+   disks associated with those instances.
 * implement audit log
 * implement alerts
 * implement external user authentication

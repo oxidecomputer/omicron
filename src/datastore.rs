@@ -413,6 +413,31 @@ impl ControlDataStore {
         collection_page_via_id(&project_disks, &pagparams, &all_disks)
     }
 
+    pub async fn project_lookup_disk(
+        &self,
+        project_name: &ApiName,
+        disk_name: &ApiName,
+    ) -> LookupResult<ApiDisk> {
+        let data = self.data.lock().await;
+        let project = collection_lookup(
+            &data.projects_by_name,
+            project_name,
+            ApiResourceType::Project,
+            &ApiError::not_found_by_name,
+        )?;
+        let disks_by_project = &data.disks_by_project_id;
+        let project_disks = disks_by_project
+            .get(&project.identity.id)
+            .expect("project existed but had no disk collection");
+        Ok(Arc::clone(collection_lookup_via_id(
+            project_disks,
+            &data.disks_by_id,
+            disk_name,
+            ApiResourceType::Disk,
+            &ApiError::not_found_by_name,
+        )?))
+    }
+
     pub async fn disk_create(
         &self,
         disk: Arc<ApiDisk>,
@@ -507,6 +532,28 @@ where
     KeyType: std::cmp::Ord,
 {
     tree.get(lookup_key).ok_or_else(|| mkerror(resource_type, lookup_key))
+}
+
+fn collection_lookup_via_id<'a, 'b, KeyType, IdType, ValueType>(
+    search_tree: &'b BTreeMap<KeyType, IdType>,
+    value_tree: &'b BTreeMap<IdType, Arc<ValueType>>,
+    lookup_key: &'a KeyType,
+    resource_type: ApiResourceType,
+    mkerror: &dyn Fn(ApiResourceType, &KeyType) -> ApiError,
+) -> Result<&'b Arc<ValueType>, ApiError>
+where
+    KeyType: std::cmp::Ord,
+    IdType: std::cmp::Ord,
+{
+    /*
+     * The lookup into `search_tree` can fail if the object does not exist.
+     * However, if that lookup suceeds, we must find the value in `value_tree`
+     * or else our data structures are internally inconsistent.
+     */
+    let id = search_tree
+        .get(lookup_key)
+        .ok_or_else(|| mkerror(resource_type, lookup_key))?;
+    Ok(value_tree.get(id).unwrap())
 }
 
 pub fn collection_page_via_id<KeyType, IdType, ValueType>(
