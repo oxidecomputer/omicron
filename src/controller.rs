@@ -20,7 +20,7 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiServer;
-use crate::datastore::collection_list;
+use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
 use crate::server_controller::ServerController;
 use async_trait::async_trait;
@@ -590,8 +590,7 @@ impl OxideController {
         pagparams: &PaginationParams<Uuid>,
     ) -> ListResult<ApiServer> {
         let controllers = self.server_controllers.lock().await;
-        let servers = collection_list(&controllers, pagparams)
-            .await?
+        let servers = collection_page(&controllers, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sc| {
                 Ok(Arc::new(ApiServer {

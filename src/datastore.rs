@@ -131,7 +131,7 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject> {
         let data = self.data.lock().await;
-        collection_list(&data.projects_by_name, pagparams).await
+        collection_page(&data.projects_by_name, pagparams)
     }
 
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
@@ -221,7 +221,7 @@ impl ControlDataStore {
         let instances = project_instances
             .get(&project.identity.id)
             .expect("project existed but had no instance collection");
-        collection_list(&instances, pagparams).await
+        collection_page(&instances, pagparams)
     }
 
     pub async fn project_create_instance(
@@ -410,7 +410,7 @@ impl ControlDataStore {
         let project_disks = disks_by_project
             .get(&project_id)
             .expect("project existed but had no disk collection");
-        collection_list_via_id(&project_disks, &pagparams, &all_disks).await
+        collection_page_via_id(&project_disks, &pagparams, &all_disks)
     }
 
     pub async fn disk_create(
@@ -451,31 +451,35 @@ impl ControlDataStore {
  * TODO-cleanup this is only public because we haven't built servers into the
  * datastore yet so the controller needs this interface.
  */
-pub async fn collection_list<KeyType, ValueType>(
-    tree: &BTreeMap<KeyType, Arc<ValueType>>,
-    pagparams: &PaginationParams<KeyType>,
+pub fn collection_page<'a, 'b, KeyType, ValueType>(
+    search_tree: &'a BTreeMap<KeyType, Arc<ValueType>>,
+    pagparams: &'b PaginationParams<KeyType>,
 ) -> ListResult<ValueType>
 where
     KeyType: std::cmp::Ord,
     ValueType: Send + Sync + 'static,
 {
-    /* TODO-cleanup this logic should be in a wrapper function? */
-    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-
     /*
      * We assemble the list of results that we're going to return now.  If the
      * caller is holding a lock, they'll be able to release it right away.  This
      * also makes the lifetime of the return value much easier.
      */
-    let collect_items =
-        |iter: &mut dyn Iterator<Item = (&KeyType, &Arc<ValueType>)>| {
-            iter.take(limit)
-                .map(|(_, arcitem)| Ok(Arc::clone(&arcitem)))
-                .collect::<Vec<Result<Arc<ValueType>, ApiError>>>()
-        };
+    let list = collection_page_as_iter(search_tree, pagparams)
+        .map(|(_, v)| Ok(Arc::clone(v)))
+        .collect::<Vec<Result<Arc<ValueType>, ApiError>>>();
+    Ok(futures::stream::iter(list).boxed())
+}
 
-    let items = match &pagparams.marker {
-        None => collect_items(&mut tree.iter()),
+fn collection_page_as_iter<'a, 'b, KeyType, ValueType>(
+    search_tree: &'a BTreeMap<KeyType, ValueType>,
+    pagparams: &'b PaginationParams<KeyType>,
+) -> Box<dyn Iterator<Item = (&'a KeyType, &'a ValueType)> + 'a>
+where
+    KeyType: std::cmp::Ord,
+{
+    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
+    match &pagparams.marker {
+        None => Box::new(search_tree.iter().take(limit)),
         /*
          * NOTE: This range is inclusive on the low end because that
          * makes it easier for the client to know that it hasn't missed
@@ -487,10 +491,10 @@ where
          * items that were present for the whole scan, which seems like
          * the main constraint.
          */
-        Some(start_value) => collect_items(&mut tree.range(start_value..)),
-    };
-
-    Ok(futures::stream::iter(items).boxed())
+        Some(start_value) => {
+            Box::new(search_tree.range(start_value..).take(limit))
+        }
+    }
 }
 
 fn collection_lookup<'a, 'b, KeyType, ValueType>(
@@ -505,8 +509,7 @@ where
     tree.get(lookup_key).ok_or_else(|| mkerror(resource_type, lookup_key))
 }
 
-/* XXX commonize */
-pub async fn collection_list_via_id<KeyType, IdType, ValueType>(
+pub fn collection_page_via_id<KeyType, IdType, ValueType>(
     search_tree: &BTreeMap<KeyType, IdType>,
     pagparams: &PaginationParams<KeyType>,
     value_tree: &BTreeMap<IdType, Arc<ValueType>>,
@@ -516,38 +519,8 @@ where
     IdType: std::cmp::Ord,
     ValueType: Send + Sync + 'static,
 {
-    /* TODO-cleanup this logic should be in a wrapper function? */
-    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-
-    /*
-     * We assemble the list of results that we're going to return now.  If the
-     * caller is holding a lock, they'll be able to release it right away.  This
-     * also makes the lifetime of the return value much easier.
-     */
-    let collect_items =
-        |iter: &mut dyn Iterator<Item = (&KeyType, &IdType)>| {
-            iter.take(limit)
-                .map(|(_, item)| Ok(Arc::clone(value_tree.get(item).unwrap())))
-                .collect::<Vec<Result<Arc<ValueType>, ApiError>>>()
-        };
-
-    let items = match &pagparams.marker {
-        None => collect_items(&mut search_tree.iter()),
-        /*
-         * NOTE: This range is inclusive on the low end because that
-         * makes it easier for the client to know that it hasn't missed
-         * some items in the namespace.  This does mean that clients
-         * have to know to skip the first item on each page because
-         * it'll be the same as the last item on the previous page.
-         * TODO-cleanup would it be a problem to just make this an
-         * exclusive bound?  It seems like you couldn't fail to see any
-         * items that were present for the whole scan, which seems like
-         * the main constraint.
-         */
-        Some(start_value) => {
-            collect_items(&mut search_tree.range(start_value..))
-        }
-    };
-
-    Ok(futures::stream::iter(items).boxed())
+    let list = collection_page_as_iter(search_tree, pagparams)
+        .map(|(_, id)| Ok(Arc::clone(value_tree.get(id).unwrap())))
+        .collect::<Vec<Result<Arc<ValueType>, ApiError>>>();
+    Ok(futures::stream::iter(list).boxed())
 }
