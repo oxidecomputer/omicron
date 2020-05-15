@@ -8,15 +8,10 @@ edition = "2018"
 proc-macro = true
 
 [dependencies]
-proc-macro-error = "*"
-proc-macro2 = "*"
-quote = "*"
+proc-macro2 = "1"
+quote = "1"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive_internals = "0.25"
-serde_tokenstream = { path = "serde_tokenstream" }
+serde_tokenstream = { git = "https://github.com/oxidecomputer/serde_tokenstream" }
 syn = { version = "1.0.17", features = [ "parsing", "printing" ] }
 schemars = "0.7.0"
-
-[dependencies.slog]
-version = "2.5"
-features = [ "max_level_trace", "release_max_level_debug" ]

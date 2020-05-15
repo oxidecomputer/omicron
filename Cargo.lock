@@ -207,14 +207,12 @@ dependencies = [
 name = "dropshot_endpoint"
 version = "0.1.0"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "schemars",
  "serde",
  "serde_derive_internals",
  "serde_tokenstream",
- "slog",
  "syn",
 ]
 
@@ -746,32 +744,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74490b50b9fbe561ac330df47c08f3f33073d2d00c150f719147d7c54522fa1b"
 
 [[package]]
-name = "proc-macro-error"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d259aa4825fa1a2371419d30a520219feff9fb3591550a209b4477d2ebaae4f"
-dependencies = [
- "proc-macro-error-attr",
- "proc-macro2",
- "quote",
- "syn",
- "version_check",
-]
-
-[[package]]
-name = "proc-macro-error-attr"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd21889899aa8e1ca2b924c1d3f08086631fc90768225b3268b5d5c3e806a503"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "syn-mid",
- "version_check",
-]
-
-[[package]]
 name = "proc-macro-hack"
 version = "0.5.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,10 +917,9 @@ dependencies = [
 [[package]]
 name = "serde_tokenstream"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/serde_tokenstream#67c3d3c34150e64f9b1300642593cce1521d913c"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
- "quote",
  "serde",
  "syn",
 ]
@@ -1081,17 +1052,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
-]
-
-[[package]]
-name = "syn-mid"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7be3539f6c128a931cf19dcee741c1af532c7fd387baa739c03dd2e96479338a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1265,12 +1225,6 @@ name = "vec_map"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
-
-[[package]]
-name = "version_check"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "078775d0255232fb988e6fccf26ddc9d1ac274299aaedcedce21c6f72cc533ce"
 
 [[package]]
 name = "want"

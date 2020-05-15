@@ -49,7 +49,6 @@ const DROPSHOT: &str = "dropshot";
 
 /// Attribute to apply to an HTTP endpoint.
 /// TODO(doc) explain intended use
-#[proc_macro_error::proc_macro_error]
 #[proc_macro_attribute]
 pub fn endpoint(
     attr: proc_macro::TokenStream,
@@ -65,7 +64,7 @@ fn do_endpoint(
     attr: TokenStream,
     item: TokenStream,
 ) -> Result<TokenStream, Error> {
-    let metadata = from_tokenstream::<Metadata>(&TokenStream::from(attr))?;
+    let metadata = from_tokenstream::<Metadata>(&attr)?;
 
     let method = metadata.method.as_str();
     let path = metadata.path;
@@ -204,9 +203,7 @@ fn get_crate(var: Option<String>) -> TokenStream {
     syn::Ident::new(DROPSHOT, proc_macro2::Span::call_site()).to_token_stream()
 }
 
-fn get_crate_attr(
-    cont: &serde_derive_internals::ast::Container,
-) -> Option<String> {
+fn get_crate_attr(cont: &Container) -> Option<String> {
     cont.original
         .attrs
         .iter()

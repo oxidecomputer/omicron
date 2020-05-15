@@ -13,14 +13,17 @@ http = "0.2.0"
 dropshot = { path = "dropshot" }
 hyper = "0.13"
 serde = { version = "1.0", features = [ "derive" ] }
-slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
 [workspace]
-members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
-default-members = [".", "dropshot", "dropshot/dropshot_endpoint", "dropshot/dropshot_endpoint/serde_tokenstream"]
+members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
+default-members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
 
 [profile.dev]
 panic = "abort"
