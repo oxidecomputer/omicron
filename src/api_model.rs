@@ -537,7 +537,6 @@ pub struct ApiInstanceUpdateParams {
 /*
  * DISKS
  */
-
 /**
  * Represents a disk (network block device) in the API.
  */
@@ -556,6 +555,14 @@ pub struct ApiDisk {
     pub size: ApiByteCount,
     /** runtime state of the disk */
     pub state: ApiDiskState,
+    /**
+     * if the disk is attaching/attached/detaching, what instance is it
+     * attached to?
+     */
+    pub attached_instance_id: Option<Uuid>,
+
+    /** desired attachment state */
+    pub state_requested: ApiDiskStateRequested,
 }
 
 #[serde(rename_all = "camelCase")]
@@ -590,17 +597,54 @@ impl ApiObject for ApiDisk {
     }
 }
 
+/*
+ * TODO-cleanup is it possible to combine this enum with the
+ * attached_instance_id field?  (The only problem is trying to
+ * serialize/deserialize them.)
+ */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskState {
     Creating,
+    Detached,
     Attaching,
     Attached,
     Detaching,
-    Detached,
-    Deleting,
+    Destroyed,
+    Faulted,
+}
+
+impl Display for ApiDiskState {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        let label = match self {
+            ApiDiskState::Creating => "creating",
+            ApiDiskState::Detached => "detached",
+            ApiDiskState::Attaching => "attaching",
+            ApiDiskState::Attached => "attached",
+            ApiDiskState::Detaching => "detaching",
+            ApiDiskState::Destroyed => "destroyed",
+            ApiDiskState::Faulted => "faulted",
+        };
+
+        write!(f, "{}", label)
+    }
+}
+
+impl ApiDiskState {
+    pub fn is_attached(&self) -> bool {
+        match self {
+            ApiDiskState::Creating => false,
+            ApiDiskState::Detached => false,
+            ApiDiskState::Destroyed => false,
+            ApiDiskState::Faulted => false,
+
+            ApiDiskState::Attaching => true,
+            ApiDiskState::Attached => false,
+            ApiDiskState::Detaching => true,
+        }
+    }
 }
 
 #[serde(rename_all = "camelCase")]
@@ -610,6 +654,50 @@ pub struct ApiDiskCreateParams {
     pub identity: ApiIdentityMetadataCreateParams,
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
     pub size: ApiByteCount,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskAttachment {
+    pub instance_name: ApiName,
+    pub instance_id: Uuid,
+    pub disk_name: ApiName,
+    pub disk_id: Uuid,
+    pub disk_state: ApiDiskState,
+}
+
+impl ApiObject for ApiDiskAttachment {
+    type View = Self;
+    fn to_view(&self) -> Self::View {
+        self.clone()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiDiskStateRequested {
+    NoChange,
+    Detached,
+    Attached(Uuid),
+    Destroyed,
+    Faulted,
+}
+
+impl ApiDiskStateRequested {
+    pub fn is_attached(&self) -> bool {
+        match self {
+            /*
+             * TODO-cleanup This case might be a good argument against having
+             * NoChange be one of the values instead of using None
+             */
+            ApiDiskStateRequested::NoChange => unimplemented!(),
+            ApiDiskStateRequested::Detached => false,
+            ApiDiskStateRequested::Destroyed => false,
+            ApiDiskStateRequested::Faulted => false,
+
+            ApiDiskStateRequested::Attached(_) => true,
+        }
+    }
 }
 
 /*

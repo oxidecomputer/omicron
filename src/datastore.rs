@@ -34,11 +34,11 @@ pub struct ControlDataStore {
 }
 
 /*
- * TODO-cleanup: We could clean up the interface for projects here by storing
- * projects_by_id (a map from Uuid to Arc<ApiProject>).  We may want to change
- * `projects_by_name` to map from ApiName to Uuid.  This will allow a clearer
- * interface for getting information about a project by either id or name
- * without duplicating a reference to the project.
+ * TODO-cleanup: We could clean up the internal interfaces for projects here by
+ * storing projects_by_id (a map from Uuid to Arc<ApiProject>).  We may want to
+ * change `projects_by_name` to map from ApiName to Uuid.  This will allow a
+ * clearer interface for getting information about a project by either id or
+ * name without duplicating a reference to the project.
  */
 struct CdsData {
     /** projects in the system, indexed by name */
@@ -55,6 +55,18 @@ struct CdsData {
     disks_by_project_id: BTreeMap<Uuid, BTreeMap<ApiName, Uuid>>,
 }
 
+/*
+ * TODO-cleanup
+ * We should consider cleaning up the consumers' interface here.  Right now,
+ * instances are sometimes operated on by (project_name, instance_name) tuple;
+ * other times you provide an ApiInstance directly (from which we have the id).
+ * Disks take the ApiDisk directly.  When you attach a disk, you provide the
+ * project name, instance name, and disk name.
+ *
+ * One idea would be that there's a way to look up a project, disk, or instance
+ * by name (and project *id*, for instances and disks), and after that, you have
+ * to operate using the whole object (instead of its name).
+ */
 impl ControlDataStore {
     pub fn new() -> ControlDataStore {
         ControlDataStore {
@@ -384,6 +396,45 @@ impl ControlDataStore {
         instances.insert(instance_name, Arc::clone(&new_instance));
         data.instances_by_id.insert(id, Arc::clone(&new_instance)).unwrap();
         Ok(())
+    }
+
+    /**
+     * List disks associated with a given instance.
+     */
+    pub async fn instance_list_disks(
+        &self,
+        instance: &Arc<ApiInstance>,
+        pagparams: &PaginationParams<ApiName>,
+    ) -> ListResult<ApiDisk> {
+        /*
+         * For most of the other queries made to the data store, we keep data
+         * structures indexing what we need.  And in a real database, we
+         * probably would do that here too.  For this use-case, it doesn't seem
+         * worthwhile.
+         */
+        let instance_id = &instance.identity.id;
+        let project_id = &instance.project_id;
+
+        let data = self.data.lock().await;
+        let all_disks = &data.disks_by_id;
+        let project_disks =
+            data.disks_by_project_id.get(project_id).ok_or_else(|| {
+                ApiError::not_found_by_id(
+                    ApiResourceType::Project,
+                    project_id,
+                )
+            })?;
+        let instance_disks_by_name = project_disks
+            .iter()
+            .map(|(disk_name, disk_id)| {
+                (disk_name.clone(), Arc::clone(all_disks.get(disk_id).unwrap()))
+            })
+            .filter(|(_, disk)| match disk.attached_instance_id {
+                Some(id) if *instance_id == id => true,
+                _ => false,
+            })
+            .collect::<BTreeMap<ApiName, Arc<ApiDisk>>>();
+        collection_page(&instance_disks_by_name, pagparams)
     }
 
     /*

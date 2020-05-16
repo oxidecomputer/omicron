@@ -6,18 +6,26 @@
 Current status:
 
 * implement disks
-** create basic model types
-** create API endpoints to create (sync?), get, list, delete (sync?)
-** create API endpoints to attach, detach
-*** probably need a field in the disk that is the instance it's attached to
-*** attach/detach can use a mechanism similar to instance_ensure() to load a
-    disk on a server controller.
-*** might disks want a "faulted" state as well?
-*** will probably want a runtime state of the disk that includes bits related to
-    attach/destroy.  Cases to handle include:
-**** attach while creating
-**** destroy while creating, attaching, detaching, or detached
-** implement async "creating"?
+** done: create basic model types
+** done: create API endpoints to create (sync?), get, list, delete (sync?)
+** in progress: create API endpoints to attach, detach
+*** working on disk_ensure() in ServerController
+**** I'm not sure if it's even worth finishing what I've currently got or if I
+     should just implement it all from scratch per note below about commonizing
+     SimInstance and SimDisk.
+**** we should give at least a passing thought to representing things internally
+     _only_  with at-rest states and presenting not-at-rest states if there's a
+     target next state that hasn't been applied.  i.e., get rid of Attaching and
+     interpret that when we're in a detached state and going to Attached.
+**** note: will want to commonize with SimInstance.  Both have constructor,
+     transition(), transition_finish(), a notify function and a sim function on
+     the ServerController.  This is going to be a bunch of work.
+**** note: will also want to have disk contain AttachState (analogous to
+     RuntimeState) that includes timestamp, generation number? server/instance
+     uuid
+**** Cases to handle include:
+***** attach while creating
+***** destroy while creating, attaching, detaching, or detached
 
 API endpoints:
 
@@ -27,11 +35,12 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
+* implement server controller as separate program (would be a better demo of
+  what's really going on internally)
+* do a demo????
 * settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents
-* implement server controller as separate program (would be a better demo of
-  what's really going on internally)
 * implement behavior of server restarting (e.g., server controller starting up)
 ** This probably isn't necessary for the big demo, but it would help validate
    some of the architectural choices.  Current thinking is that this will notify

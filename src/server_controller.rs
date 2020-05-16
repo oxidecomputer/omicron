@@ -3,6 +3,9 @@
  */
 
 use crate::api_error::ApiError;
+use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskState;
+use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateParams;
@@ -43,6 +46,8 @@ pub struct ServerController {
     log: Logger,
     /** collection of simulated instances, indexed by instance uuid */
     instances: Mutex<BTreeMap<Uuid, SimInstance>>,
+    /** collection of simulated disks, indexed by disk uuid */
+    disks: Mutex<BTreeMap<Uuid, SimDisk>>,
 }
 
 #[derive(Copy, Clone)]
@@ -67,6 +72,7 @@ impl ServerController {
             log,
             ctlsc,
             instances: Mutex::new(BTreeMap::new()),
+            disks: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -206,6 +212,82 @@ impl ServerController {
             }
         }
     }
+
+    /**
+     * Idempotently ensures that the given API Disk (described by `api_disk`)
+     * is attached (or not) as specified.  This simulates disk attach and
+     * detach, similar to instance boot and halt.
+     */
+    pub async fn disk_ensure(
+        self: &Arc<Self>,
+        api_disk: Arc<ApiDisk>,
+    ) -> Result<ApiDiskState, ApiError> {
+        let id = api_disk.identity.id.clone();
+        let mut disks = self.disks.lock().await;
+        let maybe_current_disk = disks.remove(&id);
+
+        let (disk, is_new) = {
+            if let Some(current_disk) = maybe_current_disk {
+                (current_disk, false)
+            } else {
+                /* TODO commonize with SimInstance */
+                let log = self.log.new(o!("disk_id" => id.to_string()));
+                if let ServerControllerSimMode::Auto = self.sim_mode {
+                    let (new_disk, rx) =
+                        SimDisk::new_simulated_auto(&api_disk.state, log);
+                    let selfc = Arc::clone(&self);
+                    let idc = id.clone();
+                    tokio::spawn(async move {
+                        selfc.disk_sim(idc, rx).await;
+                    });
+                    (new_disk, true)
+                } else {
+                    let new_disk =
+                        SimDisk::new_simulated_explicit(&api_disk.state, log);
+                    (new_disk, true)
+                }
+            }
+        };
+
+        disk.transition(&api_disk.state_requested);
+        let rv = Ok(disk.current_state.clone());
+        disks.insert(id.clone(), disk);
+        rv
+    }
+
+    async fn disk_sim(&self, id: Uuid, mut rx: Receiver<()>) {
+        while let Some(_) = rx.next().await {
+            tokio::time::delay_for(Duration::from_millis(1500)).await;
+            self.disk_poke(id).await;
+        }
+    }
+
+    async fn disk_poke(&self, id: Uuid) {
+        let (new_state, to_destroy) = {
+            let mut disks = self.disks.lock().await;
+            let mut disk = disks.remove(&id).unwrap();
+            disk.transition_finish();
+            let after = disk.current_state.clone();
+            if disk.requested_state == ApiDiskStateRequested::NoChange
+                && disk.current_state == ApiDiskState::Destroyed
+            {
+                info!(disk.log, "disk came to rest destroyed");
+                (after, Some(disk))
+            } else {
+                disks.insert(id.clone(), disk);
+                (after, None)
+            }
+        };
+
+        /* TODO-robutsness See instance_poke(). */
+        self.ctlsc.notify_disk_updated(&id, &new_state).await.unwrap();
+        /* TODO-debug TODO-correctness See instance_poke(). */
+        if let Some(destroyed_disk) = to_destroy {
+            if let Some(mut tx) = destroyed_disk.channel_tx {
+                tx.close_channel();
+            }
+        }
+    }
 }
 
 /**
@@ -267,7 +349,7 @@ struct SimInstance {
  * laps through the sleep cycle, which just wastes resources and increases the
  * latency for processing the next real transition request.
  */
-const SIM_INSTANCE_CHANNEL_BUFFER_SIZE: usize = 0;
+const SIM_CHANNEL_BUFFER_SIZE: usize = 0;
 
 impl SimInstance {
     /**
@@ -281,8 +363,7 @@ impl SimInstance {
     ) -> (SimInstance, Receiver<()>) {
         debug!(log, "created simulated instance";
             "initial_state" => ?initial_runtime);
-        let (tx, rx) =
-            futures::channel::mpsc::channel(SIM_INSTANCE_CHANNEL_BUFFER_SIZE);
+        let (tx, rx) = futures::channel::mpsc::channel(SIM_CHANNEL_BUFFER_SIZE);
         (
             SimInstance {
                 current_run_state: initial_runtime.clone(),
@@ -545,6 +626,213 @@ impl SimInstance {
                 reboot_wanted: false,
             });
         }
+    }
+}
+
+struct SimDisk {
+    /** Current state of the disk */
+    current_state: ApiDiskState,
+    /** Requested change in state of the disk */
+    requested_state: ApiDiskStateRequested,
+    /** Debug log */
+    log: Logger,
+    /** Channel for transmitting to the background task */
+    channel_tx: Option<Sender<()>>,
+}
+
+impl SimDisk {
+    /**
+     * Create a new `SimDisk` with state transitions automatically simulated by
+     * a background task.  The caller is expected to provide the background task
+     * that reads from the channel and advances the simulation.
+     */
+    fn new_simulated_auto(
+        initial_state: &ApiDiskState,
+        log: Logger,
+    ) -> (SimDisk, Receiver<()>) {
+        debug!(log, "created simulated disk";
+            "initial_state" => ?initial_state);
+        let (tx, rx) = futures::channel::mpsc::channel(SIM_CHANNEL_BUFFER_SIZE);
+        (
+            SimDisk {
+                current_state: initial_state.clone(),
+                requested_state: ApiDiskStateRequested::NoChange,
+                log,
+                channel_tx: Some(tx),
+            },
+            rx,
+        )
+    }
+
+    /**
+     * Create a new `SimDisk` with state transitions simulated by explicit
+     * calls.  The only difference from the perspective of this struct is that
+     * we won't have a channel to which we send notifications when asynchronous
+     * state transitions begin.
+     */
+    fn new_simulated_explicit(
+        initial_state: &ApiDiskState,
+        log: Logger,
+    ) -> SimDisk {
+        debug!(log, "created simulated disk";
+            "initial_state" => ?initial_state);
+        SimDisk {
+            current_state: initial_state.clone(),
+            requested_state: ApiDiskStateRequested::NoChange,
+            log,
+            channel_tx: None,
+        }
+    }
+
+    /**
+     * Transition this Disk to the desired state.  In some cases, the transition
+     * may happen immediately (e.g., going from "Detached" to "Destroyed").  In
+     * other cases, as when going from "Attached" to "Detached", we immediately
+     * transition to an intermediate state ("Detaching", in this case), simulate
+     * the transition, and some time later update to the desired state.
+     *
+     * This function supports transitions that don't change the state at all
+     * (either because the requested state change was `None` -- maybe we were
+     * changing some other runtime state parameter -- or because we're already
+     * in the desired state).
+     */
+    fn transition(
+        &mut self,
+        requested_state: &ApiDiskStateRequested,
+    ) -> ApiDiskStateRequested {
+        /*
+         * In all cases, set `requested_state` to the new target.  If there was
+         * already a requested run state, we will return this to the caller so
+         * that they can log a possible dropped transition.  This is only
+         * intended for debugging.
+         */
+        let dropped = self.requested_state.clone();
+        let state_before = self.current_state.clone();
+        let state_after = requested_state;
+
+        let to_do = match (state_before, state_after) {
+            /*
+             * This is the primary way to indicate no change from the current
+             * state.
+             */
+            (_, ApiDiskStateRequested::NoChange) => None,
+
+            /*
+             * It's conceivable that we'd be asked to transition from a state to
+             * itself, in which case we also don't need to do anything.
+             */
+            (ApiDiskState::Attached, ApiDiskStateRequested::Attached(_)) => {
+                None
+            }
+            (ApiDiskState::Detached, ApiDiskStateRequested::Detached) => None,
+            (ApiDiskState::Destroyed, ApiDiskStateRequested::Destroyed) => None,
+            (ApiDiskState::Faulted, ApiDiskStateRequested::Faulted) => None,
+
+            /*
+             * If we're going from any unattached state to "Attached" (the only
+             * requestable attached state), the appropriate next state is
+             * "Attaching", and it will be an asynchronous transition to
+             * "Attached".
+             */
+            (state, ApiDiskStateRequested::Attached(_))
+                if !state.is_attached() =>
+            {
+                Some((ApiDiskState::Attaching, true))
+            }
+
+            /*
+             * If we're going from any attached state to any detached state,
+             * then we'll go straight to "Detaching" en route to the new state.
+             */
+            (from_state, to_state)
+                if from_state.is_attached() && !to_state.is_attached() =>
+            {
+                Some((ApiDiskState::Detaching, true))
+            }
+
+            /*
+             * The only remaining options are transitioning from one detached
+             * state to a different one, in which case we can go straight there
+             * with no need for an asynchronous transition.
+             */
+            (from_state, ApiDiskStateRequested::Destroyed) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Destroyed, false))
+            }
+
+            (from_state, ApiDiskStateRequested::Detached) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Detached, false))
+            }
+
+            (from_state, ApiDiskStateRequested::Faulted) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Faulted, false))
+            }
+        };
+
+        if to_do.is_none() {
+            debug!(self.log, "noop transition";
+                "requested_state" => ?requested_state);
+            return dropped;
+        }
+
+        let (immed_next_state, need_async) = to_do.unwrap();
+        self.current_state = immed_next_state;
+
+        debug!(self.log, "disk transition";
+            "state_before" => %state_before,
+            "state_after" => ?state_after,
+            "immed_next_state" => %immed_next_state,
+            "dropped" => ?dropped,
+            "async" => %need_async,
+            "current_state" => ?self.current_state
+        );
+
+        /*
+         * TODO-cleanup see SimInstance::transition().
+         */
+        if need_async {
+            self.requested_state = requested_state.clone();
+            if let Some(ref mut tx) = self.channel_tx {
+                let result = tx.try_send(());
+                if let Err(error) = result {
+                    assert!(!error.is_disconnected());
+                    assert!(error.is_full());
+                }
+            }
+        } else {
+            self.requested_state = ApiDiskStateRequested::NoChange;
+        }
+
+        dropped
+    }
+
+    /**
+     * Finish simulating an "attach" or "detach" transition.
+     */
+    fn transition_finish(&mut self) {
+        let next_state = match self.requested_state {
+            /* TODO-cleanup see SimInstance::transition_finish(). */
+            ApiDiskStateRequested::NoChange => {
+                debug!(self.log, "noop transition finish";
+                    "current_state" => %self.current_state);
+                return;
+            }
+
+            ApiDiskStateRequested::Attached(_) => ApiDiskState::Attached,
+            ApiDiskStateRequested::Destroyed => ApiDiskState::Destroyed,
+            ApiDiskStateRequested::Faulted => ApiDiskState::Faulted,
+            ApiDiskStateRequested::Detached => ApiDiskState::Detached,
+        };
+
+        let state_before = self.current_state.clone();
+        self.current_state = next_state;
+
+        debug!(self.log, "simulated transition finish";
+            "state_before" => %state_before,
+            "state_after" => %self.current_state,
+        );
     }
 }
 
@@ -943,5 +1231,63 @@ mod test {
          */
 
         logctx.cleanup_successful();
+    }
+}
+
+/*
+ * XXX everything after here is just thinking out loud about how to abstract
+ * this
+ * XXX can this possibly handle reboot_requested too?
+ */
+trait Simulatable {
+    type CurrentState;
+    type RequestedState;
+
+    /*
+     * This function returns the immediate next state and whether an async
+     * transition has been started.
+     */
+    fn transition(
+        current: Self::CurrentState,
+        next: Self::RequestedState,
+    ) -> (Self::CurrentState, bool);
+
+    /*
+     * This function notifies the controller about a state change.
+     * XXX does it need the full Api* object too?
+     */
+    fn notify(
+        csc: &ControllerScApi,
+        current: Self::CurrentState,
+    ) -> Result<(), ApiError>;
+}
+
+struct SimObject<S: Simulatable> {
+    current_state: S::CurrentState,
+    requested_state: Option<S::RequestedState>,
+    log: Logger,
+    channel_tx: Option<Sender<()>>
+}
+
+impl<S: Simulatable> SimObject<S> {
+    /* This is the more direct analog to SimInstance::transition() */
+    fn transition() -> Option<S::RequestedState> {
+        unimplemented!();
+    }
+
+    fn transition_finish() {
+        unimplemented!();
+    }
+
+    fn ensure() -> Result<S::CurrentState, ApiError> {
+        unimplemented!();
+    }
+
+    fn new_simulated_auto(/* XXX */) -> SimObject<S> {
+        unimplemented!();
+    }
+
+    fn new_simulated_explicit(/* XXX */) -> SimObject<S> {
+        unimplemented!();
     }
 }
