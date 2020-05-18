@@ -364,7 +364,7 @@ impl OxideController {
         self.instance_set_runtime(
             instance_created,
             sc,
-            &ApiInstanceRuntimeStateParams {
+            ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
             },
@@ -389,7 +389,7 @@ impl OxideController {
             run_state: ApiInstanceState::Destroyed,
             reboot_wanted: false,
         };
-        self.instance_set_runtime(instance, sc, &runtime_params).await?;
+        self.instance_set_runtime(instance, sc, runtime_params).await?;
         Ok(())
     }
 
@@ -496,7 +496,7 @@ impl OxideController {
         self.instance_set_runtime(
             Arc::clone(&instance),
             self.instance_sc(&instance).await?,
-            &ApiInstanceRuntimeStateParams {
+            ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: true,
             },
@@ -521,7 +521,7 @@ impl OxideController {
         self.instance_set_runtime(
             Arc::clone(&instance),
             self.instance_sc(&instance).await?,
-            &ApiInstanceRuntimeStateParams {
+            ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
             },
@@ -546,7 +546,7 @@ impl OxideController {
         self.instance_set_runtime(
             Arc::clone(&instance),
             self.instance_sc(&instance).await?,
-            &ApiInstanceRuntimeStateParams {
+            ApiInstanceRuntimeStateParams {
                 run_state: ApiInstanceState::Stopped,
                 reboot_wanted: false,
             },
@@ -562,14 +562,14 @@ impl OxideController {
         &self,
         mut instance: Arc<ApiInstance>,
         sc: Arc<ServerController>,
-        runtime_params: &ApiInstanceRuntimeStateParams,
+        runtime_params: ApiInstanceRuntimeStateParams,
     ) -> UpdateResult<ApiInstance> {
         /*
          * Ask the SC to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
         let new_runtime_state =
-            sc.instance_ensure(Arc::clone(&instance), &runtime_params).await?;
+            sc.instance_ensure(Arc::clone(&instance), runtime_params).await?;
 
         let instance_ref = Arc::make_mut(&mut instance);
         instance_ref.runtime = new_runtime_state.clone();

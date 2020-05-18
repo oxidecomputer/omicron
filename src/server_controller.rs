@@ -100,7 +100,7 @@ impl ServerController {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         api_instance: Arc<ApiInstance>,
-        target: &ApiInstanceRuntimeStateParams, /* XXX make non-reference */
+        target: ApiInstanceRuntimeStateParams,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
         self.instances
             .sim_ensure(
@@ -1320,6 +1320,11 @@ trait Simulatable: fmt::Debug {
         next: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>);
 
+    fn state_unchanged(
+        state1: &Self::CurrentState,
+        state2: &Self::CurrentState,
+    ) -> bool;
+
     fn ready_to_destroy(
         current: &Self::CurrentState,
         next: &Option<Self::RequestedState>,
@@ -1327,7 +1332,6 @@ trait Simulatable: fmt::Debug {
 
     /*
      * This function notifies the controller about a state change.
-     * XXX does it need the full Api* object too?
      */
     async fn notify(
         csc: &Arc<ControllerScApi>,
@@ -1380,13 +1384,16 @@ impl<S: Simulatable> SimObject<S> {
         &mut self,
         target: S::RequestedState,
     ) -> Result<Option<S::RequestedState>, ApiError> {
-        let dropped = self.requested_state.take();
+        let dropped = self.requested_state.clone();
         let state_before = self.current_state.clone();
 
         let (state_after, requested_state) =
             S::next_state_for_new_target(&state_before, &dropped, &target)?;
 
-        /* XXX check for noop transition */
+        if S::state_unchanged(&state_before, &state_after) {
+            debug!(self.log, "noop transition"; "target" => ?target);
+            return Ok(None);
+        }
 
         debug!(self.log, "transition";
             "state_before" => ?state_before,
@@ -1395,6 +1402,7 @@ impl<S: Simulatable> SimObject<S> {
             "new_requested_state" => ?requested_state,
             "dropped" => ?dropped,
         );
+
         self.current_state = state_after;
 
         /*
@@ -1427,6 +1435,8 @@ impl<S: Simulatable> SimObject<S> {
                     assert!(error.is_full());
                 }
             }
+        } else {
+            self.requested_state = None;
         }
 
         Ok(dropped)
@@ -1566,10 +1576,12 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             }
         };
 
-        /* XXX another kind of reboot check here */
-        let rv = object.transition(target).and_then(|_|
-            Ok(object.current_state.clone()));
-        objects.insert(id.clone(), object);
+        let rv = object
+            .transition(target)
+            .and_then(|_| Ok(object.current_state.clone()));
+        if rv.is_ok() || !is_new {
+            objects.insert(id.clone(), object);
+        }
         rv
     }
 }
@@ -1598,6 +1610,21 @@ impl Simulatable for SimInstance {
         }
 
         let state_before = current.run_state.clone();
+
+        if target.reboot_wanted
+            && state_before != ApiInstanceState::Starting
+            && state_before != ApiInstanceState::Running
+            && (state_before != ApiInstanceState::Stopping
+                || !current.reboot_in_progress)
+        {
+            return Err(ApiError::InvalidRequest {
+                message: format!(
+                    "cannot reboot instance in state \"{}\"",
+                    state_before
+                ),
+            });
+        }
+
         let mut state_after = match target.run_state {
             /*
              * For intermediate states (which don't really make sense to
@@ -1748,6 +1775,13 @@ impl Simulatable for SimInstance {
         (next_state, next_async)
     }
 
+    fn state_unchanged(
+        state1: &Self::CurrentState,
+        state2: &Self::CurrentState,
+    ) -> bool {
+        return state1.gen == state2.gen;
+    }
+
     fn ready_to_destroy(
         current: &Self::CurrentState,
         pending: &Option<Self::RequestedState>,
@@ -1795,6 +1829,13 @@ impl Simulatable for SimDisk {
         current: &Self::CurrentState,
         next: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
+        todo!();
+    }
+
+    fn state_unchanged(
+        state1: &Self::CurrentState,
+        state2: &Self::CurrentState,
+    ) -> bool {
         todo!();
     }
 
