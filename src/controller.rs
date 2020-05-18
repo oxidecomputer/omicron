@@ -663,7 +663,7 @@ impl OxideController {
                 instance_id: instance_id.clone(),
                 disk_id: disk.identity.id.clone(),
                 disk_name: disk.identity.name.clone(),
-                disk_state: disk.state,
+                disk_state: disk.state.clone(),
             }))
         }
 
@@ -699,7 +699,7 @@ impl OxideController {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                String::from(disk.identity.name), disk_status
+                String::from(disk.identity.name.clone()), disk_status
             );
             Err(ApiError::InvalidRequest {
                 message: message,
@@ -711,7 +711,7 @@ impl OxideController {
          */
         self.check_disk_change_allowed(&disk)?;
 
-        match (disk.state, disk.attached_instance_id, disk.state_requested) {
+        match (&disk.state, &disk.attached_instance_id, &disk.state_requested) {
             /*
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
@@ -720,11 +720,11 @@ impl OxideController {
                 ApiDiskState::Attached,
                 Some(id),
                 ApiDiskStateRequested::NoChange,
-            ) if id == instance_id => {
+            ) if *id == instance_id => {
                 return disk_attachment_for(&instance, &disk);
             }
             (_, _, ApiDiskStateRequested::Attached(id))
-                if id == instance_id =>
+                if *id == instance_id =>
             {
                 return disk_attachment_for(&instance, &disk);
             }
@@ -876,7 +876,7 @@ impl ControllerScApi {
         &self,
         id: &Uuid,
         new_runtime_state: &ApiInstanceRuntimeState,
-    ) -> Result<(), HttpError> {
+    ) -> Result<(), ApiError> {
         let datastore = &self.controller.datastore;
         let log = &self.controller.log;
 
@@ -932,7 +932,7 @@ impl ControllerScApi {
         &self,
         id: &Uuid,
         new_state: &ApiDiskState,
-    ) -> Result<(), HttpError> {
+    ) -> Result<(), ApiError> {
         /* XXX */
         unimplemented!();
     }
