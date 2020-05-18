@@ -28,7 +28,6 @@ use crate::server_controller::ServerController;
 use async_trait::async_trait;
 use chrono::Utc;
 use dropshot::ExtractedParameter;
-use dropshot::HttpError;
 use futures::future::ready;
 use futures::future::TryFutureExt;
 use futures::lock::Mutex;

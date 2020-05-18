@@ -18,7 +18,7 @@ mod test_util;
 pub use api_config::ApiServerConfig;
 pub use controller::OxideController;
 pub use controller::OxideControllerTestInterfaces;
-pub use server_controller::ServerControllerSimMode;
+pub use server_controller::SimMode;
 pub use server_controller::ServerControllerTestInterfaces;
 
 use api_model::ApiIdentityMetadataCreateParams;
@@ -66,7 +66,7 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let dropshot_log = log.new(o!("component" => "dropshot"));
     let apictx = ApiContext::new(&Uuid::new_v4(), log);
 
-    populate_initial_data(&apictx, ServerControllerSimMode::Auto).await;
+    populate_initial_data(&apictx, SimMode::Auto).await;
 
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
@@ -145,7 +145,7 @@ impl ApiContext {
  */
 pub async fn populate_initial_data(
     apictx: &Arc<ApiContext>,
-    sim_mode: ServerControllerSimMode,
+    sim_mode: SimMode,
 ) {
     let controller = &apictx.controller;
     let demo_projects: Vec<(&str, &str)> = vec![

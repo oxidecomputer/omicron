@@ -5,7 +5,7 @@
 use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use oxide_api_prototype::ApiServerConfig;
-use oxide_api_prototype::ServerControllerSimMode;
+use oxide_api_prototype::SimMode;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -32,10 +32,7 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let logctx = LogContext::new(test_name, &config.log);
     let log = logctx.log.new(o!());
     let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
-    oxide_api_prototype::populate_initial_data(
-        &apictx,
-        ServerControllerSimMode::Api,
-    )
-    .await;
+    oxide_api_prototype::populate_initial_data(&apictx, SimMode::Explicit)
+        .await;
     TestContext::new(api, apictx, &config.dropshot, logctx)
 }
