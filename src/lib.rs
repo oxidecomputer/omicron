@@ -18,8 +18,8 @@ mod test_util;
 pub use api_config::ApiServerConfig;
 pub use controller::OxideController;
 pub use controller::OxideControllerTestInterfaces;
-pub use server_controller::SimMode;
 pub use server_controller::ServerControllerTestInterfaces;
+pub use server_controller::SimMode;
 
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;

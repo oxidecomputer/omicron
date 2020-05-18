@@ -698,7 +698,8 @@ impl OxideController {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                String::from(disk.identity.name.clone()), disk_status
+                String::from(disk.identity.name.clone()),
+                disk_status
             );
             Err(ApiError::InvalidRequest {
                 message: message,

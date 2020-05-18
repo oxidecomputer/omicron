@@ -419,10 +419,7 @@ impl ControlDataStore {
         let all_disks = &data.disks_by_id;
         let project_disks =
             data.disks_by_project_id.get(project_id).ok_or_else(|| {
-                ApiError::not_found_by_id(
-                    ApiResourceType::Project,
-                    project_id,
-                )
+                ApiError::not_found_by_id(ApiResourceType::Project, project_id)
             })?;
         let instance_disks_by_name = project_disks
             .iter()

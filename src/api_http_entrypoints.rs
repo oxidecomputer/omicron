@@ -508,11 +508,9 @@ async fn api_instance_disks_put(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let disk_name = &path.disk_name;
-    let attachment = controller.instance_attach_disk(
-        &project_name,
-        &instance_name,
-        &disk_name
-    ).await?;
+    let attachment = controller
+        .instance_attach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
     Ok(HttpResponseCreated(attachment.to_view()))
 }
 
