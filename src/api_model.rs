@@ -454,6 +454,7 @@ pub struct ApiInstanceRuntimeState {
  * we could imagine supporting changing properties like "ncpus" here.  If we
  * allow other properties here, we may want to make them Options so that callers
  * don't have to know the prior state already.
+ * XXX rename this from Params to Requested?
  */
 #[derive(Clone, Debug)]
 pub struct ApiInstanceRuntimeStateParams {
@@ -554,15 +555,7 @@ pub struct ApiDisk {
     /** size of the disk */
     pub size: ApiByteCount,
     /** runtime state of the disk */
-    pub state: ApiDiskState,
-    /**
-     * if the disk is attaching/attached/detaching, what instance is it
-     * attached to?
-     */
-    pub attached_instance_id: Option<Uuid>,
-
-    /** desired attachment state */
-    pub state_requested: ApiDiskStateRequested,
+    pub runtime: ApiDiskRuntimeState,
 }
 
 #[serde(rename_all = "camelCase")]
@@ -591,7 +584,7 @@ impl ApiObject for ApiDisk {
             project_id: self.project_id.clone(),
             snapshot_id: self.create_snapshot_id.clone(),
             size: self.size.clone(),
-            state: self.state.clone(),
+            state: self.runtime.disk_state.clone(),
             device_path,
         }
     }
@@ -609,9 +602,9 @@ impl ApiObject for ApiDisk {
 pub enum ApiDiskState {
     Creating,
     Detached,
-    Attaching,
-    Attached,
-    Detaching,
+    Attaching(Uuid),
+    Attached(Uuid),
+    Detaching(Uuid),
     Destroyed,
     Faulted,
 }
@@ -621,9 +614,9 @@ impl Display for ApiDiskState {
         let label = match self {
             ApiDiskState::Creating => "creating",
             ApiDiskState::Detached => "detached",
-            ApiDiskState::Attaching => "attaching",
-            ApiDiskState::Attached => "attached",
-            ApiDiskState::Detaching => "detaching",
+            ApiDiskState::Attaching(_) => "attaching",
+            ApiDiskState::Attached(_) => "attached",
+            ApiDiskState::Detaching(_) => "detaching",
             ApiDiskState::Destroyed => "destroyed",
             ApiDiskState::Faulted => "faulted",
         };
@@ -640,11 +633,34 @@ impl ApiDiskState {
             ApiDiskState::Destroyed => false,
             ApiDiskState::Faulted => false,
 
-            ApiDiskState::Attaching => true,
-            ApiDiskState::Attached => false,
-            ApiDiskState::Detaching => true,
+            ApiDiskState::Attaching(_) => true,
+            ApiDiskState::Attached(_) => false,
+            ApiDiskState::Detaching(_) => true,
         }
     }
+
+    pub fn attached_instance_id(&self) -> &Uuid {
+        match self {
+            ApiDiskState::Attaching(id) => id,
+            ApiDiskState::Attached(id) => id,
+            ApiDiskState::Detaching(id) => id,
+            
+            ApiDiskState::Creating => panic!("not attached"),
+            ApiDiskState::Detached => panic!("not attached"),
+            ApiDiskState::Destroyed => panic!("not attached"),
+            ApiDiskState::Faulted => panic!("not attached"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiDiskRuntimeState {
+    /** runtime state of the disk */
+    pub disk_state: ApiDiskState,
+    /** generation number for this state */
+    pub gen: u64,
+    /** timestamp for this information */
+    pub time_updated: DateTime<Utc>,
 }
 
 #[serde(rename_all = "camelCase")]
@@ -676,7 +692,6 @@ impl ApiObject for ApiDiskAttachment {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskStateRequested {
-    NoChange,
     Detached,
     Attached(Uuid),
     Destroyed,
@@ -686,11 +701,6 @@ pub enum ApiDiskStateRequested {
 impl ApiDiskStateRequested {
     pub fn is_attached(&self) -> bool {
         match self {
-            /*
-             * TODO-cleanup This case might be a good argument against having
-             * NoChange be one of the values instead of using None
-             */
-            ApiDiskStateRequested::NoChange => unimplemented!(),
             ApiDiskStateRequested::Detached => false,
             ApiDiskStateRequested::Destroyed => false,
             ApiDiskStateRequested::Faulted => false,

@@ -9,12 +9,10 @@ Current status:
 ** done: create basic model types
 ** done: create API endpoints to create (sync?), get, list, delete (sync?)
 ** in progress: create API endpoints to attach, detach
-*** implement SimDisk
 *** fix commented-out test suite for Instances
 *** Check for commented-out code in server_controller.rs
-*** note: will also want to have disk contain AttachState (analogous to
-    RuntimeState) that includes timestamp, generation number? server/instance
-    uuid
+*** add integration test suite for disks
+*** consider unit test suite for disks
 *** See XXXs, new TODOs, unimplemented!(), todo!()
 **** Cases to handle include:
 ***** attach while creating

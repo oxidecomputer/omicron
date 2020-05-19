@@ -6,6 +6,7 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
+use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiIdentityMetadata;
@@ -234,9 +235,11 @@ impl OxideController {
             project_id: project.identity.id.clone(),
             create_snapshot_id: params.snapshot_id.clone(),
             size: params.size.clone(),
-            state: ApiDiskState::Creating,
-            attached_instance_id: None,
-            state_requested: ApiDiskStateRequested::NoChange,
+            runtime: ApiDiskRuntimeState {
+                disk_state: ApiDiskState::Creating,
+                gen: 1,
+                time_updated: Utc::now(),
+            },
         });
 
         let disk_created = self.datastore.disk_create(disk).await?;
@@ -253,7 +256,9 @@ impl OxideController {
          * to "Created".
          */
         let mut new_disk = (*disk_created).clone();
-        new_disk.state = ApiDiskState::Detached;
+        new_disk.runtime.disk_state = ApiDiskState::Detached;
+        new_disk.runtime.gen = new_disk.runtime.gen + 1;
+        new_disk.runtime.time_updated = Utc::now();
         self.datastore.disk_update(Arc::new(new_disk)).await?;
 
         Ok(disk_created)
@@ -600,7 +605,7 @@ impl OxideController {
                     instance_id: instance.identity.id.clone(),
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id.clone(),
-                    disk_state: disk.state.clone(),
+                    disk_state: disk.runtime.disk_state.clone(),
                 }))
             })
             .collect::<Vec<Result<Arc<ApiDiskAttachment>, ApiError>>>()
@@ -615,12 +620,11 @@ impl OxideController {
         /*
          * If another request has been made to destroy or fault the disk, no
          * further requests are allowed.
+         * XXX How do we know if one is pending?
          */
-        let label = match (&disk.state, &disk.state_requested) {
-            (ApiDiskState::Destroyed, _) => Some("destroyed"),
-            (ApiDiskState::Faulted, _) => Some("faulted"),
-            (_, ApiDiskStateRequested::Destroyed) => Some("destroyed"),
-            (_, ApiDiskStateRequested::Faulted) => Some("faulted"),
+        let label = match &disk.runtime.disk_state {
+            ApiDiskState::Destroyed => Some("destroyed"),
+            ApiDiskState::Faulted => Some("faulted"),
             _ => None,
         };
 
@@ -635,7 +639,6 @@ impl OxideController {
 
     /**
      * Attach a disk to an instance.
-     * XXX working here
      */
     pub async fn instance_attach_disk(
         &self,
@@ -649,27 +652,30 @@ impl OxideController {
             .await?;
         let disk =
             self.datastore.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = instance.identity.id;
+        let instance_id = &instance.identity.id;
 
         fn disk_attachment_for(
             instance: &Arc<ApiInstance>,
             disk: &Arc<ApiDisk>,
         ) -> CreateResult<ApiDiskAttachment> {
             let instance_id = &instance.identity.id;
-            assert_eq!(disk.attached_instance_id, Some(*instance_id));
+            assert_eq!(
+                instance_id,
+                disk.runtime.disk_state.attached_instance_id()
+            );
             Ok(Arc::new(ApiDiskAttachment {
                 instance_name: instance.identity.name.clone(),
                 instance_id: instance_id.clone(),
                 disk_id: disk.identity.id.clone(),
                 disk_name: disk.identity.name.clone(),
-                disk_state: disk.state.clone(),
+                disk_state: disk.runtime.disk_state.clone(),
             }))
         }
 
         fn disk_attachment_error(
             disk: &Arc<ApiDisk>,
         ) -> CreateResult<ApiDiskAttachment> {
-            let disk_status = match disk.state {
+            let disk_status = match disk.runtime.disk_state {
                 /*
                  * We won't actually get to these two cases because they're
                  * checked in check_disk_change_allowed().
@@ -686,13 +692,13 @@ impl OxideController {
                  * other instance's name.  Getting that would require another
                  * database hit, which doesn't seem worth it for this.
                  */
-                ApiDiskState::Attaching => {
+                ApiDiskState::Attaching(_) => {
                     "disk is attached to another instance"
                 }
-                ApiDiskState::Attached => {
+                ApiDiskState::Attached(_) => {
                     "disk is attached to another instance"
                 }
-                ApiDiskState::Detaching => {
+                ApiDiskState::Detaching(_) => {
                     "disk is attached to another instance"
                 }
             };
@@ -711,21 +717,12 @@ impl OxideController {
          */
         self.check_disk_change_allowed(&disk)?;
 
-        match (&disk.state, &disk.attached_instance_id, &disk.state_requested) {
+        match &disk.runtime.disk_state {
             /*
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
              */
-            (
-                ApiDiskState::Attached,
-                Some(id),
-                ApiDiskStateRequested::NoChange,
-            ) if *id == instance_id => {
-                return disk_attachment_for(&instance, &disk);
-            }
-            (_, _, ApiDiskStateRequested::Attached(id))
-                if *id == instance_id =>
-            {
+            ApiDiskState::Attached(id) if id == instance_id => {
                 return disk_attachment_for(&instance, &disk);
             }
 
@@ -738,37 +735,107 @@ impl OxideController {
              * look up the other instance by id (and gracefully handle it not
              * existing).
              */
-            (ApiDiskState::Attached, _, _) => {
+            ApiDiskState::Attached(id) => {
+                assert_ne!(id, instance_id);
                 return disk_attachment_error(&disk);
             }
-            (_, _, ApiDiskStateRequested::Attached(_)) => {
+            ApiDiskState::Detaching(_) => {
                 return disk_attachment_error(&disk);
             }
-            (ApiDiskState::Detaching, _, _) => {
+            ApiDiskState::Attaching(id) if id != instance_id => {
+                return disk_attachment_error(&disk);
+            }
+            ApiDiskState::Destroyed => {
+                return disk_attachment_error(&disk);
+            }
+            ApiDiskState::Faulted => {
                 return disk_attachment_error(&disk);
             }
 
-            (ApiDiskState::Creating, _, _) => (),
-            (ApiDiskState::Detached, _, _) => (),
-
-            _ => panic!("unexpected disk attach condition"),
+            ApiDiskState::Creating => (),
+            ApiDiskState::Detached => (),
+            ApiDiskState::Attaching(id) => {
+                assert_eq!(id, instance_id);
+                ()
+            }
         }
 
         /* XXX this code could use some cleanup! */
-        assert!(
-            disk.state == ApiDiskState::Creating
-                || disk.state == ApiDiskState::Detached
-        );
         let mut new_disk = (*disk).clone();
-        new_disk.state_requested =
-            ApiDiskStateRequested::Attached(instance_id.clone());
+        let requested = ApiDiskStateRequested::Attached(instance_id.clone());
         let sc = self.instance_sc(&instance).await?;
-        let new_state = sc.disk_ensure(Arc::new(new_disk.clone())).await?;
+        let new_state =
+            sc.disk_ensure(Arc::new(new_disk.clone()), requested).await?;
 
-        new_disk.state = new_state;
+        new_disk.runtime = new_state;
         let new_disk = Arc::new(new_disk);
         self.datastore.disk_update(Arc::clone(&new_disk)).await?;
         disk_attachment_for(&instance, &new_disk)
+    }
+
+    /**
+     * Detach a disk from an instance.
+     */
+    pub async fn instance_detach_disk(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+        disk_name: &ApiName,
+    ) -> DeleteResult {
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+        let disk =
+            self.datastore.project_lookup_disk(project_name, disk_name).await?;
+        let instance_id = &instance.identity.id;
+
+        match &disk.runtime.disk_state {
+            /*
+             * This operation is a noop if the disk is not attached or already
+             * detaching from the same instance.
+             */
+            ApiDiskState::Creating => return Ok(()),
+            ApiDiskState::Detached => return Ok(()),
+            ApiDiskState::Destroyed => return Ok(()),
+            ApiDiskState::Faulted => return Ok(()),
+            ApiDiskState::Detaching(id) if id == instance_id => return Ok(()),
+
+            /*
+             * This operation is not allowed if the disk is attached to some
+             * other instance.
+             */
+            ApiDiskState::Attaching(id) => if id != instance_id {
+                return Err(ApiError::InvalidRequest {
+                    message: String::from("disk is attached elsewhere"),
+                });
+            },
+            ApiDiskState::Attached(id) => if id != instance_id {
+                return Err(ApiError::InvalidRequest {
+                    message: String::from("disk is attached elsewhere"),
+                });
+            },
+            ApiDiskState::Detaching(id) => if id != instance_id {
+                return Err(ApiError::InvalidRequest {
+                    message: String::from("disk is attached elsewhere"),
+                });
+            },
+
+            /* These are the cases where we have to do something. */
+            ApiDiskState::Attaching(_) => (),
+            ApiDiskState::Attached(_) => (),
+        }
+
+        /* XXX commonize with attach */
+        let sc = self.instance_sc(&instance).await?;
+        let mut new_disk = (*disk).clone();
+        let requested = ApiDiskStateRequested::Detached;
+        let new_state =
+            sc.disk_ensure(Arc::new(new_disk.clone()), requested).await?;
+        new_disk.runtime = new_state;
+        let new_disk = Arc::new(new_disk);
+        self.datastore.disk_update(Arc::clone(&new_disk)).await?;
+        Ok(())
     }
 
     /*
@@ -931,9 +998,57 @@ impl ControllerScApi {
     pub async fn notify_disk_updated(
         &self,
         id: &Uuid,
-        new_state: &ApiDiskState,
+        new_state: &ApiDiskRuntimeState,
     ) -> Result<(), ApiError> {
-        /* XXX */
-        unimplemented!();
+        let datastore = &self.controller.datastore;
+        let log = &self.controller.log;
+
+        let result = datastore
+            .disk_lookup_by_id(id)
+            .and_then(|old_disk| {
+                let mut new_disk = (*old_disk).clone();
+                new_disk.runtime = new_state.clone();
+                datastore.disk_update(Arc::new(new_disk))
+            })
+            .await;
+
+        /* TODO-cleanup commonize with notify_instance_updated() */
+        match result {
+            Ok(_) => {
+                debug!(log, "disk updated by server controller";
+                    "disk_id" => %id,
+                    "new_state" => ?new_state);
+                Ok(())
+            }
+
+            /*
+             * If the disk doesn't exist, swallow the error -- there's
+             * nothing to do here.
+             * TODO-robustness This could only be possible if we've removed a
+             * disk from the datastore altogether.  When would we do that?
+             * We don't want to do it as soon as something's destroyed, I think,
+             * and in that case, we'd need some async task for cleaning these
+             * up.
+             */
+            Err(ApiError::ObjectNotFound {
+                ..
+            }) => {
+                warn!(log, "non-existent disk updated by server controller";
+                    "instance_id" => %id,
+                    "new_state" => ?new_state);
+                Ok(())
+            }
+
+            /*
+             * If the datastore is unavailable, propagate that to the caller.
+             */
+            Err(error) => {
+                warn!(log, "failed to update disk from server controller";
+                    "disk_id" => %id,
+                    "new_state" => ?new_state,
+                    "error" => ?error);
+                Err(error.into())
+            }
+        }
     }
 }

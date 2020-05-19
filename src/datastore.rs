@@ -6,6 +6,7 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskState;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
@@ -426,8 +427,15 @@ impl ControlDataStore {
             .map(|(disk_name, disk_id)| {
                 (disk_name.clone(), Arc::clone(all_disks.get(disk_id).unwrap()))
             })
-            .filter(|(_, disk)| match disk.attached_instance_id {
-                Some(id) if *instance_id == id => true,
+            .filter(|(_, disk)| match disk.runtime.disk_state {
+                ApiDiskState::Attaching(id) if *instance_id == id => true,
+                ApiDiskState::Attached(id) if *instance_id == id => true,
+                ApiDiskState::Detaching(id) if *instance_id == id => true,
+
+                ApiDiskState::Creating => false,
+                ApiDiskState::Detached => false,
+                ApiDiskState::Faulted => false,
+                ApiDiskState::Destroyed => false,
                 _ => false,
             })
             .collect::<BTreeMap<ApiName, Arc<ApiDisk>>>();
@@ -514,6 +522,16 @@ impl ControlDataStore {
         project_disks.insert(disk_name.clone(), disk_id.clone());
         data.disks_by_id.insert(disk_id.clone(), Arc::clone(&disk));
         Ok(disk)
+    }
+
+    pub async fn disk_lookup_by_id(&self, id: &Uuid) -> LookupResult<ApiDisk> {
+        let data = self.data.lock().await;
+        Ok(Arc::clone(collection_lookup(
+            &data.disks_by_id,
+            id,
+            ApiResourceType::Disk,
+            &ApiError::not_found_by_id,
+        )?))
     }
 
     /*

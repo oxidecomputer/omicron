@@ -4,6 +4,7 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstance;
@@ -119,96 +120,12 @@ impl ServerController {
     pub async fn disk_ensure(
         self: &Arc<Self>,
         api_disk: Arc<ApiDisk>,
-    ) -> Result<ApiDiskState, ApiError> {
-        /*
-         * XXX does it make sense that disks are different from instances in
-         * this way?
-         */
-        let target = &api_disk.state_requested;
+        target: ApiDiskStateRequested,
+    ) -> Result<ApiDiskRuntimeState, ApiError> {
         self.disks
-            .sim_ensure(
-                &api_disk.identity.id,
-                api_disk.state.clone(),
-                target.clone(),
-            )
+            .sim_ensure(&api_disk.identity.id, api_disk.runtime.clone(), target)
             .await
     }
-
-    //    /**
-    //     * Idempotently ensures that the given API Disk (described by `api_disk`)
-    //     * is attached (or not) as specified.  This simulates disk attach and
-    //     * detach, similar to instance boot and halt.
-    //     */
-    //    pub async fn disk_ensure(
-    //        self: &Arc<Self>,
-    //        api_disk: Arc<ApiDisk>,
-    //    ) -> Result<ApiDiskState, ApiError> {
-    //        let id = api_disk.identity.id.clone();
-    //        let mut disks = self.disks.lock().await;
-    //        let maybe_current_disk = disks.remove(&id);
-    //
-    //        let (disk, is_new) = {
-    //            if let Some(current_disk) = maybe_current_disk {
-    //                (current_disk, false)
-    //            } else {
-    //                /* TODO commonize with SimInstance */
-    //                let log = self.log.new(o!("disk_id" => id.to_string()));
-    //                if let ServerControllerSimMode::Auto = self.sim_mode {
-    //                    let (new_disk, rx) =
-    //                        SimDisk::new_simulated_auto(&api_disk.state, log);
-    //                    let selfc = Arc::clone(&self);
-    //                    let idc = id.clone();
-    //                    tokio::spawn(async move {
-    //                        selfc.disk_sim(idc, rx).await;
-    //                    });
-    //                    (new_disk, true)
-    //                } else {
-    //                    let new_disk =
-    //                        SimDisk::new_simulated_explicit(&api_disk.state, log);
-    //                    (new_disk, true)
-    //                }
-    //            }
-    //        };
-    //
-    //        disk.transition(&api_disk.state_requested);
-    //        let rv = Ok(disk.current_state.clone());
-    //        disks.insert(id.clone(), disk);
-    //        rv
-    //    }
-    //
-    //    async fn disk_sim(&self, id: Uuid, mut rx: Receiver<()>) {
-    //        while let Some(_) = rx.next().await {
-    //            tokio::time::delay_for(Duration::from_millis(1500)).await;
-    //            self.disk_poke(id).await;
-    //        }
-    //    }
-    //
-    //    async fn disk_poke(&self, id: Uuid) {
-    //        let (new_state, to_destroy) = {
-    //            let mut disks = self.disks.lock().await;
-    //            let mut disk = disks.remove(&id).unwrap();
-    //            disk.transition_finish();
-    //            let after = disk.current_state.clone();
-    //            if disk.requested_state == ApiDiskStateRequested::NoChange
-    //                && disk.current_state == ApiDiskState::Destroyed
-    //            {
-    //                info!(disk.log, "disk came to rest destroyed");
-    //                (after, Some(disk))
-    //            } else {
-    //                disks.insert(id.clone(), disk);
-    //                (after, None)
-    //            }
-    //        };
-    //
-    //        /* TODO-robutsness See instance_poke(). */
-    //        self.ctlsc.notify_disk_updated(&id, &new_state).await.unwrap();
-    //        /* TODO-debug TODO-correctness See instance_poke(). */
-    //        if let Some(destroyed_disk) = to_destroy {
-    //            if let Some(mut tx) = destroyed_disk.channel_tx {
-    //                tx.close_channel();
-    //            }
-    //        }
-    //    }
 }
 
 /**
@@ -1486,7 +1403,7 @@ struct SimDisk {}
 
 #[async_trait]
 impl Simulatable for SimDisk {
-    type CurrentState = ApiDiskState;
+    type CurrentState = ApiDiskRuntimeState;
     type RequestedState = ApiDiskStateRequested;
 
     fn next_state_for_new_target(
@@ -1495,25 +1412,191 @@ impl Simulatable for SimDisk {
         next: &Self::RequestedState,
     ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>
     {
-        todo!();
+        let state_before = &current.disk_state;
+        let state_after = next;
+
+        /* XXX review this big block */
+        let to_do = match (state_before, state_after) {
+            /*
+             * It's conceivable that we'd be asked to transition from a state to
+             * itself, in which case we also don't need to do anything.
+             */
+            (
+                ApiDiskState::Attached(id1),
+                ApiDiskStateRequested::Attached(id2),
+            ) => {
+                /*
+                 * It's not legal to ask us to go from attached to one instance
+                 * to attached to another.
+                 */
+                assert!(pending.is_none());
+                if id1 != id2 {
+                    return Err(ApiError::InvalidRequest {
+                        message: format!("disk is already attached")
+                    });
+                }
+
+                None
+            }
+            (ApiDiskState::Detached, ApiDiskStateRequested::Detached) => {
+                assert!(pending.is_none());
+                None
+            },
+            (ApiDiskState::Destroyed, ApiDiskStateRequested::Destroyed) => {
+                assert!(pending.is_none());
+                None
+            }
+            (ApiDiskState::Faulted, ApiDiskStateRequested::Faulted) => {
+                assert!(pending.is_none());
+                None
+            }
+
+            /*
+             * If we're going from any unattached state to "Attached" (the only
+             * requestable attached state), the appropriate next state is
+             * "Attaching", and it will be an asynchronous transition to
+             * "Attached".  This is allowed even for "Destroyed" -- the caller
+             * is responsible for disallowing this if that's what's intended.
+             */
+            (ApiDiskState::Creating, ApiDiskStateRequested::Attached(id)) => {
+                assert!(pending.is_none());
+                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+            }
+            (ApiDiskState::Detached, ApiDiskStateRequested::Attached(id)) => {
+                assert!(pending.is_none());
+                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+            }
+            (ApiDiskState::Destroyed, ApiDiskStateRequested::Attached(id)) => {
+                assert!(pending.is_none());
+                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+            }
+            (ApiDiskState::Faulted, ApiDiskStateRequested::Attached(id)) => {
+                assert!(pending.is_none());
+                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+            }
+
+            /*
+             * If we're currently attaching, it's only legal to try to attach to
+             * the same thing (in which case it's a noop).
+             * TODO-cleanup would it be more consistent with our intended
+             * interface (which is to let the server controller just say what it
+             * wants and have us do the work) to have this work and go through
+             * detaching first?
+             */
+            (
+                ApiDiskState::Attaching(id1),
+                ApiDiskStateRequested::Attached(id2),
+            ) => {
+                if id1 != id2 {
+                    return Err(ApiError::InvalidRequest {
+                        message: format!("disk is already attached")
+                    });
+                }
+
+                Some((ApiDiskState::Attaching(id2.clone()), Some(state_after)))
+            }
+
+            (
+                ApiDiskState::Detaching(_),
+                ApiDiskStateRequested::Attached(_),
+            ) => {
+                return Err(ApiError::InvalidRequest {
+                    message: format!("cannot attach while detaching"),
+                });
+            }
+
+            /*
+             * If we're going from any attached state to any detached state,
+             * then we'll go straight to "Detaching" en route to the new state.
+             */
+            (from_state, to_state)
+                if from_state.is_attached() && !to_state.is_attached() =>
+            {
+                let id = from_state.attached_instance_id();
+                Some((ApiDiskState::Detaching(id.clone()), Some(to_state)))
+            }
+
+            /*
+             * The only remaining options are transitioning from one detached
+             * state to a different one, in which case we can go straight there
+             * with no need for an asynchronous transition.
+             */
+            (from_state, ApiDiskStateRequested::Destroyed) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Destroyed, None))
+            }
+
+            (from_state, ApiDiskStateRequested::Detached) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Detached, None))
+            }
+
+            (from_state, ApiDiskStateRequested::Faulted) => {
+                assert!(!from_state.is_attached());
+                Some((ApiDiskState::Faulted, None))
+            }
+        };
+
+        if to_do.is_none() {
+            return Ok((current.clone(), pending.clone()));
+        }
+
+        let (immed_next_state, next_async) = to_do.unwrap();
+        let next_state = ApiDiskRuntimeState {
+            disk_state: immed_next_state,
+            gen: current.gen + 1,
+            time_updated: Utc::now(),
+        };
+
+        Ok((next_state, next_async.map(|s| s.clone())))
     }
 
     fn next_state_for_async_transition_finish(
         current: &Self::CurrentState,
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
-        todo!();
+        let state_before = &current.disk_state;
+        let is_detaching = match &current.disk_state {
+            ApiDiskState::Attaching(_) => false,
+            ApiDiskState::Detaching(_) => true,
+            _ => panic!("async transition was not in progress"),
+        };
+        let next_state = match pending {
+            ApiDiskStateRequested::Attached(id) => {
+                let id = id.clone();
+                assert_eq!(state_before, &ApiDiskState::Attaching(id));
+                ApiDiskState::Attached(id)
+            }
+            ApiDiskStateRequested::Faulted => {
+                assert!(is_detaching);
+                ApiDiskState::Faulted
+            }
+            ApiDiskStateRequested::Destroyed => {
+                assert!(is_detaching);
+                ApiDiskState::Destroyed
+            }
+            ApiDiskStateRequested::Detached => {
+                assert!(is_detaching);
+                ApiDiskState::Detached
+            }
+        };
+        let next_runtime = ApiDiskRuntimeState {
+            disk_state: next_state,
+            gen: current.gen + 1,
+            time_updated: Utc::now()
+        };
+        (next_runtime, None)
     }
 
     fn state_unchanged(
         state1: &Self::CurrentState,
         state2: &Self::CurrentState,
     ) -> bool {
-        todo!();
+        return state1.gen == state2.gen;
     }
 
     fn ready_to_destroy(current: &Self::CurrentState) -> bool {
-        todo!();
+        ApiDiskState::Destroyed == current.disk_state
     }
 
     async fn notify(

@@ -60,7 +60,8 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_instance_stop)?;
 
     api.register(api_instance_disks_get)?;
-    api.register(api_instance_disks_put)?;
+    api.register(api_instance_disks_put_disk)?;
+    api.register(api_instance_disks_delete_disk)?;
 
     api.register(api_hardware_racks_get)?;
     api.register(api_hardware_racks_get_rack)?;
@@ -464,7 +465,7 @@ async fn api_project_instances_instance_stop(
  */
 #[endpoint {
     method = GET,
-    path = "/project/{project_name}/instances/{instance_name}/disks"
+    path = "/projects/{project_name}/instances/{instance_name}/disks"
 }]
 async fn api_instance_disks_get(
     rqctx: Arc<RequestContext>,
@@ -496,9 +497,9 @@ struct InstanceDiskPathParam {
  */
 #[endpoint {
     method = PUT,
-    path = "/project/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
-async fn api_instance_disks_put(
+async fn api_instance_disks_put_disk(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseCreated<ApiDiskAttachment>, HttpError> {
@@ -512,6 +513,29 @@ async fn api_instance_disks_put(
         .instance_attach_disk(&project_name, &instance_name, &disk_name)
         .await?;
     Ok(HttpResponseCreated(attachment.to_view()))
+}
+
+/**
+ * Detach a disk from this instance.
+ */
+#[endpoint {
+    method = DELETE,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn api_instance_disks_delete_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    controller
+        .instance_detach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseDeleted())
 }
 
 /*
