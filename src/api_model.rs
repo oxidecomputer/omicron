@@ -449,15 +449,14 @@ pub struct ApiInstanceRuntimeState {
 }
 
 /**
- * RuntimeStateParams is used to request an Instance state change from a server
- * controller.  Right now, it's only the run state that can be changed, though
- * we could imagine supporting changing properties like "ncpus" here.  If we
- * allow other properties here, we may want to make them Options so that callers
- * don't have to know the prior state already.
- * XXX rename this from Params to Requested?
+ * ApiInstanceRuntimeStateRequested is used to request an Instance state change
+ * from a server controller.  Right now, it's only the run state that can be
+ * changed, though we could imagine supporting changing properties like "ncpus"
+ * here.  If we allow other properties here, we may want to make them Options so
+ * that callers don't have to know the prior state already.
  */
 #[derive(Clone, Debug)]
-pub struct ApiInstanceRuntimeStateParams {
+pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
 }

@@ -9,7 +9,7 @@ use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateParams;
+use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
 use crate::controller::ControllerScApi;
 use async_trait::async_trait;
@@ -101,7 +101,7 @@ impl ServerController {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         api_instance: Arc<ApiInstance>,
-        target: ApiInstanceRuntimeStateParams,
+        target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
         self.instances
             .sim_ensure(
@@ -630,7 +630,7 @@ struct SimInstance {}
 #[async_trait]
 impl Simulatable for SimInstance {
     type CurrentState = ApiInstanceRuntimeState;
-    type RequestedState = ApiInstanceRuntimeStateParams;
+    type RequestedState = ApiInstanceRuntimeStateRequested;
 
     fn next_state_for_new_target(
         current: &Self::CurrentState,
@@ -753,7 +753,7 @@ impl Simulatable for SimInstance {
         };
 
         let next_async = if need_async {
-            Some(ApiInstanceRuntimeStateParams {
+            Some(ApiInstanceRuntimeStateRequested {
                 run_state: state_after.clone(),
                 reboot_wanted: reb_wanted,
             })
@@ -807,7 +807,7 @@ impl Simulatable for SimInstance {
 
         let next_async = if next_state.reboot_in_progress {
             assert_eq!(*run_state_after, ApiInstanceState::Stopped);
-            Some(ApiInstanceRuntimeStateParams {
+            Some(ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
             })
@@ -865,7 +865,6 @@ impl Simulatable for SimDisk {
         let state_before = &current.disk_state;
         let state_after = next;
 
-        /* XXX review this big block */
         let to_do = match (state_before, state_after) {
             /*
              * It's conceivable that we'd be asked to transition from a state to
@@ -1062,7 +1061,7 @@ impl Simulatable for SimDisk {
 // mod test {
 //     use super::SimInstance;
 //     use crate::api_model::ApiInstanceRuntimeState;
-//     use crate::api_model::ApiInstanceRuntimeStateParams;
+//     use crate::api_model::ApiInstanceRuntimeStateRequested;
 //     use crate::api_model::ApiInstanceState;
 //     use crate::test_util::test_setup_log;
 //     use chrono::Utc;
@@ -1127,7 +1126,7 @@ impl Simulatable for SimDisk {
 //         let mut rprev = r1;
 //         for state in stopped_states {
 //             assert!(rprev.run_state.is_stopped());
-//             let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//             let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: state.clone(),
 //                 reboot_wanted: false,
 //             });
@@ -1149,7 +1148,7 @@ impl Simulatable for SimDisk {
 //          */
 //         assert!(rprev.run_state.is_stopped());
 //         assert!(rx.try_next().is_err());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //             run_state: ApiInstanceState::Running,
 //             reboot_wanted: false,
 //         });
@@ -1181,7 +1180,7 @@ impl Simulatable for SimDisk {
 //          * immediately.
 //          */
 //         assert!(!rprev.run_state.is_stopped());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //             run_state: ApiInstanceState::Running,
 //             reboot_wanted: false,
 //         });
@@ -1200,7 +1199,7 @@ impl Simulatable for SimDisk {
 //          */
 //         assert!(!rprev.run_state.is_stopped());
 //         assert!(rx.try_next().is_err());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //             run_state: ApiInstanceState::Destroyed,
 //             reboot_wanted: false,
 //         });
@@ -1233,7 +1232,7 @@ impl Simulatable for SimDisk {
 //          * take us to "Destroyed".
 //          */
 //         assert!(rprev.run_state.is_stopped());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //             run_state: ApiInstanceState::Running,
 //             reboot_wanted: false,
 //         });
@@ -1249,7 +1248,7 @@ impl Simulatable for SimDisk {
 //         /*
 //          * Interrupt the async transition with a new one.
 //          */
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateParams {
+//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
 //             run_state: ApiInstanceState::Destroyed,
 //             reboot_wanted: false,
 //         });
@@ -1296,7 +1295,7 @@ impl Simulatable for SimDisk {
 //         assert_eq!(r1.run_state, ApiInstanceState::Creating);
 //         assert_eq!(r1.gen, 1);
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: false,
 //             })
@@ -1309,7 +1308,7 @@ impl Simulatable for SimDisk {
 //          * Now, take it through a reboot sequence.
 //          */
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
@@ -1340,7 +1339,7 @@ impl Simulatable for SimDisk {
 //          * second reboot is totally superfluous.
 //          */
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
@@ -1348,7 +1347,7 @@ impl Simulatable for SimDisk {
 //         let rnext = instance.current_run_state.clone();
 //         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
@@ -1372,7 +1371,7 @@ impl Simulatable for SimDisk {
 //          * sequence.
 //          */
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
@@ -1383,7 +1382,7 @@ impl Simulatable for SimDisk {
 //         let rnext = instance.current_run_state.clone();
 //         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
@@ -1409,7 +1408,7 @@ impl Simulatable for SimDisk {
 //          * it.  Then, while it's starting, begin a reboot sequence.
 //          */
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Stopped,
 //                 reboot_wanted: false,
 //             })
@@ -1418,7 +1417,7 @@ impl Simulatable for SimDisk {
 //         let rnext = instance.current_run_state.clone();
 //         assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: false,
 //             })
@@ -1426,7 +1425,7 @@ impl Simulatable for SimDisk {
 //         let rnext = instance.current_run_state.clone();
 //         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
 //         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateParams {
+//             .transition(&ApiInstanceRuntimeStateRequested {
 //                 run_state: ApiInstanceState::Running,
 //                 reboot_wanted: true,
 //             })
