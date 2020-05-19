@@ -613,30 +613,6 @@ impl OxideController {
         Ok(futures::stream::iter(attachments).boxed())
     }
 
-    fn check_disk_change_allowed(
-        &self,
-        disk: &Arc<ApiDisk>,
-    ) -> Result<(), ApiError> {
-        /*
-         * If another request has been made to destroy or fault the disk, no
-         * further requests are allowed.
-         * XXX How do we know if one is pending?
-         */
-        let label = match &disk.runtime.disk_state {
-            ApiDiskState::Destroyed => Some("destroyed"),
-            ApiDiskState::Faulted => Some("faulted"),
-            _ => None,
-        };
-
-        if let Some(state) = label {
-            Err(ApiError::InvalidRequest {
-                message: format!("disk is {}", state),
-            })
-        } else {
-            Ok(())
-        }
-    }
-
     /**
      * Attach a disk to an instance.
      */
@@ -676,13 +652,8 @@ impl OxideController {
             disk: &Arc<ApiDisk>,
         ) -> CreateResult<ApiDiskAttachment> {
             let disk_status = match disk.runtime.disk_state {
-                /*
-                 * We won't actually get to these two cases because they're
-                 * checked in check_disk_change_allowed().
-                 */
                 ApiDiskState::Destroyed => "disk is destroyed",
                 ApiDiskState::Faulted => "disk is faulted",
-
                 ApiDiskState::Creating => "disk is detached",
                 ApiDiskState::Detached => "disk is detached",
 
@@ -711,11 +682,6 @@ impl OxideController {
                 message: message,
             })
         }
-
-        /*
-         * Check common cases, like the disk being destroyed or faulted.
-         */
-        self.check_disk_change_allowed(&disk)?;
 
         match &disk.runtime.disk_state {
             /*
@@ -760,17 +726,14 @@ impl OxideController {
             }
         }
 
-        /* XXX this code could use some cleanup! */
-        let mut new_disk = (*disk).clone();
-        let requested = ApiDiskStateRequested::Attached(instance_id.clone());
-        let sc = self.instance_sc(&instance).await?;
-        let new_state =
-            sc.disk_ensure(Arc::new(new_disk.clone()), requested).await?;
-
-        new_disk.runtime = new_state;
-        let new_disk = Arc::new(new_disk);
-        self.datastore.disk_update(Arc::clone(&new_disk)).await?;
-        disk_attachment_for(&instance, &new_disk)
+        let disk = self
+            .disk_set_runtime(
+                disk,
+                self.instance_sc(&instance).await?,
+                ApiDiskStateRequested::Attached(instance_id.clone()),
+            )
+            .await?;
+        disk_attachment_for(&instance, &disk)
     }
 
     /**
@@ -826,16 +789,34 @@ impl OxideController {
             ApiDiskState::Attached(_) => (),
         }
 
-        /* XXX commonize with attach */
-        let sc = self.instance_sc(&instance).await?;
-        let mut new_disk = (*disk).clone();
-        let requested = ApiDiskStateRequested::Detached;
-        let new_state =
-            sc.disk_ensure(Arc::new(new_disk.clone()), requested).await?;
-        new_disk.runtime = new_state;
-        let new_disk = Arc::new(new_disk);
-        self.datastore.disk_update(Arc::clone(&new_disk)).await?;
+        self.disk_set_runtime(
+            disk,
+            self.instance_sc(&instance).await?,
+            ApiDiskStateRequested::Detached,
+        )
+        .await?;
         Ok(())
+    }
+
+    /**
+     * Modifies the runtime state of the Disk as requested.  This generally
+     * means attaching or detaching the disk.
+     */
+    async fn disk_set_runtime(
+        &self,
+        mut disk: Arc<ApiDisk>,
+        sc: Arc<ServerController>,
+        requested: ApiDiskStateRequested,
+    ) -> UpdateResult<ApiDisk> {
+        /*
+         * Ask the SC to begin the state change.  Then update the database to
+         * reflect the new intermediate state.
+         */
+        let new_runtime = sc.disk_ensure(Arc::clone(&disk), requested).await?;
+        let disk_ref = Arc::make_mut(&mut disk);
+        disk_ref.runtime = new_runtime;
+        self.datastore.disk_update(Arc::clone(&disk)).await?;
+        Ok(disk)
     }
 
     /*
