@@ -9,11 +9,8 @@ Current status:
 ** done: create basic model types
 ** done: create API endpoints to create (sync?), get, list, delete (sync?)
 ** in progress: create API endpoints to attach, detach
-*** fix commented-out test suite for Instances
-*** Check for commented-out code in server_controller.rs
 *** add integration test suite for disks
-*** consider unit test suite for disks
-*** See XXXs, new TODOs, unimplemented!(), todo!()
+*** self-review, including XXXs, new TODOs, unimplemented!(), todo!()
 **** Cases to handle include:
 ***** attach while creating
 ***** destroy while creating, attaching, detaching, or detached

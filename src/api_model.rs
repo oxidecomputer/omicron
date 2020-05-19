@@ -633,7 +633,7 @@ impl ApiDiskState {
             ApiDiskState::Faulted => false,
 
             ApiDiskState::Attaching(_) => true,
-            ApiDiskState::Attached(_) => false,
+            ApiDiskState::Attached(_) => true,
             ApiDiskState::Detaching(_) => true,
         }
     }

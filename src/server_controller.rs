@@ -1059,8 +1059,13 @@ impl Simulatable for SimDisk {
 
 #[cfg(test)]
 mod test {
+    use super::SimDisk;
     use super::SimInstance;
     use super::SimObject;
+    use crate::api_error::ApiError;
+    use crate::api_model::ApiDiskRuntimeState;
+    use crate::api_model::ApiDiskState;
+    use crate::api_model::ApiDiskStateRequested;
     use crate::api_model::ApiInstanceRuntimeState;
     use crate::api_model::ApiInstanceRuntimeStateRequested;
     use crate::api_model::ApiInstanceState;
@@ -1087,8 +1092,25 @@ mod test {
         SimObject::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
     }
 
-    /*
-     * Test non-reboot-related transitions.
+    fn make_disk(
+        logctx: &LogContext,
+        initial_state: ApiDiskState,
+    ) -> (SimObject<SimDisk>, Receiver<()>) {
+        let now = Utc::now();
+        let initial_runtime = {
+            ApiDiskRuntimeState {
+                disk_state: initial_state,
+                gen: 1,
+                time_updated: now,
+            }
+        };
+
+        SimObject::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
+    }
+
+    /**
+     * Tests SimObject in general when backed by a SimDisk in particular, for
+     * non-reboot-related transitions.
      */
     #[tokio::test]
     async fn test_sim_instance() {
@@ -1136,9 +1158,7 @@ mod test {
             assert!(dropped.is_none());
             assert!(instance.requested_state.is_none());
             let rnext = instance.current_state.clone();
-            if state != rprev.run_state {
-                assert!(rnext.gen > rprev.gen);
-            }
+            assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
             assert_eq!(rnext.run_state, state);
             assert!(rx.try_next().is_err());
@@ -1474,5 +1494,162 @@ mod test {
          */
 
         logctx.cleanup_successful();
+    }
+
+    /**
+     * Tests basic usage of `SimDisk`.  This is somewhat less exhaustive than
+     * the analogous tests for `SimInstance` because much of that functionality
+     * is implemented in `SimObject`, common to both.  So we don't bother
+     * verifying dropped state, messages sent to the background task, or some
+     * sanity checks around completion of async transitions when none is
+     * pending.
+     */
+    #[tokio::test]
+    async fn test_sim_disk() {
+        let logctx = test_setup_log("test_sim_disk").await;
+        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let r1 = disk.current_state.clone();
+
+        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
+        assert_eq!(r1.disk_state, ApiDiskState::Creating);
+        assert_eq!(r1.gen, 1);
+
+        /*
+         * Try transitioning to every other detached state.
+         */
+        let detached_states = vec![
+            (ApiDiskStateRequested::Detached, ApiDiskState::Detached),
+            (ApiDiskStateRequested::Destroyed, ApiDiskState::Destroyed),
+            (ApiDiskStateRequested::Faulted, ApiDiskState::Faulted),
+        ];
+        let mut rprev = r1;
+        for (requested, next) in detached_states {
+            assert!(!rprev.disk_state.is_attached());
+            disk.transition(requested.clone()).unwrap();
+            let rnext = disk.current_state.clone();
+            assert!(rnext.gen > rprev.gen);
+            assert!(rnext.time_updated >= rprev.time_updated);
+            assert_eq!(rnext.disk_state, next);
+            rprev = rnext;
+        }
+
+        /*
+         * Now if we transition to "Attached", we should go through an async
+         * transition.
+         */
+        let id = uuid::Uuid::new_v4();
+        assert!(!rprev.disk_state.is_attached());
+        assert!(disk
+            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .unwrap()
+            .is_none());
+        let rnext = disk.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.disk_state, ApiDiskState::Attaching(id.clone()));
+        assert!(rnext.disk_state.is_attached());
+        assert_eq!(id, *rnext.disk_state.attached_instance_id());
+        let rprev = rnext;
+
+        disk.transition_finish();
+        let rnext = disk.current_state.clone();
+        assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        let rprev = rnext;
+
+        disk.transition_finish();
+        let rnext = disk.current_state.clone();
+        assert_eq!(rnext.gen, rprev.gen);
+        assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
+        assert!(rnext.disk_state.is_attached());
+        let rprev = rnext;
+
+        /* If we go straight to "Attached" again, there's nothing to do. */
+        assert!(disk
+            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .unwrap()
+            .is_none());
+        let rnext = disk.current_state.clone();
+        assert_eq!(rnext.gen, rprev.gen);
+        let rprev = rnext;
+
+        /*
+         * It's illegal to go straight to attached to a different instance.
+         */
+        let id2 = uuid::Uuid::new_v4();
+        assert_ne!(id, id2);
+        let error = disk
+            .transition(ApiDiskStateRequested::Attached(id2.clone()))
+            .unwrap_err();
+        if let ApiError::InvalidRequest {
+            message,
+        } = error
+        {
+            assert_eq!("disk is already attached", message);
+        } else {
+            panic!("unexpected error type");
+        }
+        let rnext = disk.current_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+        let rprev = rnext;
+
+        /*
+         * If we go to a different detached state, we go through the async
+         * transition again.
+         */
+        disk.transition(ApiDiskStateRequested::Detached).unwrap();
+        let rnext = disk.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert_eq!(rnext.disk_state, ApiDiskState::Detaching(id.clone()));
+        assert!(rnext.disk_state.is_attached());
+        let rprev = rnext;
+
+        disk.transition_finish();
+        let rnext = disk.current_state.clone();
+        assert_eq!(rnext.disk_state, ApiDiskState::Detached);
+        assert!(rnext.gen > rprev.gen);
+
+        /*
+         * Verify that it works fine to change directions in the middle of an
+         * async transition.
+         */
+        disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
+        assert_eq!(
+            disk.current_state.disk_state,
+            ApiDiskState::Attaching(id.clone())
+        );
+        disk.transition(ApiDiskStateRequested::Destroyed).unwrap();
+        assert_eq!(
+            disk.current_state.disk_state,
+            ApiDiskState::Detaching(id.clone())
+        );
+        disk.transition_finish();
+        assert_eq!(disk.current_state.disk_state, ApiDiskState::Destroyed);
+
+        disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
+        disk.transition_finish();
+        assert_eq!(
+            disk.current_state.disk_state,
+            ApiDiskState::Attached(id.clone())
+        );
+        disk.transition(ApiDiskStateRequested::Faulted).unwrap();
+        assert_eq!(
+            disk.current_state.disk_state,
+            ApiDiskState::Detaching(id.clone())
+        );
+        let error = disk
+            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .unwrap_err();
+        if let ApiError::InvalidRequest {
+            message,
+        } = error
+        {
+            assert_eq!("cannot attach while detaching", message);
+        } else {
+            panic!("unexpected error type");
+        }
+        disk.transition_finish();
+        assert_eq!(disk.current_state.disk_state, ApiDiskState::Faulted);
     }
 }
