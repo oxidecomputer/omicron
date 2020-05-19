@@ -1432,7 +1432,7 @@ impl Simulatable for SimDisk {
                 assert!(pending.is_none());
                 if id1 != id2 {
                     return Err(ApiError::InvalidRequest {
-                        message: format!("disk is already attached")
+                        message: format!("disk is already attached"),
                     });
                 }
 
@@ -1441,7 +1441,7 @@ impl Simulatable for SimDisk {
             (ApiDiskState::Detached, ApiDiskStateRequested::Detached) => {
                 assert!(pending.is_none());
                 None
-            },
+            }
             (ApiDiskState::Destroyed, ApiDiskStateRequested::Destroyed) => {
                 assert!(pending.is_none());
                 None
@@ -1489,7 +1489,7 @@ impl Simulatable for SimDisk {
             ) => {
                 if id1 != id2 {
                     return Err(ApiError::InvalidRequest {
-                        message: format!("disk is already attached")
+                        message: format!("disk is already attached"),
                     });
                 }
 
@@ -1583,7 +1583,7 @@ impl Simulatable for SimDisk {
         let next_runtime = ApiDiskRuntimeState {
             disk_state: next_state,
             gen: current.gen + 1,
-            time_updated: Utc::now()
+            time_updated: Utc::now(),
         };
         (next_runtime, None)
     }

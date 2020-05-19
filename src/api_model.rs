@@ -644,7 +644,7 @@ impl ApiDiskState {
             ApiDiskState::Attaching(id) => id,
             ApiDiskState::Attached(id) => id,
             ApiDiskState::Detaching(id) => id,
-            
+
             ApiDiskState::Creating => panic!("not attached"),
             ApiDiskState::Detached => panic!("not attached"),
             ApiDiskState::Destroyed => panic!("not attached"),

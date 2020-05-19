@@ -805,21 +805,21 @@ impl OxideController {
              * This operation is not allowed if the disk is attached to some
              * other instance.
              */
-            ApiDiskState::Attaching(id) => if id != instance_id {
+            ApiDiskState::Attaching(id) if id != instance_id => {
                 return Err(ApiError::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
-            },
-            ApiDiskState::Attached(id) => if id != instance_id {
+            }
+            ApiDiskState::Attached(id) if id != instance_id => {
                 return Err(ApiError::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
-            },
-            ApiDiskState::Detaching(id) => if id != instance_id {
+            }
+            ApiDiskState::Detaching(_) => {
                 return Err(ApiError::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
-            },
+            }
 
             /* These are the cases where we have to do something. */
             ApiDiskState::Attaching(_) => (),
