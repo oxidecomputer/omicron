@@ -386,7 +386,11 @@ impl HttpRouter {
                     Some(node)
                 }
             }
-            .ok_or_else(|| HttpError::for_status(StatusCode::NOT_FOUND))?;
+            .ok_or_else(|| {
+                HttpError::for_not_found(String::from(
+                    "no route found (no path in router)",
+                ))
+            })?
         }
 
         /*
@@ -394,7 +398,9 @@ impl HttpRouter {
          * at all, report a 404.  We could probably treat this as a 405 as well.
          */
         if node.methods.is_empty() {
-            return Err(HttpError::for_status(StatusCode::NOT_FOUND));
+            return Err(HttpError::for_not_found(String::from(
+                "route has no handlers",
+            )));
         }
 
         let methodname = method.as_str().to_uppercase();
