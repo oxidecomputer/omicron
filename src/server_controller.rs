@@ -769,11 +769,11 @@ impl Simulatable for SimInstance {
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
         /*
-         * As documented above, `self.requested_run_state` is only non-None when
+         * As documented above, `self.requested_state` is only non-None when
          * there's an asynchronous (simulated) transition in progress, and the
          * only such transitions start at "Starting" or "Stopping" and go to
          * "Running" or one of several stopped states, respectively.  Since we
-         * checked `self.requested_run_state` above, we know we're in one of
+         * checked `self.requested_state` above, we know we're in one of
          * these two transitions and assert that here.
          */
         let run_state_before = current.run_state.clone();
@@ -1057,400 +1057,422 @@ impl Simulatable for SimDisk {
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use super::SimInstance;
-//     use crate::api_model::ApiInstanceRuntimeState;
-//     use crate::api_model::ApiInstanceRuntimeStateRequested;
-//     use crate::api_model::ApiInstanceState;
-//     use crate::test_util::test_setup_log;
-//     use chrono::Utc;
-//     use dropshot::test_util::LogContext;
-//     use futures::channel::mpsc::Receiver;
-//
-//     fn make_instance(
-//         logctx: &LogContext,
-//         initial_state: ApiInstanceState,
-//     ) -> (SimInstance, Receiver<()>) {
-//         let now = Utc::now();
-//         let initial_runtime = {
-//             ApiInstanceRuntimeState {
-//                 run_state: initial_state,
-//                 reboot_in_progress: false,
-//                 server_uuid: uuid::Uuid::new_v4(),
-//                 gen: 1,
-//                 time_updated: now,
-//             }
-//         };
-//
-//         SimInstance::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
-//     }
-//
-//     /*
-//      * Test non-reboot-related transitions.
-//      */
-//     #[tokio::test]
-//     async fn test_sim_instance() {
-//         let logctx = test_setup_log("test_sim_instance").await;
-//         let (mut instance, mut rx) =
-//             make_instance(&logctx, ApiInstanceState::Creating);
-//         let r1 = instance.current_run_state.clone();
-//
-//         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-//         assert_eq!(r1.run_state, ApiInstanceState::Creating);
-//         assert_eq!(r1.gen, 1);
-//
-//         /*
-//          * There's no asynchronous transition going on yet so a
-//          * transition_finish() shouldn't change anything.
-//          */
-//         assert!(instance.requested_run_state.is_none());
-//         instance.transition_finish();
-//         assert!(instance.requested_run_state.is_none());
-//         assert_eq!(&r1.time_updated, &instance.current_run_state.time_updated);
-//         assert_eq!(&r1.run_state, &instance.current_run_state.run_state);
-//         assert_eq!(r1.gen, instance.current_run_state.gen);
-//         assert!(rx.try_next().is_err());
-//
-//         /*
-//          * We should be able to transition immediately to any other stopped
-//          * state.  We can't do this for "Creating" because transition() treats
-//          * that as a transition to "Running".
-//          */
-//         let stopped_states = vec![
-//             ApiInstanceState::Stopped,
-//             ApiInstanceState::Repairing,
-//             ApiInstanceState::Failed,
-//             ApiInstanceState::Destroyed,
-//         ];
-//         let mut rprev = r1;
-//         for state in stopped_states {
-//             assert!(rprev.run_state.is_stopped());
-//             let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: state.clone(),
-//                 reboot_wanted: false,
-//             });
-//             assert!(dropped.is_none());
-//             assert!(instance.requested_run_state.is_none());
-//             let rnext = instance.current_run_state.clone();
-//             if state != rprev.run_state {
-//                 assert!(rnext.gen > rprev.gen);
-//             }
-//             assert!(rnext.time_updated >= rprev.time_updated);
-//             assert_eq!(rnext.run_state, state);
-//             assert!(rx.try_next().is_err());
-//             rprev = rnext;
-//         }
-//
-//         /*
-//          * Now, if we transition to "Running", we must go through the async
-//          * process.
-//          */
-//         assert!(rprev.run_state.is_stopped());
-//         assert!(rx.try_next().is_err());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//             run_state: ApiInstanceState::Running,
-//             reboot_wanted: false,
-//         });
-//         assert!(dropped.is_none());
-//         assert!(instance.requested_run_state.is_some());
-//         assert!(rx.try_next().is_ok());
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         assert!(!rnext.run_state.is_stopped());
-//         rprev = rnext;
-//
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert!(instance.requested_run_state.is_none());
-//         assert!(rx.try_next().is_err());
-//         assert_eq!(rprev.run_state, ApiInstanceState::Starting);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-//         rprev = rnext;
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         /*
-//          * If we transition again to "Running", the process should complete
-//          * immediately.
-//          */
-//         assert!(!rprev.run_state.is_stopped());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//             run_state: ApiInstanceState::Running,
-//             reboot_wanted: false,
-//         });
-//         assert!(dropped.is_none());
-//         assert!(instance.requested_run_state.is_none());
-//         assert!(rx.try_next().is_err());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.gen, rprev.gen);
-//         assert_eq!(rnext.time_updated, rprev.time_updated);
-//         assert_eq!(rnext.run_state, rprev.run_state);
-//         rprev = rnext;
-//
-//         /*
-//          * If we go back to any stopped state, we go through the async process
-//          * again.
-//          */
-//         assert!(!rprev.run_state.is_stopped());
-//         assert!(rx.try_next().is_err());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//             run_state: ApiInstanceState::Destroyed,
-//             reboot_wanted: false,
-//         });
-//         assert!(dropped.is_none());
-//         assert!(instance.requested_run_state.is_some());
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         assert!(!rnext.run_state.is_stopped());
-//         rprev = rnext;
-//
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert!(instance.requested_run_state.is_none());
-//         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
-//         rprev = rnext;
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         /*
-//          * Now let's test the behavior of dropping a transition.  We'll start
-//          * transitioning back to "Running".  Then, while we're still in
-//          * "Starting", will transition back to "Destroyed".  We should
-//          * immediately go to "Stopping", and completing the transition should
-//          * take us to "Destroyed".
-//          */
-//         assert!(rprev.run_state.is_stopped());
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//             run_state: ApiInstanceState::Running,
-//             reboot_wanted: false,
-//         });
-//         assert!(dropped.is_none());
-//         assert!(instance.requested_run_state.is_some());
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         assert!(!rnext.run_state.is_stopped());
-//         rprev = rnext;
-//
-//         /*
-//          * Interrupt the async transition with a new one.
-//          */
-//         let dropped = instance.transition(&ApiInstanceRuntimeStateRequested {
-//             run_state: ApiInstanceState::Destroyed,
-//             reboot_wanted: false,
-//         });
-//         assert_eq!(dropped.unwrap().run_state, ApiInstanceState::Running);
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         rprev = rnext;
-//
-//         /*
-//          * Finish the async transition.
-//          */
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated >= rprev.time_updated);
-//         assert!(instance.requested_run_state.is_none());
-//         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
-//         rprev = rnext;
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         logctx.cleanup_successful();
-//     }
-//
-//     /*
-//      * Test reboot-related transitions.
-//      */
-//     #[tokio::test]
-//     async fn test_sim_instance_reboot() {
-//         let logctx = test_setup_log("test_sim_instance_reboot").await;
-//
-//         /*
-//          * Get an initial instance up to "Running".
-//          */
-//         let (mut instance, _rx) =
-//             make_instance(&logctx, ApiInstanceState::Creating);
-//         let r1 = instance.current_run_state.clone();
-//
-//         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-//         assert_eq!(r1.run_state, ApiInstanceState::Creating);
-//         assert_eq!(r1.gen, 1);
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: false,
-//             })
-//             .is_none());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (r1, instance.current_run_state.clone());
-//         assert!(rnext.gen > rprev.gen);
-//
-//         /*
-//          * Now, take it through a reboot sequence.
-//          */
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_none());
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated > rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         assert!(rnext.reboot_in_progress);
-//         assert!(instance.requested_run_state.is_some());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated > rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         assert!(!rnext.reboot_in_progress);
-//         assert!(instance.requested_run_state.is_some());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert!(rnext.gen > rprev.gen);
-//         assert!(rnext.time_updated > rprev.time_updated);
-//         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-//         assert!(instance.requested_run_state.is_none());
-//
-//         /*
-//          * Begin a reboot.  Then, while it's still "Stopping", begin another
-//          * reboot.  This should go through exactly one reboot sequence, as the
-//          * second reboot is totally superfluous.
-//          */
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_none());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_some());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-//         assert!(instance.requested_run_state.is_none());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         /*
-//          * Begin a reboot.  Then, while it's "Starting" (on the way back up),
-//          * begin another reboot.  This should go through a second reboot
-//          * sequence.
-//          */
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_none());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_some());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-//         assert!(instance.requested_run_state.is_none());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         /*
-//          * At this point, we've exercised what happens when a reboot is issued
-//          * from "Running", from "Starting" with a reboot in progress, from
-//          * "Stopping" with a reboot in progress.  All that's left is "Starting"
-//          * with no reboot in progress.  First, stop the instance.  Then start
-//          * it.  Then, while it's starting, begin a reboot sequence.
-//          */
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Stopped,
-//                 reboot_wanted: false,
-//             })
-//             .is_none());
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: false,
-//             })
-//             .is_none());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         assert!(instance
-//             .transition(&ApiInstanceRuntimeStateRequested {
-//                 run_state: ApiInstanceState::Running,
-//                 reboot_wanted: true,
-//             })
-//             .is_some());
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-//         instance.transition_finish();
-//         let rnext = instance.current_run_state.clone();
-//         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-//         assert!(instance.requested_run_state.is_none());
-//         instance.transition_finish();
-//         let (rprev, rnext) = (rnext, instance.current_run_state.clone());
-//         assert_eq!(rprev.gen, rnext.gen);
-//
-//         /*
-//          * Issuing a reboot from any other state is not defined, including from
-//          * "Stopping" while not in the process of a reboot and from any
-//          * "stopped" state.  instance_ensure() will prevent this, while
-//          * transition() will allow it.  We don't test the behavior of
-//          * transition() because it's subject to change.
-//          */
-//
-//         logctx.cleanup_successful();
-//     }
-// }
+#[cfg(test)]
+mod test {
+    use super::SimInstance;
+    use super::SimObject;
+    use crate::api_model::ApiInstanceRuntimeState;
+    use crate::api_model::ApiInstanceRuntimeStateRequested;
+    use crate::api_model::ApiInstanceState;
+    use crate::test_util::test_setup_log;
+    use chrono::Utc;
+    use dropshot::test_util::LogContext;
+    use futures::channel::mpsc::Receiver;
+
+    fn make_instance(
+        logctx: &LogContext,
+        initial_state: ApiInstanceState,
+    ) -> (SimObject<SimInstance>, Receiver<()>) {
+        let now = Utc::now();
+        let initial_runtime = {
+            ApiInstanceRuntimeState {
+                run_state: initial_state,
+                reboot_in_progress: false,
+                server_uuid: uuid::Uuid::new_v4(),
+                gen: 1,
+                time_updated: now,
+            }
+        };
+
+        SimObject::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
+    }
+
+    /*
+     * Test non-reboot-related transitions.
+     */
+    #[tokio::test]
+    async fn test_sim_instance() {
+        let logctx = test_setup_log("test_sim_instance").await;
+        let (mut instance, mut rx) =
+            make_instance(&logctx, ApiInstanceState::Creating);
+        let r1 = instance.current_state.clone();
+
+        info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
+        assert_eq!(r1.run_state, ApiInstanceState::Creating);
+        assert_eq!(r1.gen, 1);
+
+        /*
+         * There's no asynchronous transition going on yet so a
+         * transition_finish() shouldn't change anything.
+         */
+        assert!(instance.requested_state.is_none());
+        instance.transition_finish();
+        assert!(instance.requested_state.is_none());
+        assert_eq!(&r1.time_updated, &instance.current_state.time_updated);
+        assert_eq!(&r1.run_state, &instance.current_state.run_state);
+        assert_eq!(r1.gen, instance.current_state.gen);
+        assert!(rx.try_next().is_err());
+
+        /*
+         * We should be able to transition immediately to any other stopped
+         * state.  We can't do this for "Creating" because transition() treats
+         * that as a transition to "Running".
+         */
+        let stopped_states = vec![
+            ApiInstanceState::Stopped,
+            ApiInstanceState::Repairing,
+            ApiInstanceState::Failed,
+            ApiInstanceState::Destroyed,
+        ];
+        let mut rprev = r1;
+        for state in stopped_states {
+            assert!(rprev.run_state.is_stopped());
+            let dropped = instance
+                .transition(ApiInstanceRuntimeStateRequested {
+                    run_state: state.clone(),
+                    reboot_wanted: false,
+                })
+                .unwrap();
+            assert!(dropped.is_none());
+            assert!(instance.requested_state.is_none());
+            let rnext = instance.current_state.clone();
+            if state != rprev.run_state {
+                assert!(rnext.gen > rprev.gen);
+            }
+            assert!(rnext.time_updated >= rprev.time_updated);
+            assert_eq!(rnext.run_state, state);
+            assert!(rx.try_next().is_err());
+            rprev = rnext;
+        }
+
+        /*
+         * Now, if we transition to "Running", we must go through the async
+         * process.
+         */
+        assert!(rprev.run_state.is_stopped());
+        assert!(rx.try_next().is_err());
+        let dropped = instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            })
+            .unwrap();
+        assert!(dropped.is_none());
+        assert!(instance.requested_state.is_some());
+        assert!(rx.try_next().is_ok());
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_state.is_none());
+        assert!(rx.try_next().is_err());
+        assert_eq!(rprev.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * If we transition again to "Running", the process should complete
+         * immediately.
+         */
+        assert!(!rprev.run_state.is_stopped());
+        let dropped = instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            })
+            .unwrap();
+        assert!(dropped.is_none());
+        assert!(instance.requested_state.is_none());
+        assert!(rx.try_next().is_err());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.gen, rprev.gen);
+        assert_eq!(rnext.time_updated, rprev.time_updated);
+        assert_eq!(rnext.run_state, rprev.run_state);
+        rprev = rnext;
+
+        /*
+         * If we go back to any stopped state, we go through the async process
+         * again.
+         */
+        assert!(!rprev.run_state.is_stopped());
+        assert!(rx.try_next().is_err());
+        let dropped = instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Destroyed,
+                reboot_wanted: false,
+            })
+            .unwrap();
+        assert!(dropped.is_none());
+        assert!(instance.requested_state.is_some());
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_state.is_none());
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * Now let's test the behavior of dropping a transition.  We'll start
+         * transitioning back to "Running".  Then, while we're still in
+         * "Starting", will transition back to "Destroyed".  We should
+         * immediately go to "Stopping", and completing the transition should
+         * take us to "Destroyed".
+         */
+        assert!(rprev.run_state.is_stopped());
+        let dropped = instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            })
+            .unwrap();
+        assert!(dropped.is_none());
+        assert!(instance.requested_state.is_some());
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(!rnext.run_state.is_stopped());
+        rprev = rnext;
+
+        /*
+         * Interrupt the async transition with a new one.
+         */
+        let dropped = instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Destroyed,
+                reboot_wanted: false,
+            })
+            .unwrap();
+        assert_eq!(dropped.unwrap().run_state, ApiInstanceState::Running);
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        rprev = rnext;
+
+        /*
+         * Finish the async transition.
+         */
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert!(instance.requested_state.is_none());
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        rprev = rnext;
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rprev.gen, rnext.gen);
+
+        logctx.cleanup_successful();
+    }
+
+    /*
+     * Test reboot-related transitions.
+     */
+    #[tokio::test]
+    async fn test_sim_instance_reboot() {
+        let logctx = test_setup_log("test_sim_instance_reboot").await;
+
+        /*
+         * Get an initial instance up to "Running".
+         */
+        let (mut instance, _rx) =
+            make_instance(&logctx, ApiInstanceState::Creating);
+        let r1 = instance.current_state.clone();
+
+        info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
+        assert_eq!(r1.run_state, ApiInstanceState::Creating);
+        assert_eq!(r1.gen, 1);
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            })
+            .unwrap()
+            .is_none());
+        instance.transition_finish();
+        let (rprev, rnext) = (r1, instance.current_state.clone());
+        assert!(rnext.gen > rprev.gen);
+
+        /*
+         * Now, take it through a reboot sequence.
+         */
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_none());
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated > rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert!(rnext.reboot_in_progress);
+        assert!(instance.requested_state.is_some());
+        instance.transition_finish();
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated > rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(!rnext.reboot_in_progress);
+        assert!(instance.requested_state.is_some());
+        instance.transition_finish();
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated > rprev.time_updated);
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert!(instance.requested_state.is_none());
+
+        /*
+         * Begin a reboot.  Then, while it's still "Stopping", begin another
+         * reboot.  This should go through exactly one reboot sequence, as the
+         * second reboot is totally superfluous.
+         */
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_none());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_some());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert!(instance.requested_state.is_none());
+        instance.transition_finish();
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * Begin a reboot.  Then, while it's "Starting" (on the way back up),
+         * begin another reboot.  This should go through a second reboot
+         * sequence.
+         */
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_none());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_some());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert!(instance.requested_state.is_none());
+        instance.transition_finish();
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * At this point, we've exercised what happens when a reboot is issued
+         * from "Running", from "Starting" with a reboot in progress, from
+         * "Stopping" with a reboot in progress.  All that's left is "Starting"
+         * with no reboot in progress.  First, stop the instance.  Then start
+         * it.  Then, while it's starting, begin a reboot sequence.
+         */
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Stopped,
+                reboot_wanted: false,
+            })
+            .unwrap()
+            .is_none());
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: false,
+            })
+            .unwrap()
+            .is_none());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert!(instance
+            .transition(ApiInstanceRuntimeStateRequested {
+                run_state: ApiInstanceState::Running,
+                reboot_wanted: true,
+            })
+            .unwrap()
+            .is_some());
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        instance.transition_finish();
+        let rnext = instance.current_state.clone();
+        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert!(instance.requested_state.is_none());
+        instance.transition_finish();
+        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        assert_eq!(rprev.gen, rnext.gen);
+
+        /*
+         * Issuing a reboot from any other state is not defined, including from
+         * "Stopping" while not in the process of a reboot and from any
+         * "stopped" state.  instance_ensure() will prevent this, while
+         * transition() will allow it.  We don't test the behavior of
+         * transition() because it's subject to change.
+         */
+
+        logctx.cleanup_successful();
+    }
+}
