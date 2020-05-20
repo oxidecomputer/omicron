@@ -108,6 +108,52 @@ impl ClientTestContext {
         self.make_request_with_body(method, path, body, expected_status).await
     }
 
+    pub async fn make_request_no_body(
+        &self,
+        method: Method,
+        path: &str,
+        expected_status: StatusCode,
+    ) -> Result<Response<Body>, HttpErrorResponseBody> {
+        self.make_request_with_body(
+            method,
+            path,
+            Body::empty(),
+            expected_status,
+        )
+        .await
+    }
+
+    /**
+     * Fetches a resource for which we expect to get an error response.
+     */
+    pub async fn make_request_error(
+        &self,
+        method: Method,
+        path: &str,
+        expected_status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        self.make_request_with_body(method, path, "".into(), expected_status)
+            .await
+            .unwrap_err()
+    }
+
+    /**
+     * Fetches a resource for which we expect to get an error response.
+     * TODO-cleanup the make_request_error* interfaces are slightly different
+     * than the non-error ones (and probably a bit more ergonomic).
+     */
+    pub async fn make_request_error_body<T: Serialize + Debug>(
+        &self,
+        method: Method,
+        path: &str,
+        body: T,
+        expected_status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        self.make_request(method, path, Some(body), expected_status)
+            .await
+            .unwrap_err()
+    }
+
     pub async fn make_request_with_body(
         &self,
         method: Method,
@@ -428,6 +474,67 @@ pub async fn read_string(response: &mut Response<Body>) -> String {
         to_bytes(response.body_mut()).await.expect("error reading body");
     String::from_utf8(body_bytes.as_ref().into())
         .expect("response contained non-UTF-8 bytes")
+}
+
+/**
+ * Fetches a single resource from the API.
+ */
+pub async fn object_get<T: DeserializeOwned>(
+    testctx: &TestContext,
+    object_url: &str,
+) -> T {
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &object_url,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    read_json::<T>(&mut response).await
+}
+
+/**
+ * Fetches a list of resources from the API.
+ */
+pub async fn objects_list<T: DeserializeOwned>(
+    testctx: &TestContext,
+    list_url: &str,
+) -> Vec<T> {
+    let mut response = testctx
+        .client_testctx
+        .make_request_with_body(
+            Method::GET,
+            &list_url,
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    read_ndjson::<T>(&mut response).await
+}
+
+/**
+ * Issues an HTTP POST to the specified collection URL to create an object.
+ */
+pub async fn objects_post<S: Serialize + Debug, T: DeserializeOwned>(
+    testctx: &TestContext,
+    collection_url: &str,
+    input: S,
+) -> T {
+    let mut response = testctx
+        .client_testctx
+        .make_request(
+            Method::POST,
+            &collection_url,
+            Some(input),
+            StatusCode::CREATED,
+        )
+        .await
+        .unwrap();
+    read_json::<T>(&mut response).await
 }
 
 static TEST_SUITE_LOGGER_ID: AtomicU32 = AtomicU32::new(0);

@@ -7,6 +7,9 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::api_model::ApiDiskAttachment;
+use crate::api_model::ApiDiskCreateParams;
+use crate::api_model::ApiDiskView;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
@@ -43,6 +46,11 @@ pub fn api_register_entrypoints(
     api.register(api_projects_get_project)?;
     api.register(api_projects_delete_project)?;
     api.register(api_projects_put_project)?;
+
+    api.register(api_project_disks_get)?;
+    api.register(api_project_disks_post)?;
+    api.register(api_project_disks_get_disk)?;
+
     api.register(api_project_instances_get)?;
     api.register(api_project_instances_post)?;
     api.register(api_project_instances_get_instance)?;
@@ -50,6 +58,12 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_instance_reboot)?;
     api.register(api_project_instances_instance_start)?;
     api.register(api_project_instances_instance_stop)?;
+
+    api.register(api_instance_disks_get)?;
+    api.register(api_instance_disks_get_disk)?;
+    api.register(api_instance_disks_put_disk)?;
+    api.register(api_instance_disks_delete_disk)?;
+
     api.register(api_hardware_racks_get)?;
     api.register(api_hardware_racks_get_rack)?;
     api.register(api_hardware_servers_get)?;
@@ -197,6 +211,84 @@ async fn api_projects_put_project(
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
     Ok(HttpResponseOkObject(newproject.to_view()))
+}
+
+/*
+ * Disks
+ */
+
+/**
+ * List disks in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn api_project_disks_get(
+    rqctx: Arc<RequestContext>,
+    query_params: Query<PaginationParams<ApiName>>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOkObjectList<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_stream =
+        controller.project_list_disks(project_name, &query).await?;
+    let view_list = to_view_list(disk_stream).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
+
+/**
+ * Create a disk in a project.
+ *
+ * TODO-correctness See note about instance create.  This should be async.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn api_project_disks_post(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<ProjectPathParam>,
+    new_disk: Json<ApiDiskCreateParams>,
+) -> Result<HttpResponseCreated<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_disk_params = &new_disk.into_inner();
+    let disk =
+        controller.project_create_disk(&project_name, &new_disk_params).await?;
+    Ok(HttpResponseCreated(disk.to_view()))
+}
+
+#[derive(Deserialize, ExtractedParameter)]
+struct DiskPathParam {
+    project_name: ApiName,
+    disk_name: ApiName,
+}
+
+/**
+ * Fetch a single disk in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks/{disk_name}",
+ }]
+async fn api_project_disks_get_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseOkObject<ApiDiskView>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_name = &path.disk_name;
+    let disk =
+        controller.project_lookup_disk(&project_name, &disk_name).await?;
+    Ok(HttpResponseOkObject(disk.to_view()))
 }
 
 /*
@@ -367,6 +459,107 @@ async fn api_project_instances_instance_stop(
     let instance =
         controller.instance_stop(&project_name, &instance_name).await?;
     Ok(HttpResponseAccepted(instance.to_view()))
+}
+
+/**
+ * List disks attached to this instance.
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/disks"
+}]
+async fn api_instance_disks_get(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
+    query_params: Query<PaginationParams<ApiName>>,
+) -> Result<HttpResponseOkObjectList<ApiDiskAttachment>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let query = query_params.into_inner();
+    let disk_list = controller
+        .instance_list_disks(&project_name, &instance_name, &query)
+        .await?;
+    let view_list = to_view_list(disk_list).await;
+    Ok(HttpResponseOkObjectList(view_list))
+}
+
+#[derive(Deserialize, ExtractedParameter)]
+struct InstanceDiskPathParam {
+    project_name: ApiName,
+    instance_name: ApiName,
+    disk_name: ApiName,
+}
+
+/**
+ * Fetch a description of the attachment of this disk to this instance.
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn api_instance_disks_get_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseOkObject<ApiDiskAttachment>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    let attachment = controller
+        .instance_get_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseOkObject(attachment.to_view()))
+}
+
+/**
+ * Attach a disk to this instance.
+ */
+#[endpoint {
+    method = PUT,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn api_instance_disks_put_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseCreated<ApiDiskAttachment>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    let attachment = controller
+        .instance_attach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseCreated(attachment.to_view()))
+}
+
+/**
+ * Detach a disk from this instance.
+ */
+#[endpoint {
+    method = DELETE,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn api_instance_disks_delete_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    controller
+        .instance_detach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseDeleted())
 }
 
 /*

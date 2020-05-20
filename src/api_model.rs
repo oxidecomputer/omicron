@@ -64,6 +64,8 @@ pub trait ApiObject {
 #[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
     Project,
+    Disk,
+    DiskAttachment,
     Instance,
     Rack,
     Server,
@@ -73,6 +75,8 @@ impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
+            ApiResourceType::Disk => "disk",
+            ApiResourceType::DiskAttachment => "disk attachment",
             ApiResourceType::Instance => "instance",
             ApiResourceType::Rack => "rack",
             ApiResourceType::Server => "server",
@@ -447,14 +451,14 @@ pub struct ApiInstanceRuntimeState {
 }
 
 /**
- * RuntimeStateParams is used to request an Instance state change from a server
- * controller.  Right now, it's only the run state that can be changed, though
- * we could imagine supporting changing properties like "ncpus" here.  If we
- * allow other properties here, we may want to make them Options so that callers
- * don't have to know the prior state already.
+ * ApiInstanceRuntimeStateRequested is used to request an Instance state change
+ * from a server controller.  Right now, it's only the run state that can be
+ * changed, though we could imagine supporting changing properties like "ncpus"
+ * here.  If we allow other properties here, we may want to make them Options so
+ * that callers don't have to know the prior state already.
  */
 #[derive(Clone, Debug)]
-pub struct ApiInstanceRuntimeStateParams {
+pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
 }
@@ -530,6 +534,167 @@ pub struct ApiInstanceCreateParams {
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
+}
+
+/*
+ * DISKS
+ */
+/**
+ * Represents a disk (network block device) in the API.
+ */
+#[derive(Clone, Debug)]
+pub struct ApiDisk {
+    /** common identifying metadata */
+    pub identity: ApiIdentityMetadata,
+    /** id for the project containing this disk */
+    pub project_id: Uuid,
+    /**
+     * id for the snapshot from which this disk was created (None means a blank
+     * disk)
+     */
+    pub create_snapshot_id: Option<Uuid>,
+    /** size of the disk */
+    pub size: ApiByteCount,
+    /** runtime state of the disk */
+    pub runtime: ApiDiskRuntimeState,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskView {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
+    pub project_id: Uuid,
+    pub snapshot_id: Option<Uuid>,
+    pub size: ApiByteCount,
+    pub state: ApiDiskState,
+    pub device_path: String,
+}
+
+impl ApiObject for ApiDisk {
+    type View = ApiDiskView;
+    fn to_view(&self) -> ApiDiskView {
+        /*
+         * TODO-correctness: can the name always be used as a path like this
+         * or might it need to be sanitized?
+         */
+        let device_path =
+            format!("/mnt/{}", String::from(self.identity.name.clone()),);
+        ApiDiskView {
+            identity: self.identity.clone(),
+            project_id: self.project_id.clone(),
+            snapshot_id: self.create_snapshot_id.clone(),
+            size: self.size.clone(),
+            state: self.runtime.disk_state.clone(),
+            device_path,
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiDiskState {
+    Creating,
+    Detached,
+    Attaching(Uuid), /* attached instance id */
+    Attached(Uuid),  /* attached instance id */
+    Detaching(Uuid), /* attached instance id */
+    Destroyed,
+    Faulted,
+}
+
+impl Display for ApiDiskState {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        let label = match self {
+            ApiDiskState::Creating => "creating",
+            ApiDiskState::Detached => "detached",
+            ApiDiskState::Attaching(_) => "attaching",
+            ApiDiskState::Attached(_) => "attached",
+            ApiDiskState::Detaching(_) => "detaching",
+            ApiDiskState::Destroyed => "destroyed",
+            ApiDiskState::Faulted => "faulted",
+        };
+
+        write!(f, "{}", label)
+    }
+}
+
+impl ApiDiskState {
+    pub fn is_attached(&self) -> bool {
+        self.attached_instance_id().is_some()
+    }
+
+    pub fn attached_instance_id(&self) -> Option<&Uuid> {
+        match self {
+            ApiDiskState::Attaching(id) => Some(id),
+            ApiDiskState::Attached(id) => Some(id),
+            ApiDiskState::Detaching(id) => Some(id),
+
+            ApiDiskState::Creating => None,
+            ApiDiskState::Detached => None,
+            ApiDiskState::Destroyed => None,
+            ApiDiskState::Faulted => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ApiDiskRuntimeState {
+    /** runtime state of the disk */
+    pub disk_state: ApiDiskState,
+    /** generation number for this state */
+    pub gen: u64,
+    /** timestamp for this information */
+    pub time_updated: DateTime<Utc>,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskCreateParams {
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadataCreateParams,
+    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
+    pub size: ApiByteCount,
+}
+
+#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiDiskAttachment {
+    pub instance_name: ApiName,
+    pub instance_id: Uuid,
+    pub disk_name: ApiName,
+    pub disk_id: Uuid,
+    pub disk_state: ApiDiskState,
+}
+
+impl ApiObject for ApiDiskAttachment {
+    type View = Self;
+    fn to_view(&self) -> Self::View {
+        self.clone()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiDiskStateRequested {
+    Detached,
+    Attached(Uuid),
+    Destroyed,
+    Faulted,
+}
+
+impl ApiDiskStateRequested {
+    pub fn is_attached(&self) -> bool {
+        match self {
+            ApiDiskStateRequested::Detached => false,
+            ApiDiskStateRequested::Destroyed => false,
+            ApiDiskStateRequested::Faulted => false,
+
+            ApiDiskStateRequested::Attached(_) => true,
+        }
+    }
 }
 
 /*

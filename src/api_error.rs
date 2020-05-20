@@ -24,6 +24,7 @@ pub enum ApiError {
 pub enum LookupType {
     ByName(String),
     ById(Uuid),
+    Other(String),
 }
 
 impl ApiError {
@@ -43,6 +44,16 @@ impl ApiError {
             lookup_type: LookupType::ById(id.clone()),
         }
     }
+
+    pub fn not_found_other(
+        type_name: ApiResourceType,
+        message: String,
+    ) -> ApiError {
+        ApiError::ObjectNotFound {
+            type_name: type_name,
+            lookup_type: LookupType::Other(message),
+        }
+    }
 }
 
 impl From<ApiError> for HttpError {
@@ -52,18 +63,27 @@ impl From<ApiError> for HttpError {
                 type_name: t,
                 lookup_type: lt,
             } => {
-                let (lookup_field, lookup_value) = match lt {
-                    LookupType::ByName(name) => ("name", name),
-                    LookupType::ById(id) => ("id", id.to_string()),
-                };
-                let message = format!(
-                    "not found: {} with {} \"{}\"",
-                    t, lookup_field, lookup_value
-                );
-                HttpError::for_client_error(
-                    http::StatusCode::NOT_FOUND,
-                    message,
-                )
+                if let LookupType::Other(message) = lt {
+                    HttpError::for_client_error(
+                        http::StatusCode::NOT_FOUND,
+                        message,
+                    )
+                } else {
+                    /* TODO-cleanup is there a better way to express this? */
+                    let (lookup_field, lookup_value) = match lt {
+                        LookupType::ByName(name) => ("name", name),
+                        LookupType::ById(id) => ("id", id.to_string()),
+                        LookupType::Other(_) => panic!("unhandled other"),
+                    };
+                    let message = format!(
+                        "not found: {} with {} \"{}\"",
+                        t, lookup_field, lookup_value
+                    );
+                    HttpError::for_client_error(
+                        http::StatusCode::NOT_FOUND,
+                        message,
+                    )
+                }
             }
 
             ApiError::ObjectAlreadyExists {

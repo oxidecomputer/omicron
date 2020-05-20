@@ -5,17 +5,28 @@
 
 API endpoints:
 
-* `/disks` and related endpoints
+* implement disk delete (only allowed while detached?)
 * RFD 24: regions, AZs, etc
 * (lots more)
 
 Work queue (see also: existing GitHub issues):
 
+* make instance delete require that instance be stopped?
+* implement server controller as separate program (would be a better demo of
+  what's really going on internally)
+* do a demo????
 * settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents
-* implement server controller as separate program (would be a better demo of
-  what's really going on internally)
+* implement behavior of server restarting (e.g., server controller starting up)
+** This probably isn't necessary for the big demo, but it would help validate
+   some of the architectural choices.  Current thinking is that this will notify
+   OXCP of the restart, and OXCP will find instances that are supposed to be on
+   that server and run instance_ensure().  It will also want to do that for the
+   disks associated with those instances.  IMPORTANT: this process should also
+   _remove_ any resources that are currently on that system, so the notification
+   to OXCP about a restart may need to include the list of resources that the SC
+   knows about and their current states.
 * implement audit log
 * implement alerts
 * implement external user authentication

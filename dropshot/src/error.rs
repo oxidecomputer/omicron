@@ -145,6 +145,17 @@ impl HttpError {
         HttpError::for_client_error(code, message)
     }
 
+    pub fn for_not_found(internal_message: String) -> Self {
+        let status_code = http::StatusCode::NOT_FOUND;
+        let external_message =
+            status_code.canonical_reason().unwrap().to_string();
+        HttpError {
+            status_code,
+            internal_message,
+            external_message,
+        }
+    }
+
     pub fn for_client_error(code: http::StatusCode, message: String) -> Self {
         assert!(code.is_client_error());
         HttpError {
