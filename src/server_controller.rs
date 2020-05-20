@@ -134,12 +134,16 @@ impl ServerController {
 #[async_trait]
 pub trait ServerControllerTestInterfaces {
     async fn instance_finish_transition(&self, id: Uuid);
+    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
 impl ServerControllerTestInterfaces for ServerController {
     async fn instance_finish_transition(&self, id: Uuid) {
         self.instances.sim_poke(id).await;
+    }
+    async fn disk_finish_transition(&self, id: Uuid) {
+        self.disks.sim_poke(id).await;
     }
 }
 

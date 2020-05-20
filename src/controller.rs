@@ -98,6 +98,14 @@ pub trait OxideControllerTestInterfaces {
         &self,
         id: &Uuid,
     ) -> Result<Arc<ServerController>, ApiError>;
+
+    /**
+     * Returns the ServerController for a Disk from its id.
+     */
+    async fn disk_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerController>, ApiError>;
 }
 
 /**
@@ -614,6 +622,53 @@ impl OxideController {
     }
 
     /**
+     * Fetch information about whether this disk is attached to this instance.
+     */
+    pub async fn instance_get_disk(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+        disk_name: &ApiName,
+    ) -> LookupResult<ApiDiskAttachment> {
+        let instance = self
+            .datastore
+            .project_lookup_instance(project_name, instance_name)
+            .await?;
+        let disk =
+            self.datastore.project_lookup_disk(project_name, disk_name).await?;
+        if !disk.runtime.disk_state.is_attached() {
+            return Err(ApiError::not_found_other(
+                ApiResourceType::DiskAttachment,
+                format!(
+                    "disk \"{}\" is not attached to instance \"{}\"",
+                    String::from(disk_name.clone()),
+                    String::from(instance_name.clone())
+                ),
+            ));
+        }
+
+        let instance_id = disk.runtime.disk_state.attached_instance_id();
+        if instance_id != &instance.identity.id {
+            return Err(ApiError::not_found_other(
+                ApiResourceType::DiskAttachment,
+                format!(
+                    "disk \"{}\" is not attached to instance \"{}\"",
+                    String::from(disk_name.clone()),
+                    String::from(instance_name.clone())
+                ),
+            ));
+        }
+
+        Ok(Arc::new(ApiDiskAttachment {
+            instance_name: instance.identity.name.clone(),
+            instance_id: instance.identity.id.clone(),
+            disk_name: disk.identity.name.clone(),
+            disk_id: disk.identity.id.clone(),
+            disk_state: disk.runtime.disk_state.clone(),
+        }))
+    }
+
+    /**
      * Attach a disk to an instance.
      */
     pub async fn instance_attach_disk(
@@ -900,6 +955,17 @@ impl OxideControllerTestInterfaces for OxideController {
         id: &Uuid,
     ) -> Result<Arc<ServerController>, ApiError> {
         let instance = self.datastore.instance_lookup_by_id(id).await?;
+        self.instance_sc(&instance).await
+    }
+
+    async fn disk_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerController>, ApiError> {
+        let disk = self.datastore.disk_lookup_by_id(id).await?;
+        let instance_id = disk.runtime.disk_state.attached_instance_id();
+        let instance =
+            self.datastore.instance_lookup_by_id(instance_id).await?;
         self.instance_sc(&instance).await
     }
 }

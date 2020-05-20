@@ -8,21 +8,22 @@ Current status:
 * implement disks
 ** done: create basic model types
 ** done: create API endpoints to create (sync?), get, list, delete (sync?)
-** in progress: create API endpoints to attach, detach
-*** add integration test suite for disks
-*** self-review, including XXXs, new TODOs, unimplemented!(), todo!()
+** done: create API endpoints to attach, detach
+** done: refactor test_instances.rs
+** self-review, including XXXs, new TODOs, unimplemented!(), todo!()
 **** Cases to handle include:
 ***** attach while creating
 ***** destroy while creating, attaching, detaching, or detached
 
 API endpoints:
 
-* `/disks` and related endpoints
+* implement disk delete (only allowed while detached?)
 * RFD 24: regions, AZs, etc
 * (lots more)
 
 Work queue (see also: existing GitHub issues):
 
+* make instance delete require that instance be stopped?
 * implement server controller as separate program (would be a better demo of
   what's really going on internally)
 * do a demo????

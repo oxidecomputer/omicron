@@ -65,6 +65,7 @@ pub trait ApiObject {
 pub enum ApiResourceType {
     Project,
     Disk,
+    DiskAttachment,
     Instance,
     Rack,
     Server,
@@ -75,6 +76,7 @@ impl Display for ApiResourceType {
         write!(f, "{}", match self {
             ApiResourceType::Project => "project",
             ApiResourceType::Disk => "disk",
+            ApiResourceType::DiskAttachment => "disk attachment",
             ApiResourceType::Instance => "instance",
             ApiResourceType::Rack => "rack",
             ApiResourceType::Server => "server",

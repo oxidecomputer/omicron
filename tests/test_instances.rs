@@ -5,7 +5,6 @@
 use http::method::Method;
 use http::StatusCode;
 use oxide_api_prototype::api_model::ApiByteCount;
-use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
 use oxide_api_prototype::api_model::ApiInstanceCpuCount;
 use oxide_api_prototype::api_model::ApiInstanceCreateParams;
@@ -13,6 +12,7 @@ use oxide_api_prototype::api_model::ApiInstanceState;
 use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
+use oxide_api_prototype::api_model::ApiProjectView;
 use oxide_api_prototype::ApiContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
@@ -21,11 +21,14 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list;
+use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
-use dropshot::test_util::read_ndjson;
 use dropshot::test_util::TestContext;
 
 pub mod common;
+use common::identity_eq;
 use common::test_setup;
 
 #[macro_use]
@@ -40,48 +43,25 @@ async fn test_instances() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
-    testctx
-        .client_testctx
-        .make_request(
-            Method::POST,
-            "/projects",
-            Some(ApiProjectCreateParams {
-                identity: ApiIdentityMetadataCreateParams {
-                    name: ApiName::try_from(project_name).unwrap(),
-                    description: "a pier".to_string(),
-                },
-            }),
-            StatusCode::CREATED,
-        )
-        .await
-        .unwrap();
+    let _: ApiProjectView =
+        objects_post(&testctx, "/projects", ApiProjectCreateParams {
+            identity: ApiIdentityMetadataCreateParams {
+                name: ApiName::try_from(project_name).unwrap(),
+                description: "a pier".to_string(),
+            },
+        })
+        .await;
 
     /* List instances.  There aren't any yet. */
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::GET,
-            &url_instances,
-            "".into(),
-            StatusCode::OK,
-        )
-        .await
-        .unwrap();
-    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    let instances = instances_list(&testctx, &url_instances).await;
     assert_eq!(instances.len(), 0);
 
     /* Make sure we get a 404 if we fetch one. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
     let error = testctx
         .client_testctx
-        .make_request_with_body(
-            Method::GET,
-            &instance_url,
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .unwrap_err();
+        .make_request_error(Method::GET, &instance_url, StatusCode::NOT_FOUND)
+        .await;
     assert_eq!(
         error.message,
         "not found: instance with name \"just-rainsticks\""
@@ -90,14 +70,12 @@ async fn test_instances() {
     /* Ditto if we try to delete one. */
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::DELETE,
             &instance_url,
-            "".into(),
             StatusCode::NOT_FOUND,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(
         error.message,
         "not found: instance with name \"just-rainsticks\""
@@ -114,17 +92,8 @@ async fn test_instances() {
         boot_disk_size: ApiByteCount::from_gibibytes(1),
         hostname: String::from("rainsticks"),
     };
-    let mut response = testctx
-        .client_testctx
-        .make_request(
-            Method::POST,
-            &url_instances,
-            Some(new_instance.clone()),
-            StatusCode::CREATED,
-        )
-        .await
-        .unwrap();
-    let instance: ApiInstanceView = read_json(&mut response).await;
+    let instance: ApiInstanceView =
+        objects_post(&testctx, &url_instances, new_instance.clone()).await;
     assert_eq!(instance.identity.name, "just-rainsticks");
     assert_eq!(instance.identity.description, "sells rainsticks");
     let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
@@ -137,28 +106,17 @@ async fn test_instances() {
     /* Attempt to create a second instance with a conflicting name. */
     let error = testctx
         .client_testctx
-        .make_request(
+        .make_request_error_body(
             Method::POST,
             &url_instances,
-            Some(new_instance),
+            new_instance,
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
 
     /* List instances again and expect to find the one we just created. */
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::GET,
-            &url_instances,
-            "".into(),
-            StatusCode::OK,
-        )
-        .await
-        .unwrap();
-    let instances: Vec<ApiInstanceView> = read_ndjson(&mut response).await;
+    let instances = instances_list(&testctx, &url_instances).await;
     assert_eq!(instances.len(), 1);
     instances_eq(&instances[0], &instance);
 
@@ -257,14 +215,12 @@ async fn test_instances() {
      */
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
-            "".into(),
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(error.message, "cannot reboot instance in state \"stopped\"");
 
     /*
@@ -323,14 +279,12 @@ async fn test_instances() {
 
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
-            "".into(),
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
@@ -344,10 +298,9 @@ async fn test_instances() {
     /* Delete the instance. */
     testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_no_body(
             Method::DELETE,
             &instance_url,
-            "".into(),
             StatusCode::NO_CONTENT,
         )
         .await
@@ -367,14 +320,12 @@ async fn test_instances() {
      */
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
-            "".into(),
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(
         error.message,
         "instance state cannot be changed from state \"destroyed\""
@@ -385,14 +336,12 @@ async fn test_instances() {
      */
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::POST,
             &format!("{}/start", instance_url),
-            "".into(),
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(
         error.message,
         "instance state cannot be changed from state \"destroyed\""
@@ -400,14 +349,12 @@ async fn test_instances() {
 
     let error = testctx
         .client_testctx
-        .make_request_with_body(
+        .make_request_error(
             Method::POST,
             &format!("{}/stop", instance_url),
-            "".into(),
             StatusCode::BAD_REQUEST,
         )
-        .await
-        .unwrap_err();
+        .await;
     assert_eq!(
         error.message,
         "instance state cannot be changed from state \"destroyed\""
@@ -461,24 +408,18 @@ async fn test_instances() {
     testctx.teardown().await;
 }
 
-/**
- * Convenience function to fetch the current state of an instance.
- */
 async fn instance_get(
     testctx: &TestContext,
     instance_url: &str,
 ) -> ApiInstanceView {
-    let mut response = testctx
-        .client_testctx
-        .make_request_with_body(
-            Method::GET,
-            &instance_url,
-            "".into(),
-            StatusCode::OK,
-        )
-        .await
-        .unwrap();
-    read_json::<ApiInstanceView>(&mut response).await
+    object_get::<ApiInstanceView>(testctx, instance_url).await
+}
+
+async fn instances_list(
+    testctx: &TestContext,
+    instances_url: &str,
+) -> Vec<ApiInstanceView> {
+    objects_list::<ApiInstanceView>(testctx, instances_url).await
 }
 
 /**
@@ -531,14 +472,6 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
         instance1.runtime.time_run_state_updated,
         instance2.runtime.time_run_state_updated
     );
-}
-
-fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata) {
-    assert_eq!(ident1.id, ident2.id);
-    assert_eq!(ident1.name, ident2.name);
-    assert_eq!(ident1.description, ident2.description);
-    assert_eq!(ident1.time_created, ident2.time_created);
-    assert_eq!(ident1.time_modified, ident2.time_modified);
 }
 
 /**

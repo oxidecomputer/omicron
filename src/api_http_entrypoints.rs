@@ -60,6 +60,7 @@ pub fn api_register_entrypoints(
     api.register(api_project_instances_instance_stop)?;
 
     api.register(api_instance_disks_get)?;
+    api.register(api_instance_disks_get_disk)?;
     api.register(api_instance_disks_put_disk)?;
     api.register(api_instance_disks_delete_disk)?;
 
@@ -490,6 +491,29 @@ struct InstanceDiskPathParam {
     project_name: ApiName,
     instance_name: ApiName,
     disk_name: ApiName,
+}
+
+/**
+ * Fetch a description of the attachment of this disk to this instance.
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn api_instance_disks_get_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseOkObject<ApiDiskAttachment>, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    let attachment = controller
+        .instance_get_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseOkObject(attachment.to_view()))
 }
 
 /**
