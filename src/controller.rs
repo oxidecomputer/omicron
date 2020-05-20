@@ -232,6 +232,18 @@ impl OxideController {
     ) -> CreateResult<ApiDisk> {
         let now = Utc::now();
         let project = self.project_lookup(project_name).await?;
+
+        /*
+         * Until we implement snapshots, do not allow disks to be created with a
+         * snapshot id.
+         */
+        if params.snapshot_id.is_some() {
+            return Err(ApiError::InvalidValue {
+                label: String::from("snapshot_id"),
+                message: String::from("snapshots are not yet supported"),
+            });
+        }
+
         let disk = Arc::new(ApiDisk {
             identity: ApiIdentityMetadata {
                 id: Uuid::new_v4(),
@@ -636,36 +648,28 @@ impl OxideController {
             .await?;
         let disk =
             self.datastore.project_lookup_disk(project_name, disk_name).await?;
-        if !disk.runtime.disk_state.is_attached() {
-            return Err(ApiError::not_found_other(
-                ApiResourceType::DiskAttachment,
-                format!(
-                    "disk \"{}\" is not attached to instance \"{}\"",
-                    String::from(disk_name.clone()),
-                    String::from(instance_name.clone())
-                ),
-            ));
+        if let Some(instance_id) =
+            disk.runtime.disk_state.attached_instance_id()
+        {
+            if instance_id == &instance.identity.id {
+                return Ok(Arc::new(ApiDiskAttachment {
+                    instance_name: instance.identity.name.clone(),
+                    instance_id: instance.identity.id.clone(),
+                    disk_name: disk.identity.name.clone(),
+                    disk_id: disk.identity.id.clone(),
+                    disk_state: disk.runtime.disk_state.clone(),
+                }));
+            }
         }
 
-        let instance_id = disk.runtime.disk_state.attached_instance_id();
-        if instance_id != &instance.identity.id {
-            return Err(ApiError::not_found_other(
-                ApiResourceType::DiskAttachment,
-                format!(
-                    "disk \"{}\" is not attached to instance \"{}\"",
-                    String::from(disk_name.clone()),
-                    String::from(instance_name.clone())
-                ),
-            ));
-        }
-
-        Ok(Arc::new(ApiDiskAttachment {
-            instance_name: instance.identity.name.clone(),
-            instance_id: instance.identity.id.clone(),
-            disk_name: disk.identity.name.clone(),
-            disk_id: disk.identity.id.clone(),
-            disk_state: disk.runtime.disk_state.clone(),
-        }))
+        return Err(ApiError::not_found_other(
+            ApiResourceType::DiskAttachment,
+            format!(
+                "disk \"{}\" is not attached to instance \"{}\"",
+                String::from(disk_name.clone()),
+                String::from(instance_name.clone())
+            ),
+        ));
     }
 
     /**
@@ -692,7 +696,7 @@ impl OxideController {
             let instance_id = &instance.identity.id;
             assert_eq!(
                 instance_id,
-                disk.runtime.disk_state.attached_instance_id()
+                disk.runtime.disk_state.attached_instance_id().unwrap()
             );
             Ok(Arc::new(ApiDiskAttachment {
                 instance_name: instance.identity.name.clone(),
@@ -963,7 +967,8 @@ impl OxideControllerTestInterfaces for OxideController {
         id: &Uuid,
     ) -> Result<Arc<ServerController>, ApiError> {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
-        let instance_id = disk.runtime.disk_state.attached_instance_id();
+        let instance_id =
+            disk.runtime.disk_state.attached_instance_id().unwrap();
         let instance =
             self.datastore.instance_lookup_by_id(instance_id).await?;
         self.instance_sc(&instance).await

@@ -965,7 +965,7 @@ impl Simulatable for SimDisk {
             (from_state, to_state)
                 if from_state.is_attached() && !to_state.is_attached() =>
             {
-                let id = from_state.attached_instance_id();
+                let id = from_state.attached_instance_id().unwrap();
                 Some((ApiDiskState::Detaching(id.clone()), Some(to_state)))
             }
 
@@ -1552,7 +1552,7 @@ mod test {
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(rnext.disk_state, ApiDiskState::Attaching(id.clone()));
         assert!(rnext.disk_state.is_attached());
-        assert_eq!(id, *rnext.disk_state.attached_instance_id());
+        assert_eq!(id, *rnext.disk_state.attached_instance_id().unwrap());
         let rprev = rnext;
 
         disk.transition_finish();

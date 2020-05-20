@@ -591,11 +591,6 @@ impl ApiObject for ApiDisk {
     }
 }
 
-/*
- * TODO-cleanup is it possible to combine this enum with the
- * attached_instance_id field?  (The only problem is trying to
- * serialize/deserialize them.)
- */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
@@ -603,9 +598,9 @@ impl ApiObject for ApiDisk {
 pub enum ApiDiskState {
     Creating,
     Detached,
-    Attaching(Uuid),
-    Attached(Uuid),
-    Detaching(Uuid),
+    Attaching(Uuid), /* attached instance id */
+    Attached(Uuid),  /* attached instance id */
+    Detaching(Uuid), /* attached instance id */
     Destroyed,
     Faulted,
 }
@@ -628,28 +623,19 @@ impl Display for ApiDiskState {
 
 impl ApiDiskState {
     pub fn is_attached(&self) -> bool {
-        match self {
-            ApiDiskState::Creating => false,
-            ApiDiskState::Detached => false,
-            ApiDiskState::Destroyed => false,
-            ApiDiskState::Faulted => false,
-
-            ApiDiskState::Attaching(_) => true,
-            ApiDiskState::Attached(_) => true,
-            ApiDiskState::Detaching(_) => true,
-        }
+        self.attached_instance_id().is_some()
     }
 
-    pub fn attached_instance_id(&self) -> &Uuid {
+    pub fn attached_instance_id(&self) -> Option<&Uuid> {
         match self {
-            ApiDiskState::Attaching(id) => id,
-            ApiDiskState::Attached(id) => id,
-            ApiDiskState::Detaching(id) => id,
+            ApiDiskState::Attaching(id) => Some(id),
+            ApiDiskState::Attached(id) => Some(id),
+            ApiDiskState::Detaching(id) => Some(id),
 
-            ApiDiskState::Creating => panic!("not attached"),
-            ApiDiskState::Detached => panic!("not attached"),
-            ApiDiskState::Destroyed => panic!("not attached"),
-            ApiDiskState::Faulted => panic!("not attached"),
+            ApiDiskState::Creating => None,
+            ApiDiskState::Detached => None,
+            ApiDiskState::Destroyed => None,
+            ApiDiskState::Faulted => None,
         }
     }
 }

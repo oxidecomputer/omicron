@@ -23,7 +23,10 @@ Work queue (see also: existing GitHub issues):
    some of the architectural choices.  Current thinking is that this will notify
    OXCP of the restart, and OXCP will find instances that are supposed to be on
    that server and run instance_ensure().  It will also want to do that for the
-   disks associated with those instances.
+   disks associated with those instances.  IMPORTANT: this process should also
+   _remove_ any resources that are currently on that system, so the notification
+   to OXCP about a restart may need to include the list of resources that the SC
+   knows about and their current states.
 * implement audit log
 * implement alerts
 * implement external user authentication
