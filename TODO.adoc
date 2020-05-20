@@ -3,18 +3,6 @@
 
 = TODO
 
-Current status:
-
-* implement disks
-** done: create basic model types
-** done: create API endpoints to create (sync?), get, list, delete (sync?)
-** done: create API endpoints to attach, detach
-** done: refactor test_instances.rs
-** self-review, including XXXs, new TODOs, unimplemented!(), todo!()
-**** Cases to handle include:
-***** attach while creating
-***** destroy while creating, attaching, detaching, or detached
-
 API endpoints:
 
 * implement disk delete (only allowed while detached?)
