@@ -1,0 +1,258 @@
+#
+# oxapi_demo: wrapper around curl(1) to run basic requests against the Oxide API
+# prototype server.
+#
+
+OXAPI_URL='http://127.0.0.1:12220'
+ARG0="$(basename "${BASH_SOURCE[0]}")"
+HELP="$(cat <<EOF
+
+PROJECTS
+
+    projects_list
+    project_create_demo    PROJECT_NAME
+    project_delete         PROJECT_NAME
+    project_get            PROJECT_NAME
+    project_list_instances PROJECT_NAME
+    project_list_disks     PROJECT_NAME
+
+INSTANCES
+
+    instance_create_demo PROJECT_NAME INSTANCE_NAME
+    instance_get         PROJECT_NAME INSTANCE_NAME
+    instance_delete      PROJECT_NAME INSTANCE_NAME
+
+    instance_stop        PROJECT_NAME INSTANCE_NAME
+    instance_start       PROJECT_NAME INSTANCE_NAME
+    instance_reboot      PROJECT_NAME INSTANCE_NAME
+
+    instance_attach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_detach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_list_disks  PROJECT_NAME INSTANCE_NAME
+    instance_get_disk    PROJECT_NAME INSTANCE_NAME DISK_NAME
+
+DISKS
+
+    disk_create_demo PROJECT_NAME DISK_NAME
+    disk_get PROJECT_NAME DISK_NAME
+
+HARDWARE
+
+    racks_list
+    rack_get     RACK_ID
+
+    servers_list
+    server_get   SERVER_ID
+EOF
+)"
+
+#
+# Command-line processing utility functions
+#
+
+function main
+{
+	local cmd
+
+	type curl > /dev/null 2>&1 || fail "curl not found in PATH."
+	type json > /dev/null 2>&1 || fail "json not found in PATH."
+
+	[[ $# -gt 0 ]] || usage "command not specified"
+
+	func="cmd_$1"
+	type "$func" > /dev/null 2>&1 || usage "no such command: $1"
+	shift
+	$func "$@"
+}
+
+# TODO add list of valid commands to output
+function usage
+{
+	echo "$ARG0: $@" >&2
+	echo "$HELP"
+	exit 2
+}
+
+function fail
+{
+	echo "$ARG0: $@" >&2
+	exit 1
+}
+
+#
+# Utility functions
+#
+
+function do_curl
+{
+	local path
+
+	path="$1"
+	shift
+	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
+}
+
+# TODO-cleanup We could do a lot better than this.
+function mkjson
+{
+	str="{"
+	first=true
+	for arg in "$@"; do
+		IFS='=' read key value <<< "$arg"
+
+		if [[ $first != true ]]; then
+			str="$str,"
+		fi
+		first=false
+
+		if ! [[ $value =~ ^[0-9]+$ ]]; then
+			value="\"$value\""
+		fi
+
+		str="$str \"$key\": $value"
+	done
+	str="$str }"
+	echo "$str" | json
+}
+
+#
+# API commands
+#
+
+function cmd_projects_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl /projects
+}
+
+function cmd_project_create_demo
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	mkjson name="$1" description="a project called $1" |
+		do_curl "/projects" -X POST -T -
+}
+
+function cmd_project_delete
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1" -X DELETE
+}
+
+function cmd_project_get
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1"
+}
+
+function cmd_project_list_instances
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1/instances"
+}
+
+function cmd_project_list_disks
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1/disks"
+}
+
+function cmd_instance_create_demo
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	mkjson name="$2" description="an instance called $2" ncpus=1 \
+	    memory=256 bootDiskSize=1 hostname="$1" |
+		do_curl "/projects/$1/instances" -X POST -T -
+}
+
+function cmd_instance_get
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2"
+}
+
+function cmd_instance_delete
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2" -X DELETE
+}
+
+function cmd_instance_stop
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2/stop" -X POST
+}
+
+function cmd_instance_start
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2/start" -X POST
+}
+
+function cmd_instance_reboot
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2/reboot" -X POST
+}
+
+function cmd_instance_attach_disk
+{
+	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/projects/$1/instances/$2/disks/$3" -X PUT -T /dev/null
+}
+
+function cmd_instance_detach_disk
+{
+	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/projects/$1/instances/$2/disks/$3" -X DELETE -T /dev/null
+}
+
+function cmd_instance_list_disks
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2/disks"
+}
+
+function cmd_instance_get_disk
+{
+	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/projects/$1/instances/$2/disks/$3"
+}
+
+function cmd_disk_create_demo
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
+	mkjson name="$2" description="a disk called $2" size=1024 |
+	    do_curl "/projects/$1/disks" -X POST -T -
+}
+
+function cmd_disk_get
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
+	do_curl "/projects/$1/disks/$2"
+}
+
+function cmd_racks_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl /hardware/racks
+}
+
+function cmd_rack_get
+{
+	[[ $# != 1 ]] && usage "expected RACK_ID"
+	do_curl "/hardware/racks/$1"
+}
+
+function cmd_servers_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl /hardware/servers
+}
+
+function cmd_server_get
+{
+	[[ $# != 1 ]] && usage "expected SERVER_ID"
+	do_curl "/hardware/servers/$1"
+}
+
+main "$@"
