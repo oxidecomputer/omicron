@@ -672,9 +672,9 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8776c7d6a58a03d30ba278adfd54d923eb0a24e26cbf39d2b97648306935d65"
+checksum = "3ee9a17eebdd923c4cf74145cd31b2b1d3aa019262c9e8669a843b1d629a9a3c"
 dependencies = [
  "indexmap",
  "serde",
@@ -854,9 +854,9 @@ checksum = "535622e6be132bccd223f4bb2b8ac8d53cda3c7a6394944d3b2b33fb974f9d76"
 
 [[package]]
 name = "schemars"
-version = "0.7.0"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10db1d3c2260e94570e1a492c762e62c11e1aac8869a2c3d869137995e6810d4"
+checksum = "be77ed66abed6954aabf6a3e31a84706bedbf93750d267e92ef4a6d90bbd6a61"
 dependencies = [
  "chrono 0.4.11",
  "schemars_derive",
@@ -867,9 +867,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.7.0"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "706d022205b93f710ea83037db4fc103358dd24e61a330d287d45d93fe1dc250"
+checksum = "11af7a475c9ee266cfaa9e303a47c830ebe072bf3101ab907a7b7b9d816fa01d"
 dependencies = [
  "proc-macro2",
  "quote",

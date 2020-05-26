@@ -522,7 +522,7 @@ async fn demo_handler_args_2query(
     http_echo(&query.into_inner())
 }
 
-#[derive(Debug, Serialize, Deserialize, ExtractedParameter, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DemoJsonBody {
     pub test1: String,
     pub test2: Option<u32>,

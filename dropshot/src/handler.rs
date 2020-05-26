@@ -15,6 +15,66 @@
  * specification ensures that--at least in many important ways--the
  * implementation cannot diverge from the spec.
  *
+ *
+ * ## Extractors
+ *
+ * The types `Query`, `Path`, and `Json` are called _Extractors_ because they
+ * cause information to be pulled out of the request and made available to the
+ * handler function.
+ *
+ * * `Query<Q>` extracts parameters from a query string, deserializing them into
+ *    an instance of type `Q`. `Q` must implement `serde::Deserialize` and
+ *    `dropshot::ExtractedParameter`.
+ * * `Path<P>` extracts parameters from HTTP path, deserializing them into
+ *    an instance of type `P`. `P` must implement `serde::Deserialize` and
+ *    `dropshot::ExtractedParameter`.
+ * * `Json<J>` extracts content from the request body by parsing the body as
+ *   JSON and deserializing it into an instance of type `J`. `J` must implement
+ *   `serde::Deserialize` and `dropshot::ExtractedParameter`.
+ *
+ * If the handler takes a `Query<Q>`, `Path<P>`, or a `Json<J>` and the
+ * corresponding extraction cannot be completed, the request fails with status
+ * code 400 and an error message reflecting a validation error.
+ *
+ * As with any serde-deserializable type, you can make fields optional by having
+ * the corresponding property of the type be an `Option`.  Here's an example of
+ * an endpoint that takes two arguments via query parameters: "limit", a
+ * required u32, and "marker", an optional string:
+ *
+ * ```
+ * use http::StatusCode;
+ * use dropshot::ExtractedParameter;
+ * use dropshot::HttpError;
+ * use dropshot::Json;
+ * use dropshot::Query;
+ * use dropshot::RequestContext;
+ * use hyper::Body;
+ * use hyper::Response;
+ * use std::sync::Arc;
+ *
+ * #[derive(serde::Deserialize, ExtractedParameter)]
+ * struct MyQueryArgs {
+ *     limit: u32,
+ *     marker: Option<String>
+ * }
+ *
+ * async fn handle_request(
+ *     _: Arc<RequestContext>,
+ *     query: Query<MyQueryArgs>)
+ *     -> Result<Response<Body>, HttpError>
+ * {
+ *     let query_args = query.into_inner();
+ *     let limit: u32 = query_args.limit;
+ *     let marker: Option<String> = query_args.marker;
+ *     Ok(Response::builder()
+ *         .status(StatusCode::OK)
+ *         .body(format!("limit = {}, marker = {:?}\n", limit, marker).into())?)
+ * }
+ * ```
+ *
+ *
+ * ## Endpoint function return types
+ *
  * Just like we want API input types to be represented in function arguments, we
  * want API response types to be represented in function return values so that
  * OpenAPI tooling can identify them at build time.  The more specific a type
@@ -40,6 +100,7 @@ use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::DropshotState;
 use crate::api_description::ApiEndpointParameter;
 use crate::api_description::ApiEndpointParameterLocation;
+use crate::api_description::ApiEndpointParameterName;
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -525,9 +586,7 @@ where
      * TODO-correctness: are query strings defined to be urlencoded in this way?
      */
     match serde_urlencoded::from_str(raw_query_string) {
-        Ok(q) => Ok(Query {
-            inner: q,
-        }),
+        Ok(q) => Ok(Query { inner: q }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse query string: {}", e),
@@ -597,9 +656,7 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Path<PathType>, HttpError> {
         let params: PathType = http_extract_path_params(&rqctx.path_variables)?;
-        Ok(Path {
-            inner: params,
-        })
+        Ok(Path { inner: params })
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
@@ -650,9 +707,7 @@ where
     let value: Result<JsonType, serde_json::Error> =
         serde_json::from_slice(&body_bytes);
     match value {
-        Ok(j) => Ok(Json {
-            inner: j,
-        }),
+        Ok(j) => Ok(Json { inner: j }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse body: {}", e),
@@ -683,8 +738,13 @@ where
         let settings = schemars::gen::SchemaSettings::openapi3();
         let mut generator = schemars::gen::SchemaGenerator::new(settings);
         let schema = JsonType::json_schema(&mut generator);
-        println!("here {}", serde_json::to_string_pretty(&schema).unwrap());
-        vec![]
+        vec![ApiEndpointParameter {
+            name: ApiEndpointParameterName::Body,
+            description: None,
+            required: true,
+            schema: Some(schema),
+            examples: vec![],
+        }]
     }
 }
 
@@ -706,9 +766,7 @@ pub struct HttpResponseWrap {
 
 impl HttpResponseWrap {
     fn new(result: HttpHandlerResult) -> HttpResponseWrap {
-        HttpResponseWrap {
-            wrapped: result,
-        }
+        HttpResponseWrap { wrapped: result }
     }
 }
 

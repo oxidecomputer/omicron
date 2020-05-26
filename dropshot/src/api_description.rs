@@ -60,7 +60,7 @@ pub struct ApiEndpointParameter {
     pub name: ApiEndpointParameterName,
     pub description: Option<String>,
     pub required: bool,
-    // TODO: schema
+    pub schema: Option<schemars::schema::Schema>,
     pub examples: Vec<String>,
 }
 
@@ -172,6 +172,8 @@ impl ApiDescription {
     /**
      * Emit the OpenAPI Spec document describing this API in its JSON form.
      */
+    // TODO: There's a bunch of error handling we need here such as checking
+    // for duplicate parameter names.
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
 
@@ -220,6 +222,7 @@ impl ApiDescription {
                         format: openapiv3::ParameterSchemaOrContent::Schema(
                             openapiv3::ReferenceOr::Item(openapiv3::Schema {
                                 schema_data: openapiv3::SchemaData::default(),
+                                // TODO we shouldn't be hard-coding string here
                                 schema_kind: openapiv3::SchemaKind::Type(
                                     openapiv3::Type::String(
                                         openapiv3::StringType::default(),
@@ -253,6 +256,36 @@ impl ApiDescription {
                 })
                 .collect::<Vec<_>>();
 
+            operation.request_body = endpoint
+                .parameters
+                .iter()
+                .filter_map(|param| {
+                    match &param.name {
+                        ApiEndpointParameterName::Body => (),
+                        _ => return None,
+                    }
+
+                    let schema = param.schema.as_ref().map(j2oas_schema);
+
+                    let mut content = indexmap::map::IndexMap::new();
+                    content.insert(
+                        "application/json".to_string(),
+                        openapiv3::MediaType {
+                            schema: schema,
+                            example: None,
+                            examples: indexmap::map::IndexMap::new(),
+                            encoding: indexmap::map::IndexMap::new(),
+                        },
+                    );
+
+                    Some(openapiv3::ReferenceOr::Item(openapiv3::RequestBody {
+                        description: None,
+                        content: content,
+                        required: true,
+                    }))
+                })
+                .nth(0);
+
             method_ref.replace(operation);
         }
 
@@ -267,6 +300,157 @@ impl ApiDescription {
     pub fn into_router(self) -> HttpRouter {
         self.router
     }
+}
+
+fn j2oas_schema(
+    schema: &schemars::schema::Schema,
+) -> openapiv3::ReferenceOr<openapiv3::Schema> {
+    match schema {
+        schemars::schema::Schema::Bool(_) => todo!(),
+        schemars::schema::Schema::Object(obj) => j2oas_schema_object(obj),
+    }
+}
+
+fn j2oas_schema_object(
+    obj: &schemars::schema::SchemaObject,
+) -> openapiv3::ReferenceOr<openapiv3::Schema> {
+    if let Some(reference) = &obj.reference {
+        return openapiv3::ReferenceOr::Reference {
+            reference: reference.clone(),
+        };
+    }
+
+    let ty = match &obj.instance_type {
+        Some(schemars::schema::SingleOrVec::Single(ty)) => Some(ty.as_ref()),
+        Some(schemars::schema::SingleOrVec::Vec(_)) => {
+            unimplemented!("unsupported by openapiv3")
+        }
+        None => None,
+    };
+
+    let kind = match (ty, &obj.subschemas) {
+        (Some(schemars::schema::InstanceType::Null), None) => todo!(),
+        (Some(schemars::schema::InstanceType::Boolean), None) => todo!(),
+        (Some(schemars::schema::InstanceType::Object), None) => {
+            j2oas_object(&obj.object)
+        }
+        (Some(schemars::schema::InstanceType::Array), None) => {
+            j2oas_array(&obj.array)
+        }
+        (Some(schemars::schema::InstanceType::Number), None) => {
+            j2oas_number(&obj.number)
+        }
+        (Some(schemars::schema::InstanceType::String), None) => {
+            j2oas_string(&obj.string)
+        }
+        (Some(schemars::schema::InstanceType::Integer), None) => todo!(),
+        (None, Some(subschema)) => j2oas_subschemas(subschema),
+        (None, None) => todo!("missed a valid case {:?}", obj),
+        _ => panic!("invalid"),
+    };
+
+    let mut data = openapiv3::SchemaData::default();
+
+    if let Some(metadata) = &obj.metadata {
+        data.title = metadata.title.clone();
+        data.description = metadata.description.clone();
+        // TODO skipping `default` since it's a little tricky to handle
+        data.deprecated = metadata.deprecated;
+        data.read_only = metadata.read_only;
+        data.write_only = metadata.write_only;
+    }
+
+    openapiv3::ReferenceOr::Item(openapiv3::Schema {
+        schema_data: data,
+        schema_kind: kind,
+    })
+}
+
+fn j2oas_subschemas(
+    subschemas: &Box<schemars::schema::SubschemaValidation>,
+) -> openapiv3::SchemaKind {
+    match (&subschemas.all_of, &subschemas.any_of, &subschemas.one_of) {
+        (Some(all_of), None, None) => openapiv3::SchemaKind::AllOf {
+            all_of: all_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, Some(any_of), None) => openapiv3::SchemaKind::AnyOf {
+            any_of: any_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, None, Some(one_of)) => openapiv3::SchemaKind::OneOf {
+            one_of: one_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, None, None) => todo!("missed a valid case"),
+        _ => panic!("invalid"),
+    }
+}
+
+fn j2oas_number(
+    _number: &Option<Box<schemars::schema::NumberValidation>>,
+) -> openapiv3::SchemaKind {
+    todo!()
+}
+
+fn j2oas_string(
+    string: &Option<Box<schemars::schema::StringValidation>>,
+) -> openapiv3::SchemaKind {
+    let mut string_type = openapiv3::StringType::default();
+    if let Some(string) = string.as_ref() {
+        string_type.max_length = string.max_length.map(|n| n as usize);
+        string_type.min_length = string.min_length.map(|n| n as usize);
+        string_type.pattern = string.pattern.clone();
+    }
+    openapiv3::SchemaKind::Type(openapiv3::Type::String(string_type))
+}
+
+fn j2oas_array(
+    _array: &Option<Box<schemars::schema::ArrayValidation>>,
+) -> openapiv3::SchemaKind {
+    todo!()
+}
+
+fn j2oas_object(
+    object: &Option<Box<schemars::schema::ObjectValidation>>,
+) -> openapiv3::SchemaKind {
+    let obj = object.as_ref().unwrap();
+    openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+        openapiv3::ObjectType {
+            properties: obj
+                .properties
+                .iter()
+                .map(|(prop, schema)| {
+                    (prop.clone(), match j2oas_schema(schema) {
+                        openapiv3::ReferenceOr::Item(schema) => {
+                            openapiv3::ReferenceOr::boxed_item(schema)
+                        }
+                        openapiv3::ReferenceOr::Reference {
+                            reference,
+                        } => openapiv3::ReferenceOr::Reference {
+                            reference,
+                        },
+                    })
+                })
+                .collect::<_>(),
+            required: obj.required.iter().map(|s| s.clone()).collect::<_>(),
+            additional_properties: obj.additional_properties.as_ref().map(
+                |schema| {
+                    openapiv3::AdditionalProperties::Schema(Box::new(
+                        j2oas_schema(schema),
+                    ))
+                },
+            ),
+            min_properties: obj.min_properties.map(|n| n as usize),
+            max_properties: obj.max_properties.map(|n| n as usize),
+        },
+    ))
 }
 
 #[cfg(test)]
