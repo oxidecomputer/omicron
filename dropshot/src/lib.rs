@@ -233,7 +233,7 @@
  * use hyper::Response;
  * use std::sync::Arc;
  *
- * #[derive(serde::Deserialize)]
+ * #[derive(serde::Deserialize, dropshot::ExtractedParameter)]
  * struct MyQueryArgs {
  *     limit: u32,
  *     marker: Option<String>

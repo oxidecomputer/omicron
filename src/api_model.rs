@@ -7,9 +7,11 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::convert::TryFrom;
@@ -23,8 +25,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
-
-use dropshot::ExtractedParameter;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
@@ -93,7 +93,15 @@ pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
  * that's valid as a name.
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(try_from = "String")]
 pub struct ApiName(String);
@@ -196,7 +204,7 @@ impl ApiName {
  * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
  * need to write a validator for that.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiByteCount(u64);
 impl ApiByteCount {
     pub fn from_bytes(bytes: u64) -> ApiByteCount {
@@ -251,14 +259,18 @@ pub enum ApiResourceType {
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", match self {
-            ApiResourceType::Project => "project",
-            ApiResourceType::Disk => "disk",
-            ApiResourceType::DiskAttachment => "disk attachment",
-            ApiResourceType::Instance => "instance",
-            ApiResourceType::Rack => "rack",
-            ApiResourceType::Sled => "sled",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                ApiResourceType::Project => "project",
+                ApiResourceType::Disk => "disk",
+                ApiResourceType::DiskAttachment => "disk attachment",
+                ApiResourceType::Instance => "instance",
+                ApiResourceType::Rack => "rack",
+                ApiResourceType::Sled => "sled",
+            }
+        )
     }
 }
 
@@ -323,7 +335,7 @@ pub async fn to_view_list<T: ApiObject>(
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -341,7 +353,7 @@ pub struct ApiIdentityMetadata {
  * Create-time identity-related parameters
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
@@ -351,7 +363,7 @@ pub struct ApiIdentityMetadataCreateParams {
  * Updateable identity-related parameters
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
     pub description: Option<String>,
@@ -385,9 +397,7 @@ pub struct ApiProject {
 impl ApiObject for ApiProject {
     type View = ApiProjectView;
     fn to_view(&self) -> ApiProjectView {
-        ApiProjectView {
-            identity: self.identity.clone(),
-        }
+        ApiProjectView { identity: self.identity.clone() }
     }
 }
 
@@ -395,7 +405,7 @@ impl ApiObject for ApiProject {
  * Client view of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -409,7 +419,7 @@ pub struct ApiProjectView {
  * Create-time parameters for an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -419,7 +429,7 @@ pub struct ApiProjectCreateParams {
  * Updateable properties of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
@@ -436,7 +446,15 @@ pub struct ApiProjectUpdateParams {
  * but also includes states related to the Instance's lifecycle
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiInstanceState {
@@ -489,7 +507,7 @@ impl ApiInstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceCpuCount(pub usize);
 
 /**
@@ -538,7 +556,7 @@ impl ApiObject for ApiInstance {
  *
  * This state is owned by the sled agent running that Instance.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the Instance */
     pub run_state: ApiInstanceState,
@@ -558,7 +576,7 @@ pub struct ApiInstanceRuntimeState {
  * Right now, it's only the run state that can be changed, though we might want
  * to support changing properties like "ncpus" here.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
@@ -619,7 +637,7 @@ pub struct ApiInstanceView {
  * created, modified, removed, etc.
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -702,7 +720,15 @@ impl ApiObject for ApiDisk {
  * State of a Disk (primarily: attached or not)
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskState {
@@ -769,7 +795,7 @@ impl ApiDiskState {
  * Runtime state of the Disk, which includes its attach state and some minimal
  * metadata
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskRuntimeState {
     /** runtime state of the Disk */
     pub disk_state: ApiDiskState,
@@ -783,7 +809,7 @@ pub struct ApiDiskRuntimeState {
  * Create-time parameters for an [`ApiDisk`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskCreateParams {
     /** common identifying metadata */
     #[serde(flatten)]
@@ -798,7 +824,7 @@ pub struct ApiDiskCreateParams {
  * Describes a Disk's attachment to an Instance
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskAttachment {
     pub instance_name: ApiName,
     pub instance_id: Uuid,
@@ -817,7 +843,7 @@ impl ApiObject for ApiDiskAttachment {
 /**
  * Used to request a Disk state change
  */
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskStateRequested {
     Detached,
@@ -855,9 +881,7 @@ pub struct ApiRack {
 impl ApiObject for ApiRack {
     type View = ApiRackView;
     fn to_view(&self) -> ApiRackView {
-        ApiRackView {
-            id: self.id.clone(),
-        }
+        ApiRackView { id: self.id.clone() }
     }
 }
 
@@ -909,7 +933,7 @@ pub struct ApiSledView {
 /**
  * Sent by a sled agent on startup to OXC request further instruction
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ApiSledAgentStartupInfo {
     /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
@@ -918,7 +942,7 @@ pub struct ApiSledAgentStartupInfo {
 /**
  * Sent from OXC to a sled agent to establish the runtime state of an Instance
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /**
      * Last runtime state of the Instance known to OXC (used if the agent has
@@ -932,7 +956,7 @@ pub struct InstanceEnsureBody {
 /**
  * Sent from OXC to a sled agent to establish the runtime state of a Disk
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskEnsureBody {
     /**
      * Last runtime state of the Disk known to OXC (used if the agent has never

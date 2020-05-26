@@ -15,6 +15,7 @@ hostname = "0.3.0"
 hyper = "0.13"
 indexmap = "1"
 openapiv3 = "0.3.0"
+schemars = "0.7.0"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 serde_urlencoded = "0.6"

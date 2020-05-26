@@ -51,14 +51,13 @@ impl<'a> ApiEndpoint {
 }
 
 /**
- * ApiEndpointParameter the discrete path and query parameters for a given API
- * endpoint. These are typically derived from the members of stucts used as
- * parameters to handler functions.
+ * ApiEndpointParameter represents the discrete path and query parameters for a
+ * given API endpoint. These are typically derived from the members of stucts
+ * used as parameters to handler functions.
  */
 #[derive(Debug)]
 pub struct ApiEndpointParameter {
-    pub name: String,
-    pub inn: ApiEndpointParameterLocation,
+    pub name: ApiEndpointParameterName,
     pub description: Option<String>,
     pub required: bool,
     // TODO: schema
@@ -69,6 +68,26 @@ pub struct ApiEndpointParameter {
 pub enum ApiEndpointParameterLocation {
     Path,
     Query,
+}
+
+#[derive(Debug, Clone)]
+pub enum ApiEndpointParameterName {
+    Path(String),
+    Query(String),
+    Body,
+}
+
+impl From<(ApiEndpointParameterLocation, String)> for ApiEndpointParameterName {
+    fn from((location, name): (ApiEndpointParameterLocation, String)) -> Self {
+        match location {
+            ApiEndpointParameterLocation::Path => {
+                ApiEndpointParameterName::Path(name)
+            }
+            ApiEndpointParameterLocation::Query => {
+                ApiEndpointParameterName::Query(name)
+            }
+        }
+    }
 }
 
 /**
@@ -109,8 +128,8 @@ impl ApiDescription {
         let vars = e
             .parameters
             .iter()
-            .filter_map(|p| match p.inn {
-                ApiEndpointParameterLocation::Path => Some(p.name.clone()),
+            .filter_map(|p| match &p.name {
+                ApiEndpointParameterName::Path(name) => Some(name.clone()),
                 _ => None,
             })
             .collect::<HashSet<_>>();
@@ -183,9 +202,18 @@ impl ApiDescription {
             operation.parameters = endpoint
                 .parameters
                 .iter()
-                .map(|param| {
+                .filter_map(|param| {
+                    let (name, location) = match &param.name {
+                        ApiEndpointParameterName::Body => return None,
+                        ApiEndpointParameterName::Path(name) => {
+                            (name, ApiEndpointParameterLocation::Path)
+                        }
+                        ApiEndpointParameterName::Query(name) => {
+                            (name, ApiEndpointParameterLocation::Query)
+                        }
+                    };
                     let parameter_data = openapiv3::ParameterData {
-                        name: param.name.clone(),
+                        name: name.clone(),
                         description: param.description.clone(),
                         required: true,
                         deprecated: None,
@@ -202,24 +230,24 @@ impl ApiDescription {
                         example: None,
                         examples: indexmap::map::IndexMap::new(),
                     };
-                    match param.inn {
+                    match location {
                         ApiEndpointParameterLocation::Query => {
-                            openapiv3::ReferenceOr::Item(
+                            Some(openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Query {
                                     parameter_data: parameter_data,
                                     allow_reserved: true,
                                     style: openapiv3::QueryStyle::Form,
                                     allow_empty_value: None,
                                 },
-                            )
+                            ))
                         }
                         ApiEndpointParameterLocation::Path => {
-                            openapiv3::ReferenceOr::Item(
+                            Some(openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Path {
                                     parameter_data: parameter_data,
                                     style: openapiv3::PathStyle::Simple,
                                 },
-                            )
+                            ))
                         }
                     }
                 })

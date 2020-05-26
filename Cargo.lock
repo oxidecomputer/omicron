@@ -190,6 +190,7 @@ dependencies = [
  "hyper",
  "indexmap",
  "openapiv3",
+ "schemars",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -692,6 +693,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -856,9 +858,11 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10db1d3c2260e94570e1a492c762e62c11e1aac8869a2c3d869137995e6810d4"
 dependencies = [
+ "chrono 0.4.11",
  "schemars_derive",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
