@@ -18,6 +18,7 @@ pub enum ApiError {
     InvalidRequest { message: String },
     InvalidValue { label: String, message: String },
     ResourceNotAvailable { message: String },
+    DependencyError { message: String },
 }
 
 #[derive(Debug, PartialEq)]

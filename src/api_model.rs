@@ -436,7 +436,7 @@ impl ApiObject for ApiInstance {
  * The runtime state of an Instance is owned by the server controller running
  * that Instance.
  */
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the instance */
     pub run_state: ApiInstanceState,

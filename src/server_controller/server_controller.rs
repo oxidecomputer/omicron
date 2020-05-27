@@ -1,6 +1,9 @@
 /*!
- * Facilities for interacting with Server Controllers.  See RFD 48.
+ * Simulated server controller implementation.
  */
+
+use super::SimMode;
+use super::controller_client::ControllerClient;
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiDisk;
@@ -11,7 +14,6 @@ use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
-use crate::controller::ControllerScApi;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::channel::mpsc::Receiver;
@@ -45,32 +47,13 @@ pub struct ServerController {
     disks: Arc<SimCollection<SimDisk>>,
 }
 
-/**
- * How this `ServerController` simulates object states and transitions.
- */
-#[derive(Copy, Clone)]
-pub enum SimMode {
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * automatically using a timer to complete the transition a few seconds in
-     * the future.
-     */
-    Auto,
-
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * explicitly, relying on calls through `ServerControllerTestInterfaces`.
-     */
-    Explicit,
-}
-
 impl ServerController {
     /** Constructs a simulated ServerController with the given uuid. */
     pub fn new_simulated_with_id(
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: ControllerScApi,
+        ctlsc: ControllerClient,
     ) -> ServerController {
         info!(&log, "created server controller");
 
@@ -100,16 +83,14 @@ impl ServerController {
      */
     pub async fn instance_ensure(
         self: &Arc<Self>,
-        api_instance: Arc<ApiInstance>,
+        instance_id: Uuid,
+        initial_runtime: ApiInstanceRuntimeState,
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        self.instances
-            .sim_ensure(
-                &api_instance.identity.id,
-                api_instance.runtime.clone(),
-                target.clone(),
-            )
-            .await
+        Ok(self
+            .instances
+            .sim_ensure(&instance_id, initial_runtime, target)
+            .await?)
     }
 
     /**
@@ -119,12 +100,11 @@ impl ServerController {
      */
     pub async fn disk_ensure(
         self: &Arc<Self>,
-        api_disk: Arc<ApiDisk>,
+        disk_id: Uuid,
+        initial_state: ApiDiskRuntimeState,
         target: ApiDiskStateRequested,
     ) -> Result<ApiDiskRuntimeState, ApiError> {
-        self.disks
-            .sim_ensure(&api_disk.identity.id, api_disk.runtime.clone(), target)
-            .await
+        Ok(self.disks.sim_ensure(&disk_id, initial_state, target).await?)
     }
 }
 
@@ -276,7 +256,7 @@ trait Simulatable: fmt::Debug {
      * object identified by `id`.
      */
     async fn notify(
-        csc: &Arc<ControllerScApi>,
+        csc: &Arc<ControllerClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;
@@ -474,7 +454,7 @@ impl<S: Simulatable> SimObject<S> {
  */
 struct SimCollection<S: Simulatable> {
     /** handle to the controller API, used to notify about async transitions */
-    ctlsc: Arc<ControllerScApi>,
+    ctlsc: Arc<ControllerClient>,
     /** logger for this collection */
     log: Logger,
     /** simulation mode: automatic (timer-based) or explicit (using an API) */
@@ -486,7 +466,7 @@ struct SimCollection<S: Simulatable> {
 impl<S: Simulatable + 'static> SimCollection<S> {
     /** Returns a new collection of simulated objects. */
     fn new(
-        ctlsc: Arc<ControllerScApi>,
+        ctlsc: Arc<ControllerClient>,
         log: Logger,
         sim_mode: SimMode,
     ) -> SimCollection<S> {
@@ -582,7 +562,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      * For example, if an Instance is "stopped", and the requested state is
      * "running", the returned state will be "starting".  Subsequent
      * asynchronous state transitions are reported via the notify() functions on
-     * the `ControllerScApi` object.
+     * the `ControllerClient` object.
      */
     async fn sim_ensure(
         self: &Arc<Self>,
@@ -834,7 +814,7 @@ impl Simulatable for SimInstance {
     }
 
     async fn notify(
-        csc: &Arc<ControllerScApi>,
+        csc: &Arc<ControllerClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {
@@ -1053,7 +1033,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        csc: &Arc<ControllerScApi>,
+        csc: &Arc<ControllerClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

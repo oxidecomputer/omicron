@@ -9,7 +9,7 @@ program to better validate the architecture and better demo what's going on.
 * done: separate out "oxide-controller" vs "server-controller" binaries
 * in progress: separate out server controller library-like interfaces
 ** the existing ServerController is the guts of it
-** this needs to be wrapped with a Dropshot API + server
+** next step: this needs to be wrapped with a Dropshot API + server
 ** this needs to be exposed as interfaces for both running it directly (from the
    test suite) and from the binary
 * oxide-controller changes:
@@ -30,6 +30,9 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
+* polish up for more help
+** improved documentation, especially design docs, structural docs
+** improve naming (e.g., around "api", "oxide-api-prototype")
 * implement server controller as separate program (would be a better demo of
   what's really going on internally)
 * do a demo????
