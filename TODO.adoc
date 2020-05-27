@@ -3,6 +3,26 @@
 
 = TODO
 
+Current status: working on separating out server controller as a separate
+program to better validate the architecture and better demo what's going on.
+
+* done: separate out "oxide-controller" vs "server-controller" binaries
+* in progress: separate out server controller library-like interfaces
+** the existing ServerController is the guts of it
+** this needs to be wrapped with a Dropshot API + server
+** this needs to be exposed as interfaces for both running it directly (from the
+   test suite) and from the binary
+* oxide-controller changes:
+** needs an API surface for requests from the server controller.  Ideally, this
+   would be a separate Dropshot API but we could skip this for now.
+** needs an actual API endpoint for "SC just started up".
+*** implementation needs to add the SC if it doesn't exist already
+*** needs to find instances that should be there and ensure() them
+*** needs to find disks that should be there and ensure() them
+* test suite needs to be updated to start separate server controllers
+* the server-controller binary may need to grow a config+logging mechanism
+* rip out built-in SCs?
+
 API endpoints:
 
 * RFD 24: regions, AZs, etc
