@@ -6,9 +6,9 @@ mod controller_client;
 mod server_controller;
 
 use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateRequested;
+use crate::server_controller_client::DiskEnsureBody;
+use crate::server_controller_client::InstanceEnsureBody;
 use controller_client::ControllerClient;
 use server_controller::ServerController;
 
@@ -35,7 +35,7 @@ pub use server_controller::ServerControllerTestInterfaces;
 /**
  * How this `ServerController` simulates object states and transitions.
  */
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SimMode {
     /**
      * Indicates that asynchronous state transitions should be simulated
@@ -58,7 +58,7 @@ pub enum SimMode {
 pub struct ConfigServerController {
     pub id: Uuid,
     pub sim_mode: SimMode,
-    pub controller_addr: SocketAddr,
+    pub controller_address: SocketAddr,
     pub dropshot: ConfigDropshot,
     pub log: ConfigLogging,
 }
@@ -78,11 +78,11 @@ pub async fn run_server_controller_api_server(
 
     let client_log = log.new(o!("component" => "controller_client"));
     let controller_client =
-        ControllerClient::new(config.server_addr.clone(), log);
+        ControllerClient::new(config.controller_address.clone(), client_log);
 
     let sc = Arc::new(ServerController::new_simulated_with_id(
         &config.id,
-        &config.sim_mode.clone(),
+        config.sim_mode,
         sc_log,
         controller_client,
     ));
@@ -119,15 +119,9 @@ fn dropshot_api() -> ApiDescription {
     api
 }
 
-#[derive(ExtractedParameter)]
+#[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     instance_id: Uuid,
-}
-
-#[derive(Serialize, Deserialize)]
-struct InstanceEnsureBody {
-    initial_runtime: ApiInstanceRuntimeState,
-    target: ApiInstanceRuntimeStateRequested,
 }
 
 #[endpoint {
@@ -136,28 +130,22 @@ struct InstanceEnsureBody {
 }]
 async fn scapi_instance_ensure(
     rqctx: Arc<RequestContext>,
-    path_params: Path<DiskPathParam>,
+    path_params: Path<InstancePathParam>,
     body: Json<InstanceEnsureBody>,
 ) -> Result<HttpResponseOkObject<ApiInstanceRuntimeState>, HttpError> {
     let sc = rqctx_to_sc(&rqctx);
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
-    sc.instance_ensure(
+    Ok(HttpResponseOkObject(sc.instance_ensure(
         instance_id,
         body_args.initial_runtime.clone(),
         body_args.target.clone(),
-    );
+    ).await?))
 }
 
-#[derive(ExtractedParameter)]
+#[derive(Deserialize, ExtractedParameter)]
 struct DiskPathParam {
     disk_id: Uuid,
-}
-
-#[derive(Serialize, Deserialize)]
-struct DiskEnsureBody {
-    initial_runtime: ApiDiskRuntimeState,
-    target: ApiDiskStateRequested,
 }
 
 #[endpoint {
@@ -172,9 +160,9 @@ async fn scapi_disk_ensure(
     let sc = rqctx_to_sc(&rqctx);
     let disk_id = path_params.into_inner().disk_id;
     let body_args = body.into_inner();
-    sc.disk_ensure(
+    Ok(HttpResponseOkObject(sc.disk_ensure(
         disk_id,
         body_args.initial_runtime.clone(),
         body_args.target.clone(),
-    );
+    ).await?))
 }

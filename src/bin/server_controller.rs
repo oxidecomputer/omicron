@@ -10,6 +10,8 @@ use std::io::{stderr, Write};
 use std::process::exit;
 
 use clap::{App, Arg};
+use oxide_api_prototype::ConfigServerController;
+use oxide_api_prototype::run_server_controller_api_server;
 
 #[tokio::main]
 async fn main() {
@@ -28,6 +30,7 @@ async fn main() {
 
     let controller_addr = matches.value_of("OXIDE_CONTROLLER_IP:PORT").unwrap();
     /* XXX */
+    // let config = ConfigServerController {
     todo!()
     // if let Err(error) =
     //     oxide_api_prototype::run_server_controller(&controller_addr).await

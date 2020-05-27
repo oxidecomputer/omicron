@@ -25,7 +25,7 @@ use crate::api_model::ApiResourceType;
 use crate::api_model::ApiServer;
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
-use crate::server_controller::ServerController;
+use crate::server_controller_client::ServerControllerClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use dropshot::ExtractedParameter;
@@ -90,22 +90,22 @@ pub async fn to_view_list<T: ApiObject>(
 #[async_trait]
 pub trait OxideControllerTestInterfaces {
     /**
-     * Returns the ServerController for an Instance from its id.  We may also
-     * want to split this up into instance_lookup_by_id() and instance_sc(), but
-     * after all it's a test suite special to begin with.
+     * Returns the ServerControllerClient for an Instance from its id.  We may
+     * also want to split this up into instance_lookup_by_id() and
+     * instance_sc(), but after all it's a test suite special to begin with.
      */
     async fn instance_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerController>, ApiError>;
+    ) -> Result<Arc<ServerControllerClient>, ApiError>;
 
     /**
-     * Returns the ServerController for a Disk from its id.
+     * Returns the ServerControllerClient for a Disk from its id.
      */
     async fn disk_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerController>, ApiError>;
+    ) -> Result<Arc<ServerControllerClient>, ApiError>;
 }
 
 /**
@@ -136,7 +136,7 @@ pub struct OxideController {
      * servers and how we discover them, both when they initially show up and
      * when we come up.
      */
-    server_controllers: Mutex<BTreeMap<Uuid, Arc<ServerController>>>,
+    server_controllers: Mutex<BTreeMap<Uuid, Arc<ServerControllerClient>>>,
 }
 
 /*
@@ -160,7 +160,7 @@ impl OxideController {
         }
     }
 
-    pub async fn add_server_controller(&self, sc: Arc<ServerController>) {
+    pub async fn add_server_controller(&self, sc: Arc<ServerControllerClient>) {
         let mut scs = self.server_controllers.lock().await;
         assert!(!scs.contains_key(&sc.id));
         info!(self.log, "registered server controller";
@@ -349,10 +349,10 @@ impl OxideController {
 
     async fn server_allocate_instance<'se, 'params>(
         &'se self,
-        servers: &'se BTreeMap<Uuid, Arc<ServerController>>,
+        servers: &'se BTreeMap<Uuid, Arc<ServerControllerClient>>,
         _project: Arc<ApiProject>,
         _params: &'params ApiInstanceCreateParams,
-    ) -> Result<&'se Arc<ServerController>, ApiError> {
+    ) -> Result<&'se Arc<ServerControllerClient>, ApiError> {
         /* TODO replace this with a real allocation policy. */
         servers.values().nth(0).ok_or_else(|| ApiError::ResourceNotAvailable {
             message: String::from("no servers available for new Instance"),
@@ -538,12 +538,13 @@ impl OxideController {
     }
 
     /**
-     * Returns the ServerController for the host where this Instance is running.
+     * Returns the ServerControllerClient for the host where this Instance is
+     * running.
      */
     async fn instance_sc(
         &self,
         instance: &Arc<ApiInstance>,
-    ) -> Result<Arc<ServerController>, ApiError> {
+    ) -> Result<Arc<ServerControllerClient>, ApiError> {
         let controllers = self.server_controllers.lock().await;
         let scid = &instance.runtime.server_uuid;
         Ok(Arc::clone(controllers.get(scid).ok_or_else(|| {
@@ -649,15 +650,20 @@ impl OxideController {
     async fn instance_set_runtime(
         &self,
         mut instance: Arc<ApiInstance>,
-        sc: Arc<ServerController>,
+        sc: Arc<ServerControllerClient>,
         runtime_params: ApiInstanceRuntimeStateRequested,
     ) -> UpdateResult<ApiInstance> {
         /*
          * Ask the SC to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime_state =
-            sc.instance_ensure(Arc::clone(&instance), runtime_params).await?;
+        let new_runtime_state = sc
+            .instance_ensure(
+                instance.identity.id.clone(),
+                instance.runtime.clone(),
+                runtime_params,
+            )
+            .await?;
 
         let instance_ref = Arc::make_mut(&mut instance);
         instance_ref.runtime = new_runtime_state.clone();
@@ -928,14 +934,20 @@ impl OxideController {
     async fn disk_set_runtime(
         &self,
         mut disk: Arc<ApiDisk>,
-        sc: Arc<ServerController>,
+        sc: Arc<ServerControllerClient>,
         requested: ApiDiskStateRequested,
     ) -> UpdateResult<ApiDisk> {
         /*
          * Ask the SC to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime = sc.disk_ensure(Arc::clone(&disk), requested).await?;
+        let new_runtime = sc
+            .disk_ensure(
+                disk.identity.id.clone(),
+                disk.runtime.clone(),
+                requested,
+            )
+            .await?;
         let disk_ref = Arc::make_mut(&mut disk);
         disk_ref.runtime = new_runtime;
         self.datastore.disk_update(Arc::clone(&disk)).await?;
@@ -975,8 +987,8 @@ impl OxideController {
      * Servers.
      * TODO-completeness: Eventually, we'll want servers to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiServer for each ServerController
-     * that we've got.
+     * them, etc.  For now, we expose an ApiServer for each
+     * ServerControllerClient that we've got.
      */
     pub async fn servers_list(
         &self,
@@ -1021,7 +1033,7 @@ impl OxideControllerTestInterfaces for OxideController {
     async fn instance_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerController>, ApiError> {
+    ) -> Result<Arc<ServerControllerClient>, ApiError> {
         let instance = self.datastore.instance_lookup_by_id(id).await?;
         self.instance_sc(&instance).await
     }
@@ -1029,7 +1041,7 @@ impl OxideControllerTestInterfaces for OxideController {
     async fn disk_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerController>, ApiError> {
+    ) -> Result<Arc<ServerControllerClient>, ApiError> {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();
@@ -1040,6 +1052,8 @@ impl OxideControllerTestInterfaces for OxideController {
 }
 
 /**
+ * XXX This needs to be replaced with a Dropshot API exposing it.
+ *
  * `ControllerScApi` represents the API exposed by the OxideController (OXCP)
  * for use by ServerControllers.  Like `ServerController`, this is currently
  * implemented directly in Rust, but the intent is for this to be a network call

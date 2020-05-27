@@ -457,7 +457,7 @@ pub struct ApiInstanceRuntimeState {
  * here.  If we allow other properties here, we may want to make them Options so
  * that callers don't have to know the prior state already.
  */
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
@@ -640,7 +640,7 @@ impl ApiDiskState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskRuntimeState {
     /** runtime state of the disk */
     pub disk_state: ApiDiskState,

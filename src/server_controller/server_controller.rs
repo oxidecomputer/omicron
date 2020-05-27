@@ -6,11 +6,9 @@ use super::SimMode;
 use super::controller_client::ControllerClient;
 
 use crate::api_error::ApiError;
-use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
-use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;

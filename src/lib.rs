@@ -12,21 +12,23 @@ mod api_http_entrypoints;
 pub mod api_model;
 mod controller;
 mod datastore;
+mod http_client;
 mod server_controller;
+mod server_controller_client;
 mod test_util;
 
 pub use api_config::ApiServerConfig;
 pub use controller::OxideController;
 pub use controller::OxideControllerTestInterfaces;
+pub use server_controller::run_server_controller_api_server;
+pub use server_controller::ConfigServerController;
 pub use server_controller::ServerControllerTestInterfaces;
-pub use server_controller::SimMode;
 
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;
 use api_model::ApiProjectCreateParams;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
-use server_controller::ServerController;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -66,7 +68,7 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
     let dropshot_log = log.new(o!("component" => "dropshot"));
     let apictx = ApiContext::new(&Uuid::new_v4(), log);
 
-    populate_initial_data(&apictx, SimMode::Auto).await;
+    populate_initial_data(&apictx).await;
 
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
@@ -143,10 +145,7 @@ impl ApiContext {
  * server.  This should be replaced with a config file or a data backend with a
  * demo initialization script or the like.
  */
-pub async fn populate_initial_data(
-    apictx: &Arc<ApiContext>,
-    sim_mode: SimMode,
-) {
+pub async fn populate_initial_data(apictx: &Arc<ApiContext>) {
     let controller = &apictx.controller;
     let demo_projects: Vec<(&str, &str)> = vec![
         ("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1"),
@@ -169,21 +168,5 @@ pub async fn populate_initial_data(
             )
             .await
             .unwrap();
-    }
-
-    let demo_controllers = vec![
-        "b6d65341-167c-41df-9b5c-41cded99c229",
-        "2335aceb-969e-4abc-bbba-b0d3b44bc82e",
-        "dae9faf7-5b13-4334-85ed-6a53d0835414",
-    ];
-    for uuidstr in demo_controllers {
-        let uuid = Uuid::parse_str(uuidstr).unwrap();
-        let sc = ServerController::new_simulated_with_id(
-            &uuid,
-            sim_mode,
-            apictx.log.new(o!("server_controller" => uuid.to_string())),
-            controller.as_sc_api(),
-        );
-        controller.add_server_controller(Arc::new(sc)).await;
     }
 }

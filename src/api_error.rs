@@ -111,6 +111,13 @@ impl From<ApiError> for HttpError {
             ApiError::ResourceNotAvailable {
                 message,
             } => HttpError::for_unavail(message),
+
+            ApiError::DependencyError {
+                message,
+            } => {
+                let message = format!("dependency error: {}", message);
+                HttpError::for_unavail(message)
+            }
         }
     }
 }
