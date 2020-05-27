@@ -34,7 +34,8 @@ INSTANCES
 DISKS
 
     disk_create_demo PROJECT_NAME DISK_NAME
-    disk_get PROJECT_NAME DISK_NAME
+    disk_get         PROJECT_NAME DISK_NAME
+    disk_delete      PROJECT_NAME DISK_NAME
 
 HARDWARE
 
@@ -229,6 +230,12 @@ function cmd_disk_get
 {
 	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
 	do_curl "/projects/$1/disks/$2"
+}
+
+function cmd_disk_delete
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
+	do_curl "/projects/$1/disks/$2" -X DELETE
 }
 
 function cmd_racks_list

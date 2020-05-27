@@ -71,7 +71,11 @@ async fn test_disks() {
         .await;
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
-    /* TODO-coverage now would be a good time to test destroying the disk. */
+    /* We should also get a 404 if we delete one. */
+    let error = client
+        .make_request_error(Method::DELETE, &disk_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* Create a disk. */
     let new_disk = ApiDiskCreateParams {
@@ -450,7 +454,11 @@ async fn test_disks() {
     let disk = disk_get(&testctx, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attaching(instance2_id.clone()));
 
-    /* TODO-coverage now would be a good time to test destroying the disk. */
+    /* It's not allowed to delete a disk that's attaching. */
+    let error = client
+        .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
+        .await;
+    assert_eq!(error.message, "disk is attached");
 
     /* Now, begin a detach while the disk is still being attached. */
     testctx
@@ -471,7 +479,11 @@ async fn test_disks() {
     let disk = disk_get(&testctx, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detaching(instance2_id.clone()));
 
-    /* TODO-coverage now would be a good time to test destroying the disk. */
+    /* It's not allowed to delete a disk that's detaching, either. */
+    let error = client
+        .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
+        .await;
+    assert_eq!(error.message, "disk is attached");
 
     /* Finish detachment. */
     disk_simulate(controller, &disk.identity.id).await;
@@ -505,7 +517,19 @@ async fn test_disks() {
         "disk \"just-rainsticks\" is not attached to instance \"instance2\""
     );
 
-    /* TODO-coverage now would be a good time to test destroying the disk. */
+    /* It's not allowed to delete a disk that's detaching, either. */
+    client
+        .make_request_no_body(Method::DELETE, &disk_url, StatusCode::NO_CONTENT)
+        .await
+        .unwrap();
+
+    /* It should no longer be present in our list of disks. */
+    assert_eq!(disks_list(&testctx, &url_disks).await.len(), 0);
+    /* We shouldn't find it if we request it explicitly. */
+    let error = client
+        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 }
 
 async fn disk_get(testctx: &TestContext, disk_url: &str) -> ApiDiskView {

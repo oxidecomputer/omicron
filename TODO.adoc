@@ -5,7 +5,6 @@
 
 API endpoints:
 
-* implement disk delete (only allowed while detached?)
 * RFD 24: regions, AZs, etc
 * (lots more)
 

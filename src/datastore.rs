@@ -571,6 +571,37 @@ impl ControlDataStore {
         data.disks_by_id.insert(id, Arc::clone(&new_disk)).unwrap();
         Ok(())
     }
+
+    /*
+     * TODO-correctness This ought to take some kind of generation counter or
+     * etag that can be used for optimistic concurrency control inside the
+     * datastore.
+     * TODO-cleanup Can this be commonized with instance_delete()?
+     */
+    pub async fn disk_delete(
+        &self,
+        new_disk: Arc<ApiDisk>,
+    ) -> Result<(), ApiError> {
+        let id = new_disk.identity.id.clone();
+        let mut data = self.data.lock().await;
+        let old_name = {
+            let old_disk = collection_lookup(
+                &data.disks_by_id,
+                &id,
+                ApiResourceType::Disk,
+                &ApiError::not_found_by_id,
+            )?;
+
+            assert_eq!(old_disk.identity.id, id);
+            old_disk.identity.name.clone()
+        };
+
+        let disks =
+            data.disks_by_project_id.get_mut(&new_disk.project_id).unwrap();
+        disks.remove(&old_name).unwrap();
+        data.disks_by_id.remove(&id).unwrap();
+        Ok(())
+    }
 }
 
 /**

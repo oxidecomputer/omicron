@@ -50,6 +50,7 @@ pub fn api_register_entrypoints(
     api.register(api_project_disks_get)?;
     api.register(api_project_disks_post)?;
     api.register(api_project_disks_get_disk)?;
+    api.register(api_project_disks_delete_disk)?;
 
     api.register(api_project_instances_get)?;
     api.register(api_project_instances_post)?;
@@ -289,6 +290,26 @@ async fn api_project_disks_get_disk(
     let disk =
         controller.project_lookup_disk(&project_name, &disk_name).await?;
     Ok(HttpResponseOkObject(disk.to_view()))
+}
+
+/**
+ * Delete a disk from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/disks/{disk_name}",
+ }]
+async fn api_project_disks_delete_disk(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = ApiContext::from_request(&rqctx);
+    let controller = &apictx.controller;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_name = &path.disk_name;
+    controller.project_delete_disk(&project_name, &disk_name).await?;
+    Ok(HttpResponseDeleted())
 }
 
 /*
