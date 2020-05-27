@@ -9,7 +9,8 @@ This repo houses a prototype for the Oxide Rack API.  See:
 * https://4.rfd.oxide.computer[RFD 4 User Facing API Design]
 * https://10.rfd.oxide.computer[RFD 10 API Prototype and Simulated
   Implementation]
-* https://48.rfd.oxide.computer[RFD 48 Control Plane Architecture]
+* https://48.rfd.oxide.computer[RFD 48 Control Plane Requirements]
+* https://61.rfd.oxide.computer[RFD 61 Control Plane Architecture and Design]
 
 == Status
 
@@ -17,7 +18,12 @@ image::https://github.com/oxidecomputer/oxide-api-prototype/workflows/Rust/badge
 
 The code here is still rough, but the following are implemented:
 
-* actual API: basic CRUD support for projects and instances
+* actual API:
+** projects: CRUD
+** instances: CRUD + boot/halt/reboot
+** disks: CR + attach/detach
+** racks: list + get
+** servers: list + get
 * Dropshot: a general-purpose crate for building an HTTP API server, including
   basic routing with path parameters; strong types for request and response
   bodies; basic query parameter support; ergonomic error handling; OpenAPI
@@ -57,6 +63,216 @@ date: Wed, 01 Apr 2020 23:02:22 GMT
 
 You can run the tests with `cargo test`.  The test suite runs cleanly and should
 remain clean.
+
+== Quick demo
+
+There's a small demo tool called `./tools/oxapi_demo` that provides a slightly
+friendlier interface than `curl`, with the same output format.  Here's a small
+demo that creates a project, creates an instance, and attaches a disk to it:
+
+[source,text]
+----
+$ ./tools/oxapi_demo 
+oxapi_demo: command not specified
+
+PROJECTS
+
+    projects_list
+    project_create_demo    PROJECT_NAME
+    project_delete         PROJECT_NAME
+    project_get            PROJECT_NAME
+    project_list_instances PROJECT_NAME
+    project_list_disks     PROJECT_NAME
+
+INSTANCES
+
+    instance_create_demo PROJECT_NAME INSTANCE_NAME
+    instance_get         PROJECT_NAME INSTANCE_NAME
+    instance_delete      PROJECT_NAME INSTANCE_NAME
+
+    instance_stop        PROJECT_NAME INSTANCE_NAME
+    instance_start       PROJECT_NAME INSTANCE_NAME
+    instance_reboot      PROJECT_NAME INSTANCE_NAME
+
+    instance_attach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_detach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_list_disks  PROJECT_NAME INSTANCE_NAME
+    instance_get_disk    PROJECT_NAME INSTANCE_NAME DISK_NAME
+
+DISKS
+
+    disk_create_demo PROJECT_NAME DISK_NAME
+    disk_get PROJECT_NAME DISK_NAME
+
+HARDWARE
+
+    racks_list
+    rack_get     RACK_ID
+
+    servers_list
+    server_get   SERVER_ID
+
+
+$ ./tools/oxapi_demo project_create_demo myproject
+++ curl -sSi http://127.0.0.1:12220/projects -X POST -T -
+++ json -ga
+HTTP/1.1 100 Continue
+
+HTTP/1.1 201 Created
+content-type: application/json
+x-request-id: 6e357d79-dc11-4418-8f9d-3c50fce13027
+content-length: 196
+date: Wed, 27 May 2020 00:45:03 GMT
+
+{
+  "id": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "name": "myproject",
+  "description": "a project called myproject",
+  "timeCreated": "2020-05-27T00:45:03.563996Z",
+  "timeModified": "2020-05-27T00:45:03.563996Z"
+}
+
+
+$ ./tools/oxapi_demo instance_create_demo myproject myinstance
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances -X POST -T -
+++ json -ga
+HTTP/1.1 100 Continue
+
+HTTP/1.1 201 Created
+content-type: application/json
+x-request-id: ec65473d-7c0f-462d-a0cb-2e35fabb6533
+content-length: 388
+date: Wed, 27 May 2020 00:45:24 GMT
+
+{
+  "id": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "name": "myinstance",
+  "description": "an instance called myinstance",
+  "timeCreated": "2020-05-27T00:45:24.784729Z",
+  "timeModified": "2020-05-27T00:45:24.784729Z",
+  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "ncpus": 1,
+  "memory": 256,
+  "bootDiskSize": 1,
+  "hostname": "myproject",
+  "runState": "starting",
+  "timeRunStateUpdated": "2020-05-27T00:45:24.785445Z"
+}
+
+
+$ ./tools/oxapi_demo instance_get myproject myinstance
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance
+++ json -ga
+HTTP/1.1 200 OK
+content-type: application/json
+x-request-id: c228154b-ddd1-4758-b51c-e5c0547727ba
+content-length: 387
+date: Wed, 27 May 2020 00:45:42 GMT
+
+{
+  "id": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "name": "myinstance",
+  "description": "an instance called myinstance",
+  "timeCreated": "2020-05-27T00:45:24.784729Z",
+  "timeModified": "2020-05-27T00:45:24.784729Z",
+  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "ncpus": 1,
+  "memory": 256,
+  "bootDiskSize": 1,
+  "hostname": "myproject",
+  "runState": "running",
+  "timeRunStateUpdated": "2020-05-27T00:45:26.291810Z"
+}
+
+
+$ ./tools/oxapi_demo disk_create_demo myproject mydisk
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/disks -X POST -T -
+++ json -ga
+HTTP/1.1 100 Continue
+
+HTTP/1.1 201 Created
+content-type: application/json
+x-request-id: e004d88f-d8cc-4721-8000-583b504a5372
+content-length: 314
+date: Wed, 27 May 2020 00:45:34 GMT
+
+{
+  "id": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "name": "mydisk",
+  "description": "a disk called mydisk",
+  "timeCreated": "2020-05-27T00:45:34.119234Z",
+  "timeModified": "2020-05-27T00:45:34.119234Z",
+  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "snapshotId": null,
+  "size": 1024,
+  "state": "creating",
+  "devicePath": "/mnt/mydisk"
+}
+
+
+$ ./tools/oxapi_demo disk_get myproject mydisk
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/disks/mydisk
+++ json -ga
+HTTP/1.1 200 OK
+content-type: application/json
+x-request-id: 09608040-f645-4f1e-941f-2f4629cdedd0
+content-length: 314
+date: Wed, 27 May 2020 00:45:50 GMT
+
+{
+  "id": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "name": "mydisk",
+  "description": "a disk called mydisk",
+  "timeCreated": "2020-05-27T00:45:34.119234Z",
+  "timeModified": "2020-05-27T00:45:34.119234Z",
+  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "snapshotId": null,
+  "size": 1024,
+  "state": "detached",
+  "devicePath": "/mnt/mydisk"
+}
+
+
+$ ./tools/oxapi_demo instance_attach_disk myproject myinstance mydisk
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks/mydisk -X PUT -T /dev/null
+++ json -ga
+HTTP/1.1 201 Created
+content-type: application/json
+x-request-id: 933cecce-d356-4cd4-b1b2-728cecf29a45
+content-length: 214
+date: Wed, 27 May 2020 00:46:04 GMT
+
+{
+  "instanceName": "myinstance",
+  "instanceId": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "diskName": "mydisk",
+  "diskId": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "diskState": {
+    "attaching": "d58039dc-4ed3-44de-a5d4-cd4696246799"
+  }
+}
+
+
+$ ./tools/oxapi_demo instance_list_disks myproject myinstance 
+++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks
+++ json -ga
+HTTP/1.1 200 OK
+content-type: application/x-ndjson
+x-request-id: fb3f4d2a-4992-4816-94df-1aa2c461777c
+content-length: 214
+date: Wed, 27 May 2020 00:46:11 GMT
+
+{
+  "instanceName": "myinstance",
+  "instanceId": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "diskName": "mydisk",
+  "diskId": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "diskState": {
+    "attached": "d58039dc-4ed3-44de-a5d4-cd4696246799"
+  }
+}
+----
+
 
 == Configuration
 
@@ -127,7 +343,7 @@ The implementation is divided into several subsystems:
   HTTP API server with strong OpenAPI support.  This exists today.
 - **Oxide Rack HTTP API layer**.  These are the parts of this crate that use
   Dropshot to provide an HTTP interface to the underlying Oxide Rack.
-- **Oxide Rack**.  This is an HTTP-agnostic model of the resources in a rack.
+- **Oxide Controller**.  This is an HTTP-agnostic model of the resources in a rack.
 - (still to be fleshed out) **Data storage**.  The parts of the Oxide Rack that
   persist information about resources in the rack will wind up behind a data
   storage interface.
