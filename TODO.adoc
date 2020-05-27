@@ -10,7 +10,6 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* make instance delete require that instance be stopped?
 * implement server controller as separate program (would be a better demo of
   what's really going on internally)
 * do a demo????

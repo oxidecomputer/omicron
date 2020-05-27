@@ -447,6 +447,19 @@ impl OxideController {
         .await
     }
 
+    /*
+     * TODO-correctness It's not totally clear what the semantics and behavior
+     * should be here.  It might be nice to say that you can only do this
+     * operation if the Instance is already stopped, in which case we can
+     * execute this immediately by just removing it from the database, with the
+     * same race we have with disk delete (i.e., if someone else is requesting
+     * an instance boot, we may wind up in an inconsistent state).  On the other
+     * hand, we could always allow this operation, issue the request to the SC
+     * to destroy the instance (not just stop it), and proceed with deletion
+     * when that finishes.  But in that case, although the HTTP DELETE request
+     * completed, the object will still appear for a little while, which kind of
+     * sucks.
+     */
     pub async fn project_destroy_instance(
         &self,
         project_name: &ApiName,
