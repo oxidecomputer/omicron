@@ -48,7 +48,7 @@ impl HttpClient {
     ) -> Result<Response<Body>, ApiError> {
         let error_message_base = self.error_message_base(&method, path);
 
-        info!(self.log, "client request";
+        debug!(self.log, "client request";
             "method" => %method,
             "uri" => %path,
             "body" => ?&body,
@@ -61,12 +61,12 @@ impl HttpClient {
             .build()
             .unwrap();
         let request =
-            Request::builder().method(Method::PUT).uri(uri).body(body).unwrap();
+            Request::builder().method(method).uri(uri).body(body).unwrap();
         let result = self.http_client.request(request).await.map_err(|error| {
             convert_error(&error_message_base, "making request", error)
         });
 
-        info!(self.log, "client response"; "result" => ?result);
+        debug!(self.log, "client response"; "result" => ?result);
         let mut response = result?;
         let status = response.status();
 

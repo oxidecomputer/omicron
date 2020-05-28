@@ -2,8 +2,8 @@
  * Simulated server controller implementation.
  */
 
-use super::SimMode;
 use super::controller_client::ControllerClient;
+use super::SimMode;
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiDiskRuntimeState;
@@ -51,13 +51,12 @@ impl ServerController {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: ControllerClient,
+        ctlsc: Arc<ControllerClient>,
     ) -> ServerController {
         info!(&log, "created server controller");
 
         let instance_log = log.new(o!("kind" => "instances"));
         let disk_log = log.new(o!("kind" => "disks"));
-        let ctlsc = Arc::new(ctlsc);
 
         ServerController {
             id: id.clone(),

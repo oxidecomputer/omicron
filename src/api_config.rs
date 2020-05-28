@@ -14,8 +14,10 @@ use std::path::Path;
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ApiServerConfig {
-    /** Dropshot configuration */
-    pub dropshot: ConfigDropshot,
+    /** Dropshot configuration for external server*/
+    pub dropshot_external: ConfigDropshot,
+    /** Dropshot configuration for internal server*/
+    pub dropshot_internal: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
 }

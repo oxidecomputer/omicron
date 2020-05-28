@@ -9,6 +9,7 @@
 mod api_config;
 mod api_error;
 mod api_http_entrypoints;
+mod api_http_entrypoints_internal;
 pub mod api_model;
 mod controller;
 mod datastore;
@@ -23,12 +24,14 @@ pub use controller::OxideControllerTestInterfaces;
 pub use server_controller::run_server_controller_api_server;
 pub use server_controller::ConfigServerController;
 pub use server_controller::ServerControllerTestInterfaces;
+pub use server_controller::SimMode;
 
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;
 use api_model::ApiProjectCreateParams;
 use dropshot::ApiDescription;
 use dropshot::RequestContext;
+use futures::join;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -38,9 +41,9 @@ use uuid::Uuid;
 extern crate slog;
 
 /**
- * Returns a Dropshot `ApiDescription` for our API.
+ * Returns a Dropshot `ApiDescription` for our external API.
  */
-pub fn dropshot_api() -> ApiDescription {
+pub fn dropshot_api_external() -> ApiDescription {
     let mut api = ApiDescription::new();
     if let Err(err) = api_http_entrypoints::api_register_entrypoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
@@ -49,10 +52,26 @@ pub fn dropshot_api() -> ApiDescription {
 }
 
 /**
- * Run the OpenAPI generator, which emits the OpenAPI spec to stdout.
+ * Returns a Dropshot `ApiDescription` for our internal API.
  */
-pub fn run_openapi() {
-    dropshot_api().print_openapi();
+pub fn dropshot_api_internal() -> ApiDescription {
+    let mut api = ApiDescription::new();
+    if let Err(err) =
+        api_http_entrypoints_internal::api_register_entrypoints_internal(
+            &mut api,
+        )
+    {
+        panic!("failed to register internal entrypoints: {}", err);
+    }
+    api
+}
+
+/**
+ * Run the OpenAPI generator for the external API, which emits the OpenAPI spec
+ * to stdout.
+ */
+pub fn run_openapi_external() {
+    dropshot_api_external().print_openapi();
 }
 
 /**
@@ -65,23 +84,74 @@ pub async fn run_server(config: &ApiServerConfig) -> Result<(), String> {
         .map_err(|message| format!("initializing logger: {}", message))?;
     info!(log, "starting server");
 
-    let dropshot_log = log.new(o!("component" => "dropshot"));
-    let apictx = ApiContext::new(&Uuid::new_v4(), log);
+    let api_log = log.new(o!("component" => "apictx"));
+    let apictx = ApiContext::new(&Uuid::new_v4(), api_log);
+    let c1 = Arc::clone(&apictx);
 
     populate_initial_data(&apictx).await;
 
-    let mut http_server = dropshot::HttpServer::new(
-        &config.dropshot,
-        dropshot_api(),
-        apictx,
-        &dropshot_log,
+    let mut http_server_external = dropshot::HttpServer::new(
+        &config.dropshot_external,
+        dropshot_api_external(),
+        c1,
+        &log.new(o!("component" => "dropshot_external")),
     )
-    .map_err(|error| format!("initializing server: {}", error))?;
+    .map_err(|error| format!("initializing external server: {}", error))?;
 
-    let join_handle = http_server.run().await;
-    let server_result = join_handle
-        .map_err(|error| format!("waiting for server: {}", error))?;
-    server_result.map_err(|error| format!("server stopped: {}", error))
+    let mut http_server_internal = dropshot::HttpServer::new(
+        &config.dropshot_internal,
+        dropshot_api_internal(),
+        apictx,
+        &log.new(o!("component" => "dropshot_internal")),
+    )
+    .map_err(|error| format!("initializing internal server: {}", error))?;
+
+    let join_handle_external = http_server_external.run();
+    let join_handle_internal = http_server_internal.run();
+
+    let (join_result_external, join_result_internal) =
+        join!(join_handle_external, join_handle_internal);
+
+    let (result_external, result_internal) =
+        match (join_result_external, join_result_internal) {
+            (Ok(rexternal), Ok(rinternal)) => (rexternal, rinternal),
+            (Err(error_external), Err(error_internal)) => {
+                return Err(format!(
+                    "failed to join both external and internal servers \
+                     (external: \"{}\", internal: \"{}\")",
+                    error_external, error_internal
+                ));
+            }
+            (Err(error_external), Ok(_)) => {
+                return Err(format!(
+                    "failed to join external server: {}",
+                    error_external
+                ));
+            }
+            (Ok(_), Err(error_internal)) => {
+                return Err(format!(
+                    "failed to join internal server: {}",
+                    error_internal
+                ));
+            }
+        };
+
+    match (result_external, result_internal) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error_external), Err(error_internal)) => {
+            return Err(format!(
+                "external and internal HTTP servers both stopped (external: \
+                 \"{}\", internal: \"{}\"",
+                error_external, error_internal
+            ));
+        }
+        (Err(error_external), Ok(())) => {
+            return Err(format!("external server stopped: {}", error_external));
+        }
+        (Ok(()), Err(error_internal)) => {
+            return Err(format!("internal server stopped: {}", error_internal));
+        }
+    }
 }
 
 /**

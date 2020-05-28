@@ -974,6 +974,21 @@ impl From<HttpResponseDeleted> for HttpHandlerResult {
     }
 }
 
+/**
+ * `HttpResponseUpdatedNoContent` represents an HTTP 204 "No Content" response,
+ * intended for use when an API operation has successfully updated an object and
+ * has nothing to return.
+ */
+pub struct HttpResponseUpdatedNoContent();
+impl HttpResponse for HttpResponseUpdatedNoContent {}
+impl From<HttpResponseUpdatedNoContent> for HttpHandlerResult {
+    fn from(_: HttpResponseUpdatedNoContent) -> HttpHandlerResult {
+        Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .body(Body::empty())?)
+    }
+}
+
 fn response_for_object<T: Serialize>(
     body_object: T,
     status_code: StatusCode,

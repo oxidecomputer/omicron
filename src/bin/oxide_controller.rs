@@ -52,7 +52,7 @@ async fn main() {
     };
 
     if matches.is_present("openapi") {
-        oxide_api_prototype::run_openapi();
+        oxide_api_prototype::run_openapi_external();
     } else {
         if let Err(error) = oxide_api_prototype::run_server(&config).await {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);

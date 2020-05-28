@@ -27,7 +27,7 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let config_file_path = Path::new("tests/config.test.toml");
     let config = ApiServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    let api = oxide_api_prototype::dropshot_api();
+    let api = oxide_api_prototype::dropshot_api_external();
     let rack_id_str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
     let rack_id = Uuid::parse_str(rack_id_str).unwrap();
     let logctx = LogContext::new(test_name, &config.log);
@@ -35,7 +35,7 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
     oxide_api_prototype::populate_initial_data(&apictx, SimMode::Explicit)
         .await;
-    TestContext::new(api, apictx, &config.dropshot, logctx)
+    TestContext::new(api, apictx, &config.dropshot_external, logctx)
 }
 
 /** Returns whether the two identity metadata objects are identical. */

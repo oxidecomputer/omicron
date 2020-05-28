@@ -3,7 +3,6 @@ name = "oxide-api-prototype"
 version = "0.1.0"
 authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2018"
-default-run = "oxide_controller"
 
 [dependencies]
 async-trait = "0.1.24"

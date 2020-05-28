@@ -5,6 +5,7 @@
 mod controller_client;
 mod server_controller;
 
+use crate::api_http_entrypoints_internal::ApiServerStartupInfo;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::server_controller_client::DiskEnsureBody;
@@ -74,19 +75,25 @@ pub async fn run_server_controller_api_server(
     info!(log, "starting server controller");
 
     let dropshot_log = log.new(o!("component" => "dropshot"));
-    let sc_log = log.new(o!("component" => "server_controller"));
+    let sc_log = log.new(o!(
+        "component" => "server_controller",
+        "server" => config.id.clone().to_string()
+    ));
 
     let client_log = log.new(o!("component" => "controller_client"));
-    let controller_client =
-        ControllerClient::new(config.controller_address.clone(), client_log);
+    let controller_client = Arc::new(ControllerClient::new(
+        config.controller_address.clone(),
+        client_log,
+    ));
 
     let sc = Arc::new(ServerController::new_simulated_with_id(
         &config.id,
         config.sim_mode,
         sc_log,
-        controller_client,
+        Arc::clone(&controller_client),
     ));
 
+    let my_address = config.dropshot.bind_address.clone();
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
         dropshot_api(),
@@ -95,7 +102,19 @@ pub async fn run_server_controller_api_server(
     )
     .map_err(|error| format!("initializing server: {}", error))?;
 
-    let join_handle = http_server.run().await;
+    let server_handle = http_server.run();
+
+    /*
+     * TODO this should happen continuously until it succeeds.
+     */
+    controller_client
+        .notify_server_online(config.id.clone(), ApiServerStartupInfo {
+            sc_address: my_address,
+        })
+        .await
+        .unwrap();
+
+    let join_handle = server_handle.await;
     let server_result = join_handle
         .map_err(|error| format!("waiting for server: {}", error))?;
     server_result.map_err(|error| format!("server stopped: {}", error))
@@ -136,11 +155,14 @@ async fn scapi_instance_ensure(
     let sc = rqctx_to_sc(&rqctx);
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(sc.instance_ensure(
-        instance_id,
-        body_args.initial_runtime.clone(),
-        body_args.target.clone(),
-    ).await?))
+    Ok(HttpResponseOkObject(
+        sc.instance_ensure(
+            instance_id,
+            body_args.initial_runtime.clone(),
+            body_args.target.clone(),
+        )
+        .await?,
+    ))
 }
 
 #[derive(Deserialize, ExtractedParameter)]
@@ -160,9 +182,12 @@ async fn scapi_disk_ensure(
     let sc = rqctx_to_sc(&rqctx);
     let disk_id = path_params.into_inner().disk_id;
     let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(sc.disk_ensure(
-        disk_id,
-        body_args.initial_runtime.clone(),
-        body_args.target.clone(),
-    ).await?))
+    Ok(HttpResponseOkObject(
+        sc.disk_ensure(
+            disk_id,
+            body_args.initial_runtime.clone(),
+            body_args.target.clone(),
+        )
+        .await?,
+    ))
 }
