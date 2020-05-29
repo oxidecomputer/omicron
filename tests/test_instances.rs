@@ -36,7 +36,7 @@ extern crate slog;
 
 #[tokio::test]
 async fn test_instances() {
-    let cptestctx = test_setup("test_instances").await; 
+    let cptestctx = test_setup("test_instances").await;
     let testctx = &cptestctx.external_api;
     let apictx = ApiContext::from_server(&testctx.server);
     let controller = &apictx.controller;

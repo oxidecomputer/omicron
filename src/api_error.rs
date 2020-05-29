@@ -76,7 +76,7 @@ impl ApiError {
          */
         match error_response.error_code.as_ref().map(|s| s.as_str()) {
             Some("InvalidRequest") => ApiError::InvalidRequest {
-                message: error_response.message
+                message: error_response.message,
             },
             _ => ApiError::InternalError {
                 message: format!(

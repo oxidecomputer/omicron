@@ -21,13 +21,13 @@ mod test_util;
 pub use api_config::ApiServerConfig;
 pub use controller::OxideController;
 pub use controller::OxideControllerTestInterfaces;
-pub use server_controller::ControllerClient;
 pub use server_controller::run_server_controller_api_server;
 pub use server_controller::sc_dropshot_api;
 pub use server_controller::ConfigServerController;
+pub use server_controller::ControllerClient;
 pub use server_controller::ServerController;
-pub use server_controller_client::ServerControllerTestInterfaces;
 pub use server_controller::SimMode;
+pub use server_controller_client::ServerControllerTestInterfaces;
 /* XXX */
 pub use api_http_entrypoints_internal::ApiServerStartupInfo;
 
