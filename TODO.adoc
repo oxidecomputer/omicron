@@ -5,15 +5,9 @@
 
 Currently:
 
-* I've made a mess of stuff though with imports and such. See lots of XXXs.
-** new ServerController interface
-** add it to my demo tool!
-** ServerController startup needs to take a flag which indicates how to
-   simulate (auto or explicit)
 * the server-controller binary may need to grow a config+logging mechanism
-* todo: update / rip out built-in SCs? (may as well rip out built-in projects
-  too)
 * lots of cleanup needed
+** I've made a mess of stuff though with imports and such. See lots of XXXs.
 * restructure the code:
 ** server_controller: body, entrypoints, client (for itself)
 ** controller: body, internal entrypoints, external entrypoints, internal client
@@ -42,6 +36,7 @@ Work queue (see also: existing GitHub issues):
 * polish up for more help
 ** improved documentation, especially design docs, structural docs
 ** improve naming (e.g., around "api", "oxide-api-prototype")
+** rip out built-in projects
 * flesh out controller - server-controller interaction:
 ** server controller startup should trigger restoring instances and disks
 ** server controller should retry the startup request until it succeeds
