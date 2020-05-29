@@ -92,10 +92,7 @@ async fn cpapi_instances_put(
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    controller
-        .as_sc_api()
-        .notify_instance_updated(&path.instance_id, &new_state)
-        .await?;
+    controller.notify_instance_updated(&path.instance_id, &new_state).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -120,9 +117,6 @@ async fn cpapi_disks_put(
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    controller
-        .as_sc_api()
-        .notify_disk_updated(&path.disk_id, &new_state)
-        .await?;
+    controller.notify_disk_updated(&path.disk_id, &new_state).await?;
     Ok(HttpResponseUpdatedNoContent())
 }

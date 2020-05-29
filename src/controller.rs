@@ -1027,50 +1027,10 @@ impl OxideController {
         }))
     }
 
-    pub fn as_sc_api(self: &Arc<OxideController>) -> ControllerScApi {
-        ControllerScApi {
-            controller: Arc::clone(self),
-        }
-    }
-}
+    /*
+     * Internal control plane interfaces.
+     */
 
-#[async_trait]
-impl OxideControllerTestInterfaces for OxideController {
-    async fn instance_server_by_id(
-        &self,
-        id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError> {
-        let instance = self.datastore.instance_lookup_by_id(id).await?;
-        self.instance_sc(&instance).await
-    }
-
-    async fn disk_server_by_id(
-        &self,
-        id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError> {
-        let disk = self.datastore.disk_lookup_by_id(id).await?;
-        let instance_id =
-            disk.runtime.disk_state.attached_instance_id().unwrap();
-        let instance =
-            self.datastore.instance_lookup_by_id(instance_id).await?;
-        self.instance_sc(&instance).await
-    }
-}
-
-/**
- * XXX This needs to be replaced with a Dropshot API exposing it.
- *
- * `ControllerScApi` represents the API exposed by the OxideController (OXCP)
- * for use by ServerControllers.  Like `ServerController`, this is currently
- * implemented directly in Rust, but the intent is for this to be a network call
- * of some kind, so we should be careful about the kinds of interfaces exposed
- * here.
- */
-pub struct ControllerScApi {
-    controller: Arc<OxideController>,
-}
-
-impl ControllerScApi {
     /**
      * Invoked by a server controller to publish an updated runtime state for an
      * Instance.
@@ -1080,8 +1040,8 @@ impl ControllerScApi {
         id: &Uuid,
         new_runtime_state: &ApiInstanceRuntimeState,
     ) -> Result<(), ApiError> {
-        let datastore = &self.controller.datastore;
-        let log = &self.controller.log;
+        let datastore = &self.datastore;
+        let log = &self.log;
 
         let result = datastore
             .instance_lookup_by_id(id)
@@ -1136,8 +1096,8 @@ impl ControllerScApi {
         id: &Uuid,
         new_state: &ApiDiskRuntimeState,
     ) -> Result<(), ApiError> {
-        let datastore = &self.controller.datastore;
-        let log = &self.controller.log;
+        let datastore = &self.datastore;
+        let log = &self.log;
 
         let result = datastore
             .disk_lookup_by_id(id)
@@ -1186,5 +1146,28 @@ impl ControllerScApi {
                 Err(error.into())
             }
         }
+    }
+}
+
+#[async_trait]
+impl OxideControllerTestInterfaces for OxideController {
+    async fn instance_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerControllerClient>, ApiError> {
+        let instance = self.datastore.instance_lookup_by_id(id).await?;
+        self.instance_sc(&instance).await
+    }
+
+    async fn disk_server_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<ServerControllerClient>, ApiError> {
+        let disk = self.datastore.disk_lookup_by_id(id).await?;
+        let instance_id =
+            disk.runtime.disk_state.attached_instance_id().unwrap();
+        let instance =
+            self.datastore.instance_lookup_by_id(instance_id).await?;
+        self.instance_sc(&instance).await
     }
 }
