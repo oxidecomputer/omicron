@@ -66,8 +66,7 @@ async fn cpapi_servers_post(
         si.sc_address,
         client_log,
     ));
-    /* XXX needs to do something saner when the client already exists */
-    controller.add_server_controller(client).await;
+    controller.upsert_server_controller(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 

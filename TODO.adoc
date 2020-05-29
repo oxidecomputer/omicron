@@ -23,6 +23,11 @@ program to better validate the architecture and better demo what's going on.
 *** error
 *** datastore
 *** test_util
+* steps for the above:
+** move clients to their respective places
+** create separate exports for internal vs. external models
+** rename entrypoints functions
+** revisit "Api" prefixes
 
 API endpoints:
 
@@ -38,6 +43,7 @@ Work queue (see also: existing GitHub issues):
 ** server controller startup should trigger restoring instances and disks
 ** server controller should retry the startup request until it succeeds
 * do a demo????
+* add a test that runs --openapi (to make sure it works)
 * settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents

@@ -160,9 +160,15 @@ impl OxideController {
         }
     }
 
-    pub async fn add_server_controller(&self, sc: Arc<ServerControllerClient>) {
+    /*
+     * TODO-robustness we should have a limit on how many server controllers
+     * there can be (for graceful degradation at large scale).
+     */
+    pub async fn upsert_server_controller(
+        &self,
+        sc: Arc<ServerControllerClient>,
+    ) {
         let mut scs = self.server_controllers.lock().await;
-        assert!(!scs.contains_key(&sc.id));
         info!(self.log, "registered server controller";
             "server_uuid" => sc.id.to_string());
         scs.insert(sc.id.clone(), sc);
