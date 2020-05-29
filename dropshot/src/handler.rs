@@ -527,9 +527,7 @@ where
      * TODO-correctness: are query strings defined to be urlencoded in this way?
      */
     match serde_urlencoded::from_str(raw_query_string) {
-        Ok(q) => Ok(Query {
-            inner: q,
-        }),
+        Ok(q) => Ok(Query { inner: q }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse query string: {}", e),
@@ -599,9 +597,7 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Path<PathType>, HttpError> {
         let params: PathType = http_extract_path_params(&rqctx.path_variables)?;
-        Ok(Path {
-            inner: params,
-        })
+        Ok(Path { inner: params })
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
@@ -652,9 +648,7 @@ where
     let value: Result<JsonType, serde_json::Error> =
         serde_json::from_slice(&body_bytes);
     match value {
-        Ok(j) => Ok(Json {
-            inner: j,
-        }),
+        Ok(j) => Ok(Json { inner: j }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse body: {}", e),
@@ -710,9 +704,7 @@ pub struct HttpResponseWrap {
 
 impl HttpResponseWrap {
     fn new(result: HttpHandlerResult) -> HttpResponseWrap {
-        HttpResponseWrap {
-            wrapped: result,
-        }
+        HttpResponseWrap { wrapped: result }
     }
 }
 
@@ -774,6 +766,7 @@ impl<T: HttpResponse> From<T> for HttpResponseWrap {
 pub trait HttpResponse:
     Into<HttpHandlerResult> + Send + Sync + 'static
 {
+    const STATUS_CODE: StatusCode;
 }
 
 /**
@@ -790,6 +783,7 @@ pub struct HttpResponseCreated<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseCreated<T>
 {
+    const STATUS_CODE: StatusCode = StatusCode::CREATED;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
     for HttpHandlerResult
@@ -798,7 +792,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
         HttpResponseCreated(body_object): HttpResponseCreated<T>,
     ) -> HttpHandlerResult {
         /* TODO-correctness (or polish?): add Location header */
-        response_for_object(body_object, StatusCode::CREATED)
+        response_for_object::<HttpResponseCreated<T>, T>(body_object)
     }
 }
 
@@ -811,6 +805,7 @@ pub struct HttpResponseAccepted<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseAccepted<T>
 {
+    const STATUS_CODE: StatusCode = StatusCode::ACCEPTED;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseAccepted<T>>
     for HttpHandlerResult
@@ -818,7 +813,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseAccepted<T>>
     fn from(
         HttpResponseAccepted(body_object): HttpResponseAccepted<T>,
     ) -> HttpHandlerResult {
-        response_for_object(body_object, StatusCode::ACCEPTED)
+        response_for_object::<HttpResponseAccepted<T>, T>(body_object)
     }
 }
 
@@ -831,6 +826,7 @@ pub struct HttpResponseOkObject<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseOkObject<T>
 {
+    const STATUS_CODE: StatusCode = StatusCode::OK;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
     for HttpHandlerResult
@@ -838,7 +834,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
     fn from(
         HttpResponseOkObject(body_object): HttpResponseOkObject<T>,
     ) -> HttpHandlerResult {
-        response_for_object(body_object, StatusCode::OK)
+        response_for_object::<HttpResponseOkObject<T>, T>(body_object)
     }
 }
 
@@ -856,6 +852,7 @@ pub struct HttpResponseOkObjectList<T: Serialize + Send + Sync + 'static>(
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseOkObjectList<T>
 {
+    const STATUS_CODE: StatusCode = StatusCode::OK;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
     for HttpHandlerResult
@@ -870,7 +867,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
         }
 
         Ok(Response::builder()
-            .status(StatusCode::OK)
+            .status(HttpResponseOkObjectList::<T>::STATUS_CODE)
             .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
             .body(bytebuf.freeze().into())?)
     }
@@ -881,11 +878,13 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
  * for use when an API operation has successfully deleted an object.
  */
 pub struct HttpResponseDeleted();
-impl HttpResponse for HttpResponseDeleted {}
+impl HttpResponse for HttpResponseDeleted {
+    const STATUS_CODE: StatusCode = StatusCode::NO_CONTENT;
+}
 impl From<HttpResponseDeleted> for HttpHandlerResult {
     fn from(_: HttpResponseDeleted) -> HttpHandlerResult {
         Ok(Response::builder()
-            .status(StatusCode::NO_CONTENT)
+            .status(HttpResponseDeleted::STATUS_CODE)
             .body(Body::empty())?)
     }
 }
@@ -905,13 +904,12 @@ impl From<HttpResponseUpdatedNoContent> for HttpHandlerResult {
     }
 }
 
-fn response_for_object<T: Serialize>(
+fn response_for_object<S: HttpResponse, T: Serialize>(
     body_object: T,
-    status_code: StatusCode,
 ) -> HttpHandlerResult {
     let serialized = serde_json::to_string(&body_object)?;
     Ok(Response::builder()
-        .status(status_code)
+        .status(S::STATUS_CODE)
         .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
         .body(serialized.into())?)
 }
