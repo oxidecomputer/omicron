@@ -46,6 +46,10 @@ pub struct ServerController {
 }
 
 impl ServerController {
+    /*
+     * TODO-cleanup should this instantiate the ControllerClient it needs?
+     * Should it take a Config object instead of separate id, sim_mode, etc?
+     */
     /** Constructs a simulated ServerController with the given uuid. */
     pub fn new_simulated_with_id(
         id: &Uuid,
@@ -103,23 +107,12 @@ impl ServerController {
     ) -> Result<ApiDiskRuntimeState, ApiError> {
         Ok(self.disks.sim_ensure(&disk_id, initial_state, target).await?)
     }
-}
 
-/**
- * Trait used to expose interfaces for use only by the test suite.
- */
-#[async_trait]
-pub trait ServerControllerTestInterfaces {
-    async fn instance_finish_transition(&self, id: Uuid);
-    async fn disk_finish_transition(&self, id: Uuid);
-}
-
-#[async_trait]
-impl ServerControllerTestInterfaces for ServerController {
-    async fn instance_finish_transition(&self, id: Uuid) {
+    pub async fn instance_poke(&self, id: Uuid) {
         self.instances.sim_poke(id).await;
     }
-    async fn disk_finish_transition(&self, id: Uuid) {
+
+    pub async fn disk_poke(&self, id: Uuid) {
         self.disks.sim_poke(id).await;
     }
 }

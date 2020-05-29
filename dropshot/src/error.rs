@@ -81,11 +81,19 @@ use serde_json::error::Error as SerdeError;
 #[derive(Debug)]
 pub struct HttpError {
     /*
-     * TODO-polish add string error code and coverage in the test suite
+     * TODO-coverage add coverage in the test suite for error_code
+     * TODO-robustness should error_code just be required?  It'll be confusing
+     * to clients if it's missing sometimes.  Should this class be parametrized
+     * by some enum type?
      * TODO-polish add cause chain for a complete log message?
      */
     /** HTTP status code for this error */
     pub status_code: http::StatusCode,
+    /**
+     * Optional string error code for this error.  Callers are advised to
+     * use an enum to populate this field.
+     */
+    pub error_code: Option<String>,
     /** Error message to be sent to API client for this error */
     pub external_message: String,
     /** Error message recorded in the log for this error */
@@ -94,8 +102,9 @@ pub struct HttpError {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HttpErrorResponseBody {
-    pub message: String,
     pub request_id: String,
+    pub error_code: Option<String>,
+    pub message: String,
 }
 
 impl From<SerdeError> for HttpError {
@@ -104,7 +113,7 @@ impl From<SerdeError> for HttpError {
          * TODO-polish it would really be much better to annotate this with
          * context about what we were parsing.
          */
-        HttpError::for_bad_request(format!("invalid input: {}", error))
+        HttpError::for_bad_request(None, format!("invalid input: {}", error))
     }
 }
 
@@ -114,10 +123,10 @@ impl From<HyperError> for HttpError {
          * TODO-correctness dig deeper into the various cases to make sure this
          * is a valid way to represent it.
          */
-        HttpError::for_bad_request(format!(
-            "error processing request: {}",
-            error
-        ))
+        HttpError::for_bad_request(
+            None,
+            format!("error processing request: {}", error),
+        )
     }
 }
 
@@ -127,39 +136,58 @@ impl From<http::Error> for HttpError {
          * TODO-correctness dig deeper into the various cases to make sure this
          * is a valid way to represent it.
          */
-        HttpError::for_bad_request(format!(
-            "error processing request: {}",
-            error
-        ))
+        HttpError::for_bad_request(
+            None,
+            format!("error processing request: {}", error),
+        )
     }
 }
 
 impl HttpError {
-    pub fn for_bad_request(message: String) -> Self {
-        HttpError::for_client_error(http::StatusCode::BAD_REQUEST, message)
+    pub fn for_bad_request(
+        error_code: Option<String>,
+        message: String,
+    ) -> Self {
+        HttpError::for_client_error(
+            error_code,
+            http::StatusCode::BAD_REQUEST,
+            message,
+        )
     }
 
-    pub fn for_status(code: http::StatusCode) -> Self {
+    pub fn for_status(
+        error_code: Option<String>,
+        code: http::StatusCode,
+    ) -> Self {
         /* TODO-polish This should probably be our own message. */
         let message = code.canonical_reason().unwrap().to_string();
-        HttpError::for_client_error(code, message)
+        HttpError::for_client_error(error_code, code, message)
     }
 
-    pub fn for_not_found(internal_message: String) -> Self {
+    pub fn for_not_found(
+        error_code: Option<String>,
+        internal_message: String,
+    ) -> Self {
         let status_code = http::StatusCode::NOT_FOUND;
         let external_message =
             status_code.canonical_reason().unwrap().to_string();
         HttpError {
             status_code,
+            error_code: error_code,
             internal_message,
             external_message,
         }
     }
 
-    pub fn for_client_error(code: http::StatusCode, message: String) -> Self {
+    pub fn for_client_error(
+        error_code: Option<String>,
+        code: http::StatusCode,
+        message: String,
+    ) -> Self {
         assert!(code.is_client_error());
         HttpError {
             status_code: code,
+            error_code: error_code,
             internal_message: message.clone(),
             external_message: message.clone(),
         }
@@ -169,15 +197,20 @@ impl HttpError {
         let code = http::StatusCode::INTERNAL_SERVER_ERROR;
         HttpError {
             status_code: code,
+            error_code: Some(String::from("Internal")),
             external_message: code.canonical_reason().unwrap().to_string(),
             internal_message: message_internal,
         }
     }
 
-    pub fn for_unavail(message_internal: String) -> Self {
+    pub fn for_unavail(
+        error_code: Option<String>,
+        message_internal: String,
+    ) -> Self {
         let code = http::StatusCode::SERVICE_UNAVAILABLE;
         HttpError {
             status_code: code,
+            error_code,
             external_message: code.canonical_reason().unwrap().to_string(),
             internal_message: message_internal,
         }
@@ -206,8 +239,9 @@ impl HttpError {
             .header(super::http_util::HEADER_REQUEST_ID, request_id)
             .body(
                 serde_json::to_string_pretty(&HttpErrorResponseBody {
-                    message: self.external_message,
                     request_id: request_id.to_string(),
+                    message: self.external_message,
+                    error_code: self.error_code,
                 })
                 .unwrap()
                 .into(),

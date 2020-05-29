@@ -134,8 +134,10 @@ mod test {
         let config = read_config(
             "valid",
             r##"
-            [dropshot]
+            [dropshot_external]
             bind_address = "10.1.2.3:4567"
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
             [log]
             mode = "file"
             level = "debug"
@@ -145,8 +147,11 @@ mod test {
         )
         .unwrap();
         assert_eq!(config, ApiServerConfig {
-            dropshot: ConfigDropshot {
+            dropshot_external: ConfigDropshot {
                 bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
+            },
+            dropshot_internal: ConfigDropshot {
+                bind_address: "10.1.2.3:4568".parse::<SocketAddr>().unwrap(),
             },
             log: ConfigLogging::File {
                 level: ConfigLoggingLevel::Debug,

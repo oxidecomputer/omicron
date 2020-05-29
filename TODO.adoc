@@ -3,11 +3,13 @@
 
 = TODO
 
-Current status: working on separating out server controller as a separate
-program to better validate the architecture and better demo what's going on.
+Currently:
 
-* test suite needs to be updated to start separate server controllers
-  as well as the internal _and_ external servers
+* I've made a mess of stuff though with imports and such. See lots of XXXs.
+** new ServerController interface
+** add it to my demo tool!
+** ServerController startup needs to take a flag which indicates how to
+   simulate (auto or explicit)
 * the server-controller binary may need to grow a config+logging mechanism
 * todo: update / rip out built-in SCs? (may as well rip out built-in projects
   too)
@@ -28,6 +30,7 @@ program to better validate the architecture and better demo what's going on.
 ** create separate exports for internal vs. external models
 ** rename entrypoints functions
 ** revisit "Api" prefixes
+** review 'use' statements everywhere, and src/lib.rs especially
 
 API endpoints:
 

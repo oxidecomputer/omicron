@@ -353,7 +353,7 @@ pub struct TestContext {
     pub server: HttpServer,
     pub log: Logger,
     server_task: JoinHandle<Result<(), hyper::error::Error>>,
-    log_context: LogContext,
+    log_context: Option<LogContext>,
 }
 
 impl TestContext {
@@ -368,7 +368,8 @@ impl TestContext {
         api: ApiDescription,
         private: Arc<dyn Any + Send + Sync + 'static>,
         config_dropshot: &ConfigDropshot,
-        log_context: LogContext,
+        log_context: Option<LogContext>,
+        log: Logger,
     ) -> TestContext {
         /*
          * The local bind address TCP port needs to be zero in the test suite or
@@ -383,7 +384,6 @@ impl TestContext {
         /*
          * Set up the server itself.
          */
-        let log = log_context.log.new(o!());
         let mut server =
             HttpServer::new(&config_dropshot, api, private, &log).unwrap();
         let server_task = server.run();
@@ -408,7 +408,9 @@ impl TestContext {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
         join_result.expect("server stopped with an error");
-        self.log_context.cleanup_successful();
+        if let Some(log_context) = self.log_context {
+            log_context.cleanup_successful();
+        }
     }
 }
 

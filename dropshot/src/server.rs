@@ -141,7 +141,9 @@ impl HttpServer {
 
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let graceful = server.with_graceful_shutdown(async move {
-            rx.await.ok();
+            rx.await.expect(
+                "dropshot server shutting down without invoking close()",
+            );
             info!(log_close, "received request to begin graceful shutdown");
         });
 

@@ -360,7 +360,7 @@ impl OxideController {
         _params: &'params ApiInstanceCreateParams,
     ) -> Result<&'se Arc<ServerControllerClient>, ApiError> {
         /* TODO replace this with a real allocation policy. */
-        servers.values().nth(0).ok_or_else(|| ApiError::ResourceNotAvailable {
+        servers.values().nth(0).ok_or_else(|| ApiError::ServiceUnavailable {
             message: String::from("no servers available for new Instance"),
         })
     }
@@ -556,7 +556,7 @@ impl OxideController {
         Ok(Arc::clone(controllers.get(scid).ok_or_else(|| {
             let message =
                 format!("no server controller for server_uuid \"{}\"", scid);
-            ApiError::ResourceNotAvailable {
+            ApiError::ServiceUnavailable {
                 message: message,
             }
         })?))

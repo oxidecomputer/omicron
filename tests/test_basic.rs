@@ -27,7 +27,7 @@ extern crate slog;
 
 #[tokio::test]
 async fn test_basic_failures() {
-    let testctx = test_setup("basic_failures").await;
+    let testctx = test_setup("basic_failures").await.external_api;
 
     /* Error case: GET /nonexistent (a path with no route at all) */
     let error = testctx
@@ -173,7 +173,7 @@ async fn test_basic_failures() {
  */
 #[tokio::test]
 async fn test_projects() {
-    let testctx = test_setup("test_projects").await;
+    let testctx = test_setup("test_projects").await.external_api;
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not

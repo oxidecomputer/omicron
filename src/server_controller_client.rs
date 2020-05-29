@@ -10,6 +10,7 @@ use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::http_client::HttpClient;
+use async_trait::async_trait;
 use http::Method;
 use hyper::Body;
 use serde::Deserialize;
@@ -112,5 +113,35 @@ impl ServerControllerClient {
             )
             .await?;
         Ok(value)
+    }
+}
+
+/**
+ * Trait used to expose interfaces for use only by the test suite.
+ */
+#[async_trait]
+pub trait ServerControllerTestInterfaces {
+    async fn instance_finish_transition(&self, id: Uuid);
+    async fn disk_finish_transition(&self, id: Uuid);
+}
+
+#[async_trait]
+impl ServerControllerTestInterfaces for ServerControllerClient {
+    async fn instance_finish_transition(&self, id: Uuid) {
+        let path = format!("/instances/{}/poke", id);
+        let body = Body::empty();
+        self.client
+            .request(Method::POST, path.as_str(), body)
+            .await
+            .expect("instance_finish_transition() failed unexpectedly");
+    }
+
+    async fn disk_finish_transition(&self, id: Uuid) {
+        let path = format!("/disks/{}/poke", id);
+        let body = Body::empty();
+        self.client
+            .request(Method::POST, path.as_str(), body)
+            .await
+            .expect("instance_finish_transition() failed unexpectedly");
     }
 }

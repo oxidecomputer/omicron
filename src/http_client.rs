@@ -76,10 +76,7 @@ impl HttpClient {
 
         let error_body: HttpErrorResponseBody =
             self.read_json(&error_message_base, &mut response).await?;
-        /* XXX Should this parse an error code out? */
-        Err(ApiError::DependencyError {
-            message: error_body.message,
-        })
+        Err(ApiError::from_response(error_message_base, error_body))
     }
 
     /*
@@ -122,7 +119,7 @@ fn convert_error<E: Display>(
     action: &str,
     error: E,
 ) -> ApiError {
-    ApiError::ResourceNotAvailable {
+    ApiError::ServiceUnavailable {
         message: format!("{}: {}: {}", error_message_base, action, error),
     }
 }

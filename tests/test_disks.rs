@@ -43,7 +43,8 @@ extern crate slog;
  */
 #[tokio::test]
 async fn test_disks() {
-    let testctx = test_setup("test_disks").await;
+    let cptestctx = test_setup("test_disks").await;
+    let testctx = &cptestctx.external_api;
     let client = &testctx.client_testctx;
     let apictx = ApiContext::from_server(&testctx.server);
     let controller = &apictx.controller;
@@ -530,6 +531,8 @@ async fn test_disks() {
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
         .await;
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
+
+    cptestctx.teardown().await;
 }
 
 async fn disk_get(testctx: &TestContext, disk_url: &str) -> ApiDiskView {

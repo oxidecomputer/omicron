@@ -10,8 +10,6 @@ use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::server_controller_client::DiskEnsureBody;
 use crate::server_controller_client::InstanceEnsureBody;
-use controller_client::ControllerClient;
-use server_controller::ServerController;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -20,6 +18,7 @@ use dropshot::ConfigLogging;
 use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseOkObject;
+use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Json;
 use dropshot::Path;
 use dropshot::RequestContext;
@@ -31,7 +30,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub use server_controller::ServerControllerTestInterfaces;
+pub use controller_client::ControllerClient;
+pub use server_controller::ServerController;
 
 /**
  * How this `ServerController` simulates object states and transitions.
@@ -96,7 +96,7 @@ pub async fn run_server_controller_api_server(
     let my_address = config.dropshot.bind_address.clone();
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
-        dropshot_api(),
+        sc_dropshot_api(),
         sc,
         &dropshot_log,
     )
@@ -131,10 +131,12 @@ fn rqctx_to_sc(rqctx: &Arc<RequestContext>) -> Arc<ServerController> {
  * HTTP API functions
  */
 
-fn dropshot_api() -> ApiDescription {
+pub fn sc_dropshot_api() -> ApiDescription {
     let mut api = ApiDescription::new();
-    api.register(scapi_instance_ensure).unwrap();
-    api.register(scapi_disk_ensure).unwrap();
+    api.register(scapi_instance_put).unwrap();
+    api.register(scapi_instance_poke_post).unwrap();
+    api.register(scapi_disk_put).unwrap();
+    api.register(scapi_disk_poke_post).unwrap();
     api
 }
 
@@ -147,7 +149,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn scapi_instance_ensure(
+async fn scapi_instance_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
     body: Json<InstanceEnsureBody>,
@@ -165,6 +167,20 @@ async fn scapi_instance_ensure(
     ))
 }
 
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/poke",
+}]
+async fn scapi_instance_poke_post(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sc = rqctx_to_sc(&rqctx);
+    let instance_id = path_params.into_inner().instance_id;
+    sc.instance_poke(instance_id).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 #[derive(Deserialize, ExtractedParameter)]
 struct DiskPathParam {
     disk_id: Uuid,
@@ -174,7 +190,7 @@ struct DiskPathParam {
     method = PUT,
     path = "/disks/{disk_id}",
 }]
-async fn scapi_disk_ensure(
+async fn scapi_disk_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<DiskPathParam>,
     body: Json<DiskEnsureBody>,
@@ -190,4 +206,18 @@ async fn scapi_disk_ensure(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/disks/{disk_id}/poke",
+}]
+async fn scapi_disk_poke_post(
+    rqctx: Arc<RequestContext>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sc = rqctx_to_sc(&rqctx);
+    let disk_id = path_params.into_inner().disk_id;
+    sc.disk_poke(disk_id).await;
+    Ok(HttpResponseUpdatedNoContent())
 }

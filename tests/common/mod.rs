@@ -4,16 +4,93 @@
 
 use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
+use dropshot::ConfigDropshot;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
+use oxide_api_prototype::sc_dropshot_api;
 use oxide_api_prototype::ApiServerConfig;
+use oxide_api_prototype::ControllerClient;
+use oxide_api_prototype::ServerController;
 use oxide_api_prototype::SimMode;
+/* XXX reveals this is really an implementation detail */
+use oxide_api_prototype::ApiServerStartupInfo;
+use slog::Logger;
+use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
+
+const SERVER_CONTROLLER_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
+const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+
+pub struct ControlPlaneTestContext {
+    pub external_api: TestContext,
+    pub internal_api: TestContext,
+    pub server_controller: TestContext,
+    logctx: LogContext,
+}
+
+impl ControlPlaneTestContext {
+    pub async fn teardown(self) {
+        self.external_api.teardown().await;
+        self.internal_api.teardown().await;
+        self.server_controller.teardown().await;
+        self.logctx.cleanup_successful();
+    }
+}
 
 /**
  * Set up a `TestContext` for running tests against the API server.
+ *
+ * XXX There are a bunch of problems here:
+ *
+ * - We're not setting up the controller's internal API server
+ * - We're not setting up the server controller.
+ *
+ *
+ * - Server controller startup requires:
+ *     - start with file for log config, override as needed
+ *     - instantiate ServerController
+ *       - instantiate ControllerClient
+ *     - construct dropshot description
+ *     - start dropshot server
+ *     - loop: make request to controller until it succeeds
+ *     - wait for server to exit and return result
+ *
+ * - Test suite controller startup currently requires:
+ *     - start with file for log config, override as needed
+ *     - construct dropshot description
+ *     - create log context with the config
+ *     - create ApiContext
+ *       - and populate initial data
+ *     - create testcontext
+ *       - start dropshot server
+ *       - set up client test context
+ *
+ * - Controller startup currently does:
+ *     - read config and set up logger
+ *     - create ApiContext
+ *       - and populate with initial data
+ *     - start dropshot server for external interface
+ *       - construct api description
+ *     - start dropshot server for internal interface
+ *       - construct api description
+ *     - wait for both servers to stop
+ *
+ * For controller startup, what's below (test suite) just needs to be modified
+ * to start the internal dropshot server.
+ *
+ * What's common to all three?
+ * - read some log file
+ * X test suites only: munge config
+ * X instantiate some specific kind of thing (ServerController/ApiContext)
+ * - EITHER:
+ *   - start server(s) and wait for them (non-test-suite)
+ *   - instantiate a testcontext for one, start server for the other
+ * X binaries only: wait for completion
+ *
+ * There might not be as much room for commonizing as I think.
  */
-pub async fn test_setup(test_name: &str) -> TestContext {
+pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     /*
      * We load as much configuration as we can from the test suite configuration
      * file.  In practice, TestContext requires that the TCP port be 0 and that
@@ -27,15 +104,111 @@ pub async fn test_setup(test_name: &str) -> TestContext {
     let config_file_path = Path::new("tests/config.test.toml");
     let config = ApiServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    let api = oxide_api_prototype::dropshot_api_external();
-    let rack_id_str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
-    let rack_id = Uuid::parse_str(rack_id_str).unwrap();
+    let api_external = oxide_api_prototype::dropshot_api_external();
+    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let logctx = LogContext::new(test_name, &config.log);
     let log = logctx.log.new(o!());
     let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
-    oxide_api_prototype::populate_initial_data(&apictx, SimMode::Explicit)
-        .await;
-    TestContext::new(api, apictx, &config.dropshot_external, logctx)
+    oxide_api_prototype::populate_initial_data(&apictx).await;
+    let apictx_clone = Arc::clone(&apictx);
+    let tc_external = TestContext::new(
+        api_external,
+        apictx_clone,
+        &config.dropshot_external,
+        None,
+        logctx.log.new(o!()),
+    );
+
+    /*
+     * Dropshot's TestContext sets up the external server.  We have to set up
+     * the internal server ourselves.  We don't (currently) need a TestContext
+     * for it because we're not going to invoke it directly.
+     */
+    let apictx_clone = Arc::clone(&apictx);
+    let api_internal = oxide_api_prototype::dropshot_api_internal();
+    let tc_internal = TestContext::new(
+        api_internal,
+        apictx_clone,
+        &config.dropshot_internal,
+        None,
+        logctx.log.new(o!()),
+    );
+
+    /* Set up a single server controller. */
+    let sc_id = Uuid::parse_str(SERVER_CONTROLLER_UUID).unwrap();
+    let sc = start_server_controller(
+        logctx.log.new(o!(
+            "component" => "server_controller",
+            "server" => sc_id.to_string(),
+        )),
+        tc_internal.server.local_addr(),
+        sc_id.clone(),
+    )
+    .await
+    .unwrap();
+
+    ControlPlaneTestContext {
+        external_api: tc_external,
+        internal_api: tc_internal,
+        server_controller: sc,
+        logctx: logctx,
+    }
+}
+
+/* XXX most of this is copied from run_server_controller_api_server() */
+/*
+ * XXX might the commonization be simpler if we provide:
+ * - a common function that waits for a server to stop and produces a sane error
+ * - a common function that takes two Tasks and waits for them both and produces
+ *   a single unified error
+ * (the first of these currently appears in the run_server() functions for both
+ * controller and server_controller, and the second appears in server_controller
+ * but could appear both there and below, in the test suite)
+ */
+pub async fn start_server_controller(
+    log: Logger,
+    controller_address: SocketAddr,
+    id: Uuid,
+) -> Result<TestContext, String> {
+    /*
+     * XXX use of "component" is overloaded -- caller sets it to
+     * "server_controller"
+     */
+    let dropshot_log = log.new(o!("component" => "dropshot"));
+    let sc_log = log.new(o!(
+        "component" => "server_controller",
+        "server" => id.to_string(),
+    ));
+
+    let client_log = log.new(o!("component" => "controller_client"));
+    let controller_client =
+        Arc::new(ControllerClient::new(controller_address.clone(), client_log));
+
+    let sc = Arc::new(ServerController::new_simulated_with_id(
+        &id,
+        SimMode::Explicit,
+        sc_log,
+        Arc::clone(&controller_client),
+    ));
+
+    let config_dropshot = ConfigDropshot {
+        bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+    };
+    let api = sc_dropshot_api();
+
+    let rv = TestContext::new(api, sc, &config_dropshot, None, dropshot_log);
+
+    /*
+     * TODO this could happen continuously until it succeeds, but it should be
+     * bounded (unlike the case when run as a standalone executable).
+     */
+    controller_client
+        .notify_server_online(id.clone(), ApiServerStartupInfo {
+            sc_address: rv.server.local_addr(),
+        })
+        .await
+        .unwrap();
+    Ok(rv)
 }
 
 /** Returns whether the two identity metadata objects are identical. */

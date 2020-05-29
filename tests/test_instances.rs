@@ -36,7 +36,8 @@ extern crate slog;
 
 #[tokio::test]
 async fn test_instances() {
-    let testctx = test_setup("test_instances").await;
+    let cptestctx = test_setup("test_instances").await; 
+    let testctx = &cptestctx.external_api;
     let apictx = ApiContext::from_server(&testctx.server);
     let controller = &apictx.controller;
 
@@ -405,7 +406,7 @@ async fn test_instances() {
         .message
         .starts_with("unable to parse body: invalid value: integer `-3`"));
 
-    testctx.teardown().await;
+    cptestctx.teardown().await;
 }
 
 async fn instance_get(
