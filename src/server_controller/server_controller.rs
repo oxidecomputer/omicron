@@ -57,7 +57,7 @@ impl ServerController {
         log: Logger,
         ctlsc: Arc<ControllerClient>,
     ) -> ServerController {
-        info!(&log, "created server controller");
+        info!(&log, "created server controller"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
         let disk_log = log.new(o!("kind" => "disks"));

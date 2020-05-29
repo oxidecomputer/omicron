@@ -28,6 +28,15 @@ async fn main() {
 async fn do_run() -> Result<(), String> {
     let matches = App::new("server_controller")
         .after_help("See README.adoc for more information")
+        .arg(
+            Arg::with_name("sim-mode")
+                .long("sim-mode")
+                .takes_value(true)
+                .help("automatically simulate transitions")
+                .possible_value("auto")
+                .possible_value("explicit")
+                .default_value("auto"),
+        )
         .arg(Arg::with_name("SC_UUID").required(true).index(1))
         .arg(Arg::with_name("SC_IP:PORT").required(true).index(2))
         .arg(Arg::with_name("CONTROLLER_IP:PORT").required(true).index(3))
@@ -56,9 +65,17 @@ async fn do_run() -> Result<(), String> {
             .map_err(|e| format!("parsing CONTROLLER_IP:PORT: {}", e))?
     };
 
+    let sim_mode = match matches.value_of("sim-mode").unwrap() {
+        "auto" => SimMode::Auto,
+        mode => {
+            assert_eq!(mode, "explicit");
+            SimMode::Explicit
+        }
+    };
+
     let config = ConfigServerController {
         id: sc_id,
-        sim_mode: SimMode::Auto,
+        sim_mode,
         controller_address: controller_addr,
         dropshot: ConfigDropshot {
             bind_address: sc_addr,

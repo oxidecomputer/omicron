@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 pub struct ServerControllerClient {
     pub id: Uuid,
+    pub service_address: SocketAddr,
     client: HttpClient,
 }
 
@@ -47,6 +48,7 @@ impl ServerControllerClient {
     ) -> ServerControllerClient {
         ServerControllerClient {
             id: id.clone(),
+            service_address: server_addr.clone(),
             client: HttpClient::new("server controller", server_addr, log),
         }
     }

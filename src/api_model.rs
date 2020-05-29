@@ -13,6 +13,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
@@ -736,6 +737,7 @@ pub struct ApiRackView {
  */
 pub struct ApiServer {
     pub id: Uuid,
+    pub service_address: SocketAddr,
 }
 
 impl ApiObject for ApiServer {
@@ -743,6 +745,7 @@ impl ApiObject for ApiServer {
     fn to_view(&self) -> ApiServerView {
         ApiServerView {
             id: self.id.clone(),
+            service_address: self.service_address.clone(),
         }
     }
 }
@@ -751,6 +754,7 @@ impl ApiObject for ApiServer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiServerView {
     pub id: Uuid,
+    pub service_address: SocketAddr,
 }
 
 #[cfg(test)]

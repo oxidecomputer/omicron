@@ -1004,8 +1004,10 @@ impl OxideController {
         let servers = collection_page(&controllers, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sc| {
+                let sc = sc.unwrap();
                 Ok(Arc::new(ApiServer {
-                    id: sc.unwrap().id,
+                    id: sc.id,
+                    service_address: sc.service_address,
                 }))
             })
             .collect::<Vec<Result<Arc<ApiServer>, ApiError>>>()
@@ -1024,6 +1026,7 @@ impl OxideController {
 
         Ok(Arc::new(ApiServer {
             id: sc.id,
+            service_address: sc.service_address,
         }))
     }
 
