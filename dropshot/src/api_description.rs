@@ -38,7 +38,7 @@ impl<'a> ApiEndpoint {
     where
         HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
         FuncParams: Extractor + 'static,
-        ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+        ResponseType: HttpResponseWrap + Send + Sync + 'static,
     {
         ApiEndpoint {
             handler: HttpRouteHandler::new(handler),
