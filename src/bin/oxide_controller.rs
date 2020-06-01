@@ -14,12 +14,13 @@
  * - Move even more of the server setup into api_server.rs
  */
 
+use clap::{App, Arg};
+use oxide_api_prototype::controller_run_openapi_external;
+use oxide_api_prototype::controller_run_server;
+use oxide_api_prototype::ControllerServerConfig;
 use std::io::{stderr, Write};
 use std::path::Path;
 use std::process::exit;
-
-use clap::{App, Arg};
-use oxide_api_prototype::ControllerServerConfig;
 
 #[tokio::main]
 async fn main() {
@@ -53,11 +54,9 @@ async fn main() {
     };
 
     if matches.is_present("openapi") {
-        oxide_api_prototype::controller_run_openapi_external();
+        controller_run_openapi_external();
     } else {
-        if let Err(error) =
-            oxide_api_prototype::controller_run_server(&config).await
-        {
+        if let Err(error) = controller_run_server(&config).await {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
             exit(1);
         }
