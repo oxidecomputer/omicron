@@ -3,12 +3,14 @@
  */
 
 mod server_controller;
+mod server_controller_client;
 
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiServerStartupInfo;
-use crate::server_controller_client::DiskEnsureBody;
-use crate::server_controller_client::InstanceEnsureBody;
+
+use server_controller_client::DiskEnsureBody;
+use server_controller_client::InstanceEnsureBody;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -31,6 +33,8 @@ use uuid::Uuid;
 
 pub use crate::ControllerClient;
 pub use server_controller::ServerController;
+pub use server_controller_client::ServerControllerClient;
+pub use server_controller_client::ServerControllerTestInterfaces;
 
 /**
  * How this `ServerController` simulates object states and transitions.

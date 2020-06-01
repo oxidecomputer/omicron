@@ -27,13 +27,13 @@ use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
+use crate::api_model::ObjectStream;
 use crate::api_model::PaginationParams;
 use crate::api_model::UpdateResult;
-use crate::api_model::ObjectStream;
 
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
-use crate::server_controller_client::ServerControllerClient;
+use crate::ServerControllerClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;

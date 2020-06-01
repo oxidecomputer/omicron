@@ -7,7 +7,7 @@ use super::ControllerServerContext;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiServerStartupInfo;
-use crate::server_controller_client::ServerControllerClient;
+use crate::ServerControllerClient;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ExtractedParameter;
