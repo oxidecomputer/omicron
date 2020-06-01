@@ -6,7 +6,7 @@ use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ConfigDropshot;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
-use oxide_api_prototype::sc_dropshot_api;
+use oxide_api_prototype::sc_api;
 use oxide_api_prototype::ControllerClient;
 use oxide_api_prototype::ControllerServerConfig;
 use oxide_api_prototype::ServerController;
@@ -143,7 +143,7 @@ pub async fn start_server_controller(
     let config_dropshot = ConfigDropshot {
         bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
     };
-    let api = sc_dropshot_api();
+    let api = sc_api();
 
     let rv = TestContext::new(api, sc, &config_dropshot, None, dropshot_log);
 

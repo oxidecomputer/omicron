@@ -9,12 +9,12 @@ use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
+use crate::api_model::DiskEnsureBody;
+use crate::api_model::InstanceEnsureBody;
 use crate::http_client::HttpClient;
 use async_trait::async_trait;
 use http::Method;
 use hyper::Body;
-use serde::Deserialize;
-use serde::Serialize;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,20 +24,6 @@ pub struct ServerControllerClient {
     pub id: Uuid,
     pub service_address: SocketAddr,
     client: HttpClient,
-}
-
-/* TODO-cleanup does this belong here? */
-#[derive(Serialize, Deserialize)]
-pub struct InstanceEnsureBody {
-    pub initial_runtime: ApiInstanceRuntimeState,
-    pub target: ApiInstanceRuntimeStateRequested,
-}
-
-/* TODO-cleanup does this belong here? */
-#[derive(Serialize, Deserialize)]
-pub struct DiskEnsureBody {
-    pub initial_runtime: ApiDiskRuntimeState,
-    pub target: ApiDiskStateRequested,
 }
 
 impl ServerControllerClient {

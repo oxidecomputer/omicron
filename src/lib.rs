@@ -25,7 +25,7 @@ pub use controller::OxideControllerTestInterfaces;
 
 pub use api_model::ApiServerStartupInfo;
 pub use server_controller::run_server_controller_api_server;
-pub use server_controller::sc_dropshot_api;
+pub use server_controller::sc_api;
 pub use server_controller::ConfigServerController;
 pub use server_controller::ServerController;
 pub use server_controller::ServerControllerClient;

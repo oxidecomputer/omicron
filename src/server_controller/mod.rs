@@ -2,36 +2,22 @@
  * Library interface to the server controller mechanisms.
  */
 
+mod http_entrypoints;
 mod server_controller;
 mod server_controller_client;
 
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiServerStartupInfo;
 
-use server_controller_client::DiskEnsureBody;
-use server_controller_client::InstanceEnsureBody;
-
-use dropshot::endpoint;
-use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use dropshot::ExtractedParameter;
-use dropshot::HttpError;
-use dropshot::HttpResponseOkObject;
-use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::Json;
-use dropshot::Path;
-use dropshot::RequestContext;
-use http::Method;
 use serde::Deserialize;
 use serde::Serialize;
-use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
 pub use crate::ControllerClient;
+pub use http_entrypoints::sc_api;
 pub use server_controller::ServerController;
 pub use server_controller_client::ServerControllerClient;
 pub use server_controller_client::ServerControllerTestInterfaces;
@@ -99,7 +85,7 @@ pub async fn run_server_controller_api_server(
     let my_address = config.dropshot.bind_address.clone();
     let mut http_server = dropshot::HttpServer::new(
         &config.dropshot,
-        sc_dropshot_api(),
+        http_entrypoints::sc_api(),
         sc,
         &dropshot_log,
     )
@@ -121,106 +107,4 @@ pub async fn run_server_controller_api_server(
     let server_result = join_handle
         .map_err(|error| format!("waiting for server: {}", error))?;
     server_result.map_err(|error| format!("server stopped: {}", error))
-}
-
-/* TODO-cleanup commonize with ApiContext::from_private? */
-fn rqctx_to_sc(rqctx: &Arc<RequestContext>) -> Arc<ServerController> {
-    let ctx: Arc<dyn Any + Send + Sync + 'static> =
-        Arc::clone(&rqctx.server.private);
-    ctx.downcast::<ServerController>().expect("wrong type for private data")
-}
-
-/*
- * HTTP API functions
- */
-
-pub fn sc_dropshot_api() -> ApiDescription {
-    let mut api = ApiDescription::new();
-    api.register(scapi_instance_put).unwrap();
-    api.register(scapi_instance_poke_post).unwrap();
-    api.register(scapi_disk_put).unwrap();
-    api.register(scapi_disk_poke_post).unwrap();
-    api
-}
-
-#[derive(Deserialize, ExtractedParameter)]
-struct InstancePathParam {
-    instance_id: Uuid,
-}
-
-#[endpoint {
-    method = PUT,
-    path = "/instances/{instance_id}",
-}]
-async fn scapi_instance_put(
-    rqctx: Arc<RequestContext>,
-    path_params: Path<InstancePathParam>,
-    body: Json<InstanceEnsureBody>,
-) -> Result<HttpResponseOkObject<ApiInstanceRuntimeState>, HttpError> {
-    let sc = rqctx_to_sc(&rqctx);
-    let instance_id = path_params.into_inner().instance_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(
-        sc.instance_ensure(
-            instance_id,
-            body_args.initial_runtime.clone(),
-            body_args.target.clone(),
-        )
-        .await?,
-    ))
-}
-
-#[endpoint {
-    method = POST,
-    path = "/instances/{instance_id}/poke",
-}]
-async fn scapi_instance_poke_post(
-    rqctx: Arc<RequestContext>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sc = rqctx_to_sc(&rqctx);
-    let instance_id = path_params.into_inner().instance_id;
-    sc.instance_poke(instance_id).await;
-    Ok(HttpResponseUpdatedNoContent())
-}
-
-#[derive(Deserialize, ExtractedParameter)]
-struct DiskPathParam {
-    disk_id: Uuid,
-}
-
-#[endpoint {
-    method = PUT,
-    path = "/disks/{disk_id}",
-}]
-async fn scapi_disk_put(
-    rqctx: Arc<RequestContext>,
-    path_params: Path<DiskPathParam>,
-    body: Json<DiskEnsureBody>,
-) -> Result<HttpResponseOkObject<ApiDiskRuntimeState>, HttpError> {
-    let sc = rqctx_to_sc(&rqctx);
-    let disk_id = path_params.into_inner().disk_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(
-        sc.disk_ensure(
-            disk_id,
-            body_args.initial_runtime.clone(),
-            body_args.target.clone(),
-        )
-        .await?,
-    ))
-}
-
-#[endpoint {
-    method = POST,
-    path = "/disks/{disk_id}/poke",
-}]
-async fn scapi_disk_poke_post(
-    rqctx: Arc<RequestContext>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sc = rqctx_to_sc(&rqctx);
-    let disk_id = path_params.into_inner().disk_id;
-    sc.disk_poke(disk_id).await;
-    Ok(HttpResponseUpdatedNoContent())
 }

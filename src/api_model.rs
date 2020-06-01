@@ -795,6 +795,19 @@ pub struct ApiServerStartupInfo {
     pub sc_address: SocketAddr,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct InstanceEnsureBody {
+    pub initial_runtime: ApiInstanceRuntimeState,
+    pub target: ApiInstanceRuntimeStateRequested,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DiskEnsureBody {
+    pub initial_runtime: ApiDiskRuntimeState,
+    pub target: ApiDiskStateRequested,
+}
+
+
 #[cfg(test)]
 mod test {
     use super::ApiByteCount;

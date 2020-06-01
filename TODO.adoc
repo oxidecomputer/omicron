@@ -33,10 +33,11 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* polish up for more help
-** improved documentation, especially design docs, structural docs
-** improve naming (e.g., around "api", "oxide-api-prototype")
+* deferred cleanup / polish up for more help
 ** rip out built-in projects
+** improve naming (e.g., around "api", "oxide-api-prototype", "controller",
+   "server")
+** improved documentation, especially design docs, structural docs
 * flesh out controller - server-controller interaction:
 ** server controller startup should trigger restoring instances and disks
 ** server controller should retry the startup request until it succeeds
