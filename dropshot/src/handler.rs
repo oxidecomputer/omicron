@@ -329,8 +329,8 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params {
         {
             let response: ResponseType =
                 (self)(rqctx, $(_param_tuple.$i,)*).await?;
-                response.to_result()
-                /*
+            response.to_result()
+            /*
             let response_as_wrap: HttpResponseWrap = response.into();
             response_as_wrap.into()
             */
