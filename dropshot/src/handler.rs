@@ -766,6 +766,7 @@ impl<T: HttpResponse> From<T> for HttpResponseWrap {
 pub trait HttpResponse:
     Into<HttpHandlerResult> + Send + Sync + 'static
 {
+    type Body;
     const STATUS_CODE: StatusCode;
 }
 
@@ -783,6 +784,7 @@ pub struct HttpResponseCreated<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseCreated<T>
 {
+    type Body = T;
     const STATUS_CODE: StatusCode = StatusCode::CREATED;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
@@ -805,6 +807,7 @@ pub struct HttpResponseAccepted<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseAccepted<T>
 {
+    type Body = T;
     const STATUS_CODE: StatusCode = StatusCode::ACCEPTED;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseAccepted<T>>
@@ -826,6 +829,7 @@ pub struct HttpResponseOkObject<T: Serialize + Send + Sync + 'static>(pub T);
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseOkObject<T>
 {
+    type Body = T;
     const STATUS_CODE: StatusCode = StatusCode::OK;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
@@ -852,6 +856,7 @@ pub struct HttpResponseOkObjectList<T: Serialize + Send + Sync + 'static>(
 impl<T: Serialize + Send + Sync + 'static> HttpResponse
     for HttpResponseOkObjectList<T>
 {
+    type Body = T;
     const STATUS_CODE: StatusCode = StatusCode::OK;
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
@@ -879,6 +884,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
  */
 pub struct HttpResponseDeleted();
 impl HttpResponse for HttpResponseDeleted {
+    type Body = ();
     const STATUS_CODE: StatusCode = StatusCode::NO_CONTENT;
 }
 impl From<HttpResponseDeleted> for HttpHandlerResult {
