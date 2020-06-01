@@ -7,8 +7,8 @@ use dropshot::test_util::TestContext;
 use dropshot::ConfigDropshot;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::sc_dropshot_api;
-use oxide_api_prototype::ApiServerConfig;
 use oxide_api_prototype::ControllerClient;
+use oxide_api_prototype::ControllerServerConfig;
 use oxide_api_prototype::ServerController;
 use oxide_api_prototype::SimMode;
 /* XXX reveals this is really an implementation detail */
@@ -50,13 +50,14 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * usefully configured (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = ApiServerConfig::from_file(config_file_path)
+    let config = ControllerServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    let api_external = oxide_api_prototype::dropshot_api_external();
+    let api_external = oxide_api_prototype::controller_external_api();
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let logctx = LogContext::new(test_name, &config.log);
     let log = logctx.log.new(o!());
-    let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
+    let apictx =
+        oxide_api_prototype::ControllerServerContext::new(&rack_id, log);
     oxide_api_prototype::populate_initial_data(&apictx).await;
     let apictx_clone = Arc::clone(&apictx);
     let tc_external = TestContext::new(
@@ -73,7 +74,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * for it because we're not going to invoke it directly.
      */
     let apictx_clone = Arc::clone(&apictx);
-    let api_internal = oxide_api_prototype::dropshot_api_internal();
+    let api_internal = oxide_api_prototype::controller_internal_api();
     let tc_internal = TestContext::new(
         api_internal,
         apictx_clone,

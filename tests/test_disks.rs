@@ -16,7 +16,7 @@ use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
-use oxide_api_prototype::ApiContext;
+use oxide_api_prototype::ControllerServerContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
 use oxide_api_prototype::ServerControllerTestInterfaces;
@@ -46,7 +46,7 @@ async fn test_disks() {
     let cptestctx = test_setup("test_disks").await;
     let testctx = &cptestctx.external_api;
     let client = &testctx.client_testctx;
-    let apictx = ApiContext::from_server(&testctx.server);
+    let apictx = ControllerServerContext::from_server(&testctx.server);
     let controller = &apictx.controller;
 
     /* Create a project for testing. */

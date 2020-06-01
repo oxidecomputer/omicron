@@ -2,11 +2,12 @@
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
 
+use super::ControllerServerContext;
+
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiServerStartupInfo;
 use crate::server_controller_client::ServerControllerClient;
-use crate::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ExtractedParameter;
@@ -20,9 +21,15 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub fn api_register_entrypoints_internal(
-    api: &mut ApiDescription,
-) -> Result<(), String> {
+pub fn controller_internal_api() -> ApiDescription {
+    let mut api = ApiDescription::new();
+    if let Err(err) = register_endpoints(&mut api) {
+        panic!("failed to register entrypoints: {}", err);
+    }
+    api
+}
+
+fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
     api.register(cpapi_servers_post)?;
     api.register(cpapi_instances_put)?;
     api.register(cpapi_disks_put)?;
@@ -46,7 +53,7 @@ async fn cpapi_servers_post(
     path_params: Path<ServerPathParam>,
     server_info: Json<ApiServerStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ApiContext::from_request(&rqctx);
+    let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let si = server_info.into_inner();
@@ -80,7 +87,7 @@ async fn cpapi_instances_put(
     path_params: Path<InstancePathParam>,
     new_runtime_state: Json<ApiInstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ApiContext::from_request(&rqctx);
+    let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
@@ -105,7 +112,7 @@ async fn cpapi_disks_put(
     path_params: Path<DiskPathParam>,
     new_runtime_state: Json<ApiDiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ApiContext::from_request(&rqctx);
+    let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();

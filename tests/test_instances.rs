@@ -13,7 +13,7 @@ use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
-use oxide_api_prototype::ApiContext;
+use oxide_api_prototype::ControllerServerContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
 use oxide_api_prototype::ServerControllerTestInterfaces;
@@ -38,7 +38,7 @@ extern crate slog;
 async fn test_instances() {
     let cptestctx = test_setup("test_instances").await;
     let testctx = &cptestctx.external_api;
-    let apictx = ApiContext::from_server(&testctx.server);
+    let apictx = ControllerServerContext::from_server(&testctx.server);
     let controller = &apictx.controller;
 
     /* Create a project that we'll use for testing. */

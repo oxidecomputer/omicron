@@ -15,10 +15,11 @@
  */
 
 use std::io::{stderr, Write};
+use std::path::Path;
 use std::process::exit;
 
 use clap::{App, Arg};
-use oxide_api_prototype::ApiServerConfig;
+use oxide_api_prototype::ControllerServerConfig;
 
 #[tokio::main]
 async fn main() {
@@ -42,21 +43,23 @@ async fn main() {
     };
 
     let config_file = matches.value_of("CONFIG_FILE_PATH").unwrap();
-    let config_file_path = std::path::Path::new(config_file);
-    let config = match ApiServerConfig::from_file(config_file_path) {
+    let config_file_path = Path::new(config_file);
+    let config = match ControllerServerConfig::from_file(config_file_path) {
         Ok(c) => c,
         Err(error) => {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-            std::process::exit(1);
+            exit(1);
         }
     };
 
     if matches.is_present("openapi") {
-        oxide_api_prototype::run_openapi_external();
+        oxide_api_prototype::controller_run_openapi_external();
     } else {
-        if let Err(error) = oxide_api_prototype::run_server(&config).await {
+        if let Err(error) =
+            oxide_api_prototype::controller_run_server(&config).await
+        {
             eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-            std::process::exit(1);
+            exit(1);
         }
     }
 }

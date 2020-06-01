@@ -23,49 +23,27 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiServer;
+use crate::api_model::CreateResult;
+use crate::api_model::DeleteResult;
+use crate::api_model::ListResult;
+use crate::api_model::LookupResult;
+use crate::api_model::PaginationParams;
+use crate::api_model::UpdateResult;
+use crate::api_model::ObjectStream;
+
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
 use crate::server_controller_client::ServerControllerClient;
 use async_trait::async_trait;
 use chrono::Utc;
-use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::future::TryFutureExt;
 use futures::lock::Mutex;
-use futures::stream::Stream;
 use futures::stream::StreamExt;
-use serde::Deserialize;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
-
-/*
- * These type aliases exist primarily to make it easier to be consistent about
- * return values from this module.
- */
-
-/** Result of a create operation for the specified type. */
-pub type CreateResult<T> = Result<Arc<T>, ApiError>;
-/** Result of a delete operation for the specified type. */
-pub type DeleteResult = Result<(), ApiError>;
-/** Result of a list operation that returns an ObjectStream. */
-pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
-/** Result of a lookup operation for the specified type. */
-pub type LookupResult<T> = Result<Arc<T>, ApiError>;
-/** Result of an update operation for the specified type. */
-pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
-
-/** A stream of Results, each potentially representing an object in the API. */
-pub type ObjectStream<T> =
-    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
-
-#[derive(Deserialize, ExtractedParameter)]
-pub struct PaginationParams<NameType> {
-    pub marker: Option<NameType>,
-    pub limit: Option<usize>,
-}
 
 /**
  * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),

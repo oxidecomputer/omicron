@@ -6,6 +6,7 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use futures::stream::Stream;
 use serde::Deserialize;
 use serde::Serialize;
 use std::convert::TryFrom;
@@ -14,11 +15,39 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
 use dropshot::ExtractedParameter;
+
+/*
+ * These type aliases exist primarily to make it easier to be consistent about
+ * return values from this module.
+ */
+
+/** Result of a create operation for the specified type. */
+pub type CreateResult<T> = Result<Arc<T>, ApiError>;
+/** Result of a delete operation for the specified type. */
+pub type DeleteResult = Result<(), ApiError>;
+/** Result of a list operation that returns an ObjectStream. */
+pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
+/** Result of a lookup operation for the specified type. */
+pub type LookupResult<T> = Result<Arc<T>, ApiError>;
+/** Result of an update operation for the specified type. */
+pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
+
+/** A stream of Results, each potentially representing an object in the API. */
+pub type ObjectStream<T> =
+    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+
+#[derive(Deserialize, ExtractedParameter)]
+pub struct PaginationParams<NameType> {
+    pub marker: Option<NameType>,
+    pub limit: Option<usize>,
+}
 
 /** Default maximum number of items per page of "list" results */
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
@@ -756,7 +785,6 @@ pub struct ApiServerView {
     pub id: Uuid,
     pub service_address: SocketAddr,
 }
-
 
 /*
  * Internal Control Plane API objects
