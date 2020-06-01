@@ -5,6 +5,14 @@
 
 Currently:
 
+* in the process of refactoring controller startup -- see "new" file
+** working out the test suite changes needed
+* todo: refactor server controller startup similarly
+* some renames:
+** ControllerServerConfig -> ConfigController
+** run_server_controller_api_server -> sc_run_server()
+** "controller" => "oxide_controller"?
+** other things that just say Controller should be OxideController?
 * Review XXXs, TODOs
 
 API endpoints:

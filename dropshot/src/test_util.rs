@@ -482,11 +482,10 @@ pub async fn read_string(response: &mut Response<Body>) -> String {
  * Fetches a single resource from the API.
  */
 pub async fn object_get<T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     object_url: &str,
 ) -> T {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_with_body(
             Method::GET,
             &object_url,
@@ -502,11 +501,10 @@ pub async fn object_get<T: DeserializeOwned>(
  * Fetches a list of resources from the API.
  */
 pub async fn objects_list<T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     list_url: &str,
 ) -> Vec<T> {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_with_body(
             Method::GET,
             &list_url,
@@ -522,12 +520,11 @@ pub async fn objects_list<T: DeserializeOwned>(
  * Issues an HTTP POST to the specified collection URL to create an object.
  */
 pub async fn objects_post<S: Serialize + Debug, T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     collection_url: &str,
     input: S,
 ) -> T {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request(
             Method::POST,
             &collection_url,

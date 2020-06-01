@@ -28,7 +28,7 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
-use dropshot::test_util::TestContext;
+use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
@@ -44,16 +44,15 @@ extern crate slog;
 #[tokio::test]
 async fn test_disks() {
     let cptestctx = test_setup("test_disks").await;
-    let testctx = &cptestctx.external_api;
-    let client = &testctx.client_testctx;
-    let apictx = ControllerServerContext::from_server(&testctx.server);
+    let client = &cptestctx.external_client;
+    let apictx = ControllerServerContext::from_server(&cptestctx.server);
     let controller = &apictx.controller;
 
     /* Create a project for testing. */
     let project_name = "springfield-squidport-disks";
     let url_disks = format!("/projects/{}/disks", project_name);
     let project: ApiProjectView =
-        objects_post(&testctx, "/projects", ApiProjectCreateParams {
+        objects_post(&client, "/projects", ApiProjectCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
@@ -62,7 +61,7 @@ async fn test_disks() {
         .await;
 
     /* List disks.  There aren't any yet. */
-    let disks = disks_list(&testctx, &url_disks).await;
+    let disks = disks_list(&client, &url_disks).await;
     assert_eq!(disks.len(), 0);
 
     /* Make sure we get a 404 if we fetch one. */
@@ -88,7 +87,7 @@ async fn test_disks() {
         size: ApiByteCount::from_gibibytes(1),
     };
     let disk: ApiDiskView =
-        objects_post(&testctx, &url_disks, new_disk.clone()).await;
+        objects_post(&client, &url_disks, new_disk.clone()).await;
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project.identity.id);
@@ -101,7 +100,7 @@ async fn test_disks() {
      * the state will now be "Detached", as the server has simulated the create
      * process.
      */
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project.identity.id);
@@ -121,14 +120,14 @@ async fn test_disks() {
     assert_eq!(error.message, "already exists: disk \"just-rainsticks\"");
 
     /* List disks again and expect to find the one we just created. */
-    let disks = disks_list(&testctx, &url_disks).await;
+    let disks = disks_list(&client, &url_disks).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
 
     /* Create an instance to attach the disk. */
     let url_instances = format!("/projects/{}/instances", project_name);
     let instance: ApiInstanceView =
-        objects_post(&testctx, &url_instances, ApiInstanceCreateParams {
+        objects_post(&client, &url_instances, ApiInstanceCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from("just-rainsticks").unwrap(),
                 description: String::from("sells rainsticks"),
@@ -156,10 +155,9 @@ async fn test_disks() {
         String::from(disk.identity.name.clone())
     );
     let attachments =
-        objects_list::<ApiDiskAttachment>(&testctx, &url_instance_disks).await;
+        objects_list::<ApiDiskAttachment>(&client, &url_instance_disks).await;
     assert_eq!(attachments.len(), 0);
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::GET,
             &url_instance_disk,
@@ -173,8 +171,7 @@ async fn test_disks() {
     );
 
     /* Start attaching the disk to the instance. */
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_no_body(
             Method::PUT,
             &url_instance_disk,
@@ -194,7 +191,7 @@ async fn test_disks() {
     );
 
     let attachment: ApiDiskAttachment =
-        object_get(&testctx, &url_instance_disk).await;
+        object_get(&client, &url_instance_disk).await;
     assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
@@ -205,7 +202,7 @@ async fn test_disks() {
     );
 
     /* Check the state of the disk, too. */
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attaching(instance_id.clone()));
 
     /*
@@ -214,7 +211,7 @@ async fn test_disks() {
      */
     disk_simulate(controller, &disk.identity.id).await;
     let attachment: ApiDiskAttachment =
-        object_get(&testctx, &url_instance_disk).await;
+        object_get(&client, &url_instance_disk).await;
     assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
@@ -224,15 +221,14 @@ async fn test_disks() {
         ApiDiskState::Attached(instance_id.clone())
     );
 
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attached(instance_id.clone()));
 
     /*
      * Attach the disk to the same instance.  This should complete immediately
      * with no state change.
      */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::PUT,
             &url_instance_disk,
@@ -240,7 +236,7 @@ async fn test_disks() {
         )
         .await
         .unwrap();
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attached(instance_id.clone()));
 
     /*
@@ -248,7 +244,7 @@ async fn test_disks() {
      * fail and the disk should remain attached to the first instance.
      */
     let instance2: ApiInstanceView =
-        objects_post(&testctx, &url_instances, ApiInstanceCreateParams {
+        objects_post(&client, &url_instances, ApiInstanceCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from("instance2").unwrap(),
                 description: String::from("instance2"),
@@ -265,8 +261,7 @@ async fn test_disks() {
         String::from(instance2.identity.name.clone()),
         String::from(disk.identity.name.clone())
     );
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::PUT,
             &url_instance2_disk,
@@ -279,11 +274,10 @@ async fn test_disks() {
          instance"
     );
 
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attached(instance_id.clone()));
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::GET,
             &url_instance2_disk,
@@ -298,8 +292,7 @@ async fn test_disks() {
     /*
      * Begin detaching the disk.
      */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &url_instance_disk,
@@ -308,19 +301,18 @@ async fn test_disks() {
         .await
         .unwrap();
     let attachment: ApiDiskAttachment =
-        object_get(&testctx, &url_instance_disk).await;
+        object_get(&client, &url_instance_disk).await;
     assert_eq!(
         attachment.disk_state,
         ApiDiskState::Detaching(instance_id.clone())
     );
 
     /* Check the state of the disk, too. */
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detaching(instance_id.clone()));
 
     /* It's still illegal to attach this disk elsewhere. */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::PUT,
             &url_instance2_disk,
@@ -334,8 +326,7 @@ async fn test_disks() {
     );
 
     /* It's even illegal to attach this disk back to the same instance. */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::PUT,
             &url_instance_disk,
@@ -350,8 +341,7 @@ async fn test_disks() {
     );
 
     /* However, there's no problem attempting to detach it again. */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &url_instance_disk,
@@ -359,15 +349,14 @@ async fn test_disks() {
         )
         .await
         .unwrap();
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detaching(instance_id.clone()));
 
     /* Finish the detachment. */
     disk_simulate(controller, &disk.identity.id).await;
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detached);
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::GET,
             &url_instance_disk,
@@ -381,8 +370,7 @@ async fn test_disks() {
     );
 
     /* Since delete is idempotent, we can detach it again -- from either one. */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &url_instance_disk,
@@ -390,8 +378,7 @@ async fn test_disks() {
         )
         .await
         .unwrap();
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &url_instance2_disk,
@@ -401,8 +388,7 @@ async fn test_disks() {
         .unwrap();
 
     /* Now, start attaching it again to the second instance. */
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_no_body(
             Method::PUT,
             &url_instance2_disk,
@@ -421,15 +407,14 @@ async fn test_disks() {
         ApiDiskState::Attaching(instance2_id.clone())
     );
 
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attaching(instance2_id.clone()));
 
     /*
      * At this point, it's not legal to attempt to attach it to a different
      * instance (the first one).
      */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::PUT,
             &url_instance_disk,
@@ -443,8 +428,7 @@ async fn test_disks() {
     );
 
     /* It's fine to attempt another attachment to the same instance. */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::PUT,
             &url_instance2_disk,
@@ -452,7 +436,7 @@ async fn test_disks() {
         )
         .await
         .unwrap();
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Attaching(instance2_id.clone()));
 
     /* It's not allowed to delete a disk that's attaching. */
@@ -462,8 +446,7 @@ async fn test_disks() {
     assert_eq!(error.message, "disk is attached");
 
     /* Now, begin a detach while the disk is still being attached. */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &url_instance2_disk,
@@ -472,12 +455,12 @@ async fn test_disks() {
         .await
         .unwrap();
     let attachment: ApiDiskAttachment =
-        object_get(&testctx, &url_instance2_disk).await;
+        object_get(&client, &url_instance2_disk).await;
     assert_eq!(
         attachment.disk_state,
         ApiDiskState::Detaching(instance2_id.clone())
     );
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detaching(instance2_id.clone()));
 
     /* It's not allowed to delete a disk that's detaching, either. */
@@ -488,11 +471,10 @@ async fn test_disks() {
 
     /* Finish detachment. */
     disk_simulate(controller, &disk.identity.id).await;
-    let disk = disk_get(&testctx, &disk_url).await;
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detached);
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::GET,
             &url_instance_disk,
@@ -505,8 +487,7 @@ async fn test_disks() {
          \"just-rainsticks\""
     );
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::GET,
             &url_instance2_disk,
@@ -525,7 +506,7 @@ async fn test_disks() {
         .unwrap();
 
     /* It should no longer be present in our list of disks. */
-    assert_eq!(disks_list(&testctx, &url_disks).await.len(), 0);
+    assert_eq!(disks_list(&client, &url_disks).await.len(), 0);
     /* We shouldn't find it if we request it explicitly. */
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
@@ -535,12 +516,15 @@ async fn test_disks() {
     cptestctx.teardown().await;
 }
 
-async fn disk_get(testctx: &TestContext, disk_url: &str) -> ApiDiskView {
-    object_get::<ApiDiskView>(testctx, disk_url).await
+async fn disk_get(client: &ClientTestContext, disk_url: &str) -> ApiDiskView {
+    object_get::<ApiDiskView>(client, disk_url).await
 }
 
-async fn disks_list(testctx: &TestContext, list_url: &str) -> Vec<ApiDiskView> {
-    objects_list::<ApiDiskView>(testctx, list_url).await
+async fn disks_list(
+    client: &ClientTestContext,
+    list_url: &str,
+) -> Vec<ApiDiskView> {
+    objects_list::<ApiDiskView>(client, list_url).await
 }
 
 fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {

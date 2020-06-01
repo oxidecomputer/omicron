@@ -21,8 +21,10 @@ use crate::api_model::ApiIdentityMetadataCreateParams;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProjectCreateParams;
 use futures::join;
+use slog::Logger;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /**
@@ -31,6 +33,110 @@ use uuid::Uuid;
  */
 pub fn controller_run_openapi_external() {
     controller_external_api().print_openapi();
+}
+
+pub struct OxideControllerServer {
+    pub apictx: Arc<ControllerServerContext>,
+    pub http_server_external: dropshot::HttpServer,
+    pub http_server_internal: dropshot::HttpServer,
+
+    join_handle_external: JoinHandle<Result<(), hyper::error::Error>>,
+    join_handle_internal: JoinHandle<Result<(), hyper::error::Error>>,
+}
+
+impl OxideControllerServer {
+    pub async fn start(
+        config: &ControllerServerConfig,
+        rack_id: &Uuid,
+        log: &Logger,
+    ) -> Result<OxideControllerServer, String> {
+        info!(log, "setting up server");
+
+        let ctxlog = log.new(o!("component" => "ControllerServerContext"));
+        let apictx = ControllerServerContext::new(rack_id, ctxlog);
+        populate_initial_data(&apictx).await;
+
+        let c1 = Arc::clone(&apictx);
+        let mut http_server_external = dropshot::HttpServer::new(
+            &config.dropshot_external,
+            controller_external_api(),
+            c1,
+            &log.new(o!("component" => "dropshot_external")),
+        )
+        .map_err(|error| format!("initializing external server: {}", error))?;
+
+        let c2 = Arc::clone(&apictx);
+        let mut http_server_internal = dropshot::HttpServer::new(
+            &config.dropshot_internal,
+            controller_internal_api(),
+            c2,
+            &log.new(o!("component" => "dropshot_internal")),
+        )
+        .map_err(|error| format!("initializing internal server: {}", error))?;
+
+        let join_handle_external = http_server_external.run();
+        let join_handle_internal = http_server_internal.run();
+
+        Ok(OxideControllerServer {
+            apictx,
+            http_server_external,
+            http_server_internal,
+            join_handle_external,
+            join_handle_internal,
+        })
+    }
+
+    pub async fn wait_for_finish(self) -> Result<(), String> {
+        let (join_result_external, join_result_internal) =
+            join!(self.join_handle_external, self.join_handle_internal);
+
+        let (result_external, result_internal) =
+            match (join_result_external, join_result_internal) {
+                (Ok(rexternal), Ok(rinternal)) => (rexternal, rinternal),
+                (Err(error_external), Err(error_internal)) => {
+                    return Err(format!(
+                        "failed to join both external and internal servers \
+                         (external: \"{}\", internal: \"{}\")",
+                        error_external, error_internal
+                    ));
+                }
+                (Err(error_external), Ok(_)) => {
+                    return Err(format!(
+                        "failed to join external server: {}",
+                        error_external
+                    ));
+                }
+                (Ok(_), Err(error_internal)) => {
+                    return Err(format!(
+                        "failed to join internal server: {}",
+                        error_internal
+                    ));
+                }
+            };
+
+        match (result_external, result_internal) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error_external), Err(error_internal)) => {
+                return Err(format!(
+                    "external and internal HTTP servers both stopped \
+                     (external: \"{}\", internal: \"{}\"",
+                    error_external, error_internal
+                ));
+            }
+            (Err(error_external), Ok(())) => {
+                return Err(format!(
+                    "external server stopped: {}",
+                    error_external
+                ));
+            }
+            (Ok(()), Err(error_internal)) => {
+                return Err(format!(
+                    "internal server stopped: {}",
+                    error_internal
+                ));
+            }
+        }
+    }
 }
 
 /**
@@ -43,76 +149,9 @@ pub async fn controller_run_server(
         .log
         .to_logger("oxide-controller")
         .map_err(|message| format!("initializing logger: {}", message))?;
-    info!(log, "starting server");
-
-    let api_log = log.new(o!("component" => "apictx"));
-    let apictx = ControllerServerContext::new(&Uuid::new_v4(), api_log);
-    let c1 = Arc::clone(&apictx);
-
-    populate_initial_data(&apictx).await;
-
-    let mut http_server_external = dropshot::HttpServer::new(
-        &config.dropshot_external,
-        controller_external_api(),
-        c1,
-        &log.new(o!("component" => "dropshot_external")),
-    )
-    .map_err(|error| format!("initializing external server: {}", error))?;
-
-    let mut http_server_internal = dropshot::HttpServer::new(
-        &config.dropshot_internal,
-        controller_internal_api(),
-        apictx,
-        &log.new(o!("component" => "dropshot_internal")),
-    )
-    .map_err(|error| format!("initializing internal server: {}", error))?;
-
-    let join_handle_external = http_server_external.run();
-    let join_handle_internal = http_server_internal.run();
-
-    let (join_result_external, join_result_internal) =
-        join!(join_handle_external, join_handle_internal);
-
-    let (result_external, result_internal) =
-        match (join_result_external, join_result_internal) {
-            (Ok(rexternal), Ok(rinternal)) => (rexternal, rinternal),
-            (Err(error_external), Err(error_internal)) => {
-                return Err(format!(
-                    "failed to join both external and internal servers \
-                     (external: \"{}\", internal: \"{}\")",
-                    error_external, error_internal
-                ));
-            }
-            (Err(error_external), Ok(_)) => {
-                return Err(format!(
-                    "failed to join external server: {}",
-                    error_external
-                ));
-            }
-            (Ok(_), Err(error_internal)) => {
-                return Err(format!(
-                    "failed to join internal server: {}",
-                    error_internal
-                ));
-            }
-        };
-
-    match (result_external, result_internal) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(error_external), Err(error_internal)) => {
-            return Err(format!(
-                "external and internal HTTP servers both stopped (external: \
-                 \"{}\", internal: \"{}\"",
-                error_external, error_internal
-            ));
-        }
-        (Err(error_external), Ok(())) => {
-            return Err(format!("external server stopped: {}", error_external));
-        }
-        (Ok(()), Err(error_internal)) => {
-            return Err(format!("internal server stopped: {}", error_internal));
-        }
-    }
+    let rack_id = Uuid::new_v4();
+    let server = OxideControllerServer::start(config, &rack_id, &log).await?;
+    server.wait_for_finish().await
 }
 
 /*

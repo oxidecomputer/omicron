@@ -1,4 +1,5 @@
 use super::OxideController;
+use super::OxideControllerServer;
 
 use dropshot::RequestContext;
 use slog::Logger;
@@ -16,10 +17,7 @@ pub struct ControllerServerContext {
 }
 
 impl ControllerServerContext {
-    pub fn new(
-        rack_id: &Uuid,
-        log: Logger,
-    ) -> Arc<ControllerServerContext> {
+    pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ControllerServerContext> {
         Arc::new(ControllerServerContext {
             controller: Arc::new(OxideController::new_with_id(
                 rack_id,
@@ -44,9 +42,9 @@ impl ControllerServerContext {
      * structure.
      */
     pub fn from_server(
-        server: &dropshot::HttpServer,
+        server: &OxideControllerServer,
     ) -> Arc<ControllerServerContext> {
-        Self::from_private(server.app_private())
+        Self::from_private(server.http_server_external.app_private())
     }
 
     /**

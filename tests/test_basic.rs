@@ -27,11 +27,11 @@ extern crate slog;
 
 #[tokio::test]
 async fn test_basic_failures() {
-    let testctx = test_setup("basic_failures").await.external_api;
+    let testctx = test_setup("basic_failures").await;
+    let external_client = &testctx.external_client;
 
     /* Error case: GET /nonexistent (a path with no route at all) */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::GET,
             "/nonexistent",
@@ -46,8 +46,7 @@ async fn test_basic_failures() {
      * Error case: GET /projects/nonexistent (a possible value that does not
      * exist inside a collection that does exist)
      */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::GET,
             "/projects/nonexistent",
@@ -63,8 +62,7 @@ async fn test_basic_failures() {
      * TODO-correctness is 400 the right error code here or is 404 more
      * appropriate?
      */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::GET,
             "/projects/-invalid-name",
@@ -80,8 +78,7 @@ async fn test_basic_failures() {
     );
 
     /* Error case: PUT /projects */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::PUT,
             "/projects",
@@ -93,8 +90,7 @@ async fn test_basic_failures() {
     assert_eq!("Method Not Allowed", error.message);
 
     /* Error case: DELETE /projects */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::DELETE,
             "/projects",
@@ -106,8 +102,7 @@ async fn test_basic_failures() {
     assert_eq!("Method Not Allowed", error.message);
 
     /* Error case: list instances in a nonexistent project. */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request_with_body(
             Method::GET,
             "/projects/nonexistent/instances",
@@ -119,8 +114,7 @@ async fn test_basic_failures() {
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /* Error case: fetch an instance in a nonexistent project. */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request_with_body(
             Method::GET,
             "/projects/nonexistent/instances/my-instance",
@@ -132,8 +126,7 @@ async fn test_basic_failures() {
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /* Error case: fetch an instance with an invalid name. */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request_with_body(
             Method::GET,
             "/projects/nonexistent/instances/my_instance",
@@ -149,8 +142,7 @@ async fn test_basic_failures() {
     );
 
     /* Error case: delete an instance with an invalid name. */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request_with_body(
             Method::DELETE,
             "/projects/nonexistent/instances/my_instance",
@@ -173,14 +165,14 @@ async fn test_basic_failures() {
  */
 #[tokio::test]
 async fn test_projects() {
-    let testctx = test_setup("test_projects").await.external_api;
+    let testctx = test_setup("test_projects").await;
+    let external_client = &testctx.external_client;
 
     /*
      * Error case: GET /projects/simproject1/nonexistent (a path that does not
      * exist beneath a resource that does exist)
      */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::GET,
             "/projects/simproject1/nonexistent",
@@ -196,8 +188,7 @@ async fn test_projects() {
      * TODO-coverage: pagination
      * TODO-coverage: marker even without pagination
      */
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::GET,
             "/projects",
@@ -228,8 +219,7 @@ async fn test_projects() {
     /*
      * Basic test of out-of-the-box GET /projects/simproject2
      */
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::GET,
             "/projects/simproject2",
@@ -249,8 +239,7 @@ async fn test_projects() {
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    testctx
-        .client_testctx
+    external_client
         .make_request(
             Method::DELETE,
             "/projects/simproject2",
@@ -264,8 +253,7 @@ async fn test_projects() {
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/projects/simproject2".
      */
-    testctx
-        .client_testctx
+    external_client
         .make_request(
             Method::GET,
             "/projects/simproject2",
@@ -274,8 +262,7 @@ async fn test_projects() {
         )
         .await
         .expect_err("expected failure");
-    testctx
-        .client_testctx
+    external_client
         .make_request(
             Method::DELETE,
             "/projects/simproject2",
@@ -284,8 +271,7 @@ async fn test_projects() {
         )
         .await
         .expect_err("expected failure");
-    testctx
-        .client_testctx
+    external_client
         .make_request(
             Method::PUT,
             "/projects/simproject2",
@@ -303,8 +289,7 @@ async fn test_projects() {
     /*
      * Similarly, verify "GET /projects"
      */
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::GET,
             "/projects",
@@ -348,8 +333,7 @@ async fn test_projects() {
             description: Some("Li'l lightnin'".to_string()),
         },
     };
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::PUT,
             "/projects/simproject3",
@@ -363,8 +347,7 @@ async fn test_projects() {
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::GET,
             "/projects/simproject3",
@@ -390,8 +373,7 @@ async fn test_projects() {
             description: Some("little lightning".to_string()),
         },
     };
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::PUT,
             "/projects/simproject3",
@@ -405,8 +387,7 @@ async fn test_projects() {
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
-    testctx
-        .client_testctx
+    external_client
         .make_request(
             Method::GET,
             "/projects/simproject3",
@@ -425,8 +406,7 @@ async fn test_projects() {
             description: "a duplicate of simproject1".to_string(),
         },
     };
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request(
             Method::POST,
             "/projects",
@@ -441,8 +421,7 @@ async fn test_projects() {
      * Try to create a project with an unsupported name.
      * TODO-polish why doesn't serde include the field name in this error?
      */
-    let error = testctx
-        .client_testctx
+    let error = external_client
         .make_request_with_body(
             Method::POST,
             "/projects",
@@ -466,8 +445,7 @@ async fn test_projects() {
             description: "a soapbox racer".to_string(),
         },
     };
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::POST,
             "/projects",
@@ -487,8 +465,7 @@ async fn test_projects() {
      * - "lil-lightnin" with description "little lightning"
      * - "simproject1", same as out-of-the-box
      */
-    let mut response = testctx
-        .client_testctx
+    let mut response = external_client
         .make_request(
             Method::GET,
             "/projects",

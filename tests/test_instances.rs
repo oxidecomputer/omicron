@@ -25,7 +25,7 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
-use dropshot::test_util::TestContext;
+use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
@@ -37,15 +37,15 @@ extern crate slog;
 #[tokio::test]
 async fn test_instances() {
     let cptestctx = test_setup("test_instances").await;
-    let testctx = &cptestctx.external_api;
-    let apictx = ControllerServerContext::from_server(&testctx.server);
+    let client = &cptestctx.external_client;
+    let apictx = ControllerServerContext::from_server(&cptestctx.server);
     let controller = &apictx.controller;
 
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
     let _: ApiProjectView =
-        objects_post(&testctx, "/projects", ApiProjectCreateParams {
+        objects_post(&client, "/projects", ApiProjectCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
@@ -54,13 +54,12 @@ async fn test_instances() {
         .await;
 
     /* List instances.  There aren't any yet. */
-    let instances = instances_list(&testctx, &url_instances).await;
+    let instances = instances_list(&client, &url_instances).await;
     assert_eq!(instances.len(), 0);
 
     /* Make sure we get a 404 if we fetch one. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(Method::GET, &instance_url, StatusCode::NOT_FOUND)
         .await;
     assert_eq!(
@@ -69,8 +68,7 @@ async fn test_instances() {
     );
 
     /* Ditto if we try to delete one. */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::DELETE,
             &instance_url,
@@ -94,7 +92,7 @@ async fn test_instances() {
         hostname: String::from("rainsticks"),
     };
     let instance: ApiInstanceView =
-        objects_post(&testctx, &url_instances, new_instance.clone()).await;
+        objects_post(&client, &url_instances, new_instance.clone()).await;
     assert_eq!(instance.identity.name, "just-rainsticks");
     assert_eq!(instance.identity.description, "sells rainsticks");
     let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
@@ -105,8 +103,7 @@ async fn test_instances() {
     assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
 
     /* Attempt to create a second instance with a conflicting name. */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error_body(
             Method::POST,
             &url_instances,
@@ -117,12 +114,12 @@ async fn test_instances() {
     assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
 
     /* List instances again and expect to find the one we just created. */
-    let instances = instances_list(&testctx, &url_instances).await;
+    let instances = instances_list(&client, &url_instances).await;
     assert_eq!(instances.len(), 1);
     instances_eq(&instances[0], &instance);
 
     /* Fetch the instance and expect it to match. */
-    let instance = instance_get(&testctx, &instance_url).await;
+    let instance = instance_get(&client, &instance_url).await;
     instances_eq(&instances[0], &instance);
     assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
 
@@ -130,7 +127,7 @@ async fn test_instances() {
      * Now, simulate completion of instance boot and check the state reported.
      */
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
@@ -144,9 +141,9 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, &instance_url, InstanceOp::Start).await;
     instances_eq(&instance, &instance_next);
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
     /*
@@ -154,7 +151,7 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -163,7 +160,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -172,7 +169,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -184,7 +181,7 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -193,7 +190,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -206,16 +203,15 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
     instances_eq(&instance, &instance_next);
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
     /*
      * Attempt to reboot the halted instance.  This should fail.
      */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
@@ -230,7 +226,7 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, &instance_url, InstanceOp::Start).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -239,7 +235,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -248,7 +244,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -257,7 +253,7 @@ async fn test_instances() {
 
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -271,15 +267,14 @@ async fn test_instances() {
      */
     let instance = instance_next;
     let instance_next =
-        instance_post(&testctx, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
     );
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
@@ -289,7 +284,7 @@ async fn test_instances() {
     assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(controller, &instance.identity.id).await;
-    let instance_next = instance_get(&testctx, &instance_url).await;
+    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -297,8 +292,7 @@ async fn test_instances() {
     );
 
     /* Delete the instance. */
-    testctx
-        .client_testctx
+    client
         .make_request_no_body(
             Method::DELETE,
             &instance_url,
@@ -319,8 +313,7 @@ async fn test_instances() {
      * to make DELETE remove the instance from the namespace, but it's still
      * useful to exercise this case now.)
      */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
@@ -335,8 +328,7 @@ async fn test_instances() {
     /*
      * Similarly, we should not be able to start or stop the instance.
      */
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::POST,
             &format!("{}/start", instance_url),
@@ -348,8 +340,7 @@ async fn test_instances() {
         "instance state cannot be changed from state \"destroyed\""
     );
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_error(
             Method::POST,
             &format!("{}/stop", instance_url),
@@ -368,8 +359,7 @@ async fn test_instances() {
      * passed through properly.
      */
 
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_with_body(
             Method::POST,
             &url_instances,
@@ -392,8 +382,7 @@ async fn test_instances() {
             "hostname": "localhost",
         }
     "##;
-    let error = testctx
-        .client_testctx
+    let error = client
         .make_request_with_body(
             Method::POST,
             &url_instances,
@@ -410,17 +399,17 @@ async fn test_instances() {
 }
 
 async fn instance_get(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     instance_url: &str,
 ) -> ApiInstanceView {
-    object_get::<ApiInstanceView>(testctx, instance_url).await
+    object_get::<ApiInstanceView>(client, instance_url).await
 }
 
 async fn instances_list(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     instances_url: &str,
 ) -> Vec<ApiInstanceView> {
-    objects_list::<ApiInstanceView>(testctx, instances_url).await
+    objects_list::<ApiInstanceView>(client, instances_url).await
 }
 
 /**
@@ -432,7 +421,7 @@ enum InstanceOp {
     Reboot,
 }
 async fn instance_post(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
 ) -> ApiInstanceView {
@@ -441,8 +430,7 @@ async fn instance_post(
         InstanceOp::Stop => "stop",
         InstanceOp::Reboot => "reboot",
     });
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_with_body(
             Method::POST,
             &url,

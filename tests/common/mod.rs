@@ -2,6 +2,7 @@
  * Shared integration testing facilities
  */
 
+use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ConfigDropshot;
@@ -9,6 +10,7 @@ use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::sc_api;
 use oxide_api_prototype::ControllerClient;
 use oxide_api_prototype::ControllerServerConfig;
+use oxide_api_prototype::OxideControllerServer;
 use oxide_api_prototype::ServerController;
 use oxide_api_prototype::SimMode;
 /* XXX reveals this is really an implementation detail */
@@ -23,16 +25,19 @@ const SERVER_CONTROLLER_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 
 pub struct ControlPlaneTestContext {
-    pub external_api: TestContext,
-    pub internal_api: TestContext,
+    pub external_client: ClientTestContext,
+    pub internal_client: ClientTestContext,
     pub server_controller: TestContext,
+    pub server: OxideControllerServer,
     logctx: LogContext,
 }
 
 impl ControlPlaneTestContext {
     pub async fn teardown(self) {
-        self.external_api.teardown().await;
-        self.internal_api.teardown().await;
+        self.server.http_server_external.close();
+        self.server.http_server_internal.close();
+        // XXX can we (/ how do we?) wait for the thing to shut down?
+        // self.server.wait_for_finish().await.unwrap();
         self.server_controller.teardown().await;
         self.logctx.cleanup_successful();
     }
@@ -52,35 +57,19 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let config_file_path = Path::new("tests/config.test.toml");
     let config = ControllerServerConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    let api_external = oxide_api_prototype::controller_external_api();
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let logctx = LogContext::new(test_name, &config.log);
-    let log = logctx.log.new(o!());
-    let apictx =
-        oxide_api_prototype::ControllerServerContext::new(&rack_id, log);
-    oxide_api_prototype::populate_initial_data(&apictx).await;
-    let apictx_clone = Arc::clone(&apictx);
-    let tc_external = TestContext::new(
-        api_external,
-        apictx_clone,
-        &config.dropshot_external,
-        None,
-        logctx.log.new(o!()),
-    );
+    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    /*
-     * Dropshot's TestContext sets up the external server.  We have to set up
-     * the internal server ourselves.  We don't (currently) need a TestContext
-     * for it because we're not going to invoke it directly.
-     */
-    let apictx_clone = Arc::clone(&apictx);
-    let api_internal = oxide_api_prototype::controller_internal_api();
-    let tc_internal = TestContext::new(
-        api_internal,
-        apictx_clone,
-        &config.dropshot_internal,
-        None,
-        logctx.log.new(o!()),
+    let server = OxideControllerServer::start(&config, &rack_id, &logctx.log)
+        .await
+        .unwrap();
+    let testctx_external = ClientTestContext::new(
+        server.http_server_external.local_addr(),
+        logctx.log.new(o!("component" => "external client test context")),
+    );
+    let testctx_internal = ClientTestContext::new(
+        server.http_server_internal.local_addr(),
+        logctx.log.new(o!("component" => "internal client test context")),
     );
 
     /* Set up a single server controller. */
@@ -90,15 +79,16 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
             "component" => "server_controller",
             "server" => sc_id.to_string(),
         )),
-        tc_internal.server.local_addr(),
+        server.http_server_internal.local_addr(),
         sc_id.clone(),
     )
     .await
     .unwrap();
 
     ControlPlaneTestContext {
-        external_api: tc_external,
-        internal_api: tc_internal,
+        server: server,
+        external_client: testctx_external,
+        internal_client: testctx_internal,
         server_controller: sc,
         logctx: logctx,
     }

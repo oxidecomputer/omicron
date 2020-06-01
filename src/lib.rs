@@ -12,8 +12,6 @@ mod http_client;
 mod server_controller;
 mod test_util;
 
-pub use controller::controller_external_api;
-pub use controller::controller_internal_api;
 pub use controller::controller_run_openapi_external;
 pub use controller::controller_run_server;
 pub use controller::populate_initial_data;
@@ -21,6 +19,7 @@ pub use controller::ControllerClient;
 pub use controller::ControllerServerConfig;
 pub use controller::ControllerServerContext;
 pub use controller::OxideController;
+pub use controller::OxideControllerServer;
 pub use controller::OxideControllerTestInterfaces;
 
 pub use api_model::ApiServerStartupInfo;

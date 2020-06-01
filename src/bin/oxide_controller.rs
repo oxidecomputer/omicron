@@ -48,8 +48,7 @@ async fn main() {
     let config = match ControllerServerConfig::from_file(config_file_path) {
         Ok(c) => c,
         Err(error) => {
-            eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-            exit(1);
+            fail(error);
         }
     };
 
@@ -57,8 +56,12 @@ async fn main() {
         controller_run_openapi_external();
     } else {
         if let Err(error) = controller_run_server(&config).await {
-            eprintln!("{}: {}", std::env::args().nth(0).unwrap(), error);
-            exit(1);
+            fail(error);
         }
     }
+}
+
+fn fail(message: String) -> ! {
+    eprintln!("{}: {}", std::env::args().nth(0).unwrap(), message);
+    exit(1);
 }
