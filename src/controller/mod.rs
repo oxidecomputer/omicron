@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 mod config;
 mod context;
+mod controller_client;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 mod oxide_controller;
@@ -20,6 +21,7 @@ pub use config::ControllerServerConfig;
 pub use context::ControllerServerContext;
 pub use http_entrypoints_external::controller_external_api;
 pub use http_entrypoints_internal::controller_internal_api;
+pub use controller_client::ControllerClient;
 pub use oxide_controller::OxideController;
 pub use oxide_controller::OxideControllerTestInterfaces;
 

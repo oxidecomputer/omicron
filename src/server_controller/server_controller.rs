@@ -2,7 +2,7 @@
  * Simulated server controller implementation.
  */
 
-use super::controller_client::ControllerClient;
+use super::ControllerClient;
 use super::SimMode;
 
 use crate::api_error::ApiError;

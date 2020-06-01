@@ -2,7 +2,6 @@
  * Library interface to the server controller mechanisms.
  */
 
-mod controller_client;
 mod server_controller;
 
 use crate::api_model::ApiDiskRuntimeState;
@@ -30,7 +29,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub use controller_client::ControllerClient;
+pub use crate::ControllerClient;
 pub use server_controller::ServerController;
 
 /**
