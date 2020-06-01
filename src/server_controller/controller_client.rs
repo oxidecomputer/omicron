@@ -5,9 +5,9 @@
  */
 
 use crate::api_error::ApiError;
-use crate::api_http_entrypoints_internal::ApiServerStartupInfo;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiServerStartupInfo;
 use crate::http_client::HttpClient;
 use http::Method;
 use hyper::Body;

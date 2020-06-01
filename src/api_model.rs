@@ -757,6 +757,16 @@ pub struct ApiServerView {
     pub service_address: SocketAddr,
 }
 
+
+/*
+ * Internal Control Plane API objects
+ */
+
+#[derive(Serialize, Deserialize)]
+pub struct ApiServerStartupInfo {
+    pub sc_address: SocketAddr,
+}
+
 #[cfg(test)]
 mod test {
     use super::ApiByteCount;

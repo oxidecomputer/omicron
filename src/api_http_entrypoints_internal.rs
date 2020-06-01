@@ -4,6 +4,7 @@
 
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiServerStartupInfo;
 use crate::server_controller_client::ServerControllerClient;
 use crate::ApiContext;
 use dropshot::endpoint;
@@ -16,8 +17,6 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use http::Method;
 use serde::Deserialize;
-use serde::Serialize;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -33,12 +32,6 @@ pub fn api_register_entrypoints_internal(
 #[derive(Deserialize, ExtractedParameter)]
 struct ServerPathParam {
     server_id: Uuid,
-}
-
-/* XXX commonize in an api_model_internal? */
-#[derive(Serialize, Deserialize)]
-pub struct ApiServerStartupInfo {
-    pub sc_address: SocketAddr,
 }
 
 /**
@@ -70,7 +63,6 @@ async fn cpapi_servers_post(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/* XXX commonize in an api_model_internal? */
 #[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     instance_id: Uuid,

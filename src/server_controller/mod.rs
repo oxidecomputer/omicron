@@ -5,9 +5,9 @@
 mod controller_client;
 mod server_controller;
 
-use crate::api_http_entrypoints_internal::ApiServerStartupInfo;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiServerStartupInfo;
 use crate::server_controller_client::DiskEnsureBody;
 use crate::server_controller_client::InstanceEnsureBody;
 

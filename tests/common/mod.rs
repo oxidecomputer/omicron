@@ -38,58 +38,6 @@ impl ControlPlaneTestContext {
     }
 }
 
-/**
- * Set up a `TestContext` for running tests against the API server.
- *
- * XXX There are a bunch of problems here:
- *
- * - We're not setting up the controller's internal API server
- * - We're not setting up the server controller.
- *
- *
- * - Server controller startup requires:
- *     - start with file for log config, override as needed
- *     - instantiate ServerController
- *       - instantiate ControllerClient
- *     - construct dropshot description
- *     - start dropshot server
- *     - loop: make request to controller until it succeeds
- *     - wait for server to exit and return result
- *
- * - Test suite controller startup currently requires:
- *     - start with file for log config, override as needed
- *     - construct dropshot description
- *     - create log context with the config
- *     - create ApiContext
- *       - and populate initial data
- *     - create testcontext
- *       - start dropshot server
- *       - set up client test context
- *
- * - Controller startup currently does:
- *     - read config and set up logger
- *     - create ApiContext
- *       - and populate with initial data
- *     - start dropshot server for external interface
- *       - construct api description
- *     - start dropshot server for internal interface
- *       - construct api description
- *     - wait for both servers to stop
- *
- * For controller startup, what's below (test suite) just needs to be modified
- * to start the internal dropshot server.
- *
- * What's common to all three?
- * - read some log file
- * X test suites only: munge config
- * X instantiate some specific kind of thing (ServerController/ApiContext)
- * - EITHER:
- *   - start server(s) and wait for them (non-test-suite)
- *   - instantiate a testcontext for one, start server for the other
- * X binaries only: wait for completion
- *
- * There might not be as much room for commonizing as I think.
- */
 pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     /*
      * We load as much configuration as we can from the test suite configuration

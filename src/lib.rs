@@ -19,6 +19,7 @@ mod server_controller_client;
 mod test_util;
 
 pub use api_config::ApiServerConfig;
+pub use api_model::ApiServerStartupInfo;
 pub use controller::OxideController;
 pub use controller::OxideControllerTestInterfaces;
 pub use server_controller::run_server_controller_api_server;
@@ -28,8 +29,6 @@ pub use server_controller::ControllerClient;
 pub use server_controller::ServerController;
 pub use server_controller::SimMode;
 pub use server_controller_client::ServerControllerTestInterfaces;
-/* XXX */
-pub use api_http_entrypoints_internal::ApiServerStartupInfo;
 
 use api_model::ApiIdentityMetadataCreateParams;
 use api_model::ApiName;
