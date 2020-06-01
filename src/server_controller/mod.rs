@@ -2,56 +2,21 @@
  * Library interface to the server controller mechanisms.
  */
 
+mod config;
 mod http_entrypoints;
 mod server_controller;
 mod server_controller_client;
 
-use crate::api_model::ApiServerStartupInfo;
-
-use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
-use serde::Deserialize;
-use serde::Serialize;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use uuid::Uuid;
-
-pub use crate::ControllerClient;
+pub use config::ConfigServerController;
+pub use config::SimMode;
 pub use http_entrypoints::sc_api;
 pub use server_controller::ServerController;
 pub use server_controller_client::ServerControllerClient;
 pub use server_controller_client::ServerControllerTestInterfaces;
 
-/**
- * How this `ServerController` simulates object states and transitions.
- */
-#[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum SimMode {
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * automatically using a timer to complete the transition a few seconds in
-     * the future.
-     */
-    Auto,
-
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * explicitly, relying on calls through `ServerControllerTestInterfaces`.
-     */
-    Explicit,
-}
-
-/**
- * Configuration for a server controller.
- */
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ConfigServerController {
-    pub id: Uuid,
-    pub sim_mode: SimMode,
-    pub controller_address: SocketAddr,
-    pub dropshot: ConfigDropshot,
-    pub log: ConfigLogging,
-}
+use crate::api_model::ApiServerStartupInfo;
+use crate::ControllerClient;
+use std::sync::Arc;
 
 /* TODO-cleanup commonize with oxide-controller run_server() */
 pub async fn run_server_controller_api_server(

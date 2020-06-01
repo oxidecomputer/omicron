@@ -2,14 +2,6 @@
  * Library interface to the Oxide Controller mechanisms.
  */
 
-use crate::api_model::ApiIdentityMetadataCreateParams;
-use crate::api_model::ApiName;
-use crate::api_model::ApiProjectCreateParams;
-use futures::join;
-use std::convert::TryFrom;
-use std::sync::Arc;
-use uuid::Uuid;
-
 mod config;
 mod context;
 mod controller_client;
@@ -19,11 +11,19 @@ mod oxide_controller;
 
 pub use config::ControllerServerConfig;
 pub use context::ControllerServerContext;
+pub use controller_client::ControllerClient;
 pub use http_entrypoints_external::controller_external_api;
 pub use http_entrypoints_internal::controller_internal_api;
-pub use controller_client::ControllerClient;
 pub use oxide_controller::OxideController;
 pub use oxide_controller::OxideControllerTestInterfaces;
+
+use crate::api_model::ApiIdentityMetadataCreateParams;
+use crate::api_model::ApiName;
+use crate::api_model::ApiProjectCreateParams;
+use futures::join;
+use std::convert::TryFrom;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /**
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec

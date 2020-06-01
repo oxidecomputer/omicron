@@ -8,17 +8,6 @@ Currently:
 * the server-controller binary may need to grow a config+logging mechanism
 * lots of cleanup needed
 ** I've made a mess of stuff though with imports and such. See lots of XXXs.
-* restructure the code:
-** server_controller: body, entrypoints, client (for itself)
-** controller: body, internal entrypoints, external entrypoints, internal client
-   (for itself)
-** generic:
-*** model (maybe with separate exports for internal model vs. external model?)
-*** http_client
-*** config? is this specific to controller?
-*** error
-*** datastore
-*** test_util
 * steps for the above:
 ** move clients to their respective places
 ** create separate exports for internal vs. external models
@@ -37,6 +26,7 @@ Work queue (see also: existing GitHub issues):
 ** rip out built-in projects
 ** improve naming (e.g., around "api", "oxide-api-prototype", "controller",
    "server")
+** big example of naming issue: ControllerServerConfig vs ConfigServerController
 ** improved documentation, especially design docs, structural docs
 * flesh out controller - server-controller interaction:
 ** server controller startup should trigger restoring instances and disks
