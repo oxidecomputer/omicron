@@ -33,8 +33,8 @@ impl ControllerServerConfig {
         let file_contents = file_read.map_err(|error| {
             format!("read \"{}\": {}", path.display(), error)
         })?;
-        let config_parsed: ControllerServerConfig = toml::from_str(&file_contents)
-            .map_err(|error| {
+        let config_parsed: ControllerServerConfig =
+            toml::from_str(&file_contents).map_err(|error| {
                 format!("parse \"{}\": {}", path.display(), error)
             })?;
         Ok(config_parsed)
@@ -97,8 +97,9 @@ mod test {
 
     #[test]
     fn test_config_nonexistent() {
-        let error = ControllerServerConfig::from_file(Path::new("/nonexistent"))
-            .expect_err("expected config to fail from /nonexistent");
+        let error =
+            ControllerServerConfig::from_file(Path::new("/nonexistent"))
+                .expect_err("expected config to fail from /nonexistent");
         assert!(error
             .starts_with("read \"/nonexistent\": No such file or directory"));
     }

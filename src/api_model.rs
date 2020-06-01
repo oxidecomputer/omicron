@@ -807,7 +807,6 @@ pub struct DiskEnsureBody {
     pub target: ApiDiskStateRequested,
 }
 
-
 #[cfg(test)]
 mod test {
     use super::ApiByteCount;
