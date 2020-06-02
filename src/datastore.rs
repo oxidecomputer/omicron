@@ -16,13 +16,15 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
+use crate::api_model::PaginationParams;
 use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
-use crate::controller::CreateResult;
-use crate::controller::DeleteResult;
-use crate::controller::ListResult;
-use crate::controller::LookupResult;
-use crate::controller::PaginationParams;
-use crate::controller::UpdateResult;
+
+use crate::api_model::CreateResult;
+use crate::api_model::DeleteResult;
+use crate::api_model::ListResult;
+use crate::api_model::LookupResult;
+use crate::api_model::UpdateResult;
+
 use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;

@@ -10,9 +10,23 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
-* implement server controller as separate program (would be a better demo of
-  what's really going on internally)
+* deferred cleanup / polish up for more help
+** need better names for controller, server-controller.  It's a mouthful and
+   leads to confusing naming of related structs all around.
+** rename entrypoints functions with prefix appropriate to its API
+** rip out built-in projects
+** improve naming (e.g., around "api", "oxide-api-prototype", "controller",
+   "server")
+** create separate exports for internal vs. external models
+** big example of naming issue: ControllerServerConfig vs ConfigServerController
+** improved documentation, especially design docs, structural docs
+** revisit "Api" prefixes
+* flesh out controller - server-controller interaction:
+** server controller startup should trigger restoring instances and disks
+** server controller should retry the startup request until it succeeds
 * do a demo????
+* add a test that runs --openapi (to make sure it works)
+* proper config + logging for server controller
 * settle on an approach for modification of resources and implement it once
 * document Dropshot
 * write some design documents

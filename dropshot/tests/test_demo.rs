@@ -40,6 +40,9 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[macro_use]
+extern crate slog;
+
 fn test_setup(test_name: &str) -> TestContext {
     /*
      * The IP address to which we bind can be any local IP, but we use
@@ -64,7 +67,14 @@ fn test_setup(test_name: &str) -> TestContext {
     register_test_endpoints(&mut api);
     let logctx = LogContext::new(test_name, &config_logging);
 
-    TestContext::new(api, Arc::new(0 as usize), &config_dropshot, logctx)
+    let log = logctx.log.new(o!());
+    TestContext::new(
+        api,
+        Arc::new(0 as usize),
+        &config_dropshot,
+        Some(logctx),
+        log,
+    )
 }
 
 /*

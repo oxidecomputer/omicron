@@ -46,10 +46,10 @@ where
         if nbytesread + bufsize > cap {
             http_dump_body(body).await?;
             // TODO-correctness check status code
-            return Err(HttpError::for_bad_request(format!(
-                "request body exceeded maximum size of {} bytes",
-                cap
-            )));
+            return Err(HttpError::for_bad_request(
+                None,
+                format!("request body exceeded maximum size of {} bytes", cap),
+            ));
         }
 
         nbytesread += bufsize;
@@ -160,9 +160,9 @@ pub fn http_extract_path_params<T: DeserializeOwned>(
          */
         let message = e.to_string();
         assert!(!message.starts_with("missing field: "));
-        HttpError::for_bad_request(format!(
-            "bad parameter in URL path: {}",
-            message
-        ))
+        HttpError::for_bad_request(
+            None,
+            format!("bad parameter in URL path: {}", message),
+        )
     })
 }

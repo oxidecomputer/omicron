@@ -693,6 +693,7 @@ dependencies = [
  "http",
  "hyper",
  "serde",
+ "serde_json",
  "slog",
  "tokio",
  "toml",

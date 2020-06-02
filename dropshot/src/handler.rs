@@ -620,10 +620,10 @@ where
         Ok(q) => Ok(Query {
             inner: q,
         }),
-        Err(e) => Err(HttpError::for_bad_request(format!(
-            "unable to parse query string: {}",
-            e
-        ))),
+        Err(e) => Err(HttpError::for_bad_request(
+            None,
+            format!("unable to parse query string: {}", e),
+        )),
     }
 }
 
@@ -745,16 +745,16 @@ where
         Ok(j) => Ok(Json {
             inner: j,
         }),
-        Err(e) => Err(HttpError::for_bad_request(format!(
-            "unable to parse body: {}",
-            e
-        ))),
+        Err(e) => Err(HttpError::for_bad_request(
+            None,
+            format!("unable to parse body: {}", e),
+        )),
     }
 }
 
 /*
- * The `Extractor` implementation for Json<JsonType> describes how to construct an
- * instance of `Json<JsonType>` from an HTTP request: namely, by reading the
+ * The `Extractor` implementation for Json<JsonType> describes how to construct
+ * an instance of `Json<JsonType>` from an HTTP request: namely, by reading the
  * request body and parsing it as JSON into type `JsonType`.
  * TODO-cleanup We shouldn't have to use the "'static" bound on `JsonType` here.
  * It seems like we ought to be able to use 'async_trait, but that doesn't seem
@@ -968,6 +968,21 @@ pub struct HttpResponseDeleted();
 impl HttpResponse for HttpResponseDeleted {}
 impl From<HttpResponseDeleted> for HttpHandlerResult {
     fn from(_: HttpResponseDeleted) -> HttpHandlerResult {
+        Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .body(Body::empty())?)
+    }
+}
+
+/**
+ * `HttpResponseUpdatedNoContent` represents an HTTP 204 "No Content" response,
+ * intended for use when an API operation has successfully updated an object and
+ * has nothing to return.
+ */
+pub struct HttpResponseUpdatedNoContent();
+impl HttpResponse for HttpResponseUpdatedNoContent {}
+impl From<HttpResponseUpdatedNoContent> for HttpHandlerResult {
+    fn from(_: HttpResponseUpdatedNoContent) -> HttpHandlerResult {
         Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
             .body(Body::empty())?)

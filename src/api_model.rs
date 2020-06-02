@@ -6,6 +6,7 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use futures::stream::Stream;
 use serde::Deserialize;
 use serde::Serialize;
 use std::convert::TryFrom;
@@ -13,11 +14,40 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
 
 use dropshot::ExtractedParameter;
+
+/*
+ * These type aliases exist primarily to make it easier to be consistent about
+ * return values from this module.
+ */
+
+/** Result of a create operation for the specified type. */
+pub type CreateResult<T> = Result<Arc<T>, ApiError>;
+/** Result of a delete operation for the specified type. */
+pub type DeleteResult = Result<(), ApiError>;
+/** Result of a list operation that returns an ObjectStream. */
+pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
+/** Result of a lookup operation for the specified type. */
+pub type LookupResult<T> = Result<Arc<T>, ApiError>;
+/** Result of an update operation for the specified type. */
+pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
+
+/** A stream of Results, each potentially representing an object in the API. */
+pub type ObjectStream<T> =
+    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+
+#[derive(Deserialize, ExtractedParameter)]
+pub struct PaginationParams<NameType> {
+    pub marker: Option<NameType>,
+    pub limit: Option<usize>,
+}
 
 /** Default maximum number of items per page of "list" results */
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
@@ -436,7 +466,7 @@ impl ApiObject for ApiInstance {
  * The runtime state of an Instance is owned by the server controller running
  * that Instance.
  */
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the instance */
     pub run_state: ApiInstanceState,
@@ -457,7 +487,7 @@ pub struct ApiInstanceRuntimeState {
  * here.  If we allow other properties here, we may want to make them Options so
  * that callers don't have to know the prior state already.
  */
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
@@ -640,7 +670,7 @@ impl ApiDiskState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskRuntimeState {
     /** runtime state of the disk */
     pub disk_state: ApiDiskState,
@@ -736,6 +766,7 @@ pub struct ApiRackView {
  */
 pub struct ApiServer {
     pub id: Uuid,
+    pub service_address: SocketAddr,
 }
 
 impl ApiObject for ApiServer {
@@ -743,6 +774,7 @@ impl ApiObject for ApiServer {
     fn to_view(&self) -> ApiServerView {
         ApiServerView {
             id: self.id.clone(),
+            service_address: self.service_address.clone(),
         }
     }
 }
@@ -751,6 +783,28 @@ impl ApiObject for ApiServer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiServerView {
     pub id: Uuid,
+    pub service_address: SocketAddr,
+}
+
+/*
+ * Internal Control Plane API objects
+ */
+
+#[derive(Serialize, Deserialize)]
+pub struct ApiServerStartupInfo {
+    pub sc_address: SocketAddr,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct InstanceEnsureBody {
+    pub initial_runtime: ApiInstanceRuntimeState,
+    pub target: ApiInstanceRuntimeStateRequested,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DiskEnsureBody {
+    pub initial_runtime: ApiDiskRuntimeState,
+    pub target: ApiDiskStateRequested,
 }
 
 #[cfg(test)]

@@ -99,6 +99,16 @@ impl HttpServer {
         tokio::spawn(async { future.await })
     }
 
+    pub async fn wait_for_shutdown(
+        &mut self,
+        join_handle: tokio::task::JoinHandle<Result<(), hyper::error::Error>>,
+    ) -> Result<(), String> {
+        let join_result = join_handle
+            .await
+            .map_err(|error| format!("waiting for server: {}", error))?;
+        join_result.map_err(|error| format!("server stopped: {}", error))
+    }
+
     /**
      * Set up an HTTP server bound on the specified address that runs registered
      * handlers.  You must invoke `run()` on the returned instance of
@@ -141,7 +151,9 @@ impl HttpServer {
 
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let graceful = server.with_graceful_shutdown(async move {
-            rx.await.ok();
+            rx.await.expect(
+                "dropshot server shutting down without invoking close()",
+            );
             info!(log_close, "received request to begin graceful shutdown");
         });
 

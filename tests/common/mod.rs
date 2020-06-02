@@ -2,18 +2,48 @@
  * Shared integration testing facilities
  */
 
+use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use dropshot::test_util::TestContext;
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
-use oxide_api_prototype::ApiServerConfig;
+use oxide_api_prototype::ConfigController;
+use oxide_api_prototype::ConfigServerController;
+use oxide_api_prototype::OxideControllerServer;
+use oxide_api_prototype::ServerControllerServer;
 use oxide_api_prototype::SimMode;
+use slog::Logger;
+use std::net::SocketAddr;
 use std::path::Path;
 use uuid::Uuid;
 
-/**
- * Set up a `TestContext` for running tests against the API server.
- */
-pub async fn test_setup(test_name: &str) -> TestContext {
+const SERVER_CONTROLLER_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
+const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+
+pub struct ControlPlaneTestContext {
+    pub external_client: ClientTestContext,
+    pub internal_client: ClientTestContext,
+    pub server: OxideControllerServer,
+    server_controller: ServerControllerServer,
+    logctx: LogContext,
+}
+
+impl ControlPlaneTestContext {
+    pub async fn teardown(self) {
+        self.server.http_server_external.close();
+        self.server.http_server_internal.close();
+        /*
+         * TODO-correctness
+         * can we (/ how do we?) wait for these things to shut down?  We want to
+         * use wait_for_finish() here on the http servers.
+         */
+        self.server_controller.http_server.close();
+        self.logctx.cleanup_successful();
+    }
+}
+
+pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     /*
      * We load as much configuration as we can from the test suite configuration
      * file.  In practice, TestContext requires that the TCP port be 0 and that
@@ -25,17 +55,64 @@ pub async fn test_setup(test_name: &str) -> TestContext {
      * usefully configured (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = ApiServerConfig::from_file(config_file_path)
+    let config = ConfigController::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    let api = oxide_api_prototype::dropshot_api();
-    let rack_id_str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
-    let rack_id = Uuid::parse_str(rack_id_str).unwrap();
     let logctx = LogContext::new(test_name, &config.log);
-    let log = logctx.log.new(o!());
-    let apictx = oxide_api_prototype::ApiContext::new(&rack_id, log);
-    oxide_api_prototype::populate_initial_data(&apictx, SimMode::Explicit)
-        .await;
-    TestContext::new(api, apictx, &config.dropshot, logctx)
+    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+
+    let server = OxideControllerServer::start(&config, &rack_id, &logctx.log)
+        .await
+        .unwrap();
+    let testctx_external = ClientTestContext::new(
+        server.http_server_external.local_addr(),
+        logctx.log.new(o!("component" => "external client test context")),
+    );
+    let testctx_internal = ClientTestContext::new(
+        server.http_server_internal.local_addr(),
+        logctx.log.new(o!("component" => "internal client test context")),
+    );
+
+    /* Set up a single server controller. */
+    let sc_id = Uuid::parse_str(SERVER_CONTROLLER_UUID).unwrap();
+    let sc = start_server_controller(
+        logctx.log.new(o!(
+            "component" => "ServerControllerServer",
+            "server" => sc_id.to_string(),
+        )),
+        server.http_server_internal.local_addr(),
+        sc_id,
+    )
+    .await
+    .unwrap();
+
+    ControlPlaneTestContext {
+        server: server,
+        external_client: testctx_external,
+        internal_client: testctx_internal,
+        server_controller: sc,
+        logctx: logctx,
+    }
+}
+
+pub async fn start_server_controller(
+    log: Logger,
+    controller_address: SocketAddr,
+    id: Uuid,
+) -> Result<ServerControllerServer, String> {
+    let config = ConfigServerController {
+        id,
+        sim_mode: SimMode::Explicit,
+        controller_address,
+        dropshot: ConfigDropshot {
+            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+        },
+        /* TODO-cleanup this is unused */
+        log: ConfigLogging::StderrTerminal {
+            level: ConfigLoggingLevel::Debug,
+        },
+    };
+
+    ServerControllerServer::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

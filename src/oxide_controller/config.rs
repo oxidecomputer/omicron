@@ -13,25 +13,27 @@ use std::path::Path;
  * Represents configuration for the whole API server.
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ApiServerConfig {
-    /** Dropshot configuration */
-    pub dropshot: ConfigDropshot,
+pub struct ConfigController {
+    /** Dropshot configuration for external server*/
+    pub dropshot_external: ConfigDropshot,
+    /** Dropshot configuration for internal server*/
+    pub dropshot_internal: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
 }
 
-impl ApiServerConfig {
+impl ConfigController {
     /**
-     * Load an `ApiServerConfig` from the given TOML file.  The format is
+     * Load a `ConfigController` from the given TOML file.  The format is
      * described in the README.  This config object can then be used to create a
      * new `ApiServer`.
      */
-    pub fn from_file(path: &Path) -> Result<ApiServerConfig, String> {
+    pub fn from_file(path: &Path) -> Result<ConfigController, String> {
         let file_read = std::fs::read_to_string(path);
         let file_contents = file_read.map_err(|error| {
             format!("read \"{}\": {}", path.display(), error)
         })?;
-        let config_parsed: ApiServerConfig = toml::from_str(&file_contents)
+        let config_parsed: ConfigController = toml::from_str(&file_contents)
             .map_err(|error| {
                 format!("parse \"{}\": {}", path.display(), error)
             })?;
@@ -41,7 +43,7 @@ impl ApiServerConfig {
 
 #[cfg(test)]
 mod test {
-    use super::ApiServerConfig;
+    use super::ConfigController;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -68,7 +70,7 @@ mod test {
     }
 
     /**
-     * Load an ApiServerConfig with the given string `contents`.  To exercise
+     * Load a ConfigController with the given string `contents`.  To exercise
      * the full path, this function writes the contents to a file first, then
      * loads the config from that file, then removes the file.  `label` is used
      * as a unique string for the filename and error messages.  It should be
@@ -77,13 +79,13 @@ mod test {
     fn read_config(
         label: &str,
         contents: &str,
-    ) -> Result<ApiServerConfig, String> {
+    ) -> Result<ConfigController, String> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path.display());
         fs::write(path, contents).expect("write to tempfile failed");
 
-        let result = ApiServerConfig::from_file(path);
+        let result = ConfigController::from_file(path);
         fs::remove_file(path).expect("failed to remove temporary file");
         eprintln!("{:?}", result);
         result
@@ -95,7 +97,7 @@ mod test {
 
     #[test]
     fn test_config_nonexistent() {
-        let error = ApiServerConfig::from_file(Path::new("/nonexistent"))
+        let error = ConfigController::from_file(Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
         assert!(error
             .starts_with("read \"/nonexistent\": No such file or directory"));
@@ -132,8 +134,10 @@ mod test {
         let config = read_config(
             "valid",
             r##"
-            [dropshot]
+            [dropshot_external]
             bind_address = "10.1.2.3:4567"
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
             [log]
             mode = "file"
             level = "debug"
@@ -142,9 +146,12 @@ mod test {
             "##,
         )
         .unwrap();
-        assert_eq!(config, ApiServerConfig {
-            dropshot: ConfigDropshot {
+        assert_eq!(config, ConfigController {
+            dropshot_external: ConfigDropshot {
                 bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
+            },
+            dropshot_internal: ConfigDropshot {
+                bind_address: "10.1.2.3:4568".parse::<SocketAddr>().unwrap(),
             },
             log: ConfigLogging::File {
                 level: ConfigLoggingLevel::Debug,

@@ -2,9 +2,13 @@
 # Oxide API: example configuration file
 #
 
-[dropshot]
-# IP address and TCP port on which to listen for connections
+[dropshot_external]
+# IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
+
+[dropshot_internal]
+# IP address and TCP port on which to listen for the internal API
+bind_address = "127.0.0.1:12221"
 
 [log]
 # Show log messages of this level and more severe

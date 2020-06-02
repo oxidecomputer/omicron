@@ -32,6 +32,7 @@ pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
 pub use handler::HttpResponseOkObject;
 pub use handler::HttpResponseOkObjectList;
+pub use handler::HttpResponseUpdatedNoContent;
 pub use handler::HttpRouteHandler;
 pub use handler::Json;
 pub use handler::Path;

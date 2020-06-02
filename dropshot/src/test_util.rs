@@ -353,7 +353,7 @@ pub struct TestContext {
     pub server: HttpServer,
     pub log: Logger,
     server_task: JoinHandle<Result<(), hyper::error::Error>>,
-    log_context: LogContext,
+    log_context: Option<LogContext>,
 }
 
 impl TestContext {
@@ -368,7 +368,8 @@ impl TestContext {
         api: ApiDescription,
         private: Arc<dyn Any + Send + Sync + 'static>,
         config_dropshot: &ConfigDropshot,
-        log_context: LogContext,
+        log_context: Option<LogContext>,
+        log: Logger,
     ) -> TestContext {
         /*
          * The local bind address TCP port needs to be zero in the test suite or
@@ -383,7 +384,6 @@ impl TestContext {
         /*
          * Set up the server itself.
          */
-        let log = log_context.log.new(o!());
         let mut server =
             HttpServer::new(&config_dropshot, api, private, &log).unwrap();
         let server_task = server.run();
@@ -408,7 +408,9 @@ impl TestContext {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
         join_result.expect("server stopped with an error");
-        self.log_context.cleanup_successful();
+        if let Some(log_context) = self.log_context {
+            log_context.cleanup_successful();
+        }
     }
 }
 
@@ -480,11 +482,10 @@ pub async fn read_string(response: &mut Response<Body>) -> String {
  * Fetches a single resource from the API.
  */
 pub async fn object_get<T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     object_url: &str,
 ) -> T {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_with_body(
             Method::GET,
             &object_url,
@@ -500,11 +501,10 @@ pub async fn object_get<T: DeserializeOwned>(
  * Fetches a list of resources from the API.
  */
 pub async fn objects_list<T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     list_url: &str,
 ) -> Vec<T> {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request_with_body(
             Method::GET,
             &list_url,
@@ -520,12 +520,11 @@ pub async fn objects_list<T: DeserializeOwned>(
  * Issues an HTTP POST to the specified collection URL to create an object.
  */
 pub async fn objects_post<S: Serialize + Debug, T: DeserializeOwned>(
-    testctx: &TestContext,
+    client: &ClientTestContext,
     collection_url: &str,
     input: S,
 ) -> T {
-    let mut response = testctx
-        .client_testctx
+    let mut response = client
         .make_request(
             Method::POST,
             &collection_url,
