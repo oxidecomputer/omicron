@@ -13,12 +13,9 @@ Work queue (see also: existing GitHub issues):
 * deferred cleanup / polish up for more help
 ** need better names for controller, server-controller.  It's a mouthful and
    leads to confusing naming of related structs all around.
-** rename entrypoints functions with prefix appropriate to its API
-** rip out built-in projects
-** improve naming (e.g., around "api", "oxide-api-prototype", "controller",
-   "server")
+*** big example of naming issue: ControllerServerConfig vs ConfigServerController
+** rename repo
 ** create separate exports for internal vs. external models
-** big example of naming issue: ControllerServerConfig vs ConfigServerController
 ** improved documentation, especially design docs, structural docs
 ** revisit "Api" prefixes
 * flesh out controller - server-controller interaction:
