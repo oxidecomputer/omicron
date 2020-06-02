@@ -5,7 +5,7 @@
 
 Currently:
 
-* Review XXXs, new TODOs
+* Self-review + review XXXs, new TODOs
 
 API endpoints:
 
