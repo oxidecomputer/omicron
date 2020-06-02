@@ -3,10 +3,6 @@
 
 = TODO
 
-Currently:
-
-* Self-review + review XXXs, new TODOs
-
 API endpoints:
 
 * RFD 24: regions, AZs, etc
