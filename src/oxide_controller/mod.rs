@@ -21,7 +21,6 @@ use http_entrypoints_internal::controller_internal_api;
 use crate::api_model::ApiIdentityMetadataCreateParams;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProjectCreateParams;
-use futures::join;
 use slog::Logger;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -87,54 +86,30 @@ impl OxideControllerServer {
         })
     }
 
-    pub async fn wait_for_finish(self) -> Result<(), String> {
-        let (join_result_external, join_result_internal) =
-            join!(self.join_handle_external, self.join_handle_internal);
-
-        let (result_external, result_internal) =
-            match (join_result_external, join_result_internal) {
-                (Ok(rexternal), Ok(rinternal)) => (rexternal, rinternal),
-                (Err(error_external), Err(error_internal)) => {
-                    return Err(format!(
-                        "failed to join both external and internal servers \
-                         (external: \"{}\", internal: \"{}\")",
-                        error_external, error_internal
-                    ));
-                }
-                (Err(error_external), Ok(_)) => {
-                    return Err(format!(
-                        "failed to join external server: {}",
-                        error_external
-                    ));
-                }
-                (Ok(_), Err(error_internal)) => {
-                    return Err(format!(
-                        "failed to join internal server: {}",
-                        error_internal
-                    ));
-                }
-            };
+    pub async fn wait_for_finish(mut self) -> Result<(), String> {
+        let result_external = self
+            .http_server_external
+            .wait_for_shutdown(self.join_handle_external)
+            .await;
+        let result_internal = self
+            .http_server_internal
+            .wait_for_shutdown(self.join_handle_internal)
+            .await;
 
         match (result_external, result_internal) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error_external), Err(error_internal)) => {
                 return Err(format!(
-                    "external and internal HTTP servers both stopped \
-                     (external: \"{}\", internal: \"{}\"",
+                    "errors from both external and internal HTTP \
+                     servers(external: \"{}\", internal: \"{}\"",
                     error_external, error_internal
                 ));
             }
             (Err(error_external), Ok(())) => {
-                return Err(format!(
-                    "external server stopped: {}",
-                    error_external
-                ));
+                return Err(format!("external server: {}", error_external));
             }
             (Ok(()), Err(error_internal)) => {
-                return Err(format!(
-                    "internal server stopped: {}",
-                    error_internal
-                ));
+                return Err(format!("internal server: {}", error_internal));
             }
         }
     }
@@ -160,7 +135,7 @@ pub async fn controller_run_server(
  * server.  This should be replaced with a config file or a data backend with a
  * demo initialization script or the like.
  */
-pub async fn populate_initial_data(apictx: &Arc<ControllerServerContext>) {
+async fn populate_initial_data(apictx: &Arc<ControllerServerContext>) {
     let controller = &apictx.controller;
     let demo_projects: Vec<(&str, &str)> = vec![
         ("1eb2b543-b199-405f-b705-1739d01a197c", "simproject1"),

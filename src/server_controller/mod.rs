@@ -14,13 +14,11 @@ pub use server_controller_client::ServerControllerTestInterfaces;
 
 use crate::api_model::ApiServerStartupInfo;
 use crate::ControllerClient;
-use http_entrypoints::sc_api;
 use server_controller::ServerController;
 use slog::Logger;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
-/* TODO-cleanup commonize with OxideControllerServer? */
 pub struct ServerControllerServer {
     pub server_controller: Arc<ServerController>,
     pub http_server: dropshot::HttpServer,
@@ -81,12 +79,8 @@ impl ServerControllerServer {
         })
     }
 
-    pub async fn wait_for_finish(self) -> Result<(), String> {
-        let server_result = self
-            .join_handle
-            .await
-            .map_err(|error| format!("waiting for server: {}", error))?;
-        server_result.map_err(|error| format!("server stopped: {}", error))
+    pub async fn wait_for_finish(mut self) -> Result<(), String> {
+        self.http_server.wait_for_shutdown(self.join_handle).await
     }
 }
 

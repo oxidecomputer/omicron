@@ -33,9 +33,11 @@ impl ControlPlaneTestContext {
     pub async fn teardown(self) {
         self.server.http_server_external.close();
         self.server.http_server_internal.close();
-        // XXX can we (/ how do we?) wait for these things to shut down?
-        // self.server.wait_for_finish().await.unwrap();
-        // self.server_controller.teardown().await;
+        /*
+         * TODO-correctness
+         * can we (/ how do we?) wait for these things to shut down?  We want to
+         * use wait_for_finish() here on the http servers.
+         */
         self.server_controller.http_server.close();
         self.logctx.cleanup_successful();
     }
@@ -92,15 +94,6 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     }
 }
 
-/*
- * XXX might the commonization be simpler if we provide:
- * - a common function that waits for a server to stop and produces a sane error
- * - a common function that takes two Tasks and waits for them both and produces
- *   a single unified error
- * (the first of these currently appears in the run_server() functions for both
- * controller and server_controller, and the second appears in server_controller
- * but could appear both there and below, in the test suite)
- */
 pub async fn start_server_controller(
     log: Logger,
     controller_address: SocketAddr,
