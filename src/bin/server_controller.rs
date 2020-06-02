@@ -12,7 +12,7 @@ use clap::{App, Arg};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use oxide_api_prototype::run_server_controller_api_server;
+use oxide_api_prototype::sc_run_server;
 use oxide_api_prototype::ConfigServerController;
 use oxide_api_prototype::SimMode;
 use std::net::SocketAddr;
@@ -85,7 +85,7 @@ async fn do_run() -> Result<(), String> {
         },
     };
 
-    run_server_controller_api_server(config).await
+    sc_run_server(&config).await
 }
 
 fn fatal(message: String) {

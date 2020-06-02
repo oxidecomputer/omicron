@@ -4,21 +4,18 @@
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use dropshot::test_util::TestContext;
 use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
-use oxide_api_prototype::sc_api;
-use oxide_api_prototype::ControllerClient;
+use oxide_api_prototype::ConfigServerController;
 use oxide_api_prototype::ControllerServerConfig;
 use oxide_api_prototype::OxideControllerServer;
-use oxide_api_prototype::ServerController;
+use oxide_api_prototype::ServerControllerServer;
 use oxide_api_prototype::SimMode;
-/* XXX reveals this is really an implementation detail */
-use oxide_api_prototype::ApiServerStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
 use uuid::Uuid;
 
 const SERVER_CONTROLLER_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
@@ -27,8 +24,8 @@ const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub server_controller: TestContext,
     pub server: OxideControllerServer,
+    server_controller: ServerControllerServer,
     logctx: LogContext,
 }
 
@@ -36,9 +33,10 @@ impl ControlPlaneTestContext {
     pub async fn teardown(self) {
         self.server.http_server_external.close();
         self.server.http_server_internal.close();
-        // XXX can we (/ how do we?) wait for the thing to shut down?
+        // XXX can we (/ how do we?) wait for these things to shut down?
         // self.server.wait_for_finish().await.unwrap();
-        self.server_controller.teardown().await;
+        // self.server_controller.teardown().await;
+        self.server_controller.http_server.close();
         self.logctx.cleanup_successful();
     }
 }
@@ -76,11 +74,11 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let sc_id = Uuid::parse_str(SERVER_CONTROLLER_UUID).unwrap();
     let sc = start_server_controller(
         logctx.log.new(o!(
-            "component" => "server_controller",
+            "component" => "ServerControllerServer",
             "server" => sc_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
-        sc_id.clone(),
+        sc_id,
     )
     .await
     .unwrap();
@@ -94,7 +92,6 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     }
 }
 
-/* XXX most of this is copied from run_server_controller_api_server() */
 /*
  * XXX might the commonization be simpler if we provide:
  * - a common function that waits for a server to stop and produces a sane error
@@ -108,46 +105,21 @@ pub async fn start_server_controller(
     log: Logger,
     controller_address: SocketAddr,
     id: Uuid,
-) -> Result<TestContext, String> {
-    /*
-     * XXX use of "component" is overloaded -- caller sets it to
-     * "server_controller"
-     */
-    let dropshot_log = log.new(o!("component" => "dropshot"));
-    let sc_log = log.new(o!(
-        "component" => "server_controller",
-        "server" => id.to_string(),
-    ));
-
-    let client_log = log.new(o!("component" => "controller_client"));
-    let controller_client =
-        Arc::new(ControllerClient::new(controller_address.clone(), client_log));
-
-    let sc = Arc::new(ServerController::new_simulated_with_id(
-        &id,
-        SimMode::Explicit,
-        sc_log,
-        Arc::clone(&controller_client),
-    ));
-
-    let config_dropshot = ConfigDropshot {
-        bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+) -> Result<ServerControllerServer, String> {
+    let config = ConfigServerController {
+        id,
+        sim_mode: SimMode::Explicit,
+        controller_address,
+        dropshot: ConfigDropshot {
+            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+        },
+        /* TODO-cleanup this is unused */
+        log: ConfigLogging::StderrTerminal {
+            level: ConfigLoggingLevel::Debug,
+        },
     };
-    let api = sc_api();
 
-    let rv = TestContext::new(api, sc, &config_dropshot, None, dropshot_log);
-
-    /*
-     * TODO this could happen continuously until it succeeds, but it should be
-     * bounded (unlike the case when run as a standalone executable).
-     */
-    controller_client
-        .notify_server_online(id.clone(), ApiServerStartupInfo {
-            sc_address: rv.server.local_addr(),
-        })
-        .await
-        .unwrap();
-    Ok(rv)
+    ServerControllerServer::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

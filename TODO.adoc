@@ -5,7 +5,6 @@
 
 Currently:
 
-* todo: refactor server controller startup similarly to controller startup
 * some renames:
 ** ControllerServerConfig -> ConfigController
 ** run_server_controller_api_server -> sc_run_server()
@@ -13,6 +12,8 @@ Currently:
 ** other things that just say Controller should be OxideController?
 * Review XXXs, new TODOs
 * remove dropshot TestContext?
+* todo: commonize two executable programs (that is, make fail/fatal consistent,
+  etc.)
 
 API endpoints:
 

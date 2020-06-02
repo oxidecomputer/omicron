@@ -50,7 +50,7 @@ impl OxideControllerServer {
         rack_id: &Uuid,
         log: &Logger,
     ) -> Result<OxideControllerServer, String> {
-        info!(log, "setting up server");
+        info!(log, "setting up controller server");
 
         let ctxlog = log.new(o!("component" => "ControllerServerContext"));
         let apictx = ControllerServerContext::new(rack_id, ctxlog);
