@@ -88,7 +88,7 @@ async fn do_run() -> Result<(), String> {
     sc_run_server(&config).await
 }
 
-fn fatal(message: String) {
+fn fatal(message: String) -> ! {
     eprintln!("{}: {}", std::env::args().nth(0).unwrap(), message);
     exit(1);
 }

@@ -9,7 +9,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::ConfigServerController;
-use oxide_api_prototype::ControllerServerConfig;
+use oxide_api_prototype::ConfigController;
 use oxide_api_prototype::OxideControllerServer;
 use oxide_api_prototype::ServerControllerServer;
 use oxide_api_prototype::SimMode;
@@ -53,7 +53,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * usefully configured (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = ControllerServerConfig::from_file(config_file_path)
+    let config = ConfigController::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();

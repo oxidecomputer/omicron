@@ -13,7 +13,7 @@ use std::path::Path;
  * Represents configuration for the whole API server.
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ControllerServerConfig {
+pub struct ConfigController {
     /** Dropshot configuration for external server*/
     pub dropshot_external: ConfigDropshot,
     /** Dropshot configuration for internal server*/
@@ -22,18 +22,18 @@ pub struct ControllerServerConfig {
     pub log: ConfigLogging,
 }
 
-impl ControllerServerConfig {
+impl ConfigController {
     /**
-     * Load a `ControllerServerConfig` from the given TOML file.  The format is
+     * Load a `ConfigController` from the given TOML file.  The format is
      * described in the README.  This config object can then be used to create a
      * new `ApiServer`.
      */
-    pub fn from_file(path: &Path) -> Result<ControllerServerConfig, String> {
+    pub fn from_file(path: &Path) -> Result<ConfigController, String> {
         let file_read = std::fs::read_to_string(path);
         let file_contents = file_read.map_err(|error| {
             format!("read \"{}\": {}", path.display(), error)
         })?;
-        let config_parsed: ControllerServerConfig =
+        let config_parsed: ConfigController =
             toml::from_str(&file_contents).map_err(|error| {
                 format!("parse \"{}\": {}", path.display(), error)
             })?;
@@ -43,7 +43,7 @@ impl ControllerServerConfig {
 
 #[cfg(test)]
 mod test {
-    use super::ControllerServerConfig;
+    use super::ConfigController;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -70,22 +70,22 @@ mod test {
     }
 
     /**
-     * Load a ControllerServerConfig with the given string `contents`.  To
-     * exercise the full path, this function writes the contents to a file
-     * first, then loads the config from that file, then removes the file.
-     * `label` is used as a unique string for the filename and error messages.
-     * It should be unique for each test.
+     * Load a ConfigController with the given string `contents`.  To exercise
+     * the full path, this function writes the contents to a file first, then
+     * loads the config from that file, then removes the file.  `label` is used
+     * as a unique string for the filename and error messages.  It should be
+     * unique for each test.
      */
     fn read_config(
         label: &str,
         contents: &str,
-    ) -> Result<ControllerServerConfig, String> {
+    ) -> Result<ConfigController, String> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path.display());
         fs::write(path, contents).expect("write to tempfile failed");
 
-        let result = ControllerServerConfig::from_file(path);
+        let result = ConfigController::from_file(path);
         fs::remove_file(path).expect("failed to remove temporary file");
         eprintln!("{:?}", result);
         result
@@ -98,7 +98,7 @@ mod test {
     #[test]
     fn test_config_nonexistent() {
         let error =
-            ControllerServerConfig::from_file(Path::new("/nonexistent"))
+            ConfigController::from_file(Path::new("/nonexistent"))
                 .expect_err("expected config to fail from /nonexistent");
         assert!(error
             .starts_with("read \"/nonexistent\": No such file or directory"));
@@ -147,7 +147,7 @@ mod test {
             "##,
         )
         .unwrap();
-        assert_eq!(config, ControllerServerConfig {
+        assert_eq!(config, ConfigController {
             dropshot_external: ConfigDropshot {
                 bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
             },

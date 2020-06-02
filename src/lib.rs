@@ -16,7 +16,7 @@ pub use controller::controller_run_openapi_external;
 pub use controller::controller_run_server;
 pub use controller::populate_initial_data;
 pub use controller::ControllerClient;
-pub use controller::ControllerServerConfig;
+pub use controller::ConfigController;
 pub use controller::ControllerServerContext;
 pub use controller::OxideController;
 pub use controller::OxideControllerServer;

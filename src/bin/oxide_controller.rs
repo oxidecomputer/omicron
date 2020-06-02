@@ -17,14 +17,19 @@
 use clap::{App, Arg};
 use oxide_api_prototype::controller_run_openapi_external;
 use oxide_api_prototype::controller_run_server;
-use oxide_api_prototype::ControllerServerConfig;
-use std::io::{stderr, Write};
+use oxide_api_prototype::ConfigController;
 use std::path::Path;
 use std::process::exit;
 
 #[tokio::main]
 async fn main() {
-    let args = App::new("oxide-api-prototype")
+    if let Err(message) = do_run().await {
+        fatal(message);
+    }
+}
+
+async fn do_run() -> Result<(), String> {
+    let matches = App::new("oxide-api-prototype")
         .after_help("See README.adoc for more information")
         .arg(
             Arg::with_name("openapi")
@@ -33,35 +38,23 @@ async fn main() {
                 .help("Print the OpenAPI Spec document and exit"),
         )
         .arg(Arg::with_name("CONFIG_FILE_PATH").required(true).index(1))
-        .get_matches_safe();
-
-    let matches = match args {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = write!(stderr(), "{}", e);
-            exit(1);
-        }
-    };
+        .get_matches_safe()
+        .map_err(|clap_error| {
+            format!("parsing arguments: {}", clap_error.message)
+        })?;
 
     let config_file = matches.value_of("CONFIG_FILE_PATH").unwrap();
     let config_file_path = Path::new(config_file);
-    let config = match ControllerServerConfig::from_file(config_file_path) {
-        Ok(c) => c,
-        Err(error) => {
-            fail(error);
-        }
-    };
+    let config = ConfigController::from_file(config_file_path)?;
 
     if matches.is_present("openapi") {
-        controller_run_openapi_external();
+        Ok(controller_run_openapi_external())
     } else {
-        if let Err(error) = controller_run_server(&config).await {
-            fail(error);
-        }
+        controller_run_server(&config).await
     }
 }
 
-fn fail(message: String) -> ! {
+fn fatal(message: String) -> ! {
     eprintln!("{}: {}", std::env::args().nth(0).unwrap(), message);
     exit(1);
 }
