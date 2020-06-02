@@ -12,10 +12,11 @@ mod oxide_controller;
 pub use config::ConfigController;
 pub use context::ControllerServerContext;
 pub use controller_client::ControllerClient;
-pub use http_entrypoints_external::controller_external_api;
-pub use http_entrypoints_internal::controller_internal_api;
 pub use oxide_controller::OxideController;
 pub use oxide_controller::OxideControllerTestInterfaces;
+
+use http_entrypoints_external::controller_external_api;
+use http_entrypoints_internal::controller_internal_api;
 
 use crate::api_model::ApiIdentityMetadataCreateParams;
 use crate::api_model::ApiName;

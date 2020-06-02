@@ -9,13 +9,13 @@ mod server_controller_client;
 
 pub use config::ConfigServerController;
 pub use config::SimMode;
-pub use http_entrypoints::sc_api;
-pub use server_controller::ServerController;
 pub use server_controller_client::ServerControllerClient;
 pub use server_controller_client::ServerControllerTestInterfaces;
 
 use crate::api_model::ApiServerStartupInfo;
 use crate::ControllerClient;
+use http_entrypoints::sc_api;
+use server_controller::ServerController;
 use slog::Logger;
 use std::sync::Arc;
 use tokio::task::JoinHandle;

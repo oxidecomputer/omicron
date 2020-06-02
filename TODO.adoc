@@ -5,12 +5,7 @@
 
 Currently:
 
-* some renames:
-** "controller" => "oxide_controller"?
-** other things that just say Controller should be OxideController?
 * Review XXXs, new TODOs
-* todo: commonize two executable programs (that is, make fail/fatal consistent,
-  etc.)
 
 API endpoints:
 
@@ -20,6 +15,8 @@ API endpoints:
 Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
+** need better names for controller, server-controller.  It's a mouthful and
+   leads to confusing naming of related structs all around.
 ** rename entrypoints functions with prefix appropriate to its API
 ** rip out built-in projects
 ** improve naming (e.g., around "api", "oxide-api-prototype", "controller",
