@@ -49,7 +49,7 @@ use serde::Serialize;
 use serde_json::error::Error as SerdeError;
 
 /**
- * HttpError represents an error generated as part of handling an API
+ * `HttpError` represents an error generated as part of handling an API
  * request.  When these bubble up to the top of the request handling stack
  * (which is most of the time that they're generated), these are turned into an
  * HTTP response, which includes:
@@ -72,7 +72,7 @@ use serde_json::error::Error as SerdeError;
  * should avoid creating specific codes and metadata unless there's a good
  * reason for a client to care.
  *
- * Besides that, HttpErrors also have an internal error message, which may
+ * Besides that, `HttpError`s also have an internal error message, which may
  * differ from the error message that gets reported to users.  For example, if
  * the request fails because an internal database is unreachable, the client may
  * just see "internal error", while the server log would include more details
@@ -144,6 +144,68 @@ impl From<http::Error> for HttpError {
 }
 
 impl HttpError {
+    /**
+     * Generates an `HttpError` for any 400-level client error with a custom
+     * `message` used for both the internal and external message.  The
+     * expectation here is that for most 400-level errors, there's no need for a
+     * separate internal message.
+     */
+    pub fn for_client_error(
+        error_code: Option<String>,
+        code: http::StatusCode,
+        message: String,
+    ) -> Self {
+        assert!(code.is_client_error());
+        HttpError {
+            status_code: code,
+            error_code: error_code,
+            internal_message: message.clone(),
+            external_message: message.clone(),
+        }
+    }
+
+    /**
+     * Generates an `HttpError` for a 500 "Internal Server Error" error with the
+     * given `internal_message` for the internal message.
+     */
+    pub fn for_internal_error(internal_message: String) -> Self {
+        let status_code = http::StatusCode::INTERNAL_SERVER_ERROR;
+        HttpError {
+            status_code,
+            error_code: Some(String::from("Internal")),
+            external_message: status_code
+                .canonical_reason()
+                .unwrap()
+                .to_string(),
+            internal_message,
+        }
+    }
+
+    /**
+     * Generates an `HttpError` for a 503 "Service Unavailable" error with the
+     * given `internal_message` for the internal message.
+     */
+    pub fn for_unavail(
+        error_code: Option<String>,
+        internal_message: String,
+    ) -> Self {
+        let status_code = http::StatusCode::SERVICE_UNAVAILABLE;
+        HttpError {
+            status_code,
+            error_code,
+            external_message: status_code
+                .canonical_reason()
+                .unwrap()
+                .to_string(),
+            internal_message,
+        }
+    }
+
+    /**
+     * Generates a 400 "Bad Request" error with the given `message` used for
+     * both the internal and external message.  This is a convenience wrapper
+     * around [`HttpError::for_client_error`].
+     */
     pub fn for_bad_request(
         error_code: Option<String>,
         message: String,
@@ -155,15 +217,26 @@ impl HttpError {
         )
     }
 
+    /**
+     * Generates an `HttpError` for the given HTTP `status_code` where the
+     * internal and external messages for the error come from the standard label
+     * for this status code (e.g., the message for status code 404 is "Not
+     * Found").
+     */
     pub fn for_status(
         error_code: Option<String>,
-        code: http::StatusCode,
+        status_code: http::StatusCode,
     ) -> Self {
         /* TODO-polish This should probably be our own message. */
-        let message = code.canonical_reason().unwrap().to_string();
-        HttpError::for_client_error(error_code, code, message)
+        let message = status_code.canonical_reason().unwrap().to_string();
+        HttpError::for_client_error(error_code, status_code, message)
     }
 
+    /**
+     * Generates an `HttpError` for a 404 "Not Found" error with a custom
+     * internal message `internal_message`.  The external message will be "Not
+     * Found" (i.e., the standard label for status code 404).
+     */
     pub fn for_not_found(
         error_code: Option<String>,
         internal_message: String,
@@ -179,43 +252,10 @@ impl HttpError {
         }
     }
 
-    pub fn for_client_error(
-        error_code: Option<String>,
-        code: http::StatusCode,
-        message: String,
-    ) -> Self {
-        assert!(code.is_client_error());
-        HttpError {
-            status_code: code,
-            error_code: error_code,
-            internal_message: message.clone(),
-            external_message: message.clone(),
-        }
-    }
-
-    pub fn for_internal_error(message_internal: String) -> Self {
-        let code = http::StatusCode::INTERNAL_SERVER_ERROR;
-        HttpError {
-            status_code: code,
-            error_code: Some(String::from("Internal")),
-            external_message: code.canonical_reason().unwrap().to_string(),
-            internal_message: message_internal,
-        }
-    }
-
-    pub fn for_unavail(
-        error_code: Option<String>,
-        message_internal: String,
-    ) -> Self {
-        let code = http::StatusCode::SERVICE_UNAVAILABLE;
-        HttpError {
-            status_code: code,
-            error_code,
-            external_message: code.canonical_reason().unwrap().to_string(),
-            internal_message: message_internal,
-        }
-    }
-
+    /**
+     * Generates an HTTP response for the given `HttpError`, using `request_id`
+     * for the response's request id.
+     */
     pub fn into_response(
         self,
         request_id: &str,
