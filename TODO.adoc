@@ -17,7 +17,6 @@ Work queue (see also: existing GitHub issues):
 ** rename repo
 ** create separate exports for internal vs. external models
 ** improved documentation, especially design docs, structural docs
-** document Dropshot
 ** write some design documents
 * flesh out controller - server-controller interaction:
 ** server controller startup should trigger restoring instances and disks

@@ -1,24 +1,10 @@
 /*!
  * Interface for implementing HTTP endpoint handler functions.
  *
- * ## Endpoint function signatures
- *
- * All endpoint handler functions must be `async` (that is, must return
- * a `Future`) and must return something that can be turned into a
- * `Result<Response<Body>, HttpError>`.  Ignoring the return values for a
- * minute, handler functions must have a signature that matches this pattern:
- *
- * ```ignore
- * f(
- *      rqctx: Arc<RequestContext>,
- *      [query_params: Query<Q>,]
- *      [path_params: Path<P>,]
- *      [body_param: Json<J>,]
- * ) -> Result<HttpResponse, HttpError>
- * ```
- *
- * Note that, other than the RequestContext, parameters may appear in any order.
- * See "Extractors" below for more on the types `Query`, `Path`, and `Json`.
+ * For information about supported endpoint function signatures, argument types,
+ * extractors, and return types, see the top-level documentation for this crate.
+ * As documented there, we support several different sets of function arguments
+ * and return types.
  *
  * We allow for variation in the function arguments not so much for programmer
  * convenience (since parsing the query string or JSON body could be implemented
@@ -29,98 +15,19 @@
  * specification ensures that--at least in many important ways--the
  * implementation cannot diverge from the spec.
  *
- *
- * ## Extractors
- *
- * The types `Query`, `Path`, and `Json` are called _Extractors_ because they
- * cause information to be pulled out of the request and made available to the
- * handler function.
- *
- * * `Query<Q>` extracts parameters from a query string, deserializing them into
- *    an instance of type `Q`. `Q` must implement `serde::Deserialize` and
- *    `dropshot::ExtractedParameter`.
- * * `Path<P>` extracts parameters from HTTP path, deserializing them into
- *    an instance of type `P`. `P` must implement `serde::Deserialize` and
- *    `dropshot::ExtractedParameter`.
- * * `Json<J>` extracts content from the request body by parsing the body as
- *   JSON and deserializing it into an instance of type `J`. `J` must implement
- *   `serde::Deserialize` and `dropshot::ExtractedParameter`.
- *
- * If the handler takes a `Query<Q>`, `Path<P>`, or a `Json<J>` and the
- * corresponding extraction cannot be completed, the request fails with status
- * code 400 and an error message reflecting a validation error.
- *
- * As with any serde-deserializable type, you can make fields optional by having
- * the corresponding property of the type be an `Option`.  Here's an example of
- * an endpoint that takes two arguments via query parameters: "limit", a
- * required u32, and "marker", an optional string:
- *
- * ```
- * use http::StatusCode;
- * use dropshot::HttpError;
- * use dropshot::Json;
- * use dropshot::Query;
- * use dropshot::RequestContext;
- * use hyper::Body;
- * use hyper::Response;
- * use std::sync::Arc;
- *
- * #[derive(serde::Deserialize)]
- * struct MyQueryArgs {
- *     limit: u32,
- *     marker: Option<String>
- * }
- *
- * async fn handle_request(
- *     _: Arc<RequestContext>,
- *     query: Query<MyQueryArgs>)
- *     -> Result<Response<Body>, HttpError>
- * {
- *     let query_args = query.into_inner();
- *     let limit: u32 = query_args.limit;
- *     let marker: Option<String> = query_args.marker;
- *     Ok(Response::builder()
- *         .status(StatusCode::OK)
- *         .body(format!("limit = {}, marker = {:?}\n", limit, marker).into())?)
- * }
- * ```
- *
- *
- * ## Endpoint function return types
- *
  * Just like we want API input types to be represented in function arguments, we
  * want API response types to be represented in function return values so that
  * OpenAPI tooling can identify them at build time.  The more specific a type
  * returned by the handler function, the more can be validated at build-time,
  * and the more specific an OpenAPI schema can be generated from the source
- * alone.  For example, a POST to an endpoint "/projects" might return
- * `Result<HttpResponseCreated<Project>, HttpError>`.  As you might expect, on
- * success, this turns into an HTTP 201 "Created" response whose body is
- * constructed by serializing the `Project`.  In this example, OpenAPI tooling
- * can identify at build time that this function produces a 201 "Created"
- * response on success with a body whose schema matches `Project` (which we
- * already said implements `Serialize`), and there would be no way to violate
- * this contract at runtime.  If the function just returned `Response<Body>`, it
- * would be harder to tell what it actually produces (for generating the OpenAPI
- * spec), and no way to validate that it really does that.
- *
- * Ultimately, a handler function's return value needs to become a
- * `Result<Response<Body>, HttpError>`.  However, handler functions may return
- * `Result<T, HttpError>` for any `T` that implements
- * `Into<Result<Response<Body>, HttpError>>`.  Note that there's an extra level
- * of `Result` there to account for the possibility that the conversion may
- * fail.
- *
- *
- * ## Implementation notes
+ * alone.
  *
  * We go through considerable effort below to make this interface possible.
  * Both the interface (primarily) and the implementation (less so) are inspired
  * by Actix-Web.  The Actix implementation is significantly more general (and
  * commensurately complex).  It would be possible to implement richer facilities
- * here, like extractors for backend server state, path components, headers, and
- * so on; allowing for extractors to appear in arbitrary order; allowing for
- * server and request parameters to be omitted; and so on; but those other
+ * here, like extractors for backend server state, headers, and so on; allowing
+ * for server and request parameters to be omitted; and so on; but those other
  * facilities don't seem that valuable right now since they largely don't affect
  * the OpenAPI spec.
  */
