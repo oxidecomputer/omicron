@@ -1031,7 +1031,7 @@ impl OxideController {
 
         match result {
             Ok(_) => {
-                debug!(log, "instance updated by sled agent";
+                info!(log, "instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
@@ -1088,7 +1088,7 @@ impl OxideController {
         /* TODO-cleanup commonize with notify_instance_updated() */
         match result {
             Ok(_) => {
-                debug!(log, "disk updated by sled agent";
+                info!(log, "disk updated by sled agent";
                     "disk_id" => %id,
                     "new_state" => ?new_state);
                 Ok(())

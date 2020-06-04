@@ -81,7 +81,7 @@ async fn do_run() -> Result<(), String> {
             bind_address: sa_addr,
         },
         log: ConfigLogging::StderrTerminal {
-            level: ConfigLoggingLevel::Debug,
+            level: ConfigLoggingLevel::Info,
         },
     };
 

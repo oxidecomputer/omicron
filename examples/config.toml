@@ -12,7 +12,7 @@ bind_address = "127.0.0.1:12221"
 
 [log]
 # Show log messages of this level and more severe
-level = "trace"
+level = "info"
 
 # Example output to a terminal (with colors)
 mode = "stderr-terminal"

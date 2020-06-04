@@ -298,7 +298,7 @@ impl<S: Simulatable> SimObject<S> {
         initial_state: &S::CurrentState,
         log: Logger,
     ) -> (SimObject<S>, Receiver<()>) {
-        debug!(log, "created"; "initial_state" => ?initial_state);
+        info!(log, "created"; "initial_state" => ?initial_state);
         let (tx, rx) = futures::channel::mpsc::channel(SIM_CHANNEL_BUFFER_SIZE);
         (
             SimObject {
@@ -321,7 +321,7 @@ impl<S: Simulatable> SimObject<S> {
         initial_state: &S::CurrentState,
         log: Logger,
     ) -> SimObject<S> {
-        debug!(log, "created"; "initial_state" => ?initial_state);
+        info!(log, "created"; "initial_state" => ?initial_state);
         SimObject {
             current_state: initial_state.clone(),
             requested_state: None,
@@ -346,11 +346,11 @@ impl<S: Simulatable> SimObject<S> {
             S::next_state_for_new_target(&state_before, &dropped, &target)?;
 
         if S::state_unchanged(&state_before, &state_after) {
-            debug!(self.log, "noop transition"; "target" => ?target);
+            info!(self.log, "noop transition"; "target" => ?target);
             return Ok(None);
         }
 
-        debug!(self.log, "transition";
+        info!(self.log, "transition";
             "state_before" => ?state_before,
             "target" => ?target,
             "state_after" => ?state_after,
@@ -409,7 +409,7 @@ impl<S: Simulatable> SimObject<S> {
              * sending a message to the background task if we were already in an
              * async transition.
              */
-            debug!(self.log, "noop transition finish"; "current" => ?self);
+            info!(self.log, "noop transition finish"; "current" => ?self);
             return;
         }
 
@@ -419,7 +419,7 @@ impl<S: Simulatable> SimObject<S> {
                 &self.current_state,
                 &requested_state,
             );
-        debug!(self.log, "simulated transition finish";
+        info!(self.log, "simulated transition finish";
             "state_before" => ?self.current_state,
             "requested_state" => ?self.requested_state,
             "state_after" => ?next_state,
