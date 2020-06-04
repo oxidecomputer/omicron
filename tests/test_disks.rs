@@ -19,7 +19,7 @@ use oxide_api_prototype::api_model::ApiProjectView;
 use oxide_api_prototype::ControllerServerContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
-use oxide_api_prototype::ServerControllerTestInterfaces;
+use oxide_api_prototype::SledAgentTestInterfaces;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -540,6 +540,6 @@ fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {
  * Simulate completion of an ongoing disk state transition.
  */
 async fn disk_simulate(controller: &Arc<OxideController>, id: &Uuid) {
-    let sc = controller.disk_server_by_id(id).await.unwrap();
-    sc.disk_finish_transition(id.clone()).await;
+    let sa = controller.disk_server_by_id(id).await.unwrap();
+    sa.disk_finish_transition(id.clone()).await;
 }

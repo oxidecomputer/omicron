@@ -1,5 +1,5 @@
 /*!
- * Interfaces for working with server controller configuration.
+ * Interfaces for working with sled agent configuration.
  */
 
 use dropshot::ConfigDropshot;
@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 /**
- * How this `ServerController` simulates object states and transitions.
+ * How this `SledAgent` simulates object states and transitions.
  */
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SimMode {
@@ -23,16 +23,16 @@ pub enum SimMode {
 
     /**
      * Indicates that asynchronous state transitions should be simulated
-     * explicitly, relying on calls through `ServerControllerTestInterfaces`.
+     * explicitly, relying on calls through `SledAgentTestInterfaces`.
      */
     Explicit,
 }
 
 /**
- * Configuration for a server controller.
+ * Configuration for a sled agent.
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ConfigServerController {
+pub struct ConfigSledAgent {
     pub id: Uuid,
     pub sim_mode: SimMode,
     pub controller_address: SocketAddr,

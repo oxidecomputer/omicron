@@ -9,23 +9,23 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
 use oxide_api_prototype::ConfigController;
-use oxide_api_prototype::ConfigServerController;
+use oxide_api_prototype::ConfigSledAgent;
 use oxide_api_prototype::OxideControllerServer;
-use oxide_api_prototype::ServerControllerServer;
 use oxide_api_prototype::SimMode;
+use oxide_api_prototype::SledAgentServer;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
 use uuid::Uuid;
 
-const SERVER_CONTROLLER_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
+const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: OxideControllerServer,
-    server_controller: ServerControllerServer,
+    sled_agent: SledAgentServer,
     logctx: LogContext,
 }
 
@@ -38,7 +38,7 @@ impl ControlPlaneTestContext {
          * can we (/ how do we?) wait for these things to shut down?  We want to
          * use wait_for_finish() here on the http servers.
          */
-        self.server_controller.http_server.close();
+        self.sled_agent.http_server.close();
         self.logctx.cleanup_successful();
     }
 }
@@ -72,15 +72,15 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
-    /* Set up a single server controller. */
-    let sc_id = Uuid::parse_str(SERVER_CONTROLLER_UUID).unwrap();
-    let sc = start_server_controller(
+    /* Set up a single sled agent. */
+    let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+    let sa = start_sled_agent(
         logctx.log.new(o!(
-            "component" => "ServerControllerServer",
-            "server" => sc_id.to_string(),
+            "component" => "SledAgentServer",
+            "server" => sa_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
-        sc_id,
+        sa_id,
     )
     .await
     .unwrap();
@@ -89,17 +89,17 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
         server: server,
         external_client: testctx_external,
         internal_client: testctx_internal,
-        server_controller: sc,
+        sled_agent: sa,
         logctx: logctx,
     }
 }
 
-pub async fn start_server_controller(
+pub async fn start_sled_agent(
     log: Logger,
     controller_address: SocketAddr,
     id: Uuid,
-) -> Result<ServerControllerServer, String> {
-    let config = ConfigServerController {
+) -> Result<SledAgentServer, String> {
+    let config = ConfigSledAgent {
         id,
         sim_mode: SimMode::Explicit,
         controller_address,
@@ -112,7 +112,7 @@ pub async fn start_server_controller(
         },
     };
 
-    ServerControllerServer::start(&config, &log).await
+    SledAgentServer::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

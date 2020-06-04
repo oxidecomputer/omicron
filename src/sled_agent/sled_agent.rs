@@ -1,5 +1,5 @@
 /*!
- * Simulated server controller implementation.
+ * Simulated sled agent implementation.
  */
 
 use super::ControllerClient;
@@ -26,16 +26,16 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /**
- * `ServerController` is a handle for the software service running on a compute
- * server that manages the control plane on that server.  The current
- * implementation simulates a server directly in this program.
+ * `SledAgent` is a handle for the software service running on a compute server
+ * that manages the control plane on that server.  The current implementation
+ * simulates a server directly in this program.
  *
  * **It's important to be careful about the interface exposed by this struct.**
  * The intent is for it to eventually be implemented using requests to a remote
  * server.  The tighter the coupling that exists now, the harder this will be to
  * move later.
  */
-pub struct ServerController {
+pub struct SledAgent {
     /** unique id for this server */
     pub id: Uuid,
 
@@ -45,24 +45,24 @@ pub struct ServerController {
     disks: Arc<SimCollection<SimDisk>>,
 }
 
-impl ServerController {
+impl SledAgent {
     /*
      * TODO-cleanup should this instantiate the ControllerClient it needs?
      * Should it take a Config object instead of separate id, sim_mode, etc?
      */
-    /** Constructs a simulated ServerController with the given uuid. */
+    /** Constructs a simulated SledAgent with the given uuid. */
     pub fn new_simulated_with_id(
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
         ctlsc: Arc<ControllerClient>,
-    ) -> ServerController {
-        info!(&log, "created server controller"; "sim_mode" => ?sim_mode);
+    ) -> SledAgent {
+        info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
         let disk_log = log.new(o!("kind" => "disks"));
 
-        ServerController {
+        SledAgent {
             id: id.clone(),
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&ctlsc),
@@ -119,10 +119,10 @@ impl ServerController {
 
 /**
  * `Simulatable` defines an interface for a type of Oxide Rack API object that
- * can be simulated here in the server controller.  We only simulate these
- * objects from the perspective of an API consumer, which means for example
- * accepting a request to boot it, reporting the current state as "starting",
- * and then some time later reporting that the state is "running".
+ * can be simulated here in the sled agent.  We only simulate these objects from
+ * the perspective of an API consumer, which means for example accepting a
+ * request to boot it, reporting the current state as "starting", and then some
+ * time later reporting that the state is "running".
  *
  * This interface defines only associated functions, not constructors nor what
  * would traditionally be called "methods".  On the one hand, this approach is
@@ -440,7 +440,7 @@ impl<S: Simulatable> SimObject<S> {
 /**
  * A `SimCollection` is a collection of `Simulatable` objects, each represented
  * by a `SimObject`.  This struct provides basic facilities for simulating
- * ServerController APIs for instances and disks.
+ * SledAgent APIs for instances and disks.
  */
 struct SimCollection<S: Simulatable> {
     /** handle to the controller API, used to notify about async transitions */
@@ -474,7 +474,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      * channel, we sleep for a bit and then invoke `poke()` to complete whatever
      * transition is currently outstanding.
      *
-     * This is only used for `ServerControllerSimMode::Auto`.
+     * This is only used for `SimMode::Auto`.
      */
     async fn sim_step(&self, id: Uuid, mut rx: Receiver<()>) {
         while let Some(_) = rx.next().await {
@@ -486,8 +486,8 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /**
      * Complete a pending asynchronous state transition for object `id`.
      * This is invoked either by `sim_step()` (if the simulation mode is
-     * `ServerControllerSimMode::Auto`) or `instance_finish_transition` (if the
-     * simulation mode is `ServerControllerSimMode::Api).
+     * `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
+     * is `SimMode::Api).
      */
     async fn sim_poke(&self, id: Uuid) {
         let (new_state, to_destroy) = {
@@ -810,8 +810,8 @@ impl Simulatable for SimInstance {
     ) -> Result<(), ApiError> {
         /*
          * Notify the controller that the instance state has changed.  The
-         * server controller is authoritative for the runtime state, and we use
-         * a generation number here so that calls processed out of order do not
+         * sled agent is authoritative for the runtime state, and we use a
+         * generation number here so that calls processed out of order do not
          * settle on the wrong value.
          */
         csc.notify_instance_updated(id, &current).await
@@ -902,8 +902,8 @@ impl Simulatable for SimDisk {
              * If we're currently attaching, it's only legal to try to attach to
              * the same thing (in which case it's a noop).
              * TODO-cleanup would it be more consistent with our intended
-             * interface (which is to let the server controller just say what it
-             * wants and have us do the work) to have this work and go through
+             * interface (which is to let the controller just say what it wants
+             * and have us do the work) to have this work and go through
              * detaching first?
              */
             (

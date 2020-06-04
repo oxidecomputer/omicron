@@ -26,7 +26,7 @@ The code here is still rough, but the following are implemented:
 ** servers: list + get
 * architecture:
 ** oxide controller: manages a fleet of Oxide racks
-** server controller: manages a single compute server in an Oxide fleet
+** sled agent: manages a single compute server in an Oxide fleet
 * Dropshot: a general-purpose crate for building an HTTP API server, including
   basic routing with path parameters; strong types for request and response
   bodies; basic query parameter support; ergonomic error handling; OpenAPI
@@ -43,8 +43,8 @@ runs cleanly and should remain clean.
 
 There are two executables: the `oxide_controller` (which is a real prototype
 backed by an in-memory store; this component manages an Oxide fleet), and the
-`server_controller` (which is a simulation of the component that will manage an
-Oxide server).
+`sled_agent` (which is a simulation of the component that will manage an Oxide
+server).
 
 `oxide_controller` requires a configuration file to run.  You can use
 `examples/config.toml` to start with.  Build and run it like this:
@@ -56,20 +56,20 @@ $ cargo run --bin=oxide_controller -- examples/config.toml
 listening: http://127.0.0.1:12220
 ----
 
-`server_controller` only takes configuration on the command line.  Run it with a
-uuid identifying itself (this would be a uuid for the server it's managing), an
+`sled_agent` only takes configuration on the command line.  Run it with a uuid
+identifying itself (this would be a uuid for the server it's managing), an
 IP:port for itself, and the IP:port of `oxide_controller`'s _internal_
 interface.  Using default config, this might look like this:
 
 [source,text]
 ----
-$ cargo run --bin=server_controller -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
 
-NOTE: Currently, `server_controller` will crash if `oxide_controller` is not
-already running.
+NOTE: Currently, `sled_agent` will crash if `oxide_controller` is not already
+running.
 
 You can use `curl` directly to hit either of these servers, but it's easier to
 use the `oxapi_demo` wrapper (see below).
@@ -315,7 +315,7 @@ and port, but this is not (yet?) supported.
 |`"127.0.0.1:12220"`
 |Yes
 |Specifies that the server should bind to the given IP address and TCP port for
-the **internal** API (i.e., the one used by the server controller).  In general,
+the **internal** API (i.e., the one used by the sled agent).  In general,
 servers can bind to more than one IP address and port, but this is not (yet?)
 supported.
 

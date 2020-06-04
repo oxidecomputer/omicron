@@ -11,29 +11,26 @@ API endpoints:
 Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
-** need better names for controller, server-controller.  It's a mouthful and
-   leads to confusing naming of related structs all around.
-*** big example of naming issue: ControllerServerConfig vs ConfigServerController
+** oxide controller -> Oxc?
 ** rename repo
 ** create separate exports for internal vs. external models
 ** improved documentation, especially design docs, structural docs
-** write some design documents
-* flesh out controller - server-controller interaction:
-** server controller startup should trigger restoring instances and disks
-** server controller should retry the startup request until it succeeds
+* flesh out controller - sled-agent interaction:
+** sled agent startup should trigger restoring instances and disks
+** sled agent should retry the startup request until it succeeds
 * do a demo????
 * add a test that runs --openapi (to make sure it works)
 * scope out switching to sync
-* proper config + logging for server controller
+* proper config + logging for sled agent
 * settle on an approach for modification of resources and implement it once
-* implement behavior of server restarting (e.g., server controller starting up)
+* implement behavior of server restarting (e.g., sled agent starting up)
 ** This probably isn't necessary for the big demo, but it would help validate
    some of the architectural choices.  Current thinking is that this will notify
    OXCP of the restart, and OXCP will find instances that are supposed to be on
    that server and run instance_ensure().  It will also want to do that for the
    disks associated with those instances.  IMPORTANT: this process should also
    _remove_ any resources that are currently on that system, so the notification
-   to OXCP about a restart may need to include the list of resources that the SC
+   to OXCP about a restart may need to include the list of resources that the SA
    knows about and their current states.
 * implement audit log
 * implement alerts

@@ -1,5 +1,5 @@
 /*!
- * Simulated server controller
+ * Simulated sled agent
  */
 
 /*
@@ -12,8 +12,8 @@ use clap::{App, Arg};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use oxide_api_prototype::sc_run_server;
-use oxide_api_prototype::ConfigServerController;
+use oxide_api_prototype::sa_run_server;
+use oxide_api_prototype::ConfigSledAgent;
 use oxide_api_prototype::SimMode;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -26,7 +26,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), String> {
-    let matches = App::new("server_controller")
+    let matches = App::new("sled_agent")
         .after_help("See README.adoc for more information")
         .arg(
             Arg::with_name("sim-mode")
@@ -37,25 +37,25 @@ async fn do_run() -> Result<(), String> {
                 .possible_value("explicit")
                 .default_value("auto"),
         )
-        .arg(Arg::with_name("SC_UUID").required(true).index(1))
-        .arg(Arg::with_name("SC_IP:PORT").required(true).index(2))
+        .arg(Arg::with_name("SA_UUID").required(true).index(1))
+        .arg(Arg::with_name("SA_IP:PORT").required(true).index(2))
         .arg(Arg::with_name("CONTROLLER_IP:PORT").required(true).index(3))
         .get_matches_safe()
         .map_err(|clap_error| {
             format!("parsing arguments: {}", clap_error.message)
         })?;
 
-    let sc_id = {
-        let value_str = matches.value_of("SC_UUID").unwrap();
+    let sa_id = {
+        let value_str = matches.value_of("SA_UUID").unwrap();
         Uuid::parse_str(value_str)
-            .map_err(|e| format!("parsing SC_UUID: {}", e))?
+            .map_err(|e| format!("parsing SA_UUID: {}", e))?
     };
 
-    let sc_addr = {
-        let value_str = matches.value_of("SC_IP:PORT").unwrap();
+    let sa_addr = {
+        let value_str = matches.value_of("SA_IP:PORT").unwrap();
         value_str
             .parse::<SocketAddr>()
-            .map_err(|e| format!("parsing SC_IP:PORT: {}", e))?
+            .map_err(|e| format!("parsing SA_IP:PORT: {}", e))?
     };
 
     let controller_addr = {
@@ -73,19 +73,19 @@ async fn do_run() -> Result<(), String> {
         }
     };
 
-    let config = ConfigServerController {
-        id: sc_id,
+    let config = ConfigSledAgent {
+        id: sa_id,
         sim_mode,
         controller_address: controller_addr,
         dropshot: ConfigDropshot {
-            bind_address: sc_addr,
+            bind_address: sa_addr,
         },
         log: ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Debug,
         },
     };
 
-    sc_run_server(&config).await
+    sa_run_server(&config).await
 }
 
 fn fatal(message: String) -> ! {

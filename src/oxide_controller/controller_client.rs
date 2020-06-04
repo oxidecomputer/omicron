@@ -27,7 +27,7 @@ impl ControllerClient {
     }
 
     /**
-     * Publish information about this server controller's startup.
+     * Publish information about this sled agent's startup.
      */
     pub async fn notify_server_online(
         &self,

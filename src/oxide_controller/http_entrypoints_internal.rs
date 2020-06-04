@@ -7,7 +7,7 @@ use super::ControllerServerContext;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiServerStartupInfo;
-use crate::ServerControllerClient;
+use crate::SledAgentClient;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ExtractedParameter;
@@ -42,7 +42,7 @@ struct ServerPathParam {
 }
 
 /**
- * Report that the server controller for the specified server has come online.
+ * Report that the sled agent for the specified server has come online.
  */
 #[endpoint {
      method = POST,
@@ -58,15 +58,11 @@ async fn cpapi_servers_post(
     let path = path_params.into_inner();
     let si = server_info.into_inner();
     let server_id = &path.server_id;
-    let client_log = apictx
-        .log
-        .new(o!("server_controller" => server_id.clone().to_string()));
-    let client = Arc::new(ServerControllerClient::new(
-        &server_id,
-        si.sc_address,
-        client_log,
-    ));
-    controller.upsert_server_controller(client).await;
+    let client_log =
+        apictx.log.new(o!("SledAgent" => server_id.clone().to_string()));
+    let client =
+        Arc::new(SledAgentClient::new(&server_id, si.sa_address, client_log));
+    controller.upsert_sled_agent(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 

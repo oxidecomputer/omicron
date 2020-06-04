@@ -33,7 +33,7 @@ use crate::api_model::UpdateResult;
 
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
-use crate::ServerControllerClient;
+use crate::SledAgentClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
@@ -68,22 +68,22 @@ pub async fn to_view_list<T: ApiObject>(
 #[async_trait]
 pub trait OxideControllerTestInterfaces {
     /**
-     * Returns the ServerControllerClient for an Instance from its id.  We may
-     * also want to split this up into instance_lookup_by_id() and
-     * instance_sc(), but after all it's a test suite special to begin with.
+     * Returns the SledAgentClient for an Instance from its id.  We may also
+     * want to split this up into instance_lookup_by_id() and instance_sled(),
+     * but after all it's a test suite special to begin with.
      */
     async fn instance_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, ApiError>;
 
     /**
-     * Returns the ServerControllerClient for a Disk from its id.
+     * Returns the SledAgentClient for a Disk from its id.
      */
     async fn disk_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, ApiError>;
 }
 
 /**
@@ -114,7 +114,7 @@ pub struct OxideController {
      * servers and how we discover them, both when they initially show up and
      * when we come up.
      */
-    server_controllers: Mutex<BTreeMap<Uuid, Arc<ServerControllerClient>>>,
+    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 }
 
 /*
@@ -134,22 +134,19 @@ impl OxideController {
                 id: id.clone(),
             }),
             datastore: ControlDataStore::new(),
-            server_controllers: Mutex::new(BTreeMap::new()),
+            sled_agents: Mutex::new(BTreeMap::new()),
         }
     }
 
     /*
-     * TODO-robustness we should have a limit on how many server controllers
-     * there can be (for graceful degradation at large scale).
+     * TODO-robustness we should have a limit on how many sled agents there can
+     * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_server_controller(
-        &self,
-        sc: Arc<ServerControllerClient>,
-    ) {
-        let mut scs = self.server_controllers.lock().await;
-        info!(self.log, "registered server controller";
-            "server_uuid" => sc.id.to_string());
-        scs.insert(sc.id.clone(), sc);
+    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
+        let mut scs = self.sled_agents.lock().await;
+        info!(self.log, "registered sled agent";
+            "server_uuid" => sa.id.to_string());
+        scs.insert(sa.id.clone(), sa);
     }
 
     /*
@@ -251,13 +248,13 @@ impl OxideController {
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
          * transition from "Creating" to "Detached".  For instances, the
-         * simulation lives in a simulated server controller.  Here, the analog
-         * might be a simulated disk control plane.  But that doesn't exist yet,
-         * and we don't even know what APIs it would provide yet.  So we just
-         * carry out the simplest possible "simulation" here: we'll return to
-         * the client a structure describing a disk in state "Creating", but by
-         * the time we do so, we've already updated the internal representation
-         * to "Created".
+         * simulation lives in a simulated sled agent.  Here, the analog might
+         * be a simulated disk control plane.  But that doesn't exist yet, and
+         * we don't even know what APIs it would provide yet.  So we just carry
+         * out the simplest possible "simulation" here: we'll return to the
+         * client a structure describing a disk in state "Creating", but by the
+         * time we do so, we've already updated the internal representation to
+         * "Created".
          */
         let mut new_disk = (*disk_created).clone();
         new_disk.runtime.disk_state = ApiDiskState::Detached;
@@ -333,10 +330,10 @@ impl OxideController {
 
     async fn server_allocate_instance<'se, 'params>(
         &'se self,
-        servers: &'se BTreeMap<Uuid, Arc<ServerControllerClient>>,
+        servers: &'se BTreeMap<Uuid, Arc<SledAgentClient>>,
         _project: Arc<ApiProject>,
         _params: &'params ApiInstanceCreateParams,
-    ) -> Result<&'se Arc<ServerControllerClient>, ApiError> {
+    ) -> Result<&'se Arc<SledAgentClient>, ApiError> {
         /* TODO replace this with a real allocation policy. */
         servers.values().nth(0).ok_or_else(|| ApiError::ServiceUnavailable {
             message: String::from("no servers available for new Instance"),
@@ -359,10 +356,10 @@ impl OxideController {
         let project = self.project_lookup(project_name).await?;
 
         /*
-         * Allocate a server and retrieve our handle to its SC.
+         * Allocate a server and retrieve our handle to its SA.
          */
-        let sc = {
-            let servers = self.server_controllers.lock().await;
+        let sa = {
+            let servers = self.sled_agents.lock().await;
             let arc = self
                 .server_allocate_instance(&servers, project, params)
                 .await?;
@@ -373,10 +370,10 @@ impl OxideController {
          * The order of operations here is slightly subtle:
          *
          * 1. We want to record the new instance in the database before telling
-         *    the SC about it.  This record will have state "Creating" to
+         *    the SA about it.  This record will have state "Creating" to
          *    distinguish it from other runtime states.  If we crash after this
          *    point, there will be a record in the database for the instance,
-         *    but it won't be running, since no SC knows about it.
+         *    but it won't be running, since no SA knows about it.
          *    TODO-robustness How do we want to handle a crash at this point?
          *    One approach would be to say that while an Instance exists in the
          *    "Creating" state, it's not logically present yet.  Thus, if
@@ -395,19 +392,19 @@ impl OxideController {
          *    same name.  Exactly one should win every time and we shouldn't
          *    wind up with two Instances running at any point.
          *
-         * 2. We want to tell the SC about this Instance and have the SC start
-         *    it up.  The SC should reply immediately that it's starting the
+         * 2. We want to tell the SA about this Instance and have the SA start
+         *    it up.  The SA should reply immediately that it's starting the
          *    instance, and we immediately record this into the database, now
          *    with state "Starting".
          *
-         * 3. Some time later (after this function has completed), the SC will
+         * 3. Some time later (after this function has completed), the SA will
          *    notify us that the Instance has changed states to "Running".
          *    We'll record this into the database.
          */
         let runtime = ApiInstanceRuntimeState {
             run_state: ApiInstanceState::Creating,
             reboot_in_progress: false,
-            server_uuid: sc.id,
+            server_uuid: sa.id,
             gen: 1,
             time_updated: Utc::now(),
         };
@@ -422,7 +419,7 @@ impl OxideController {
             .await?;
         self.instance_set_runtime(
             instance_created,
-            sc,
+            sa,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
@@ -438,7 +435,7 @@ impl OxideController {
      * execute this immediately by just removing it from the database, with the
      * same race we have with disk delete (i.e., if someone else is requesting
      * an instance boot, we may wind up in an inconsistent state).  On the other
-     * hand, we could always allow this operation, issue the request to the SC
+     * hand, we could always allow this operation, issue the request to the SA
      * to destroy the instance (not just stop it), and proceed with deletion
      * when that finishes.  But in that case, although the HTTP DELETE request
      * completed, the object will still appear for a little while, which kind of
@@ -456,12 +453,12 @@ impl OxideController {
          */
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
-        let sc = self.instance_sc(&instance).await?;
+        let sa = self.instance_sled(&instance).await?;
         let runtime_params = ApiInstanceRuntimeStateRequested {
             run_state: ApiInstanceState::Destroyed,
             reboot_wanted: false,
         };
-        self.instance_set_runtime(instance, sc, runtime_params).await?;
+        self.instance_set_runtime(instance, sa, runtime_params).await?;
         Ok(())
     }
 
@@ -492,7 +489,7 @@ impl OxideController {
         /*
          * Users are allowed to request a start or stop even if the instance is
          * already in the desired state (or moving to it), and we will issue a
-         * request to the SC to make the state change in these cases in case the
+         * request to the SA to make the state change in these cases in case the
          * runtime state we saw here was stale.  However, users are not allowed
          * to change the state of an instance that's failed or destroyed.
          */
@@ -522,18 +519,16 @@ impl OxideController {
     }
 
     /**
-     * Returns the ServerControllerClient for the host where this Instance is
-     * running.
+     * Returns the SledAgentClient for the host where this Instance is running.
      */
-    async fn instance_sc(
+    async fn instance_sled(
         &self,
         instance: &Arc<ApiInstance>,
-    ) -> Result<Arc<ServerControllerClient>, ApiError> {
-        let controllers = self.server_controllers.lock().await;
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
+        let controllers = self.sled_agents.lock().await;
         let scid = &instance.runtime.server_uuid;
         Ok(Arc::clone(controllers.get(scid).ok_or_else(|| {
-            let message =
-                format!("no server controller for server_uuid \"{}\"", scid);
+            let message = format!("no sled agent for server_uuid \"{}\"", scid);
             ApiError::ServiceUnavailable {
                 message: message,
             }
@@ -549,16 +544,17 @@ impl OxideController {
         instance_name: &ApiName,
     ) -> UpdateResult<ApiInstance> {
         /*
-         * To implement reboot, we issue a call to the server controller to
-         * set a runtime state with "reboot_wanted".  We cannot simply stop the
+         * To implement reboot, we issue a call to the sled agent to set a
+         * runtime state with "reboot_wanted".  We cannot simply stop the
          * Instance and start it again here because if we crash in the meantime,
          * we might leave it stopped.
          *
          * When an instance is rebooted, the "reboot_in_progress" remains set on
-         * the runtime state as it transitions to "Stopping" and "Stopped".  This
-         * flag is cleared when the state goes to "Starting".  This way, even if
-         * the whole rack powered off while this was going on, we would never
-         * lose track of the fact that this Instance was supposed to be running.
+         * the runtime state as it transitions to "Stopping" and "Stopped".
+         * This flag is cleared when the state goes to "Starting".  This way,
+         * even if the whole rack powered off while this was going on, we would
+         * never lose track of the fact that this Instance was supposed to be
+         * running.
          */
         let instance = self
             .datastore
@@ -568,7 +564,7 @@ impl OxideController {
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
             Arc::clone(&instance),
-            self.instance_sc(&instance).await?,
+            self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: true,
@@ -593,7 +589,7 @@ impl OxideController {
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
             Arc::clone(&instance),
-            self.instance_sc(&instance).await?,
+            self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
@@ -618,7 +614,7 @@ impl OxideController {
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
             Arc::clone(&instance),
-            self.instance_sc(&instance).await?,
+            self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Stopped,
                 reboot_wanted: false,
@@ -634,14 +630,14 @@ impl OxideController {
     async fn instance_set_runtime(
         &self,
         mut instance: Arc<ApiInstance>,
-        sc: Arc<ServerControllerClient>,
+        sa: Arc<SledAgentClient>,
         runtime_params: ApiInstanceRuntimeStateRequested,
     ) -> UpdateResult<ApiInstance> {
         /*
-         * Ask the SC to begin the state change.  Then update the database to
+         * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime_state = sc
+        let new_runtime_state = sa
             .instance_ensure(
                 instance.identity.id.clone(),
                 instance.runtime.clone(),
@@ -842,7 +838,7 @@ impl OxideController {
         let disk = self
             .disk_set_runtime(
                 disk,
-                self.instance_sc(&instance).await?,
+                self.instance_sled(&instance).await?,
                 ApiDiskStateRequested::Attached(instance_id.clone()),
             )
             .await?;
@@ -904,7 +900,7 @@ impl OxideController {
 
         self.disk_set_runtime(
             disk,
-            self.instance_sc(&instance).await?,
+            self.instance_sled(&instance).await?,
             ApiDiskStateRequested::Detached,
         )
         .await?;
@@ -918,14 +914,14 @@ impl OxideController {
     async fn disk_set_runtime(
         &self,
         mut disk: Arc<ApiDisk>,
-        sc: Arc<ServerControllerClient>,
+        sa: Arc<SledAgentClient>,
         requested: ApiDiskStateRequested,
     ) -> UpdateResult<ApiDisk> {
         /*
-         * Ask the SC to begin the state change.  Then update the database to
+         * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime = sc
+        let new_runtime = sa
             .disk_ensure(
                 disk.identity.id.clone(),
                 disk.runtime.clone(),
@@ -971,21 +967,21 @@ impl OxideController {
      * Servers.
      * TODO-completeness: Eventually, we'll want servers to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiServer for each
-     * ServerControllerClient that we've got.
+     * them, etc.  For now, we expose an ApiServer for each SledAgentClient that
+     * we've got.
      */
     pub async fn servers_list(
         &self,
         pagparams: &PaginationParams<Uuid>,
     ) -> ListResult<ApiServer> {
-        let controllers = self.server_controllers.lock().await;
+        let controllers = self.sled_agents.lock().await;
         let servers = collection_page(&controllers, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
-            .map(|sc| {
-                let sc = sc.unwrap();
+            .map(|sa| {
+                let sa = sa.unwrap();
                 Ok(Arc::new(ApiServer {
-                    id: sc.id,
-                    service_address: sc.service_address,
+                    id: sa.id,
+                    service_address: sa.service_address,
                 }))
             })
             .collect::<Vec<Result<Arc<ApiServer>, ApiError>>>()
@@ -997,14 +993,14 @@ impl OxideController {
         &self,
         server_id: &Uuid,
     ) -> LookupResult<ApiServer> {
-        let controllers = self.server_controllers.lock().await;
-        let sc = controllers.get(server_id).ok_or_else(|| {
+        let controllers = self.sled_agents.lock().await;
+        let sa = controllers.get(server_id).ok_or_else(|| {
             ApiError::not_found_by_id(ApiResourceType::Server, server_id)
         })?;
 
         Ok(Arc::new(ApiServer {
-            id: sc.id,
-            service_address: sc.service_address,
+            id: sa.id,
+            service_address: sa.service_address,
         }))
     }
 
@@ -1013,7 +1009,7 @@ impl OxideController {
      */
 
     /**
-     * Invoked by a server controller to publish an updated runtime state for an
+     * Invoked by a sled agent to publish an updated runtime state for an
      * Instance.
      */
     pub async fn notify_instance_updated(
@@ -1035,7 +1031,7 @@ impl OxideController {
 
         match result {
             Ok(_) => {
-                debug!(log, "instance updated by server controller";
+                debug!(log, "instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
@@ -1053,7 +1049,7 @@ impl OxideController {
             Err(ApiError::ObjectNotFound {
                 ..
             }) => {
-                warn!(log, "non-existent instance updated by server controller";
+                warn!(log, "non-existent instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
@@ -1063,7 +1059,7 @@ impl OxideController {
              * If the datastore is unavailable, propagate that to the caller.
              */
             Err(error) => {
-                warn!(log, "failed to update instance from server controller";
+                warn!(log, "failed to update instance from sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state,
                     "error" => ?error);
@@ -1092,7 +1088,7 @@ impl OxideController {
         /* TODO-cleanup commonize with notify_instance_updated() */
         match result {
             Ok(_) => {
-                debug!(log, "disk updated by server controller";
+                debug!(log, "disk updated by sled agent";
                     "disk_id" => %id,
                     "new_state" => ?new_state);
                 Ok(())
@@ -1110,7 +1106,7 @@ impl OxideController {
             Err(ApiError::ObjectNotFound {
                 ..
             }) => {
-                warn!(log, "non-existent disk updated by server controller";
+                warn!(log, "non-existent disk updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => ?new_state);
                 Ok(())
@@ -1120,7 +1116,7 @@ impl OxideController {
              * If the datastore is unavailable, propagate that to the caller.
              */
             Err(error) => {
-                warn!(log, "failed to update disk from server controller";
+                warn!(log, "failed to update disk from sled agent";
                     "disk_id" => %id,
                     "new_state" => ?new_state,
                     "error" => ?error);
@@ -1135,20 +1131,20 @@ impl OxideControllerTestInterfaces for OxideController {
     async fn instance_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let instance = self.datastore.instance_lookup_by_id(id).await?;
-        self.instance_sc(&instance).await
+        self.instance_sled(&instance).await
     }
 
     async fn disk_server_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<ServerControllerClient>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();
         let instance =
             self.datastore.instance_lookup_by_id(instance_id).await?;
-        self.instance_sc(&instance).await
+        self.instance_sled(&instance).await
     }
 }

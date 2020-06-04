@@ -463,8 +463,8 @@ impl ApiObject for ApiInstance {
 }
 
 /**
- * The runtime state of an Instance is owned by the server controller running
- * that Instance.
+ * The runtime state of an Instance is owned by the sled agent running that
+ * Instance.
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeState {
@@ -482,10 +482,10 @@ pub struct ApiInstanceRuntimeState {
 
 /**
  * ApiInstanceRuntimeStateRequested is used to request an Instance state change
- * from a server controller.  Right now, it's only the run state that can be
- * changed, though we could imagine supporting changing properties like "ncpus"
- * here.  If we allow other properties here, we may want to make them Options so
- * that callers don't have to know the prior state already.
+ * from a sled agent.  Right now, it's only the run state that can be changed,
+ * though we could imagine supporting changing properties like "ncpus" here.  If
+ * we allow other properties here, we may want to make them Options so that
+ * callers don't have to know the prior state already.
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateRequested {
@@ -792,7 +792,7 @@ pub struct ApiServerView {
 
 #[derive(Serialize, Deserialize)]
 pub struct ApiServerStartupInfo {
-    pub sc_address: SocketAddr,
+    pub sa_address: SocketAddr,
 }
 
 #[derive(Serialize, Deserialize)]

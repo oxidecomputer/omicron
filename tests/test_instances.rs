@@ -16,7 +16,7 @@ use oxide_api_prototype::api_model::ApiProjectView;
 use oxide_api_prototype::ControllerServerContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
-use oxide_api_prototype::ServerControllerTestInterfaces;
+use oxide_api_prototype::SledAgentTestInterfaces;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -465,11 +465,11 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
 
 /**
  * Simulate completion of an ongoing instance state transition.  To do this, we
- * have to look up the instance, then get the server controller associated with
- * that instance, and then tell it to finish simulating whatever async
- * transition is going on.
+ * have to look up the instance, then get the sled agent associated with that
+ * instance, and then tell it to finish simulating whatever async transition is
+ * going on.
  */
 async fn instance_simulate(controller: &Arc<OxideController>, id: &Uuid) {
-    let sc = controller.instance_server_by_id(id).await.unwrap();
-    sc.instance_finish_transition(id.clone()).await;
+    let sa = controller.instance_server_by_id(id).await.unwrap();
+    sa.instance_finish_transition(id.clone()).await;
 }
