@@ -277,30 +277,84 @@ impl ClientTestContext {
     }
 }
 
-/*
- * LogContext encapsulates the log-related parts of a TestContext.  This is
- * separated because some callers may need to set up logging before setting up
- * the TestContext.
+/**
+ * Constructs a Logger for use by a test suite.  If a file-based logger is
+ * requested, the file will be put in a temporary directory and the name will be
+ * unique for a given test name and is likely to be unique across multiple runs
+ * of this test.  The file will also be deleted if the test succeeds, indicated
+ * by invoking [`LogContext::cleanup_successful`].  This way, you can debug a
+ * test failure from the failed instance rather than hoping the failure is
+ * reproducible.
+ *
+ * ## Example
+ *
+ * ```
+ * # use dropshot::ConfigLoggingLevel;
+ * #
+ * # fn my_logging_config() -> ConfigLogging {
+ * #     ConfigLogging::StderrTerminal {
+ * #         level: ConfigLoggingLevel::Info,
+ * #     }
+ * # }
+ * #
+ * # fn some_invariant() -> bool {
+ * #     true
+ * # }
+ * #
+ * use dropshot::ConfigLogging;
+ * use dropshot::test_util::LogContext;
+ *
+ * #[macro_use]
+ * extern crate slog; /* for the `info!` macro below */
+ *
+ * # fn main() {
+ * let log_config: ConfigLogging = my_logging_config();
+ * let logctx = LogContext::new("my_test", &log_config);
+ * let log = &logctx.log;
+ *
+ * /* Run your test.  Use the log like you normally would. */
+ * info!(log, "the test is going great");
+ * assert!(some_invariant());
+ *
+ * /* Upon successful completion, invoke `cleanup_successful()`. */
+ * logctx.cleanup_successful();
+ * # }
+ * ```
+ *
+ * If the test fails (e.g., the `some_invariant()` assertion fails), the log
+ * file will be retained.  If the test gets as far as calling
+ * `cleanup_successful()`, the log file will be removed.
+ *
+ * Note that `cleanup_successful()` is not invoked automatically on `drop`
+ * because that would remove the file even if the test failed, which isn't what
+ * we want.  You have to explicitly call `cleanup_successful`.  Normally, you
+ * just do this as one of the last steps in your test.  This pattern ensures
+ * that the log file sticks around if the test fails, but is removed if the test
+ * succeeds.
  */
 pub struct LogContext {
+    /** general-purpose logger */
     pub log: Logger,
     log_path: Option<PathBuf>,
 }
 
 impl LogContext {
+    /**
+     * Sets up a LogContext.  If `initial_config_logging` specifies a file-based
+     * log (i.e., [`ConfigLogging::File`]), then the requested path _must_ be
+     * the string `"UNUSED"` and it will be replaced with a file name (in a
+     * temporary directory) containing `test_name` and other information to make
+     * the filename likely to be unique across multiple runs (e.g., process id).
+     */
     pub fn new(
         test_name: &str,
         initial_config_logging: &ConfigLogging,
     ) -> LogContext {
         /*
-         * Set up logging.  If the caller requested a file path, assert that the
-         * path matches our sentinel (just to improve debuggability -- otherwise
-         * people might be pretty confused about where the logs went) and then
-         * override the path with one uniquely generated for this test.  On
-         * success, we will remove the log file.  This way, on failure, users
-         * have the complete log from the first test result.  They don't have to
-         * hope the problem was reproducible in order to know more about what
-         * went wrong.
+         * See above.  If the caller requested a file path, assert that the path
+         * matches our sentinel (just to improve debuggability -- otherwise
+         * people might be pretty confused about where the logs went).  Then
+         * override the path with one uniquely generated for this test.
          * TODO-developer allow keeping the logs in successful cases with an
          * environment variable or other flag.
          */
@@ -336,6 +390,9 @@ impl LogContext {
         }
     }
 
+    /**
+     * Removes the log file, if this was a file-based logger.
+     */
     pub fn cleanup_successful(self) {
         if let Some(ref log_path) = self.log_path {
             fs::remove_file(log_path).unwrap();
@@ -343,7 +400,7 @@ impl LogContext {
     }
 }
 
-/*
+/**
  * TestContext is used to manage a matched server and client for the common
  * test-case pattern of setting up a logger, server, and client and tearing them
  * all down at the end.
@@ -358,11 +415,13 @@ pub struct TestContext {
 
 impl TestContext {
     /**
-     * Instantiate a new test context with a logger determined by
-     * `config_logging` and the Dropshot config determined by `config_dropshot`.
-     * Note that if `config_logging` indicates a file destination, the path MUST
-     * be the string "UNUSED".  It will be replaced with a path uniquely
-     * generated for each TestContext.
+     * Instantiate a TestContext by creating a new Dropshot server with `api`,
+     * `private`, `config_dropshot`, and `log`, and then creating a
+     * `ClientTestContext` with whatever address the server wound up bound to.
+     *
+     * This interfaces requires that `config_dropshot.bind_address.port()` be
+     * `0` to allow the server to bind to any available port.  This is necessary
+     * in order for it to be used concurrently by many tests.
      */
     pub fn new(
         api: ApiDescription,
@@ -371,10 +430,6 @@ impl TestContext {
         log_context: Option<LogContext>,
         log: Logger,
     ) -> TestContext {
-        /*
-         * The local bind address TCP port needs to be zero in the test suite or
-         * else concurrent tests may fail to bind.
-         */
         assert_eq!(
             0,
             config_dropshot.bind_address.port(),
@@ -401,9 +456,11 @@ impl TestContext {
         }
     }
 
-    /*
-     * TODO-cleanup: is there an async analog to Drop?
+    /**
+     * Requests a graceful shutdown of the server, waits for that to complete,
+     * and cleans up the associated log context (if any).
      */
+    /* TODO-cleanup: is there an async analog to Drop? */
     pub async fn teardown(self) {
         self.server.close();
         let join_result = self.server_task.await.unwrap();
@@ -416,7 +473,7 @@ impl TestContext {
 
 /**
  * Given a Hyper Response whose body is expected to represent newline-separated
- * JSON, each of which is expected to be parseable via Serde as type T,
+ * JSON, each line of which is expected to be parseable via Serde as type T,
  * asynchronously read the body of the response and parse it accordingly,
  * returning a vector of T.
  */
@@ -434,9 +491,10 @@ pub async fn read_ndjson<T: DeserializeOwned>(
         .expect("response contained non-UTF-8 bytes");
 
     /*
-     * TODO-cleanup: should probably implement NDJSON-based Serde type?
-     * TODO-correctness: even if not, this should split on (\r?\n)+ to be
-     * NDJSON-compatible.
+     * TODO-cleanup: Consider using serde_json::StreamDeserializer or maybe
+     * implementing an NDJSON-based Serde type?
+     * TODO-correctness: If we don't do that, this should split on (\r?\n)+ to
+     * be NDJSON-compatible.
      */
     body_string
         .split("\n")

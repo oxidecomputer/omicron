@@ -19,9 +19,9 @@ use std::path::Path;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "mode")]
 pub enum ConfigLogging {
-    StderrTerminal {
-        level: ConfigLoggingLevel,
-    },
+    /** Pretty-printed output to stderr, assumed to support terminal escapes. */
+    StderrTerminal { level: ConfigLoggingLevel },
+    /** Bunyan-formatted output to a specified file. */
     File {
         level: ConfigLoggingLevel,
         path: String,
@@ -29,6 +29,9 @@ pub enum ConfigLogging {
     },
 }
 
+/**
+ * Log messages have a level that's used for filtering in the usual way.
+ */
 #[serde(rename_all = "lowercase")]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingLevel {
@@ -53,17 +56,23 @@ impl From<&ConfigLoggingLevel> for Level {
     }
 }
 
+/**
+ * Specifies the behavior when logging to a file that already exists.
+ */
 #[serde(rename_all = "lowercase")]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ConfigLoggingIfExists {
+    /** Fail to create the log */
     Fail,
+    /** Truncate the existing file */
     Truncate,
+    /** Append to the existing file */
     Append,
 }
 
 impl ConfigLogging {
     /**
-     * Create the root logger based on the requested configuration.
+     * Create a root logger based on the requested configuration.
      */
     pub fn to_logger<S: AsRef<str>>(
         &self,
@@ -116,7 +125,7 @@ impl ConfigLogging {
  * mainly because the other two documented options use a std::sync::Mutex, which
  * is not futures-aware and is likely to foul up our executor.  However, we have
  * not verified that the async implementation behaves reasonably under
- * backpressure.
+ * backpressure, and it definitely makes things harder to debug.
  */
 fn async_root_logger<T>(level: &ConfigLoggingLevel, drain: T) -> slog::Logger
 where

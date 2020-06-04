@@ -4,12 +4,12 @@
 
 use crate::handler::HttpHandlerFunc;
 use crate::handler::HttpResponseWrap;
+use crate::handler::HttpRouteHandler;
+use crate::handler::RouteHandler;
 use crate::router::path_to_segments;
 use crate::router::HttpRouter;
 use crate::router::PathSegment;
 use crate::Extractor;
-use crate::HttpRouteHandler;
-use crate::RouteHandler;
 
 use http::Method;
 use std::collections::HashSet;

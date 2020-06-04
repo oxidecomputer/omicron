@@ -13,83 +13,8 @@ use std::collections::BTreeSet;
 
 /**
  * `HttpRouter` is a simple data structure for routing incoming HTTP requests to
- * specific handler functions based on the request method and URI path.
- *
- * ## Examples
- *
- * ```
- * use http::Method;
- * use http::StatusCode;
- * use dropshot::ApiEndpoint;
- * use dropshot::HttpError;
- * use dropshot::HttpRouteHandler;
- * use dropshot::HttpRouter;
- * use dropshot::RequestContext;
- * use dropshot::RouteHandler;
- * use dropshot::RouterLookupResult;
- * use hyper::Body;
- * use hyper::Response;
- * use std::sync::Arc;
- *
- * /// Example HTTP request handler function
- * async fn demo_handler(_: Arc<RequestContext>)
- *     -> Result<Response<Body>, HttpError>
- * {
- *      Ok(Response::builder()
- *          .status(StatusCode::NO_CONTENT)
- *          .body(Body::empty())?)
- * }
- *
- * fn demo()
- *     -> Result<(), HttpError>
- * {
- *      // Create a router and register a few routes.
- *      let mut router = HttpRouter::new();
- *      router.insert(ApiEndpoint::new(
- *          demo_handler,
- *          Method::GET,
- *          "/projects",
- *      ));
- *      router.insert(ApiEndpoint::new(
- *          demo_handler,
- *          Method::GET,
- *          "/projects/{project_id}",
- *      ));
- *
- *      // Basic lookup for a literal path.
- *      let lookup: RouterLookupResult = router.lookup_route(
- *          &Method::GET,
- *          "/projects"
- *      )?;
- *      let handler: &Box<dyn RouteHandler> = lookup.handler;
- *      assert!(lookup.variables.is_empty());
- *      // handler.handle_request(...)
- *
- *      // Basic lookup with path variables
- *      let lookup: RouterLookupResult = router.lookup_route(
- *          &Method::GET,
- *          "/projects/proj123"
- *      )?;
- *      assert_eq!(
- *          *lookup.variables.get(&"project_id".to_string()).unwrap(),
- *          "proj123".to_string()
- *      );
- *      let handler: &Box<dyn RouteHandler> = lookup.handler;
- *      // handler.handle_request(...)
- *
- *      // If a route is not found, we get back a 404.
- *      let error = router.lookup_route(&Method::GET, "/foo").unwrap_err();
- *      assert_eq!(error.status_code, StatusCode::NOT_FOUND);
- *
- *      // If a route is found, but there's no handler for this method,
- *      // we get back a 405.
- *      let error = router.lookup_route(&Method::PUT, "/projects").unwrap_err();
- *      assert_eq!(error.status_code, StatusCode::METHOD_NOT_ALLOWED);
- *      Ok(())
- * }
- * ```
- *
- * ## Usage details
+ * specific handler functions based on the request method and URI path.  For
+ * examples, see the basic test below.
  *
  * Routes are registered and looked up according to a path, like `"/foo/bar"`.
  * Paths are split into segments separated by one or more '/' characters.  When

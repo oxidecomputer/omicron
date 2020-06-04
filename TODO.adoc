@@ -17,16 +17,16 @@ Work queue (see also: existing GitHub issues):
 ** rename repo
 ** create separate exports for internal vs. external models
 ** improved documentation, especially design docs, structural docs
-** revisit "Api" prefixes
+** document Dropshot
+** write some design documents
 * flesh out controller - server-controller interaction:
 ** server controller startup should trigger restoring instances and disks
 ** server controller should retry the startup request until it succeeds
 * do a demo????
 * add a test that runs --openapi (to make sure it works)
+* scope out switching to sync
 * proper config + logging for server controller
 * settle on an approach for modification of resources and implement it once
-* document Dropshot
-* write some design documents
 * implement behavior of server restarting (e.g., server controller starting up)
 ** This probably isn't necessary for the big demo, but it would help validate
    some of the architectural choices.  Current thinking is that this will notify
@@ -81,7 +81,6 @@ Work queue (see also: existing GitHub issues):
 
 External dependencies / open questions:
 
-* Should we consider switching to sync?
 * Should we create a more first-class notion of objects in the API?
 ** This would be a good way to enforce built-in limits.
 ** This would be a good way to enforce uniformity of pagination.

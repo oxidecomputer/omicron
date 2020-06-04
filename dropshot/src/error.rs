@@ -100,6 +100,11 @@ pub struct HttpError {
     pub internal_message: String,
 }
 
+/**
+ * Body of an HTTP response for an `HttpError`.  This type can be used to
+ * deserialize an HTTP response corresponding to an error in order to access the
+ * error code, message, etc.
+ */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HttpErrorResponseBody {
     pub request_id: String,

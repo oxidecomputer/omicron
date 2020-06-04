@@ -1,5 +1,5 @@
 /*!
- * general-purpose HTTP-related facilities
+ * General-purpose HTTP-related facilities
  */
 
 use bytes::BufMut;
@@ -10,8 +10,11 @@ use std::collections::BTreeMap;
 
 use super::error::HttpError;
 
+/** header name for conveying request ids ("x-request-id") */
 pub const HEADER_REQUEST_ID: &str = "x-request-id";
+/** MIME type for plain JSON data */
 pub const CONTENT_TYPE_JSON: &str = "application/json";
+/** MIME type for newline-delimited JSON data */
 pub const CONTENT_TYPE_NDJSON: &str = "application/x-ndjson";
 
 /**
