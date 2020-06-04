@@ -801,6 +801,7 @@ impl<T: Serialize + Send + Sync + 'static> HttpResponseWrap
 {
     fn to_result(self) -> HttpHandlerResult {
         self.into()
+        //response_for_object::<Self, T>(self.0)
     }
 }
 impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
