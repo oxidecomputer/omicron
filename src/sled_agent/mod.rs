@@ -17,7 +17,10 @@ use crate::ControllerClient;
 use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
+
+const SLED_AGENT_NOTIFY_DELAY_MS: u64 = 5000;
 
 pub struct SledAgentServer {
     pub sled_agent: Arc<SledAgent>,
@@ -62,14 +65,35 @@ impl SledAgentServer {
         let join_handle = http_server.run();
 
         /*
-         * TODO this should happen continuously until it succeeds.
+         * Notify the control plane that we're up, and continue trying this
+         * until it succeeds.
+         * TODO-robustness if this returns a 400 error, we probably want to
+         * stop.
+         * TODO-robustness we should probably use randomized, capped exponential
+         * backoff here, as the control plane may be overloaded (e.g., cold
+         * start of rack).
          */
-        controller_client
-            .notify_server_online(config.id.clone(), ApiServerStartupInfo {
-                sa_address: http_server.local_addr(),
-            })
-            .await
-            .unwrap();
+        loop {
+            debug!(log, "contacting server controller");
+            let result = controller_client
+                .notify_server_online(config.id.clone(), ApiServerStartupInfo {
+                    sa_address: http_server.local_addr(),
+                })
+                .await;
+            match result {
+                Ok(()) => break,
+                Err(error) => {
+                    warn!(log, "failed to contact controller (will retry)";
+                        "error" => ?error);
+                    tokio::time::delay_for(Duration::from_millis(
+                        SLED_AGENT_NOTIFY_DELAY_MS,
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        info!(log, "contacted server controller");
 
         Ok(SledAgentServer {
             sled_agent: sled_agent,

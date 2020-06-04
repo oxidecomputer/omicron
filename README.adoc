@@ -68,9 +68,6 @@ $ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
 
-NOTE: Currently, `sled_agent` will crash if `oxide_controller` is not already
-running.
-
 You can use `curl` directly to hit either of these servers, but it's easier to
 use the `oxapi_demo` wrapper (see below).
 

@@ -11,16 +11,14 @@ API endpoints:
 Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
-** oxide controller -> Oxc?
-** rename repo
-** create separate exports for internal vs. external models
+** decide on a code name for the whole control plane and rename the repo
+** oxide controller -> Oxc?  Or something using the new code name?
 ** improved documentation, especially design docs, structural docs
-* flesh out controller - sled-agent interaction:
-** sled agent startup should trigger restoring instances and disks
-** sled agent should retry the startup request until it succeeds
+* sled agent startup should trigger restoring instances and disks
 * do a demo????
 * add a test that runs --openapi (to make sure it works)
 * scope out switching to sync
+* create separate exports for internal vs. external models
 * proper config + logging for sled agent
 * settle on an approach for modification of resources and implement it once
 * implement behavior of server restarting (e.g., sled agent starting up)
