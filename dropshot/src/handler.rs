@@ -530,7 +530,9 @@ where
      * TODO-correctness: are query strings defined to be urlencoded in this way?
      */
     match serde_urlencoded::from_str(raw_query_string) {
-        Ok(q) => Ok(Query { inner: q }),
+        Ok(q) => Ok(Query {
+            inner: q,
+        }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse query string: {}", e),
@@ -600,7 +602,9 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Path<PathType>, HttpError> {
         let params: PathType = http_extract_path_params(&rqctx.path_variables)?;
-        Ok(Path { inner: params })
+        Ok(Path {
+            inner: params,
+        })
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
@@ -651,7 +655,9 @@ where
     let value: Result<JsonType, serde_json::Error> =
         serde_json::from_slice(&body_bytes);
     match value {
-        Ok(j) => Ok(Json { inner: j }),
+        Ok(j) => Ok(Json {
+            inner: j,
+        }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse body: {}", e),
@@ -944,11 +950,19 @@ impl From<HttpResponseDeleted> for HttpHandlerResult {
  * has nothing to return.
  */
 pub struct HttpResponseUpdatedNoContent();
-impl HttpResponse for HttpResponseUpdatedNoContent {}
+impl HttpResponseWrap for HttpResponseUpdatedNoContent {
+    fn to_result(self) -> HttpHandlerResult {
+        self.into()
+    }
+}
+impl HttpResponse for HttpResponseUpdatedNoContent {
+    type Body = ();
+    const STATUS_CODE: StatusCode = StatusCode::NO_CONTENT;
+}
 impl From<HttpResponseUpdatedNoContent> for HttpHandlerResult {
     fn from(_: HttpResponseUpdatedNoContent) -> HttpHandlerResult {
         Ok(Response::builder()
-            .status(StatusCode::NO_CONTENT)
+            .status(HttpResponseUpdatedNoContent::STATUS_CODE)
             .body(Body::empty())?)
     }
 }
