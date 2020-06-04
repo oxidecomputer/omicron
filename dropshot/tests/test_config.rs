@@ -72,7 +72,7 @@ async fn test_config_bind_address() {
 
     let client = hyper::Client::new();
     let bind_ip_str = "127.0.0.1";
-    let bind_port: u16 = 12221;
+    let bind_port: u16 = 12215;
 
     /*
      * This helper constructs a GET HTTP request to
