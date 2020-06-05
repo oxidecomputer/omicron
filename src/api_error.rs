@@ -1,5 +1,6 @@
 /*!
- * API-specific error handling facilities.  See dropshot/error.rs for details.
+ * Error handling facilities for the Oxide control plane.  For HTTP-level error
+ * handling, see Dropshot.
  */
 
 use crate::api_model::ApiName;
@@ -9,27 +10,52 @@ use dropshot::HttpErrorResponseBody;
 use uuid::Uuid;
 
 /**
- * ApiError represents errors that can be generated within the API server.
- * These are HTTP-agnostic.  See the module-level documentation for details.
+ * Represents errors that can be generated within a control plane component.
+ * These may be generated while handling a client request or as part of
+ * background operation.  When generated as part of an HTTP request, an
+ * `ApiError` will be converted into an HTTP error as one of the last steps in
+ * processing the request.  This allows most of the system to remain agnostic to
+ * the transport with which the system communicates with clients.
+ *
+ * General best practices for error design apply here.  Where possible, we want
+ * to reuse existing variants rather than inventing new ones to distinguish
+ * cases that no programmatic consumer needs to distinguish.
  */
 #[derive(Debug, PartialEq)]
 pub enum ApiError {
+    /** An object needed as part of this operation was not found. */
     ObjectNotFound { type_name: ApiResourceType, lookup_type: LookupType },
+    /** An object already exists with the specified name or identifier. */
     ObjectAlreadyExists { type_name: ApiResourceType, object_name: String },
+    /**
+     * The request was well-formed, but the operation cannot be completed given
+     * the current state of the system.
+     */
     InvalidRequest { message: String },
+    /** The specified input field is not valid. */
     InvalidValue { label: String, message: String },
+    /** The system encountered an unhandled operational error. */
     InternalError { message: String },
+    /** The system (or part of it) is unavailable. */
     ServiceUnavailable { message: String },
 }
 
+/** Indicates how an object was looked up (for an `ObjectNotFound` error) */
 #[derive(Debug, PartialEq)]
 pub enum LookupType {
+    /** a specific name was requested */
     ByName(String),
+    /** a specific id was requested */
     ById(Uuid),
+    /** some other lookup type was used */
     Other(String),
 }
 
 impl ApiError {
+    /**
+     * Generates an [`ApiError::ObjectNotFound`] error for a lookup by object
+     * name.
+     */
     pub fn not_found_by_name(
         type_name: ApiResourceType,
         name: &ApiName,
@@ -40,6 +66,9 @@ impl ApiError {
         }
     }
 
+    /**
+     * Generates an [`ApiError::ObjectNotFound`] error for a lookup by object id.
+     */
     pub fn not_found_by_id(type_name: ApiResourceType, id: &Uuid) -> ApiError {
         ApiError::ObjectNotFound {
             type_name: type_name,
@@ -47,6 +76,10 @@ impl ApiError {
         }
     }
 
+    /**
+     * Generates an [`ApiError::ObjectNotFound`] error for some other kind of
+     * lookup.
+     */
     pub fn not_found_other(
         type_name: ApiResourceType,
         message: String,
@@ -58,11 +91,11 @@ impl ApiError {
     }
 
     /**
-     * Given an error returned in an HTTP response, reconstitute a corresponding
-     * ApiError.  This is intended for use when returning an error from one
-     * control plane service to another while preserving information about the
-     * error.  If the error is of an unknown kind or doesn't match the expected
-     * form, an internal error will be returned.
+     * Given an error returned in an HTTP response, reconstitute an `ApiError`
+     * that describes that error.  This is intended for use when returning an
+     * error from one control plane service to another while preserving
+     * information about the error.  If the error is of an unknown kind or
+     * doesn't match the expected form, an internal error will be returned.
      */
     pub fn from_response(
         error_message_base: String,
@@ -89,6 +122,11 @@ impl ApiError {
 }
 
 impl From<ApiError> for HttpError {
+    /**
+     * Converts an `ApiError` error into an `HttpError`.  This defines how
+     * errors that are represented internally using `ApiError` are ultimately
+     * exposed to clients over HTTP.
+     */
     fn from(error: ApiError) -> HttpError {
         match error {
             ApiError::ObjectNotFound {

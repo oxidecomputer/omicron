@@ -1,7 +1,7 @@
 /*!
- * Facilities for working with objects in the API (agnostic to both the HTTP
- * transport through which consumers interact with them and the backend
- * implementation (simulator or a real rack)).
+ * Data structures and related facilities for representing resources in the API.
+ * This includes all representations over the wire for both the external and
+ * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
 use chrono::DateTime;
@@ -24,8 +24,9 @@ use crate::api_error::ApiError;
 use dropshot::ExtractedParameter;
 
 /*
- * These type aliases exist primarily to make it easier to be consistent about
- * return values from this module.
+ * The type aliases below exist primarily to ensure consistency among return
+ * types for functions in the `OxideController` and `ControlDataStore`.  The
+ * type argument `T` generally implements `ApiObject`.
  */
 
 /** Result of a create operation for the specified type. */
@@ -43,9 +44,38 @@ pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
 
+/*
+ * General-purpose types used for client request parameters and return values.
+ */
+
+/**
+ * Parameters for requesting a specific page of results when listing a
+ * collection of objects.
+ *
+ * All list operations in the API are paginated, meaning that there's a limit on
+ * the number of objects returned in a single request and clients are expected
+ * to make additional requests to fetch the next page of results until the end
+ * of the list is reached or the client has found what it needs.  For any list
+ * operation, objects are sorted by a particular field that is unique among
+ * objects in the list (usually a UTF-8 name or a UUID).  For all requests after
+ * the first, the client is expected to provide the value of this field for the
+ * last object seen, called the _marker_.  The server will return a page of
+ * objects that appear immediately after the object that has this marker.
+ *
+ * `NameType` is the type of the field used to sort the returned values and it's
+ * usually `ApiName`.
+ */
 #[derive(Deserialize, ExtractedParameter)]
 pub struct PaginationParams<NameType> {
+    /**
+     * If present, this is the value of the sort field for the last object seen
+     */
     pub marker: Option<NameType>,
+
+    /**
+     * If present, this is an upper bound on how many objects the client wants
+     * in this page of results.  The server may choose to use a lower limit.
+     */
     pub limit: Option<usize>,
 }
 
@@ -53,74 +83,9 @@ pub struct PaginationParams<NameType> {
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 /**
- * ApiObject is a trait implemented by the types used to represent objects in
- * the API.  It's helpful to start with a concrete example, so let's consider
- * a Project, which is about as simple a resource as we have.
- *
- * The `ApiProject` struct represents a project as understood by the API.  It
- * contains all the fields necessary to implement a Project.  It has several
- * associated types:
- *
- * * `ApiProjectView`, which is what gets emitted by the API when a user asks
- *    for a Project
- * * `ApiProjectCreateParams`, which is what must be provided to the API when a
- *   user wants to create a new project
- * * `ApiProjectUpdate`, which is what must be provided to the API when a user
- *   wants to update a project.
- *
- * We expect to add many more types to the API for things like instances, disks,
- * images, networking abstractions, organizations, teams, users, system
- * components, and the like.  See RFD 4 for details.  The current plan is to add
- * types and supporting functions for each of these resources.  However,
- * different types may support different operations.  For examples, instances
- * will have additional operations (like "boot" and "halt").  System component
- * resources may be immutable (i.e., they won't define a "CreateParams" type, an
- * "UpdateParams" type, nor create or update functions).
- *
- * The only thing guaranteed by the `ApiObject` trait is that the type can be
- * converted to a View, which is something that can be serialized.
- *
- * TODO-coverage: each type could have unit tests for various invalid input
- * types?
- */
-pub trait ApiObject {
-    type View: Serialize + Clone + Debug;
-    fn to_view(&self) -> Self::View;
-}
-
-/**
- * List of API resource types
- */
-#[derive(Debug, PartialEq)]
-pub enum ApiResourceType {
-    Project,
-    Disk,
-    DiskAttachment,
-    Instance,
-    Rack,
-    Server,
-}
-
-impl Display for ApiResourceType {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", match self {
-            ApiResourceType::Project => "project",
-            ApiResourceType::Disk => "disk",
-            ApiResourceType::DiskAttachment => "disk attachment",
-            ApiResourceType::Instance => "instance",
-            ApiResourceType::Rack => "rack",
-            ApiResourceType::Server => "server",
-        })
-    }
-}
-
-/*
- * Data types used in the API
- */
-
-/**
- * ApiName represents a "name" value in the API.  An ApiName can only be
- * constructed with a valid name string.
+ * Represents a "name" value in the API.  Names are generally user-provided
+ * unique identifiers, highly constrained as described in RFD 4.  An `ApiName`
+ * can only be constructed with a string that's valid as a name.
  */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
@@ -219,9 +184,116 @@ impl ApiName {
     }
 }
 
+/**
+ * Represents a count of bytes, typically used either for memory or storage.
+ */
 /*
- * IDENTITY METADATA
- * (shared by most API objects)
+ * TODO-cleanup This could benefit from a more complete implementation.
+ * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
+ * need to write a validator for that.
+ */
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct ApiByteCount(u64);
+impl ApiByteCount {
+    pub fn from_bytes(bytes: u64) -> ApiByteCount {
+        ApiByteCount(bytes)
+    }
+    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * kibibytes)
+    }
+    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
+    }
+    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
+    }
+    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
+        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
+    }
+
+    pub fn to_bytes(&self) -> u64 {
+        self.0
+    }
+    pub fn to_whole_kibibytes(&self) -> u64 {
+        self.to_bytes() / 1024
+    }
+    pub fn to_whole_mebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024
+    }
+    pub fn to_whole_gibibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024
+    }
+    pub fn to_whole_tebibytes(&self) -> u64 {
+        self.to_bytes() / 1024 / 1024 / 1024 / 1024
+    }
+}
+
+/*
+ * General types used to implement API resources
+ */
+
+/**
+ * Specifies a type of API resource
+ */
+#[derive(Debug, PartialEq)]
+pub enum ApiResourceType {
+    Project,
+    Disk,
+    DiskAttachment,
+    Instance,
+    Rack,
+    Server,
+}
+
+impl Display for ApiResourceType {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        write!(f, "{}", match self {
+            ApiResourceType::Project => "project",
+            ApiResourceType::Disk => "disk",
+            ApiResourceType::DiskAttachment => "disk attachment",
+            ApiResourceType::Instance => "instance",
+            ApiResourceType::Rack => "rack",
+            ApiResourceType::Server => "server",
+        })
+    }
+}
+
+/**
+ * ApiObject represents a resource in the API and is implemented by concrete
+ * types representing specific API resources
+ *
+ * Consider a Project, which is about as simple a resource as we have.  The
+ * `ApiProject` struct represents a project as understood by the API.  It
+ * contains all the fields necessary to implement a Project.  It has several
+ * related types:
+ *
+ * * `ApiProjectView` is what gets emitted by the API when a user asks for a
+ *   Project
+ * * `ApiProjectCreateParams` is what must be provided to the API when a user
+ *   wants to create a new project
+ * * `ApiProjectUpdateParams` is what must be provided to the API when a user
+ *   wants to update a project.
+ *
+ * We also have instances, disks, racks, servers, and many related types, and we
+ * expect to add many more types like images, networking abstractions,
+ * organizations, teams, users, system components, and the like.  See RFD 4 for
+ * details.  Some resources may not have analogs for all these types because
+ * they're immutable (e.g., the `ApiRack` resource doesn't define a
+ * "CreateParams" type).
+ *
+ * The only thing guaranteed by the `ApiObject` trait is that the type can be
+ * converted to a View, which is something that can be serialized.
+ *
+ * TODO-coverage: each type could have unit tests for various invalid input
+ * types?
+ */
+pub trait ApiObject {
+    type View: Serialize + Clone + Debug;
+    fn to_view(&self) -> Self::View;
+}
+
+/*
+ * IDENTITY METADATA (embedded in most API objects)
  */
 
 #[serde(rename_all = "camelCase")]
@@ -254,6 +326,10 @@ pub struct ApiIdentityMetadataUpdateParams {
 }
 
 /*
+ * Specific API resources
+ */
+
+/*
  * PROJECTS
  */
 
@@ -265,9 +341,8 @@ pub struct ApiProject {
     pub identity: ApiIdentityMetadata,
 
     /*
-     * TODO
-     * We define a generation number here at the model layer so that in theory
-     * the model layer can handle optimistic concurrency control (i.e.,
+     * TODO We define a generation number here at the model layer so that in
+     * theory the model layer can handle optimistic concurrency control (i.e.,
      * put-only-if-matches-etag and the like).  It's not yet clear if a
      * generation number is the right way to express this.
      */
@@ -285,18 +360,21 @@ impl ApiObject for ApiProject {
 }
 
 /**
- * Represents the properties of an ApiProject that can be seen by end users.
+ * End-user view of an [`ApiProject`].
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
-    /* TODO is flattening here the intent in RFD 4? */
+    /*
+     * TODO-correctness is flattening here (and in all the other types) the
+     * intent in RFD 4?
+     */
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
 }
 
 /**
- * Represents the create-time parameters for an ApiProject.
+ * Create-time parameters for an [`ApiProject`].
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
@@ -306,7 +384,7 @@ pub struct ApiProjectCreateParams {
 }
 
 /**
- * Represents the properties of an ApiProject that can be updated by end users.
+ * Updateable properties of an [`ApiProject`].
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -379,48 +457,6 @@ impl ApiInstanceState {
 /** Represents the number of CPUs in an instance. */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceCpuCount(pub usize);
-
-/**
- * Represents a count of bytes, typically used either for memory or storage.
- * TODO-cleanup This could benefit from a more complete implementation.
- * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
- * need to write a validator for that.
- */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-pub struct ApiByteCount(u64);
-impl ApiByteCount {
-    pub fn from_bytes(bytes: u64) -> ApiByteCount {
-        ApiByteCount(bytes)
-    }
-    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * kibibytes)
-    }
-    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
-    }
-    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
-    }
-    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
-    }
-
-    pub fn to_bytes(&self) -> u64 {
-        self.0
-    }
-    pub fn to_whole_kibibytes(&self) -> u64 {
-        self.to_bytes() / 1024
-    }
-    pub fn to_whole_mebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024
-    }
-    pub fn to_whole_gibibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024
-    }
-    pub fn to_whole_tebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024 / 1024
-    }
-}
 
 /**
  * Represents an instance (VM) in the API

@@ -3,6 +3,9 @@
 
 = TODO
 
+Currently:
+- fleshing out documentation, working in api_model.rs, starting at ApiInstance
+
 API endpoints:
 
 * RFD 24: regions, AZs, etc
@@ -11,12 +14,13 @@ API endpoints:
 Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
-** decide on a code name for the whole control plane and rename the repo
-** oxide controller -> Oxc?  Or something using the new code name?
 ** improved documentation, especially design docs, structural docs
-* sled agent startup should trigger restoring instances and disks
 * do a demo????
+* decide on a code name for the whole control plane and rename the repo
+** oxide controller -> Oxc?  Or something using the new code name?
 * add a test that runs --openapi (to make sure it works)
+* sled agent startup should trigger restoring instances and disks
+* cargo clippy
 * scope out switching to sync
 * create separate exports for internal vs. external models
 * proper config + logging for sled agent
