@@ -3,6 +3,14 @@
 
 = TODO
 
+Currently:
+* working through crate documentation, file-by-file
+** currently 
+** consistency of one-line summaries
+** documenting everything
+* need higher-level docs in src/lib.rs
+* document _that_ we use rustdoc --document-private-items for internal docs
+
 API endpoints:
 
 * RFD 24: regions, AZs, etc
@@ -12,7 +20,9 @@ Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
 ** improved documentation, especially design docs, structural docs
+** clarify use of OXC / OXCP / OxideController / controller
 ** rename server -> sled in API?
+** clean up datastore?
 * do a demo????
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?

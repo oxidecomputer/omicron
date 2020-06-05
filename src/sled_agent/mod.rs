@@ -1,5 +1,5 @@
-/*
- * Library interface to the sled agent mechanisms.
+/*!
+ * Library interface to the sled agent mechanisms
  */
 
 mod config;

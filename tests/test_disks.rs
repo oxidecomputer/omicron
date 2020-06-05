@@ -1,5 +1,5 @@
 /*!
- * Tests basic disk support in the API.
+ * Tests basic disk support in the API
  */
 
 use http::method::Method;

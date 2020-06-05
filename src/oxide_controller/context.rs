@@ -1,3 +1,6 @@
+/*!
+ * Shared state used by API request handlers
+ */
 use super::OxideController;
 use super::OxideControllerServer;
 

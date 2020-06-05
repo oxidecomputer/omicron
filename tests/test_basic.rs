@@ -1,5 +1,5 @@
 /*!
- * Smoke tests against the API server.
+ * Smoke tests against the API server
  *
  * This file defines a very basic set of tests against the API.
  * TODO-coverage add test for racks, servers

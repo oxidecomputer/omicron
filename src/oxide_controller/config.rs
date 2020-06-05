@@ -1,6 +1,6 @@
 /*!
  * Interfaces for parsing configuration files and working with API server
- * configuration.
+ * configuration
  */
 
 use dropshot::ConfigDropshot;

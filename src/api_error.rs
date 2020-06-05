@@ -1,6 +1,7 @@
 /*!
- * Error handling facilities for the Oxide control plane.  For HTTP-level error
- * handling, see Dropshot.
+ * Error handling facilities for the Oxide control plane
+ *
+ * For HTTP-level error handling, see Dropshot.
  */
 
 use crate::api_model::ApiName;

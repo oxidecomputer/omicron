@@ -1,5 +1,5 @@
 /*!
- * Interfaces for working with sled agent configuration.
+ * Interfaces for working with sled agent configuration
  */
 
 use dropshot::ConfigDropshot;

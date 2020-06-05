@@ -1,7 +1,5 @@
 /*!
- * Data storage interfaces for resources in the Oxide system.  Currently, this
- * just stores data in-memory, but the intent is to move this towards something
- * more like a distributed database.
+ * Simulated (in-memory) data storage for the Oxide control plane
  */
 
 use crate::api_error::ApiError;
@@ -32,10 +30,22 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/**
+ * Data storage interface exposed to the rest of OXC
+ *
+ * All the data is stored in the `data` field, protected by one big lock.
+ */
 pub struct ControlDataStore {
     data: Mutex<CdsData>,
 }
 
+/**
+ * Contains the actual data structures to store control plane objects
+ *
+ * The methods exposed here should reflect what we expect would be exposed if
+ * this were a traditional database or a distributed SQL-like database, since
+ * that's ultimately what we expect to put here.
+ */
 /*
  * TODO-cleanup: We could clean up the internal interfaces for projects here by
  * storing projects_by_id (a map from Uuid to Arc<ApiProject>).  We may want to
@@ -67,8 +77,8 @@ struct CdsData {
  * project name, instance name, and disk name.
  *
  * One idea would be that there's a way to look up a project, disk, or instance
- * by name (and project *id*, for instances and disks), and after that, you have
- * to operate using the whole object (instead of its name).
+ * by name (and project *id*, for instances and disks), and after that, you
+ * always have to operate using the whole object (instead of its name).
  */
 impl ControlDataStore {
     pub fn new() -> ControlDataStore {
@@ -607,10 +617,14 @@ impl ControlDataStore {
 }
 
 /**
- * List a page of items from a collection.
+ * List a page of items from a collection `search_tree` that maps lookup keys
+ * directly to the actual objects
+ *
+ * For objects that are stored using two mappings (one from lookup keys to ids,
+ * and one from ids to values), see [`collection_page_via_id`].
  */
 /*
- * TODO-cleanup this is only public because we haven't built servers into the
+ * TODO-cleanup this is only public because we haven't built Servers into the
  * datastore yet so the controller needs this interface.
  */
 pub fn collection_page<'a, 'b, KeyType, ValueType>(
@@ -632,6 +646,9 @@ where
     Ok(futures::stream::iter(list).boxed())
 }
 
+/**
+ * Returns a page of items from a collection `search_tree` as an iterator
+ */
 fn collection_page_as_iter<'a, 'b, KeyType, ValueType>(
     search_tree: &'a BTreeMap<KeyType, ValueType>,
     pagparams: &'b PaginationParams<KeyType>,
@@ -659,6 +676,18 @@ where
     }
 }
 
+/**
+ * Look up a single item in a collection `tree` by its key `lookup_key`, where
+ * `tree` maps the lookup key directly to the item that the caller is looking
+ * for
+ *
+ * This is a convenience function used to generate an appropriate `ApiError` if
+ * the object is not found.
+ *
+ * Some resources are stored by mapping a lookup key first to an id, and then
+ * looking up this id in a separate tree.  For that kind of lookup, use
+ * [`collection_lookup_via_id`].
+ */
 fn collection_lookup<'a, 'b, KeyType, ValueType>(
     tree: &'b BTreeMap<KeyType, Arc<ValueType>>,
     lookup_key: &'a KeyType,
@@ -671,6 +700,10 @@ where
     tree.get(lookup_key).ok_or_else(|| mkerror(resource_type, lookup_key))
 }
 
+/**
+ * Look up a single item in a collection `value_tree` by first looking up its id
+ * in `search_tree` and then finding the item with that id in `value_tree`.
+ */
 fn collection_lookup_via_id<'a, 'b, KeyType, IdType, ValueType>(
     search_tree: &'b BTreeMap<KeyType, IdType>,
     value_tree: &'b BTreeMap<IdType, Arc<ValueType>>,
@@ -693,6 +726,11 @@ where
     Ok(value_tree.get(id).unwrap())
 }
 
+/**
+ * List a page of objects for objects that are stored using two mappings: one
+ * from lookup keys to ids called `search_tree`, and one from ids to values
+ * called `value_tree`
+ */
 pub fn collection_page_via_id<KeyType, IdType, ValueType>(
     search_tree: &BTreeMap<KeyType, IdType>,
     pagparams: &PaginationParams<KeyType>,

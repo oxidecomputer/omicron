@@ -1,5 +1,5 @@
 /*!
- * Tests basic instance support in the API.
+ * Tests basic instance support in the API
  */
 
 use http::method::Method;

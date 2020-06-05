@@ -1,5 +1,5 @@
 /*!
- * API server process
+ * Executable program to run the Oxide Controller (OXC)
  */
 
 /*

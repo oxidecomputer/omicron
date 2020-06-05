@@ -1,7 +1,5 @@
 /*!
- * Library interfaces for this crate, intended for use only by the automated
- * test suite.  This crate does not define a Rust library API that's intended to
- * be consumed from the outside.
+ * Oxide control plane
  */
 
 mod api_error;

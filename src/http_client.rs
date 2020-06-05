@@ -1,5 +1,6 @@
 /*!
- * General-purpose HTTP client, used for internal control plane interfaces.
+ * HTTP client used for internal control plane interfaces
+ *
  * This is quite limited and intended as a temporary abstraction until we have
  * proper OpenAPI-generated clients for our own internal interfaces.
  */

@@ -1,5 +1,5 @@
 /*!
- * Library interface to the Oxide Controller mechanisms.
+ * Library interface to the Oxide Controller mechanisms
  */
 
 mod config;

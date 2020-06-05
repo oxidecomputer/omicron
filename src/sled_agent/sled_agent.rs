@@ -1,5 +1,5 @@
 /*!
- * Simulated sled agent implementation.
+ * Simulated sled agent implementation
  */
 
 use super::ControllerClient;

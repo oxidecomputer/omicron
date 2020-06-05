@@ -1,5 +1,6 @@
 /*!
- * Data structures and related facilities for representing resources in the API.
+ * Data structures and related facilities for representing resources in the API
+ *
  * This includes all representations over the wire for both the external and
  * internal APIs.  The contents here are all HTTP-agnostic.
  */

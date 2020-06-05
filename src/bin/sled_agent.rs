@@ -1,5 +1,5 @@
 /*!
- * Simulated sled agent
+ * Executable program to run a simulated sled agent
  */
 
 /*
