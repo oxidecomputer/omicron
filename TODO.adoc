@@ -3,9 +3,6 @@
 
 = TODO
 
-Currently:
-- fleshing out documentation, working in api_model.rs, starting at ApiInstance
-
 API endpoints:
 
 * RFD 24: regions, AZs, etc
@@ -15,6 +12,7 @@ Work queue (see also: existing GitHub issues):
 
 * deferred cleanup / polish up for more help
 ** improved documentation, especially design docs, structural docs
+** rename server -> sled in API?
 * do a demo????
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?

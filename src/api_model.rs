@@ -29,18 +29,18 @@ use dropshot::ExtractedParameter;
  * type argument `T` generally implements `ApiObject`.
  */
 
-/** Result of a create operation for the specified type. */
+/** Result of a create operation for the specified type */
 pub type CreateResult<T> = Result<Arc<T>, ApiError>;
-/** Result of a delete operation for the specified type. */
+/** Result of a delete operation for the specified type */
 pub type DeleteResult = Result<(), ApiError>;
-/** Result of a list operation that returns an ObjectStream. */
+/** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
-/** Result of a lookup operation for the specified type. */
+/** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<Arc<T>, ApiError>;
-/** Result of an update operation for the specified type. */
+/** Result of an update operation for the specified type */
 pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 
-/** A stream of Results, each potentially representing an object in the API. */
+/** A stream of Results, each potentially representing an object in the API */
 pub type ObjectStream<T> =
     Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
 
@@ -50,7 +50,7 @@ pub type ObjectStream<T> =
 
 /**
  * Parameters for requesting a specific page of results when listing a
- * collection of objects.
+ * collection of objects
  *
  * All list operations in the API are paginated, meaning that there's a limit on
  * the number of objects returned in a single request and clients are expected
@@ -83,9 +83,11 @@ pub struct PaginationParams<NameType> {
 pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
 
 /**
- * Represents a "name" value in the API.  Names are generally user-provided
- * unique identifiers, highly constrained as described in RFD 4.  An `ApiName`
- * can only be constructed with a string that's valid as a name.
+ * A name used in the API
+ *
+ * Names are generally user-provided unique identifiers, highly constrained as
+ * described in RFD 4.  An `ApiName` can only be constructed with a string
+ * that's valid as a name.
  */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
@@ -138,8 +140,7 @@ impl TryFrom<String> for ApiName {
 }
 
 /**
- * `ApiName::try_from(&str)` is a convenience primarily for the test suite and
- * other hardcoded names.
+ * Convenience parse function for literal strings, primarily for the test suite.
  */
 impl TryFrom<&str> for ApiName {
     type Error = String;
@@ -185,7 +186,7 @@ impl ApiName {
 }
 
 /**
- * Represents a count of bytes, typically used either for memory or storage.
+ * A count of bytes, typically used either for memory or storage capacity
  */
 /*
  * TODO-cleanup This could benefit from a more complete implementation.
@@ -233,7 +234,7 @@ impl ApiByteCount {
  */
 
 /**
- * Specifies a type of API resource
+ * Identifies a type of API resource
  */
 #[derive(Debug, PartialEq)]
 pub enum ApiResourceType {
@@ -260,7 +261,7 @@ impl Display for ApiResourceType {
 
 /**
  * ApiObject represents a resource in the API and is implemented by concrete
- * types representing specific API resources
+ * types representing specific API resources.
  *
  * Consider a Project, which is about as simple a resource as we have.  The
  * `ApiProject` struct represents a project as understood by the API.  It
@@ -274,7 +275,7 @@ impl Display for ApiResourceType {
  * * `ApiProjectUpdateParams` is what must be provided to the API when a user
  *   wants to update a project.
  *
- * We also have instances, disks, racks, servers, and many related types, and we
+ * We also have Instances, Disks, Racks, Servers, and many related types, and we
  * expect to add many more types like images, networking abstractions,
  * organizations, teams, users, system components, and the like.  See RFD 4 for
  * details.  Some resources may not have analogs for all these types because
@@ -283,7 +284,8 @@ impl Display for ApiResourceType {
  *
  * The only thing guaranteed by the `ApiObject` trait is that the type can be
  * converted to a View, which is something that can be serialized.
- *
+ */
+/*
  * TODO-coverage: each type could have unit tests for various invalid input
  * types?
  */
@@ -293,9 +295,12 @@ pub trait ApiObject {
 }
 
 /*
- * IDENTITY METADATA (embedded in most API objects)
+ * IDENTITY METADATA
  */
 
+/**
+ * Identity-related metadata that's included in nearly all public API objects
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
@@ -311,6 +316,9 @@ pub struct ApiIdentityMetadata {
     pub time_modified: DateTime<Utc>,
 }
 
+/**
+ * Create-time identity-related parameters
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataCreateParams {
@@ -318,6 +326,9 @@ pub struct ApiIdentityMetadataCreateParams {
     pub description: String,
 }
 
+/**
+ * Updateable identity-related parameters
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadataUpdateParams {
@@ -334,7 +345,7 @@ pub struct ApiIdentityMetadataUpdateParams {
  */
 
 /**
- * Represents a Project in the API.  See RFD for field details.
+ * A Project in the external API
  */
 pub struct ApiProject {
     /** common identifying metadata */
@@ -360,7 +371,7 @@ impl ApiObject for ApiProject {
 }
 
 /**
- * End-user view of an [`ApiProject`].
+ * Client view of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -374,7 +385,7 @@ pub struct ApiProjectView {
 }
 
 /**
- * Create-time parameters for an [`ApiProject`].
+ * Create-time parameters for an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
@@ -384,7 +395,7 @@ pub struct ApiProjectCreateParams {
 }
 
 /**
- * Updateable properties of an [`ApiProject`].
+ * Updateable properties of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -398,8 +409,10 @@ pub struct ApiProjectUpdateParams {
  */
 
 /**
- * ApiInstanceState describes the runtime state of the instance (i.e., starting,
- * running, etc.)
+ * Running state of an Instance (primarily: booted or stopped)
+ *
+ * This typically reflects whether it's starting, running, stopping, or stopped,
+ * but also includes states related to the Instance's lifecycle
  */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
@@ -454,28 +467,28 @@ impl ApiInstanceState {
     }
 }
 
-/** Represents the number of CPUs in an instance. */
+/** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceCpuCount(pub usize);
 
 /**
- * Represents an instance (VM) in the API
+ * An Instance (VM) in the external API
  */
 #[derive(Clone, Debug)]
 pub struct ApiInstance {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
 
-    /** id for the project containing this instance */
+    /** id for the project containing this Instance */
     pub project_id: Uuid,
 
-    /** number of CPUs allocated for this instance */
+    /** number of CPUs allocated for this Instance */
     pub ncpus: ApiInstanceCpuCount,
-    /** memory, in gigabytes, allocated for this instance */
+    /** memory allocated for this Instance */
     pub memory: ApiByteCount,
     /** size of the boot disk for the image */
     pub boot_disk_size: ApiByteCount,
-    /** RFC1035-compliant hostname for the instance. */
+    /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
     /** state owned by the data plane */
@@ -499,16 +512,18 @@ impl ApiObject for ApiInstance {
 }
 
 /**
- * The runtime state of an Instance is owned by the sled agent running that
- * Instance.
+ * Runtime state of the Instance, including the actual running state and minimal
+ * metadata
+ *
+ * This state is owned by the sled agent running that Instance.
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeState {
-    /** runtime state of the instance */
+    /** runtime state of the Instance */
     pub run_state: ApiInstanceState,
     /** indicates whether a reboot is currently in progress */
     pub reboot_in_progress: bool,
-    /** which server is running this instance */
+    /** which server is running this Instance */
     pub server_uuid: Uuid,
     /** generation number for this state */
     pub gen: u64,
@@ -517,11 +532,10 @@ pub struct ApiInstanceRuntimeState {
 }
 
 /**
- * ApiInstanceRuntimeStateRequested is used to request an Instance state change
- * from a sled agent.  Right now, it's only the run state that can be changed,
- * though we could imagine supporting changing properties like "ncpus" here.  If
- * we allow other properties here, we may want to make them Options so that
- * callers don't have to know the prior state already.
+ * Used to request an Instance state change from a sled agent
+ *
+ * Right now, it's only the run state that can be changed, though we might want
+ * to support changing properties like "ncpus" here.
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateRequested {
@@ -529,6 +543,9 @@ pub struct ApiInstanceRuntimeStateRequested {
     pub reboot_wanted: bool,
 }
 
+/**
+ * Client view of an [`ApiInstanceRuntimeState`]
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiInstanceRuntimeStateView {
@@ -547,7 +564,7 @@ impl ApiObject for ApiInstanceRuntimeState {
 }
 
 /**
- * Represents the properties of an `ApiInstance` that can be seen by end users.
+ * Client view of an [`ApiInstance`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -556,16 +573,16 @@ pub struct ApiInstanceView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
 
-    /** id for the project containing this instance */
+    /** id for the project containing this Instance */
     pub project_id: Uuid,
 
-    /** number of CPUs allocated for this instance */
+    /** number of CPUs allocated for this Instance */
     pub ncpus: ApiInstanceCpuCount,
-    /** memory, in gigabytes, allocated for this instance */
+    /** memory, in gigabytes, allocated for this Instance */
     pub memory: ApiByteCount,
     /** size of the boot disk for the image */
     pub boot_disk_size: ApiByteCount,
-    /** RFC1035-compliant hostname for the instance. */
+    /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
     #[serde(flatten)]
@@ -573,7 +590,9 @@ pub struct ApiInstanceView {
 }
 
 /**
- * Represents the create-time parameters for an ApiInstance.
+ * Create-time parameters for an [`ApiInstance`]
+ */
+/*
  * TODO We're ignoring "type" for now because no types are specified by the API.
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
@@ -590,10 +609,7 @@ pub struct ApiInstanceCreateParams {
 }
 
 /**
- * Represents the properties of an ApiInstance that can be updated by end users.
- * TODO Very little is updateable right now because it's not clear if we'll want
- * the key properties to be updated only by a separate "resize" API that would
- * be async.
+ * Updateable properties of an [`ApiInstance`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -605,26 +621,30 @@ pub struct ApiInstanceUpdateParams {
 /*
  * DISKS
  */
+
 /**
- * Represents a disk (network block device) in the API.
+ * A Disk (network block device) in the external API
  */
 #[derive(Clone, Debug)]
 pub struct ApiDisk {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
-    /** id for the project containing this disk */
+    /** id for the project containing this Disk */
     pub project_id: Uuid,
     /**
-     * id for the snapshot from which this disk was created (None means a blank
+     * id for the snapshot from which this Disk was created (None means a blank
      * disk)
      */
     pub create_snapshot_id: Option<Uuid>,
-    /** size of the disk */
+    /** size of the Disk */
     pub size: ApiByteCount,
-    /** runtime state of the disk */
+    /** runtime state of the Disk */
     pub runtime: ApiDiskRuntimeState,
 }
 
+/**
+ * Client view of an [`ApiDisk`]
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskView {
@@ -657,17 +677,27 @@ impl ApiObject for ApiDisk {
     }
 }
 
+/**
+ * State of a Disk (primarily: attached or not)
+ */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskState {
+    /** Disk is being initialized */
     Creating,
+    /** Disk is ready but detached from any Instance */
     Detached,
-    Attaching(Uuid), /* attached instance id */
-    Attached(Uuid),  /* attached instance id */
-    Detaching(Uuid), /* attached instance id */
+    /** Disk is being attached to the given Instance */
+    Attaching(Uuid), /* attached Instance id */
+    /** Disk is attached to the given Instance */
+    Attached(Uuid), /* attached Instance id */
+    /** Disk is being detached from the given Instance */
+    Detaching(Uuid), /* attached Instance id */
+    /** Disk has been destroyed */
     Destroyed,
+    /** Disk is unavailable */
     Faulted,
 }
 
@@ -688,10 +718,18 @@ impl Display for ApiDiskState {
 }
 
 impl ApiDiskState {
+    /**
+     * Returns whether the Disk is currently attached to, being attached to, or
+     * being detached from any Instance.
+     */
     pub fn is_attached(&self) -> bool {
         self.attached_instance_id().is_some()
     }
 
+    /**
+     * If the Disk is attached to, being attached to, or being detached from an
+     * Instance, returns the id for that Instance.  Otherwise returns `None`.
+     */
     pub fn attached_instance_id(&self) -> Option<&Uuid> {
         match self {
             ApiDiskState::Attaching(id) => Some(id),
@@ -706,9 +744,13 @@ impl ApiDiskState {
     }
 }
 
+/**
+ * Runtime state of the Disk, which includes its attach state and some minimal
+ * metadata
+ */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskRuntimeState {
-    /** runtime state of the disk */
+    /** runtime state of the Disk */
     pub disk_state: ApiDiskState,
     /** generation number for this state */
     pub gen: u64,
@@ -716,15 +758,24 @@ pub struct ApiDiskRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
+/**
+ * Create-time parameters for an [`ApiDisk`]
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskCreateParams {
+    /** common identifying metadata */
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
+    /** id for snapshot from which the Disk should be created, if any */
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
+    /** size of the Disk */
     pub size: ApiByteCount,
 }
 
+/**
+ * Describes a Disk's attachment to an Instance
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiDiskAttachment {
@@ -742,6 +793,9 @@ impl ApiObject for ApiDiskAttachment {
     }
 }
 
+/**
+ * Used to request a Disk state change
+ */
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskStateRequested {
@@ -752,6 +806,9 @@ pub enum ApiDiskStateRequested {
 }
 
 impl ApiDiskStateRequested {
+    /**
+     * Returns whether the requested state is attached to an Instance or not.
+     */
     pub fn is_attached(&self) -> bool {
         match self {
             ApiDiskStateRequested::Detached => false,
@@ -768,8 +825,7 @@ impl ApiDiskStateRequested {
  */
 
 /**
- * Concrete type for a Rack in the API.  Note that this type is not really used
- * for anything.  See `OxideRack` for details.
+ * A Rack in the external API
  */
 pub struct ApiRack {
     pub id: Uuid,
@@ -785,7 +841,7 @@ impl ApiObject for ApiRack {
 }
 
 /**
- * Represents a Rack in the API.  See RFD for field details.
+ * Client view of an [`ApiRack`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -798,7 +854,7 @@ pub struct ApiRackView {
  */
 
 /**
- * Concrete type for a Server in the API.
+ * A Server in the external API
  */
 pub struct ApiServer {
     pub id: Uuid,
@@ -815,6 +871,9 @@ impl ApiObject for ApiServer {
     }
 }
 
+/**
+ * Client view of an [`ApiServer`]
+ */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiServerView {
@@ -826,20 +885,40 @@ pub struct ApiServerView {
  * Internal Control Plane API objects
  */
 
+/**
+ * Sent by a sled agent on startup to OXC request further instruction
+ */
 #[derive(Serialize, Deserialize)]
 pub struct ApiServerStartupInfo {
+    /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
 }
 
+/**
+ * Sent from OXC to a sled agent to establish the runtime state of an Instance
+ */
 #[derive(Serialize, Deserialize)]
 pub struct InstanceEnsureBody {
+    /**
+     * Last runtime state of the Instance known to OXC (used if the agent has
+     * never seen this Instance before).
+     */
     pub initial_runtime: ApiInstanceRuntimeState,
+    /** requested runtime state of the Instance */
     pub target: ApiInstanceRuntimeStateRequested,
 }
 
+/**
+ * Sent from OXC to a sled agent to establish the runtime state of a Disk
+ */
 #[derive(Serialize, Deserialize)]
 pub struct DiskEnsureBody {
+    /**
+     * Last runtime state of the Disk known to OXC (used if the agent has never
+     * seen this Disk before).
+     */
     pub initial_runtime: ApiDiskRuntimeState,
+    /** requested runtime state of the Disk */
     pub target: ApiDiskStateRequested,
 }
 
