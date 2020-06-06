@@ -325,6 +325,11 @@ pub use logging::ConfigLoggingIfExists;
 pub use logging::ConfigLoggingLevel;
 pub use server::HttpServer;
 
+/*
+ * Users of the `endpoint` macro need `http::Method` available.
+ */
+pub use http::Method;
+
 extern crate dropshot_endpoint;
 pub use dropshot_endpoint::endpoint;
 pub use dropshot_endpoint::ExtractedParameter;

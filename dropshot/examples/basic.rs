@@ -13,7 +13,6 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::HttpServer;
 use dropshot::Json;
 use dropshot::RequestContext;
-use http::Method; /* TODO-cleanup should not be required for endpoint */
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::Any;
