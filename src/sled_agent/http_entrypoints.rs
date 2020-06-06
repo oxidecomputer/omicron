@@ -23,7 +23,18 @@ use uuid::Uuid;
 
 use super::SledAgent;
 
+/**
+ * Returns a description of the sled agent API
+ */
 pub fn sa_api() -> ApiDescription {
+    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+        api.register(scapi_instance_put)?;
+        api.register(scapi_instance_poke_post)?;
+        api.register(scapi_disk_put)?;
+        api.register(scapi_disk_poke_post)?;
+        Ok(())
+    }
+
     let mut api = ApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
@@ -31,14 +42,9 @@ pub fn sa_api() -> ApiDescription {
     api
 }
 
-fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
-    api.register(scapi_instance_put)?;
-    api.register(scapi_instance_poke_post)?;
-    api.register(scapi_disk_put)?;
-    api.register(scapi_disk_poke_post)?;
-    Ok(())
-}
-
+/**
+ * Given a dropshot request context `rqctx`, return our shared state object
+ */
 /* TODO-cleanup commonize with ApiContext::from_private? */
 fn rqctx_to_sa(rqctx: &Arc<RequestContext>) -> Arc<SledAgent> {
     let ctx: Arc<dyn Any + Send + Sync + 'static> =
@@ -46,6 +52,9 @@ fn rqctx_to_sa(rqctx: &Arc<RequestContext>) -> Arc<SledAgent> {
     ctx.downcast::<SledAgent>().expect("wrong type for private data")
 }
 
+/**
+ * Path parameters for Instance requests (sled agent API)
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     instance_id: Uuid,
@@ -87,6 +96,9 @@ async fn scapi_instance_poke_post(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/**
+ * Path parameters for Disk requests (sled agent API)
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct DiskPathParam {
     disk_id: Uuid,

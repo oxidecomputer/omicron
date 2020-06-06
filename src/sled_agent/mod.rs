@@ -1,5 +1,5 @@
 /*!
- * Library interface to the sled agent mechanisms
+ * Library interface to the sled agent
  */
 
 mod config;
@@ -20,15 +20,29 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
+/**
+ * Delay time in milliseconds between attempts to notify OXC about a sled agent
+ * startup
+ */
 const SLED_AGENT_NOTIFY_DELAY_MS: u64 = 5000;
 
+/**
+ * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
+ * server wired up to the sled agent
+ */
 pub struct SledAgentServer {
+    /** underlying sled agent */
     pub sled_agent: Arc<SledAgent>,
+    /** dropshot server for the API */
     pub http_server: dropshot::HttpServer,
+    /** task handle for the dropshot server */
     join_handle: JoinHandle<Result<(), hyper::error::Error>>,
 }
 
 impl SledAgentServer {
+    /**
+     * Start a SledAgent server
+     */
     pub async fn start(
         config: &ConfigSledAgent,
         log: &Logger,
@@ -102,11 +116,21 @@ impl SledAgentServer {
         })
     }
 
+    /**
+     * Wait for the given server to shut down
+     *
+     * Note that this doesn't initiate a graceful shutdown, so if you call this
+     * immediately after calling `start()`, the program will block indefinitely
+     * or until something else initiates a graceful shutdown.
+     */
     pub async fn wait_for_finish(mut self) -> Result<(), String> {
         self.http_server.wait_for_shutdown(self.join_handle).await
     }
 }
 
+/**
+ * Run an instance of the `SledAgentServer`
+ */
 pub async fn sa_run_server(config: &ConfigSledAgent) -> Result<(), String> {
     let log = config
         .log

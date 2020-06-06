@@ -11,15 +11,20 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /**
- * API-specific state that we'll associate with the server and make available to
- * API request handler functions.
+ * Shared state available to all API request handlers
  */
 pub struct ControllerServerContext {
+    /** reference to the underlying OXC */
     pub controller: Arc<OxideController>,
+    /** debug log */
     pub log: Logger,
 }
 
 impl ControllerServerContext {
+    /**
+     * Create a new context with the given rack id and log.  This creates the
+     * underlying OXC as well.
+     */
     pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ControllerServerContext> {
         Arc::new(ControllerServerContext {
             controller: Arc::new(OxideController::new_with_id(
@@ -31,7 +36,7 @@ impl ControllerServerContext {
     }
 
     /**
-     * Retrieves our API-specific context out of the generic RequestContext
+     * Retrieve our API-specific context out of the generic RequestContext
      * structure
      */
     pub fn from_request(
@@ -41,7 +46,7 @@ impl ControllerServerContext {
     }
 
     /**
-     * Retrieves our API-specific context out of the generic HttpServer
+     * Retrieve our API-specific context out of the generic HttpServer
      * structure.
      */
     pub fn from_server(
@@ -51,7 +56,7 @@ impl ControllerServerContext {
     }
 
     /**
-     * Retrieves our API-specific context from the generic one stored in
+     * Retrieve our API-specific context from the generic one stored in
      * Dropshot.
      */
     fn from_private(

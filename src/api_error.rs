@@ -11,7 +11,8 @@ use dropshot::HttpErrorResponseBody;
 use uuid::Uuid;
 
 /**
- * Represents errors that can be generated within a control plane component.
+ * An error that can be generated within a control plane component
+ *
  * These may be generated while handling a client request or as part of
  * background operation.  When generated as part of an HTTP request, an
  * `ApiError` will be converted into an HTTP error as one of the last steps in

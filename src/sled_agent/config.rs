@@ -10,7 +10,8 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 /**
- * How this `SledAgent` simulates object states and transitions.
+ * How a [`SledAgent`](`super::SledAgent`) simulates object states and
+ * transitions
  */
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SimMode {
@@ -29,13 +30,18 @@ pub enum SimMode {
 }
 
 /**
- * Configuration for a sled agent.
+ * Configuration for a sled agent
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConfigSledAgent {
+    /** unique id for the sled */
     pub id: Uuid,
+    /** how to simulate asynchronous Instance and Disk transitions */
     pub sim_mode: SimMode,
+    /** IP address and TCP port for the OXC instance to register with */
     pub controller_address: SocketAddr,
+    /** configuration for the sled agent dropshot server */
     pub dropshot: ConfigDropshot,
+    /** configuration for the sled agent debug log */
     pub log: ConfigLogging,
 }

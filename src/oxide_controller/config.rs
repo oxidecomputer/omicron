@@ -1,5 +1,5 @@
 /*!
- * Interfaces for parsing configuration files and working with API server
+ * Interfaces for parsing configuration files and working with OXC server
  * configuration
  */
 
@@ -10,13 +10,13 @@ use serde::Serialize;
 use std::path::Path;
 
 /**
- * Represents configuration for the whole API server.
+ * Configuration for an OXC server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConfigController {
-    /** Dropshot configuration for external server*/
+    /** Dropshot configuration for external API server*/
     pub dropshot_external: ConfigDropshot,
-    /** Dropshot configuration for internal server*/
+    /** Dropshot configuration for internal API server*/
     pub dropshot_internal: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
@@ -24,9 +24,10 @@ pub struct ConfigController {
 
 impl ConfigController {
     /**
-     * Load a `ConfigController` from the given TOML file.  The format is
-     * described in the README.  This config object can then be used to create a
-     * new `ApiServer`.
+     * Load a `ConfigController` from the given TOML file
+     *
+     * This config object can then be used to create a new `ApiServer`.  The
+     * format is described in the README.
      */
     pub fn from_file(path: &Path) -> Result<ConfigController, String> {
         let file_read = std::fs::read_to_string(path);

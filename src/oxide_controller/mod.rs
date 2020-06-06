@@ -1,5 +1,5 @@
 /*!
- * Library interface to the Oxide Controller mechanisms
+ * Library interface to the Oxide Controller (OXC)
  */
 
 mod config;
@@ -31,16 +31,28 @@ pub fn controller_run_openapi_external() {
     controller_external_api().print_openapi();
 }
 
+/**
+ * Packages up an [`OxideController`], running both external and internal HTTP
+ * API servers wired up to the controller
+ */
 pub struct OxideControllerServer {
+    /** shared state used by API request handlers */
     pub apictx: Arc<ControllerServerContext>,
+    /** dropshot server for external API */
     pub http_server_external: dropshot::HttpServer,
+    /** dropshot server for internal API */
     pub http_server_internal: dropshot::HttpServer,
 
+    /** task handle for the external API server */
     join_handle_external: JoinHandle<Result<(), hyper::error::Error>>,
+    /** task handle for the internal API server */
     join_handle_internal: JoinHandle<Result<(), hyper::error::Error>>,
 }
 
 impl OxideControllerServer {
+    /**
+     * Start an OxideController server.
+     */
     pub async fn start(
         config: &ConfigController,
         rack_id: &Uuid,
@@ -81,6 +93,13 @@ impl OxideControllerServer {
         })
     }
 
+    /**
+     * Wait for the given server to shut down
+     *
+     * Note that this doesn't initiate a graceful shutdown, so if you call this
+     * immediately after calling `start()`, the program will block indefinitely
+     * or until something else initiates a graceful shutdown.
+     */
     pub async fn wait_for_finish(mut self) -> Result<(), String> {
         let result_external = self
             .http_server_external
@@ -111,7 +130,7 @@ impl OxideControllerServer {
 }
 
 /**
- * Run an instance of the API server.
+ * Run an instance of the `OxideControllerServer`.
  */
 pub async fn controller_run_server(
     config: &ConfigController,

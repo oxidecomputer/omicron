@@ -1,5 +1,6 @@
 /*!
- * HTTP-agnostic interface to an Oxide system
+ * Heart of OXC, the Oxide Controller, which operates much of the control plane
+ * in an Oxide fleet
  */
 
 use crate::api_error::ApiError;
@@ -16,7 +17,6 @@ use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
-use crate::api_model::ApiObject;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
@@ -27,7 +27,6 @@ use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
-use crate::api_model::ObjectStream;
 use crate::api_model::PaginationParams;
 use crate::api_model::UpdateResult;
 
@@ -46,24 +45,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /**
- * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
- * return a vector of the objects' views.  Any failures are ignored.
- * TODO-hardening: Consider how to better deal with these failures.  We should
- * probably at least log something.
- */
-pub async fn to_view_list<T: ApiObject>(
-    object_stream: ObjectStream<T>,
-) -> Vec<T::View> {
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().to_view())
-        .collect::<Vec<T::View>>()
-        .await
-}
-
-/**
- * This trait is used to expose interfaces that we only want made available to
- * the test suite.
+ * Exposes additional [`OxideController`] interfaces for use by the test suite
  */
 #[async_trait]
 pub trait OxideControllerTestInterfaces {
@@ -87,11 +69,7 @@ pub trait OxideControllerTestInterfaces {
 }
 
 /**
- * Represents the state of the Oxide system that we're managing.
- *
- * Right now, this is mostly a wrapper around the data store because this server
- * doesn't do much beyond CRUD operations.  However, higher-level functionality
- * could go here, including caching of objects.
+ * (OXC) Manages an Oxide fleet -- the heart of the control plane
  */
 pub struct OxideController {
     /** uuid for this rack (TODO should also be in persistent storage) */
@@ -126,6 +104,12 @@ pub struct OxideController {
  * TODO audit logging ought to be part of this structure and its functions
  */
 impl OxideController {
+    /**
+     * Create a new OXC instance for the given rack id `id`
+     *
+     * The state of the system is maintained in memory, so we always start from
+     * a clean slate.
+     */
     pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
         OxideController {
             id: id.clone(),

@@ -4,12 +4,11 @@
 = TODO
 
 Currently:
-* working through crate documentation, file-by-file
-** currently 
-** consistency of one-line summaries
-** documenting everything
 * need higher-level docs in src/lib.rs
 * document _that_ we use rustdoc --document-private-items for internal docs
+* change `endpoint` macro to add doc comment?
+** could also eliminate the "method" dependency
+* change all `log` fields to `debug_log`
 
 API endpoints:
 

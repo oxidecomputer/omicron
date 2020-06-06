@@ -21,7 +21,17 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/**
+ * Returns a description of the internal OXC API
+ */
 pub fn controller_internal_api() -> ApiDescription {
+    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+        api.register(cpapi_servers_post)?;
+        api.register(cpapi_instances_put)?;
+        api.register(cpapi_disks_put)?;
+        Ok(())
+    }
+
     let mut api = ApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
@@ -29,13 +39,9 @@ pub fn controller_internal_api() -> ApiDescription {
     api
 }
 
-fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
-    api.register(cpapi_servers_post)?;
-    api.register(cpapi_instances_put)?;
-    api.register(cpapi_disks_put)?;
-    Ok(())
-}
-
+/**
+ * Path parameters for Server requests (internal API)
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct ServerPathParam {
     server_id: Uuid,
@@ -66,6 +72,9 @@ async fn cpapi_servers_post(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/**
+ * Path parameters for Instance requests (internal API)
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     instance_id: Uuid,
@@ -91,6 +100,9 @@ async fn cpapi_instances_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/**
+ * Path parameters for Disk requests (internal API)
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct DiskPathParam {
     disk_id: Uuid,

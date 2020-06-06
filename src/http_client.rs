@@ -1,8 +1,5 @@
 /*!
  * HTTP client used for internal control plane interfaces
- *
- * This is quite limited and intended as a temporary abstraction until we have
- * proper OpenAPI-generated clients for our own internal interfaces.
  */
 
 use crate::api_error::ApiError;
@@ -19,14 +16,29 @@ use slog::Logger;
 use std::fmt::Display;
 use std::net::SocketAddr;
 
+/**
+ * HTTP client used for internal control plane interfaces
+ *
+ * This is quite limited and intended as a temporary abstraction until we have
+ * proper OpenAPI-generated clients for our own internal interfaces.
+ */
 pub struct HttpClient {
+    /** label for this client, used for error messages */
     label: String,
+    /** remote address of the endpoint to connect to */
+    /*
+     * TODO-robustness This will need to be replaced with a pool of connections
+     * based on some service discovery mechanism (e.g., DNS).
+     */
     server_addr: SocketAddr,
+    /** debug log */
     log: Logger,
+    /** hyper Client used to actually make requests */
     http_client: Client<HttpConnector>,
 }
 
 impl HttpClient {
+    /** Create a new `HttpClient` connected to `server_addr`. */
     pub fn new<S: AsRef<str>>(
         label: S,
         server_addr: SocketAddr,
@@ -41,6 +53,20 @@ impl HttpClient {
         }
     }
 
+    /**
+     * Issue a request to the server having the given HTTP `method`, URI `path`,
+     * and `body` contents
+     *
+     * A 200-level response will be returned as a successful
+     * `Ok(Response<Body>)`.  Any other result (including failure to make the
+     * request, a 400-level response, or a 500-level response) will result in an
+     * `Err(ApiError)` describing the error.  When possible, if an error
+     * contained in the response corresponds to an `ApiError` that we can
+     * recognize (i.e., because the remote side is another control plane service
+     * that also uses `ApiError` and it serialized the error with enough
+     * information for us to recognize it), the server-side error will be
+     * reconstituted as the returned error.
+     */
     pub async fn request(
         &self,
         method: Method,
@@ -80,6 +106,10 @@ impl HttpClient {
         Err(ApiError::from_response(error_message_base, error_body))
     }
 
+    /**
+     * Returns an appropriate prefix for an error message associated with a
+     * request using method `method` to URI path `path`
+     */
     /*
      * TODO-cleanup This interface kind of sucks.  There's too much redundancy
      * in the caller.
@@ -91,6 +121,10 @@ impl HttpClient {
         )
     }
 
+    /**
+     * Reads the body of a response as a JSON object to be deserialized into
+     * type `T`
+     */
     /*
      * TODO-cleanup TODO-robustness commonize with dropshot read_json() and make
      * this more robust to operational errors
@@ -115,6 +149,11 @@ impl HttpClient {
     }
 }
 
+/**
+ * Produce a useful human-readable error message starting with
+ * `error_message_base` for a request that failed with error `error` while
+ * performing action `action`
+ */
 fn convert_error<E: Display>(
     error_message_base: &str,
     action: &str,

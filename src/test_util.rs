@@ -1,5 +1,5 @@
 /*!
- * Shared automated testing facilities
+ * Shared automated testing facilities used by unit tests
  */
 
 /*
@@ -12,9 +12,12 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 
-/*
- * This function is currently only used by unit tests.  We want the dead code
- * warning if it's removed from unit tests, but not during a normal build.
+/**
+ * Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
+ * `test_name`
+ *
+ * This function is currently only used by unit tests.  (We want the dead code
+ * warning if it's removed from unit tests, but not during a normal build.)
  */
 pub async fn test_setup_log(test_name: &str) -> LogContext {
     let log_config = ConfigLogging::File {

@@ -26,10 +26,9 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /**
- * `SledAgent` is a handle for the software service running on a compute server
- * that manages the control plane on that server.  The current implementation
- * simulates a server directly in this program.
+ * Simulates management of the control plane on a sled
  *
+ * The current implementation simulates a server directly in this program.
  * **It's important to be careful about the interface exposed by this struct.**
  * The intent is for it to eventually be implemented using requests to a remote
  * server.  The tighter the coupling that exists now, the harder this will be to
@@ -118,11 +117,12 @@ impl SledAgent {
 }
 
 /**
- * `Simulatable` defines an interface for a type of Oxide Rack API object that
- * can be simulated here in the sled agent.  We only simulate these objects from
- * the perspective of an API consumer, which means for example accepting a
- * request to boot it, reporting the current state as "starting", and then some
- * time later reporting that the state is "running".
+ * Describes Oxide API objects that can be simulated here in the sled agent
+ *
+ * We only simulate these objects from the perspective of an API consumer, which
+ * means for example accepting a request to boot it, reporting the current state
+ * as "starting", and then some time later reporting that the state is
+ * "running".
  *
  * This interface defines only associated functions, not constructors nor what
  * would traditionally be called "methods".  On the one hand, this approach is
@@ -165,7 +165,8 @@ impl SledAgent {
  *
  * When an asynchronous state change completes, we notify the control plane via
  * the `notify()` function.
- *
+ */
+/*
  * TODO-cleanup Among the awkward bits here is that the an object's state is
  * essentially represented by a tuple `(CurrentState, Option<RequestedState>)`,
  * but that's not represented anywhere.  Would it help to have that be a
@@ -253,7 +254,10 @@ trait Simulatable: fmt::Debug {
 }
 
 /**
- * SimObject represents a simulated object of type `S: Simulatable`.
+ * Simulates an object of type `S: Simulatable`.
+ *
+ * Much of the simulation logic is commonized here in `SimObject` rather than
+ * separately in the specific `Simulatable` types.
  */
 #[derive(Debug)]
 struct SimObject<S: Simulatable> {
@@ -268,23 +272,25 @@ struct SimObject<S: Simulatable> {
 }
 
 /**
- * Buffer size for channel used to communicate with each SimInstance's
- * background task.  Messages sent on this channel trigger the task to simulate
- * an Instance state transition by sleeping for some interval and then updating
- * the Instance state.  When the background task updates the Instance state
- * after sleeping, it always looks at the current state to decide what to do.
- * As a result, we never need to queue up more than one transition.  In turn,
- * that means we don't need (or want) a channel buffer larger than 1.  If we
- * were to queue up multiple messages in the buffer, the net effect would be
- * exactly the same as if just one message were queued.  (Because of what we
- * said above, as part of processing that message, the receiver will wind up
- * handling all state transitions requested up to the point where the first
- * message is read.  If another transition is requested after that point,
- * another message will be enqueued and the receiver will process that
- * transition then.  There's no need to queue more than one message.)  Even
- * stronger: we don't want a larger buffer because that would only cause extra
- * laps through the sleep cycle, which just wastes resources and increases the
- * latency for processing the next real transition request.
+ * Buffer size for channel used to communicate with each `SimObject`'s
+ * background task
+ *
+ * Messages sent on this channel trigger the task to simulate an asynchronous
+ * state transition by sleeping for some interval and then updating the object
+ * state.  When the background task updates the object state after sleeping, it
+ * always looks at the current state to decide what to do.  As a result, we
+ * never need to queue up more than one transition.  In turn, that means we
+ * don't need (or want) a channel buffer larger than 1.  If we were to queue up
+ * multiple messages in the buffer, the net effect would be exactly the same as
+ * if just one message were queued.  (Because of what we said above, as part of
+ * processing that message, the receiver will wind up handling all state
+ * transitions requested up to the point where the first message is read.  If
+ * another transition is requested after that point, another message will be
+ * enqueued and the receiver will process that transition then.  There's no need
+ * to queue more than one message.)  Even stronger: we don't want a larger
+ * buffer because that would only cause extra laps through the sleep cycle,
+ * which just wastes resources and increases the latency for processing the next
+ * real transition request.
  */
 const SIM_CHANNEL_BUFFER_SIZE: usize = 0;
 
@@ -438,9 +444,10 @@ impl<S: Simulatable> SimObject<S> {
 }
 
 /**
- * A `SimCollection` is a collection of `Simulatable` objects, each represented
- * by a `SimObject`.  This struct provides basic facilities for simulating
- * SledAgent APIs for instances and disks.
+ * A collection of `Simulatable` objects, each represented by a `SimObject`
+ *
+ * This struct provides basic facilities for simulating SledAgent APIs for
+ * instances and disks.
  */
 struct SimCollection<S: Simulatable> {
     /** handle to the controller API, used to notify about async transitions */
@@ -595,8 +602,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 }
 
 /**
- * Simulates an Oxide Rack Instance (virtual machine), as created by the public
- * API.  See `Simulatable` for how this works.
+ * Simulated Instance (virtual machine), as created by the external Oxide API
  */
 #[derive(Debug)]
 struct SimInstance {}
@@ -819,8 +825,9 @@ impl Simulatable for SimInstance {
 }
 
 /**
- * Simulates an Oxide Rack Disk (network block device), as created by the public
- * API.  See `Simulatable` for how this works.
+ * Simulated Disk (network block device), as created by the external Oxide API
+ *
+ * See `Simulatable` for how this works.
  */
 #[derive(Debug)]
 struct SimDisk {}

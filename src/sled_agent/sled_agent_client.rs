@@ -21,13 +21,24 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/** Client for a sled agent */
 pub struct SledAgentClient {
+    /**
+     * sled agent's unique id (used by callers to track `SledAgentClient`
+     * objects)
+     */
     pub id: Uuid,
+    /** sled agent server address */
     pub service_address: SocketAddr,
+    /** underlying HTTP client */
     client: HttpClient,
 }
 
 impl SledAgentClient {
+    /**
+     * Create a new sled agent client to make requests to the sled agent running
+     * at `server_addr`.
+     */
     pub fn new(
         id: &Uuid,
         server_addr: SocketAddr,
@@ -106,7 +117,7 @@ impl SledAgentClient {
 }
 
 /**
- * Trait used to expose interfaces for use only by the test suite.
+ * Exposes additional [`SledAgentClient`] interfaces for use by the test suite
  */
 #[async_trait]
 pub trait SledAgentTestInterfaces {

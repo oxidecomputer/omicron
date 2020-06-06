@@ -2,9 +2,9 @@
  * Handler functions (entrypoints) for external HTTP APIs
  */
 
-use super::oxide_controller::to_view_list;
 use super::ControllerServerContext;
 
+use crate::api_model::to_view_list;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskView;
@@ -38,45 +38,48 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/**
+ * Returns a description of the external OXC API
+ */
 pub fn controller_external_api() -> ApiDescription {
+    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+        api.register(api_projects_get)?;
+        api.register(api_projects_post)?;
+        api.register(api_projects_get_project)?;
+        api.register(api_projects_delete_project)?;
+        api.register(api_projects_put_project)?;
+
+        api.register(api_project_disks_get)?;
+        api.register(api_project_disks_post)?;
+        api.register(api_project_disks_get_disk)?;
+        api.register(api_project_disks_delete_disk)?;
+
+        api.register(api_project_instances_get)?;
+        api.register(api_project_instances_post)?;
+        api.register(api_project_instances_get_instance)?;
+        api.register(api_project_instances_delete_instance)?;
+        api.register(api_project_instances_instance_reboot)?;
+        api.register(api_project_instances_instance_start)?;
+        api.register(api_project_instances_instance_stop)?;
+
+        api.register(api_instance_disks_get)?;
+        api.register(api_instance_disks_get_disk)?;
+        api.register(api_instance_disks_put_disk)?;
+        api.register(api_instance_disks_delete_disk)?;
+
+        api.register(api_hardware_racks_get)?;
+        api.register(api_hardware_racks_get_rack)?;
+        api.register(api_hardware_servers_get)?;
+        api.register(api_hardware_servers_get_server)?;
+
+        Ok(())
+    }
+
     let mut api = ApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
     api
-}
-
-fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
-    api.register(api_projects_get)?;
-    api.register(api_projects_post)?;
-    api.register(api_projects_get_project)?;
-    api.register(api_projects_delete_project)?;
-    api.register(api_projects_put_project)?;
-
-    api.register(api_project_disks_get)?;
-    api.register(api_project_disks_post)?;
-    api.register(api_project_disks_get_disk)?;
-    api.register(api_project_disks_delete_disk)?;
-
-    api.register(api_project_instances_get)?;
-    api.register(api_project_instances_post)?;
-    api.register(api_project_instances_get_instance)?;
-    api.register(api_project_instances_delete_instance)?;
-    api.register(api_project_instances_instance_reboot)?;
-    api.register(api_project_instances_instance_start)?;
-    api.register(api_project_instances_instance_stop)?;
-
-    api.register(api_instance_disks_get)?;
-    api.register(api_instance_disks_get_disk)?;
-    api.register(api_instance_disks_put_disk)?;
-    api.register(api_instance_disks_delete_disk)?;
-
-    api.register(api_hardware_racks_get)?;
-    api.register(api_hardware_racks_get_rack)?;
-    api.register(api_hardware_servers_get)?;
-    api.register(api_hardware_servers_get_server)?;
-
-    Ok(())
 }
 
 /*
@@ -148,6 +151,9 @@ async fn api_projects_post(
     Ok(HttpResponseCreated(project.to_view()))
 }
 
+/**
+ * Path parameters for Project requests
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct ProjectPathParam {
     /// The project's unique ID.
@@ -272,6 +278,9 @@ async fn api_project_disks_post(
     Ok(HttpResponseCreated(disk.to_view()))
 }
 
+/**
+ * Path parameters for Disk requests
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct DiskPathParam {
     project_name: ApiName,
@@ -377,6 +386,9 @@ async fn api_project_instances_post(
     Ok(HttpResponseCreated(instance.to_view()))
 }
 
+/**
+ * Path parameters for Instance requests
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct InstancePathParam {
     project_name: ApiName,
@@ -514,6 +526,9 @@ async fn api_instance_disks_get(
     Ok(HttpResponseOkObjectList(view_list))
 }
 
+/**
+ * Path parameters for requests that access Disks attached to an Instance
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct InstanceDiskPathParam {
     project_name: ApiName,
@@ -613,6 +628,9 @@ async fn api_hardware_racks_get(
     Ok(HttpResponseOkObjectList(view_list))
 }
 
+/**
+ * Path parameters for Rack requests
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct RackPathParam {
     /** The rack's unique ID. */
@@ -660,6 +678,9 @@ async fn api_hardware_servers_get(
     Ok(HttpResponseOkObjectList(view_list))
 }
 
+/**
+ * Path parameters for Server requests
+ */
 #[derive(Deserialize, ExtractedParameter)]
 struct ServerPathParam {
     /** The server's unique ID. */
