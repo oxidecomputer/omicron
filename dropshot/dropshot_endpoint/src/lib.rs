@@ -72,9 +72,18 @@ fn do_endpoint(
     let ast: ItemFn = syn::parse2(item)?;
 
     let name = &ast.sig.ident;
+    let name_str = name.to_string();
     let method_ident = format_ident!("{}", method);
 
-    let description = extract_doc_from_attrs(&ast.attrs).map(|s| {
+    let description_text_provided = extract_doc_from_attrs(&ast.attrs);
+    let description_text_annotated = format!(
+        "API Endpoint: {}",
+        description_text_provided.as_ref().unwrap_or(&name_str).as_str().trim()
+    );
+    let description_doc_comment = quote! {
+        #[doc = #description_text_annotated]
+    };
+    let description = description_text_provided.map(|s| {
         quote! {
             endpoint.description = Some(#s.to_string());
         }
@@ -87,9 +96,11 @@ fn do_endpoint(
     let stream = quote! {
         // ... a struct type called `#name` that has no members
         #[allow(non_camel_case_types, missing_docs)]
+        #description_doc_comment
         pub struct #name {}
         // ... a constant of type `#name` whose identifier is also #name
         #[allow(non_upper_case_globals, missing_docs)]
+        #description_doc_comment
         const #name: #name = #name {};
 
         // ... an impl of `From<#name>` for ApiEndpoint that allows the constant
@@ -101,7 +112,7 @@ fn do_endpoint(
                 #[allow(unused_mut)]
                 let mut endpoint = #dropshot::ApiEndpoint::new(
                     #name,
-                    Method::#method_ident,
+                    #dropshot::Method::#method_ident,
                     #path,
                 );
                 #description
@@ -294,8 +305,10 @@ mod tests {
         );
         let expected = quote! {
             #[allow(non_camel_case_types, missing_docs)]
+            #[doc = "API Endpoint: handler_xyz"]
             pub struct handler_xyz {}
             #[allow(non_upper_case_globals, missing_docs)]
+            #[doc = "API Endpoint: handler_xyz"]
             const handler_xyz: handler_xyz = handler_xyz {};
             impl From<handler_xyz> for dropshot::ApiEndpoint {
                 fn from(_: handler_xyz) -> Self {
@@ -304,9 +317,51 @@ mod tests {
                     let mut endpoint =
                         dropshot::ApiEndpoint::new(
                             handler_xyz,
-                            Method::GET,
+                            dropshot::Method::GET,
                             "/a/b/c",
                         );
+                    endpoint
+                }
+            }
+        };
+
+        assert_eq!(expected.to_string(), ret.unwrap().to_string());
+    }
+
+    #[test]
+    fn test_endpoint1_with_doc() {
+        let ret = do_endpoint(
+            quote! {
+                method = GET,
+                path = "/a/b/c"
+            }
+            .into(),
+            quote! {
+                /** handle "xyz" requests */
+                fn handler_xyz() {}
+            }
+            .into(),
+        );
+        let expected = quote! {
+            #[allow(non_camel_case_types, missing_docs)]
+            #[doc = "API Endpoint: handle \"xyz\" requests"]
+            pub struct handler_xyz {}
+            #[allow(non_upper_case_globals, missing_docs)]
+            #[doc = "API Endpoint: handle \"xyz\" requests"]
+            const handler_xyz: handler_xyz = handler_xyz {};
+            impl From<handler_xyz> for dropshot::ApiEndpoint {
+                fn from(_: handler_xyz) -> Self {
+                    #[doc = r#" handle "xyz" requests "#]
+                    fn handler_xyz() {}
+                    #[allow(unused_mut)]
+                    let mut endpoint =
+                        dropshot::ApiEndpoint::new(
+                            handler_xyz,
+                            dropshot::Method::GET,
+                            "/a/b/c",
+                        );
+                    endpoint.description = Some(
+                        "handle \"xyz\" requests ".to_string());
                     endpoint
                 }
             }

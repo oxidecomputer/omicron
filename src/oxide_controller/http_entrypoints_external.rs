@@ -33,7 +33,6 @@ use dropshot::Json;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
-use http::Method;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
