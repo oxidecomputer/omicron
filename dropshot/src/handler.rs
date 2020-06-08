@@ -586,7 +586,9 @@ where
      * TODO-correctness: are query strings defined to be urlencoded in this way?
      */
     match serde_urlencoded::from_str(raw_query_string) {
-        Ok(q) => Ok(Query { inner: q }),
+        Ok(q) => Ok(Query {
+            inner: q,
+        }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse query string: {}", e),
@@ -656,7 +658,9 @@ where
         rqctx: Arc<RequestContext>,
     ) -> Result<Path<PathType>, HttpError> {
         let params: PathType = http_extract_path_params(&rqctx.path_variables)?;
-        Ok(Path { inner: params })
+        Ok(Path {
+            inner: params,
+        })
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
@@ -707,7 +711,9 @@ where
     let value: Result<JsonType, serde_json::Error> =
         serde_json::from_slice(&body_bytes);
     match value {
-        Ok(j) => Ok(Json { inner: j }),
+        Ok(j) => Ok(Json {
+            inner: j,
+        }),
         Err(e) => Err(HttpError::for_bad_request(
             None,
             format!("unable to parse body: {}", e),
@@ -766,7 +772,9 @@ pub struct HttpResponseWrap {
 
 impl HttpResponseWrap {
     fn new(result: HttpHandlerResult) -> HttpResponseWrap {
-        HttpResponseWrap { wrapped: result }
+        HttpResponseWrap {
+            wrapped: result,
+        }
     }
 }
 
