@@ -22,7 +22,7 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
-use crate::api_model::ApiServer;
+use crate::api_model::ApiSled;
 use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
@@ -54,7 +54,7 @@ pub trait OxideControllerTestInterfaces {
      * want to split this up into instance_lookup_by_id() and instance_sled(),
      * but after all it's a test suite special to begin with.
      */
-    async fn instance_server_by_id(
+    async fn instance_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, ApiError>;
@@ -62,7 +62,7 @@ pub trait OxideControllerTestInterfaces {
     /**
      * Returns the SledAgentClient for a Disk from its id.
      */
-    async fn disk_server_by_id(
+    async fn disk_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, ApiError>;
@@ -85,12 +85,12 @@ pub struct OxideController {
     datastore: ControlDataStore,
 
     /**
-     * List of controllers in this server.
+     * List of sled agents known by this controller.
      * TODO This ought to have some representation in the data store as well so
-     * that we don't simply forget about servers that aren't currently up.
-     * We'll need to think about the interface between this program and the
-     * servers and how we discover them, both when they initially show up and
-     * when we come up.
+     * that we don't simply forget about sleds that aren't currently up.  We'll
+     * need to think about the interface between this program and the sleds and
+     * how we discover them, both when they initially show up and when we come
+     * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 }
@@ -129,7 +129,7 @@ impl OxideController {
     pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
         let mut scs = self.sled_agents.lock().await;
         info!(self.log, "registered sled agent";
-            "server_uuid" => sa.id.to_string());
+            "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id.clone(), sa);
     }
 
@@ -288,7 +288,7 @@ impl OxideController {
          * might be able to detect this when we go update the disk's state to
          * Attaching (because a SQL UPDATE will update 0 rows), but we'd sort of
          * already be in a bad state because the destroyed disk will be
-         * attaching (and eventually attached) on some server, and if the wrong
+         * attaching (and eventually attached) on some sled, and if the wrong
          * combination of components crash at this point, we could wind up not
          * fixing that state.
          *
@@ -312,15 +312,15 @@ impl OxideController {
      * Instances
      */
 
-    async fn server_allocate_instance<'se, 'params>(
+    async fn sled_allocate_instance<'se, 'params>(
         &'se self,
-        servers: &'se BTreeMap<Uuid, Arc<SledAgentClient>>,
+        sleds: &'se BTreeMap<Uuid, Arc<SledAgentClient>>,
         _project: Arc<ApiProject>,
         _params: &'params ApiInstanceCreateParams,
     ) -> Result<&'se Arc<SledAgentClient>, ApiError> {
         /* TODO replace this with a real allocation policy. */
-        servers.values().nth(0).ok_or_else(|| ApiError::ServiceUnavailable {
-            message: String::from("no servers available for new Instance"),
+        sleds.values().nth(0).ok_or_else(|| ApiError::ServiceUnavailable {
+            message: String::from("no sleds available for new Instance"),
         })
     }
 
@@ -340,13 +340,12 @@ impl OxideController {
         let project = self.project_lookup(project_name).await?;
 
         /*
-         * Allocate a server and retrieve our handle to its SA.
+         * Allocate a sled and retrieve our handle to its SA.
          */
         let sa = {
-            let servers = self.sled_agents.lock().await;
-            let arc = self
-                .server_allocate_instance(&servers, project, params)
-                .await?;
+            let sleds = self.sled_agents.lock().await;
+            let arc =
+                self.sled_allocate_instance(&sleds, project, params).await?;
             Arc::clone(arc)
         };
 
@@ -388,7 +387,7 @@ impl OxideController {
         let runtime = ApiInstanceRuntimeState {
             run_state: ApiInstanceState::Creating,
             reboot_in_progress: false,
-            server_uuid: sa.id,
+            sled_uuid: sa.id,
             gen: 1,
             time_updated: Utc::now(),
         };
@@ -509,10 +508,10 @@ impl OxideController {
         &self,
         instance: &Arc<ApiInstance>,
     ) -> Result<Arc<SledAgentClient>, ApiError> {
-        let controllers = self.sled_agents.lock().await;
-        let scid = &instance.runtime.server_uuid;
-        Ok(Arc::clone(controllers.get(scid).ok_or_else(|| {
-            let message = format!("no sled agent for server_uuid \"{}\"", scid);
+        let sled_agents = self.sled_agents.lock().await;
+        let said = &instance.runtime.sled_uuid;
+        Ok(Arc::clone(sled_agents.get(said).ok_or_else(|| {
+            let message = format!("no sled agent for sled_uuid \"{}\"", said);
             ApiError::ServiceUnavailable {
                 message: message,
             }
@@ -948,41 +947,38 @@ impl OxideController {
     }
 
     /*
-     * Servers.
-     * TODO-completeness: Eventually, we'll want servers to be stored in the
+     * Sleds.
+     * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiServer for each SledAgentClient that
+     * them, etc.  For now, we expose an ApiSled for each SledAgentClient that
      * we've got.
      */
-    pub async fn servers_list(
+    pub async fn sleds_list(
         &self,
         pagparams: &PaginationParams<Uuid>,
-    ) -> ListResult<ApiServer> {
-        let controllers = self.sled_agents.lock().await;
-        let servers = collection_page(&controllers, pagparams)?
+    ) -> ListResult<ApiSled> {
+        let sled_agents = self.sled_agents.lock().await;
+        let sleds = collection_page(&sled_agents, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sa| {
                 let sa = sa.unwrap();
-                Ok(Arc::new(ApiServer {
+                Ok(Arc::new(ApiSled {
                     id: sa.id,
                     service_address: sa.service_address,
                 }))
             })
-            .collect::<Vec<Result<Arc<ApiServer>, ApiError>>>()
+            .collect::<Vec<Result<Arc<ApiSled>, ApiError>>>()
             .await;
-        Ok(futures::stream::iter(servers).boxed())
+        Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn server_lookup(
-        &self,
-        server_id: &Uuid,
-    ) -> LookupResult<ApiServer> {
+    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
         let controllers = self.sled_agents.lock().await;
-        let sa = controllers.get(server_id).ok_or_else(|| {
-            ApiError::not_found_by_id(ApiResourceType::Server, server_id)
+        let sa = controllers.get(sled_id).ok_or_else(|| {
+            ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)
         })?;
 
-        Ok(Arc::new(ApiServer {
+        Ok(Arc::new(ApiSled {
             id: sa.id,
             service_address: sa.service_address,
         }))
@@ -1112,7 +1108,7 @@ impl OxideController {
 
 #[async_trait]
 impl OxideControllerTestInterfaces for OxideController {
-    async fn instance_server_by_id(
+    async fn instance_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, ApiError> {
@@ -1120,7 +1116,7 @@ impl OxideControllerTestInterfaces for OxideController {
         self.instance_sled(&instance).await
     }
 
-    async fn disk_server_by_id(
+    async fn disk_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, ApiError> {

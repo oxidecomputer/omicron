@@ -14,9 +14,9 @@ use std::path::Path;
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConfigController {
-    /** Dropshot configuration for external API server*/
+    /** Dropshot configuration for external API server */
     pub dropshot_external: ConfigDropshot,
-    /** Dropshot configuration for internal API server*/
+    /** Dropshot configuration for internal API server */
     pub dropshot_internal: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
@@ -26,8 +26,8 @@ impl ConfigController {
     /**
      * Load a `ConfigController` from the given TOML file
      *
-     * This config object can then be used to create a new `ApiServer`.  The
-     * format is described in the README.
+     * This config object can then be used to create a new `OxideController`.
+     * The format is described in the README.
      */
     pub fn from_file(path: &Path) -> Result<ConfigController, String> {
         let file_read = std::fs::read_to_string(path);

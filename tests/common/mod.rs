@@ -77,7 +77,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let sa = start_sled_agent(
         logctx.log.new(o!(
             "component" => "SledAgentServer",
-            "server" => sa_id.to_string(),
+            "sled_id" => sa_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
         sa_id,

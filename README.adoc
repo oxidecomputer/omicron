@@ -52,7 +52,7 @@ The code here is still rough, but the following are implemented:
 ** instances: CRUD + boot/halt/reboot
 ** disks: CRD + attach/detach
 ** racks: list + get
-** servers: list + get
+** sleds: list + get
 * architecture:
 ** oxide controller (OXC): manages a fleet of Oxide racks
 ** sled agent: manages a single compute sled in an Oxide fleet
@@ -89,7 +89,7 @@ listening: http://127.0.0.1:12220
 ----
 
 `sled_agent` only takes configuration on the command line.  Run it with a uuid
-identifying itself (this would be a uuid for the server it's managing), an
+identifying itself (this would be a uuid for the sled it's managing), an
 IP:port for itself, and the IP:port of `oxide_controller`'s _internal_
 interface.  Using default config, this might look like this:
 
@@ -148,8 +148,8 @@ HARDWARE
     racks_list
     rack_get     RACK_ID
 
-    servers_list
-    server_get   SERVER_ID
+    sleds_list
+    sled_get     SERVER_ID
 
 
 $ ./tools/oxapi_demo project_create_demo myproject

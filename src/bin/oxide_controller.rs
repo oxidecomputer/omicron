@@ -11,7 +11,6 @@
  *   shutdown timeout), server backlog, number of workers, max connections per
  *   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
  *   timeout)
- * - Move even more of the server setup into api_server.rs
  */
 
 use clap::{App, Arg};

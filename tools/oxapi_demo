@@ -42,8 +42,8 @@ HARDWARE
     racks_list
     rack_get     RACK_ID
 
-    servers_list
-    server_get   SERVER_ID
+    sleds_list
+    sled_get     SLED_ID
 EOF
 )"
 
@@ -250,16 +250,16 @@ function cmd_rack_get
 	do_curl "/hardware/racks/$1"
 }
 
-function cmd_servers_list
+function cmd_sleds_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /hardware/servers
+	do_curl /hardware/sleds
 }
 
-function cmd_server_get
+function cmd_sled_get
 {
-	[[ $# != 1 ]] && usage "expected SERVER_ID"
-	do_curl "/hardware/servers/$1"
+	[[ $# != 1 ]] && usage "expected SLED_ID"
+	do_curl "/hardware/sleds/$1"
 }
 
 main "$@"

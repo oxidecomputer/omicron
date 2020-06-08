@@ -12,7 +12,7 @@ pub use config::SimMode;
 pub use sled_agent_client::SledAgentClient;
 pub use sled_agent_client::SledAgentTestInterfaces;
 
-use crate::api_model::ApiServerStartupInfo;
+use crate::api_model::ApiSledAgentStartupInfo;
 use crate::ControllerClient;
 use sled_agent::SledAgent;
 use slog::Logger;
@@ -90,9 +90,12 @@ impl SledAgentServer {
         loop {
             debug!(log, "contacting server controller");
             let result = controller_client
-                .notify_server_online(config.id.clone(), ApiServerStartupInfo {
-                    sa_address: http_server.local_addr(),
-                })
+                .notify_sled_agent_online(
+                    config.id.clone(),
+                    ApiSledAgentStartupInfo {
+                        sa_address: http_server.local_addr(),
+                    },
+                )
                 .await;
             match result {
                 Ok(()) => break,

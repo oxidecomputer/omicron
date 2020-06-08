@@ -540,6 +540,6 @@ fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {
  * Simulate completion of an ongoing disk state transition.
  */
 async fn disk_simulate(controller: &Arc<OxideController>, id: &Uuid) {
-    let sa = controller.disk_server_by_id(id).await.unwrap();
+    let sa = controller.disk_sled_by_id(id).await.unwrap();
     sa.disk_finish_transition(id.clone()).await;
 }

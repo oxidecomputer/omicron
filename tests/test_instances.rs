@@ -470,6 +470,6 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
  * going on.
  */
 async fn instance_simulate(controller: &Arc<OxideController>, id: &Uuid) {
-    let sa = controller.instance_server_by_id(id).await.unwrap();
+    let sa = controller.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(id.clone()).await;
 }

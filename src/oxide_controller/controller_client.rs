@@ -9,7 +9,7 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiServerStartupInfo;
+use crate::api_model::ApiSledAgentStartupInfo;
 use crate::http_client::HttpClient;
 use http::Method;
 use hyper::Body;
@@ -37,12 +37,12 @@ impl ControllerClient {
     /**
      * Publish information about a sled agent's startup.
      */
-    pub async fn notify_server_online(
+    pub async fn notify_sled_agent_online(
         &self,
         id: Uuid,
-        info: ApiServerStartupInfo,
+        info: ApiSledAgentStartupInfo,
     ) -> Result<(), ApiError> {
-        let path = format!("/servers/{}", id);
+        let path = format!("/sled_agents/{}", id);
         let body = Body::from(serde_json::to_string(&info).unwrap());
         self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
     }

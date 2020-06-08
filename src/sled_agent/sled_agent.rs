@@ -727,7 +727,7 @@ impl Simulatable for SimInstance {
         let next_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
             reboot_in_progress: reb_wanted,
-            server_uuid: current.server_uuid.clone(),
+            sled_uuid: current.sled_uuid.clone(),
             gen: current.gen + 1,
             time_updated: Utc::now(),
         };
@@ -780,7 +780,7 @@ impl Simulatable for SimInstance {
         let next_state = ApiInstanceRuntimeState {
             run_state: run_state_after.clone(),
             reboot_in_progress: pending.reboot_wanted,
-            server_uuid: current.server_uuid.clone(),
+            sled_uuid: current.sled_uuid.clone(),
             gen: current.gen + 1,
             time_updated: Utc::now(),
         };
@@ -1064,7 +1064,7 @@ mod test {
             ApiInstanceRuntimeState {
                 run_state: initial_state,
                 reboot_in_progress: false,
-                server_uuid: uuid::Uuid::new_v4(),
+                sled_uuid: uuid::Uuid::new_v4(),
                 gen: 1,
                 time_updated: now,
             }

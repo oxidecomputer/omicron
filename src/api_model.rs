@@ -246,7 +246,7 @@ pub enum ApiResourceType {
     DiskAttachment,
     Instance,
     Rack,
-    Server,
+    Sled,
 }
 
 impl Display for ApiResourceType {
@@ -257,7 +257,7 @@ impl Display for ApiResourceType {
             ApiResourceType::DiskAttachment => "disk attachment",
             ApiResourceType::Instance => "instance",
             ApiResourceType::Rack => "rack",
-            ApiResourceType::Server => "server",
+            ApiResourceType::Sled => "sled",
         })
     }
 }
@@ -278,7 +278,7 @@ impl Display for ApiResourceType {
  * * `ApiProjectUpdateParams` is what must be provided to the API when a user
  *   wants to update a project.
  *
- * We also have Instances, Disks, Racks, Servers, and many related types, and we
+ * We also have Instances, Disks, Racks, Sleds, and many related types, and we
  * expect to add many more types like images, networking abstractions,
  * organizations, teams, users, system components, and the like.  See RFD 4 for
  * details.  Some resources may not have analogs for all these types because
@@ -544,8 +544,8 @@ pub struct ApiInstanceRuntimeState {
     pub run_state: ApiInstanceState,
     /** indicates whether a reboot is currently in progress */
     pub reboot_in_progress: bool,
-    /** which server is running this Instance */
-    pub server_uuid: Uuid,
+    /** which sled is running this Instance */
+    pub sled_uuid: Uuid,
     /** generation number for this state */
     pub gen: u64,
     /** timestamp for this information */
@@ -871,21 +871,21 @@ pub struct ApiRackView {
 }
 
 /*
- * SERVERS
+ * SLEDS
  */
 
 /**
- * A Server in the external API
+ * A Sled in the external API
  */
-pub struct ApiServer {
+pub struct ApiSled {
     pub id: Uuid,
     pub service_address: SocketAddr,
 }
 
-impl ApiObject for ApiServer {
-    type View = ApiServerView;
-    fn to_view(&self) -> ApiServerView {
-        ApiServerView {
+impl ApiObject for ApiSled {
+    type View = ApiSledView;
+    fn to_view(&self) -> ApiSledView {
+        ApiSledView {
             id: self.id.clone(),
             service_address: self.service_address.clone(),
         }
@@ -897,7 +897,7 @@ impl ApiObject for ApiServer {
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ApiServerView {
+pub struct ApiSledView {
     pub id: Uuid,
     pub service_address: SocketAddr,
 }
@@ -910,7 +910,7 @@ pub struct ApiServerView {
  * Sent by a sled agent on startup to OXC request further instruction
  */
 #[derive(Serialize, Deserialize)]
-pub struct ApiServerStartupInfo {
+pub struct ApiSledAgentStartupInfo {
     /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
 }

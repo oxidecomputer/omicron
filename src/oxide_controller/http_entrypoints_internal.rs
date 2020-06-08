@@ -6,7 +6,7 @@ use super::ControllerServerContext;
 
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiServerStartupInfo;
+use crate::api_model::ApiSledAgentStartupInfo;
 use crate::SledAgentClient;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -25,7 +25,7 @@ use uuid::Uuid;
  */
 pub fn controller_internal_api() -> ApiDescription {
     fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
-        api.register(cpapi_servers_post)?;
+        api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         Ok(())
@@ -39,34 +39,34 @@ pub fn controller_internal_api() -> ApiDescription {
 }
 
 /**
- * Path parameters for Server requests (internal API)
+ * Path parameters for Sled Agent requests (internal API)
  */
 #[derive(Deserialize, ExtractedParameter)]
-struct ServerPathParam {
-    server_id: Uuid,
+struct SledAgentPathParam {
+    sled_id: Uuid,
 }
 
 /**
- * Report that the sled agent for the specified server has come online.
+ * Report that the sled agent for the specified sled has come online.
  */
 #[endpoint {
      method = POST,
-     path = "/servers/{server_id}",
+     path = "/sled_agents/{sled_id}",
  }]
-async fn cpapi_servers_post(
+async fn cpapi_sled_agents_post(
     rqctx: Arc<RequestContext>,
-    path_params: Path<ServerPathParam>,
-    server_info: Json<ApiServerStartupInfo>,
+    path_params: Path<SledAgentPathParam>,
+    sled_info: Json<ApiSledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
-    let si = server_info.into_inner();
-    let server_id = &path.server_id;
+    let si = sled_info.into_inner();
+    let sled_id = &path.sled_id;
     let client_log =
-        apictx.log.new(o!("SledAgent" => server_id.clone().to_string()));
+        apictx.log.new(o!("SledAgent" => sled_id.clone().to_string()));
     let client =
-        Arc::new(SledAgentClient::new(&server_id, si.sa_address, client_log));
+        Arc::new(SledAgentClient::new(&sled_id, si.sa_address, client_log));
     controller.upsert_sled_agent(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }

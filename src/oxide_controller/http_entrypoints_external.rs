@@ -18,7 +18,7 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
 use crate::api_model::ApiRackView;
-use crate::api_model::ApiServerView;
+use crate::api_model::ApiSledView;
 use crate::api_model::PaginationParams;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -68,8 +68,8 @@ pub fn controller_external_api() -> ApiDescription {
 
         api.register(api_hardware_racks_get)?;
         api.register(api_hardware_racks_get_rack)?;
-        api.register(api_hardware_servers_get)?;
-        api.register(api_hardware_servers_get_server)?;
+        api.register(api_hardware_sleds_get)?;
+        api.register(api_hardware_sleds_get_sled)?;
 
         Ok(())
     }
@@ -655,51 +655,51 @@ async fn api_hardware_racks_get_rack(
 }
 
 /*
- * Servers
+ * Sleds
  */
 
 /**
- * List servers in the system.
+ * List sleds in the system.
  */
 #[endpoint {
      method = GET,
-     path = "/hardware/servers",
+     path = "/hardware/sleds",
  }]
-async fn api_hardware_servers_get(
+async fn api_hardware_sleds_get(
     rqctx: Arc<RequestContext>,
     params_raw: Query<PaginationParams<Uuid>>,
-) -> Result<HttpResponseOkObjectList<ApiServerView>, HttpError> {
+) -> Result<HttpResponseOkObjectList<ApiSledView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let params = params_raw.into_inner();
-    let server_stream = controller.servers_list(&params).await?;
-    let view_list = to_view_list(server_stream).await;
+    let sled_stream = controller.sleds_list(&params).await?;
+    let view_list = to_view_list(sled_stream).await;
     Ok(HttpResponseOkObjectList(view_list))
 }
 
 /**
- * Path parameters for Server requests
+ * Path parameters for Sled requests
  */
 #[derive(Deserialize, ExtractedParameter)]
-struct ServerPathParam {
-    /** The server's unique ID. */
-    server_id: Uuid,
+struct SledPathParam {
+    /** The sled's unique ID. */
+    sled_id: Uuid,
 }
 
 /**
- * Fetch information about a server in the system.
+ * Fetch information about a sled in the system.
  */
 #[endpoint {
      method = GET,
-     path = "/hardware/servers/{server_id}",
+     path = "/hardware/sleds/{sled_id}",
  }]
-async fn api_hardware_servers_get_server(
+async fn api_hardware_sleds_get_sled(
     rqctx: Arc<RequestContext>,
-    path_params: Path<ServerPathParam>,
-) -> Result<HttpResponseOkObject<ApiServerView>, HttpError> {
+    path_params: Path<SledPathParam>,
+) -> Result<HttpResponseOkObject<ApiSledView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
-    let server_info = controller.server_lookup(&path.server_id).await?;
-    Ok(HttpResponseOkObject(server_info.to_view()))
+    let sled_info = controller.sled_lookup(&path.sled_id).await?;
+    Ok(HttpResponseOkObject(sled_info.to_view()))
 }
