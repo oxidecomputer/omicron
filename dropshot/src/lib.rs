@@ -212,7 +212,7 @@
  *    `dropshot::ExtractedParameter`.
  * * [`Json`]`<J>` extracts content from the request body by parsing the body as
  *   JSON and deserializing it into an instance of type `J`. `J` must implement
- *   `serde::Deserialize` and `dropshot::ExtractedParameter`.
+ *   `serde::Deserialize` and `schemars::JsonSchema`.
  *
  * If the handler takes a `Query<Q>`, `Path<P>`, or a `Json<J>` and the
  * corresponding extraction cannot be completed, the request fails with status
@@ -225,6 +225,7 @@
  *
  * ```
  * use http::StatusCode;
+ * use dropshot::ExtractedParameter;
  * use dropshot::HttpError;
  * use dropshot::Json;
  * use dropshot::Query;
@@ -233,7 +234,7 @@
  * use hyper::Response;
  * use std::sync::Arc;
  *
- * #[derive(serde::Deserialize)]
+ * #[derive(serde::Deserialize, ExtractedParameter)]
  * struct MyQueryArgs {
  *     limit: u32,
  *     marker: Option<String>

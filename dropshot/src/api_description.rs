@@ -51,17 +51,16 @@ impl<'a> ApiEndpoint {
 }
 
 /**
- * ApiEndpointParameter the discrete path and query parameters for a given API
- * endpoint. These are typically derived from the members of stucts used as
- * parameters to handler functions.
+ * ApiEndpointParameter represents the discrete path and query parameters for a
+ * given API endpoint. These are typically derived from the members of stucts
+ * used as parameters to handler functions.
  */
 #[derive(Debug)]
 pub struct ApiEndpointParameter {
-    pub name: String,
-    pub inn: ApiEndpointParameterLocation,
+    pub name: ApiEndpointParameterName,
     pub description: Option<String>,
     pub required: bool,
-    // TODO: schema
+    pub schema: Option<ApiSchemaGenerator>,
     pub examples: Vec<String>,
 }
 
@@ -69,6 +68,38 @@ pub struct ApiEndpointParameter {
 pub enum ApiEndpointParameterLocation {
     Path,
     Query,
+}
+
+#[derive(Debug, Clone)]
+pub enum ApiEndpointParameterName {
+    Path(String),
+    Query(String),
+    Body,
+}
+
+impl From<(ApiEndpointParameterLocation, String)> for ApiEndpointParameterName {
+    fn from((location, name): (ApiEndpointParameterLocation, String)) -> Self {
+        match location {
+            ApiEndpointParameterLocation::Path => {
+                ApiEndpointParameterName::Path(name)
+            }
+            ApiEndpointParameterLocation::Query => {
+                ApiEndpointParameterName::Query(name)
+            }
+        }
+    }
+}
+/**
+ * Wrapper for our schema generator callback so that we can impl Debug
+ */
+pub struct ApiSchemaGenerator(
+    pub fn(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema,
+);
+
+impl std::fmt::Debug for ApiSchemaGenerator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[schema generator]")
+    }
 }
 
 /**
@@ -109,8 +140,8 @@ impl ApiDescription {
         let vars = e
             .parameters
             .iter()
-            .filter_map(|p| match p.inn {
-                ApiEndpointParameterLocation::Path => Some(p.name.clone()),
+            .filter_map(|p| match &p.name {
+                ApiEndpointParameterName::Path(name) => Some(name.clone()),
                 _ => None,
             })
             .collect::<HashSet<_>>();
@@ -153,8 +184,13 @@ impl ApiDescription {
     /**
      * Emit the OpenAPI Spec document describing this API in its JSON form.
      */
+    // TODO: There's a bunch of error handling we need here such as checking
+    // for duplicate parameter names.
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
+
+        let settings = schemars::gen::SchemaSettings::openapi3();
+        let mut generator = schemars::gen::SchemaGenerator::new(settings);
 
         for (path, method, endpoint) in &self.router {
             let path = openapi.paths.entry(path).or_insert(
@@ -183,15 +219,25 @@ impl ApiDescription {
             operation.parameters = endpoint
                 .parameters
                 .iter()
-                .map(|param| {
+                .filter_map(|param| {
+                    let (name, location) = match &param.name {
+                        ApiEndpointParameterName::Body => return None,
+                        ApiEndpointParameterName::Path(name) => {
+                            (name, ApiEndpointParameterLocation::Path)
+                        }
+                        ApiEndpointParameterName::Query(name) => {
+                            (name, ApiEndpointParameterLocation::Query)
+                        }
+                    };
                     let parameter_data = openapiv3::ParameterData {
-                        name: param.name.clone(),
+                        name: name.clone(),
                         description: param.description.clone(),
                         required: true,
                         deprecated: None,
                         format: openapiv3::ParameterSchemaOrContent::Schema(
                             openapiv3::ReferenceOr::Item(openapiv3::Schema {
                                 schema_data: openapiv3::SchemaData::default(),
+                                // TODO we shouldn't be hard-coding string here
                                 schema_kind: openapiv3::SchemaKind::Type(
                                     openapiv3::Type::String(
                                         openapiv3::StringType::default(),
@@ -202,31 +248,73 @@ impl ApiDescription {
                         example: None,
                         examples: indexmap::map::IndexMap::new(),
                     };
-                    match param.inn {
+                    match location {
                         ApiEndpointParameterLocation::Query => {
-                            openapiv3::ReferenceOr::Item(
+                            Some(openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Query {
                                     parameter_data: parameter_data,
                                     allow_reserved: true,
                                     style: openapiv3::QueryStyle::Form,
                                     allow_empty_value: None,
                                 },
-                            )
+                            ))
                         }
                         ApiEndpointParameterLocation::Path => {
-                            openapiv3::ReferenceOr::Item(
+                            Some(openapiv3::ReferenceOr::Item(
                                 openapiv3::Parameter::Path {
                                     parameter_data: parameter_data,
                                     style: openapiv3::PathStyle::Simple,
                                 },
-                            )
+                            ))
                         }
                     }
                 })
                 .collect::<Vec<_>>();
 
+            operation.request_body = endpoint
+                .parameters
+                .iter()
+                .filter_map(|param| {
+                    match &param.name {
+                        ApiEndpointParameterName::Body => (),
+                        _ => return None,
+                    }
+
+                    let schema = param
+                        .schema
+                        .as_ref()
+                        .map(|schema| j2oas_schema(&schema.0(&mut generator)));
+
+                    let mut content = indexmap::map::IndexMap::new();
+                    content.insert(
+                        "application/json".to_string(),
+                        openapiv3::MediaType {
+                            schema: schema,
+                            example: None,
+                            examples: indexmap::map::IndexMap::new(),
+                            encoding: indexmap::map::IndexMap::new(),
+                        },
+                    );
+
+                    Some(openapiv3::ReferenceOr::Item(openapiv3::RequestBody {
+                        description: None,
+                        content: content,
+                        required: true,
+                    }))
+                })
+                .nth(0);
+
             method_ref.replace(operation);
         }
+
+        // Add the schemas for which we generated references.
+        let schemas = &mut openapi
+            .components
+            .get_or_insert_with(|| openapiv3::Components::default())
+            .schemas;
+        generator.definitions().iter().for_each(|(key, schema)| {
+            &schemas.insert(key.clone(), j2oas_schema(schema));
+        });
 
         println!("{}", serde_json::to_string_pretty(&openapi).unwrap());
     }
@@ -239,6 +327,238 @@ impl ApiDescription {
     pub fn into_router(self) -> HttpRouter {
         self.router
     }
+}
+
+/**
+ * Convert from JSON Schema into OpenAPI.
+ */
+/*
+ * TODO Initially this seemed like it was going to be a win, but the versions
+ * of JSON Schema that the schemars and openapiv3 crates adhere to are just
+ * different enough to make the conversion a real pain in the neck. A better
+ * approach might be a derive(OpenAPI)-like thing, or even a generic
+ * derive(schema) that we could then marshall into OpenAPI.
+ * The schemars crate also seems a bit inflexible when it comes to how the
+ * schema is generated wrt references vs. inline types.
+ */
+fn j2oas_schema(
+    schema: &schemars::schema::Schema,
+) -> openapiv3::ReferenceOr<openapiv3::Schema> {
+    match schema {
+        schemars::schema::Schema::Bool(_) => todo!(),
+        schemars::schema::Schema::Object(obj) => j2oas_schema_object(obj),
+    }
+}
+
+fn j2oas_schema_object(
+    obj: &schemars::schema::SchemaObject,
+) -> openapiv3::ReferenceOr<openapiv3::Schema> {
+    if let Some(reference) = &obj.reference {
+        return openapiv3::ReferenceOr::Reference {
+            reference: reference.clone(),
+        };
+    }
+
+    let ty = match &obj.instance_type {
+        Some(schemars::schema::SingleOrVec::Single(ty)) => Some(ty.as_ref()),
+        Some(schemars::schema::SingleOrVec::Vec(_)) => {
+            unimplemented!("unsupported by openapiv3")
+        }
+        None => None,
+    };
+
+    let kind = match (ty, &obj.subschemas) {
+        (Some(schemars::schema::InstanceType::Null), None) => todo!(),
+        (Some(schemars::schema::InstanceType::Boolean), None) => todo!(),
+        (Some(schemars::schema::InstanceType::Object), None) => {
+            j2oas_object(&obj.object)
+        }
+        (Some(schemars::schema::InstanceType::Array), None) => {
+            j2oas_array(&obj.array)
+        }
+        (Some(schemars::schema::InstanceType::Number), None) => {
+            j2oas_number(&obj.format, &obj.number)
+        }
+        (Some(schemars::schema::InstanceType::String), None) => {
+            j2oas_string(&obj.string)
+        }
+        (Some(schemars::schema::InstanceType::Integer), None) => {
+            j2oas_integer(&obj.format, &obj.number, &obj.enum_values)
+        }
+        (None, Some(subschema)) => j2oas_subschemas(subschema),
+        (None, None) => todo!("missed a valid case {:?}", obj),
+        _ => panic!("invalid"),
+    };
+
+    let mut data = openapiv3::SchemaData::default();
+
+    if let Some(metadata) = &obj.metadata {
+        data.title = metadata.title.clone();
+        data.description = metadata.description.clone();
+        // TODO skipping `default` since it's a little tricky to handle
+        data.deprecated = metadata.deprecated;
+        data.read_only = metadata.read_only;
+        data.write_only = metadata.write_only;
+    }
+
+    openapiv3::ReferenceOr::Item(openapiv3::Schema {
+        schema_data: data,
+        schema_kind: kind,
+    })
+}
+
+fn j2oas_subschemas(
+    subschemas: &Box<schemars::schema::SubschemaValidation>,
+) -> openapiv3::SchemaKind {
+    match (&subschemas.all_of, &subschemas.any_of, &subschemas.one_of) {
+        (Some(all_of), None, None) => openapiv3::SchemaKind::AllOf {
+            all_of: all_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, Some(any_of), None) => openapiv3::SchemaKind::AnyOf {
+            any_of: any_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, None, Some(one_of)) => openapiv3::SchemaKind::OneOf {
+            one_of: one_of
+                .iter()
+                .map(|schema| j2oas_schema(schema))
+                .collect::<Vec<_>>(),
+        },
+        (None, None, None) => todo!("missed a valid case"),
+        _ => panic!("invalid"),
+    }
+}
+
+fn j2oas_integer(
+    format: &Option<String>,
+    number: &Option<Box<schemars::schema::NumberValidation>>,
+    enum_values: &Option<Vec<serde_json::value::Value>>,
+) -> openapiv3::SchemaKind {
+    let format = match format.as_ref().map(|s| s.as_str()) {
+        None => openapiv3::VariantOrUnknownOrEmpty::Empty,
+        Some("int32") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::IntegerFormat::Int32,
+        ),
+        Some("int64") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::IntegerFormat::Int64,
+        ),
+        Some(other) => {
+            openapiv3::VariantOrUnknownOrEmpty::Unknown(other.to_string())
+        }
+    };
+
+    let (multiple_of, minimum, exclusive_minimum, maximum, exclusive_maximum) =
+        match number {
+            None => (None, None, false, None, false),
+            Some(number) => {
+                let multiple_of = number.multiple_of.map(|f| f as i64);
+                let (minimum, exclusive_minimum) =
+                    match (number.minimum, number.exclusive_minimum) {
+                        (None, None) => (None, false),
+                        (Some(f), None) => (Some(f as i64), false),
+                        (None, Some(f)) => (Some(f as i64), true),
+                        _ => panic!("invalid"),
+                    };
+                let (maximum, exclusive_maximum) =
+                    match (number.maximum, number.exclusive_maximum) {
+                        (None, None) => (None, false),
+                        (Some(f), None) => (Some(f as i64), false),
+                        (None, Some(f)) => (Some(f as i64), true),
+                        _ => panic!("invalid"),
+                    };
+
+                (
+                    multiple_of,
+                    minimum,
+                    exclusive_minimum,
+                    maximum,
+                    exclusive_maximum,
+                )
+            }
+        };
+
+    let enumeration = enum_values
+        .iter()
+        .flat_map(|v| v.iter().map(|vv| vv.as_u64().unwrap() as i64))
+        .collect::<Vec<_>>();
+
+    openapiv3::SchemaKind::Type(openapiv3::Type::Integer(
+        openapiv3::IntegerType {
+            format,
+            multiple_of,
+            exclusive_minimum,
+            exclusive_maximum,
+            minimum,
+            maximum,
+            enumeration,
+        },
+    ))
+}
+
+fn j2oas_number(
+    _format: &Option<String>,
+    _number: &Option<Box<schemars::schema::NumberValidation>>,
+) -> openapiv3::SchemaKind {
+    todo!()
+}
+
+fn j2oas_string(
+    string: &Option<Box<schemars::schema::StringValidation>>,
+) -> openapiv3::SchemaKind {
+    let mut string_type = openapiv3::StringType::default();
+    if let Some(string) = string.as_ref() {
+        string_type.max_length = string.max_length.map(|n| n as usize);
+        string_type.min_length = string.min_length.map(|n| n as usize);
+        string_type.pattern = string.pattern.clone();
+    }
+    openapiv3::SchemaKind::Type(openapiv3::Type::String(string_type))
+}
+
+fn j2oas_array(
+    _array: &Option<Box<schemars::schema::ArrayValidation>>,
+) -> openapiv3::SchemaKind {
+    todo!()
+}
+
+fn j2oas_object(
+    object: &Option<Box<schemars::schema::ObjectValidation>>,
+) -> openapiv3::SchemaKind {
+    let obj = object.as_ref().unwrap();
+    openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+        openapiv3::ObjectType {
+            properties: obj
+                .properties
+                .iter()
+                .map(|(prop, schema)| {
+                    (prop.clone(), match j2oas_schema(schema) {
+                        openapiv3::ReferenceOr::Item(schema) => {
+                            openapiv3::ReferenceOr::boxed_item(schema)
+                        }
+                        openapiv3::ReferenceOr::Reference {
+                            reference,
+                        } => openapiv3::ReferenceOr::Reference {
+                            reference,
+                        },
+                    })
+                })
+                .collect::<_>(),
+            required: obj.required.iter().map(|s| s.clone()).collect::<_>(),
+            additional_properties: obj.additional_properties.as_ref().map(
+                |schema| {
+                    openapiv3::AdditionalProperties::Schema(Box::new(
+                        j2oas_schema(schema),
+                    ))
+                },
+            ),
+            min_properties: obj.min_properties.map(|n| n as usize),
+            max_properties: obj.max_properties.map(|n| n as usize),
+        },
+    ))
 }
 
 #[cfg(test)]

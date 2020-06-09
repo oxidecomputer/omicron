@@ -35,6 +35,7 @@ use http::StatusCode;
 use hyper::Body;
 use hyper::Method;
 use hyper::Response;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -521,7 +522,7 @@ async fn demo_handler_args_2query(
     http_echo(&query.into_inner())
 }
 
-#[derive(Debug, Serialize, Deserialize, ExtractedParameter)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DemoJsonBody {
     pub test1: String,
     pub test2: Option<u32>,

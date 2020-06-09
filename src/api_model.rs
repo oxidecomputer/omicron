@@ -7,11 +7,14 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -23,8 +26,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
-
-use dropshot::ExtractedParameter;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
@@ -174,6 +175,57 @@ where
     }
 }
 
+/**
+ * Custom JsonSchema implementation to encode the constraints on ApiName
+ */
+/*
+ * TODO: 1. make this part of schemars w/ rename and maxlen annotations
+ * TODO: 2. integrate the regex with `try_from`
+ */
+impl JsonSchema for ApiName {
+    fn schema_name() -> String {
+        "ApiName".to_string()
+    }
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A name used in the API".to_string()),
+                description: Some(
+                    "Names must begin with a lower case ASCII letter, be \
+                     composed exclusively of lowercase ASCII, uppercase \
+                     ASCII, numbers, and '-', and may not end with a '-'."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
 impl ApiName {
     /**
      * Parse an `ApiName`.  This is a convenience wrapper around
@@ -196,7 +248,7 @@ impl ApiName {
  * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
  * need to write a validator for that.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiByteCount(u64);
 impl ApiByteCount {
     pub fn from_bytes(bytes: u64) -> ApiByteCount {
@@ -341,7 +393,7 @@ pub struct ApiIdentityMetadata {
  * Create-time identity-related parameters
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
@@ -351,7 +403,7 @@ pub struct ApiIdentityMetadataCreateParams {
  * Updateable identity-related parameters
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
     pub description: Option<String>,
@@ -409,7 +461,7 @@ pub struct ApiProjectView {
  * Create-time parameters for an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -419,7 +471,7 @@ pub struct ApiProjectCreateParams {
  * Updateable properties of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
@@ -436,7 +488,15 @@ pub struct ApiProjectUpdateParams {
  * but also includes states related to the Instance's lifecycle
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiInstanceState {
@@ -489,7 +549,7 @@ impl ApiInstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceCpuCount(pub usize);
 
 /**
@@ -538,7 +598,7 @@ impl ApiObject for ApiInstance {
  *
  * This state is owned by the sled agent running that Instance.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the Instance */
     pub run_state: ApiInstanceState,
@@ -558,7 +618,7 @@ pub struct ApiInstanceRuntimeState {
  * Right now, it's only the run state that can be changed, though we might want
  * to support changing properties like "ncpus" here.
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceState,
     pub reboot_wanted: bool,
@@ -619,7 +679,7 @@ pub struct ApiInstanceView {
  * created, modified, removed, etc.
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, ExtractedParameter)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -702,7 +762,15 @@ impl ApiObject for ApiDisk {
  * State of a Disk (primarily: attached or not)
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskState {
@@ -769,7 +837,7 @@ impl ApiDiskState {
  * Runtime state of the Disk, which includes its attach state and some minimal
  * metadata
  */
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskRuntimeState {
     /** runtime state of the Disk */
     pub disk_state: ApiDiskState,
@@ -783,7 +851,7 @@ pub struct ApiDiskRuntimeState {
  * Create-time parameters for an [`ApiDisk`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskCreateParams {
     /** common identifying metadata */
     #[serde(flatten)]
@@ -798,7 +866,7 @@ pub struct ApiDiskCreateParams {
  * Describes a Disk's attachment to an Instance
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskAttachment {
     pub instance_name: ApiName,
     pub instance_id: Uuid,
@@ -817,7 +885,7 @@ impl ApiObject for ApiDiskAttachment {
 /**
  * Used to request a Disk state change
  */
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiDiskStateRequested {
     Detached,
@@ -909,7 +977,7 @@ pub struct ApiSledView {
 /**
  * Sent by a sled agent on startup to OXC request further instruction
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ApiSledAgentStartupInfo {
     /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
@@ -918,7 +986,7 @@ pub struct ApiSledAgentStartupInfo {
 /**
  * Sent from OXC to a sled agent to establish the runtime state of an Instance
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /**
      * Last runtime state of the Instance known to OXC (used if the agent has
@@ -932,7 +1000,7 @@ pub struct InstanceEnsureBody {
 /**
  * Sent from OXC to a sled agent to establish the runtime state of a Disk
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskEnsureBody {
     /**
      * Last runtime state of the Disk known to OXC (used if the agent has never

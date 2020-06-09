@@ -161,10 +161,10 @@ fn do_derive_parameter(
                     let name = ident.to_string();
                     Some(quote! {
                         #dropshot::ApiEndpointParameter {
-                            name: #name.to_string(),
-                            inn: _in.clone(),
+                            name: (_in.clone(), #name.to_string()).into(),
                             description: #doc ,
                             required: true, // TODO look for Option type
+                            schema: None,
                             examples: vec![],
                         }
                     })
@@ -424,6 +424,8 @@ mod tests {
         assert_eq!("extraneous member `methud`", msg);
     }
 
+    /// This tests the actual generated output; while this is quite strict, it
+    /// is intended to require care when modifying the generated code.
     #[test]
     fn test_derive_parameter() {
         let ret = do_derive_parameter(
@@ -443,17 +445,17 @@ mod tests {
                 ) -> Vec<dropshot::ApiEndpointParameter> {
                     vec![
                         dropshot::ApiEndpointParameter {
-                            name: "a".to_string(),
-                            inn: _in.clone(),
+                            name: (_in.clone(), "a".to_string()).into(),
                             description: None,
                             required: true,
+                            schema: None,
                             examples: vec![],
                         },
                         dropshot::ApiEndpointParameter {
-                            name: "b".to_string(),
-                            inn: _in.clone(),
+                            name: (_in.clone(), "b".to_string()).into(),
                             description: None,
                             required: true,
+                            schema: None,
                             examples: vec![],
                         },
                     ]

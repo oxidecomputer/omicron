@@ -40,6 +40,8 @@ use super::http_util::CONTENT_TYPE_NDJSON;
 use super::server::DropshotState;
 use crate::api_description::ApiEndpointParameter;
 use crate::api_description::ApiEndpointParameterLocation;
+use crate::api_description::ApiEndpointParameterName;
+use crate::api_description::ApiSchemaGenerator;
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -50,6 +52,7 @@ use http::StatusCode;
 use hyper::Body;
 use hyper::Request;
 use hyper::Response;
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use slog::Logger;
@@ -496,11 +499,11 @@ where
  * structure of yours that implements `serde::Deserialize`.  See this module's
  * documentation for more information.
  */
-pub struct Query<QueryType: Send + Sync> {
+pub struct Query<QueryType: ExtractedParameter + Send + Sync> {
     inner: QueryType,
 }
 
-impl<QueryType: Send + Sync> Query<QueryType> {
+impl<QueryType: ExtractedParameter + Send + Sync> Query<QueryType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -569,11 +572,11 @@ where
  * structure of yours that implements `serde::Deserialize`.  See this module's
  * documentation for more information.
  */
-pub struct Path<PathType: Send + Sync> {
+pub struct Path<PathType: ExtractedParameter + Send + Sync> {
     inner: PathType,
 }
 
-impl<PathType: Send + Sync> Path<PathType> {
+impl<PathType: ExtractedParameter + Send + Sync> Path<PathType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -616,11 +619,11 @@ where
  * that implements `serde::Deserialize`.  See this module's documentation for
  * more information.
  */
-pub struct Json<JsonType: DeserializeOwned + Send + Sync> {
+pub struct Json<JsonType: JsonSchema + DeserializeOwned + Send + Sync> {
     inner: JsonType,
 }
 
-impl<JsonType: DeserializeOwned + Send + Sync> Json<JsonType> {
+impl<JsonType: JsonSchema + DeserializeOwned + Send + Sync> Json<JsonType> {
     /*
      * TODO drop this in favor of Deref?  + Display and Debug for convenience?
      */
@@ -637,7 +640,7 @@ async fn http_request_load_json_body<JsonType>(
     rqctx: Arc<RequestContext>,
 ) -> Result<Json<JsonType>, HttpError>
 where
-    JsonType: DeserializeOwned + Send + Sync,
+    JsonType: JsonSchema + DeserializeOwned + Send + Sync,
 {
     let server = &rqctx.server;
     let mut request = rqctx.request.lock().await;
@@ -670,7 +673,7 @@ where
 #[async_trait]
 impl<JsonType> Extractor for Json<JsonType>
 where
-    JsonType: DeserializeOwned + Send + Sync + 'static,
+    JsonType: JsonSchema + DeserializeOwned + Send + Sync + 'static,
 {
     async fn from_request(
         rqctx: Arc<RequestContext>,
@@ -679,7 +682,13 @@ where
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
-        vec![]
+        vec![ApiEndpointParameter {
+            name: ApiEndpointParameterName::Body,
+            description: None,
+            required: true,
+            schema: Some(ApiSchemaGenerator(JsonType::json_schema)),
+            examples: vec![],
+        }]
     }
 }
 
