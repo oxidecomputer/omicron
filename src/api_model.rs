@@ -303,18 +303,14 @@ pub enum ApiResourceType {
 
 impl Display for ApiResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(
-            f,
-            "{}",
-            match self {
-                ApiResourceType::Project => "project",
-                ApiResourceType::Disk => "disk",
-                ApiResourceType::DiskAttachment => "disk attachment",
-                ApiResourceType::Instance => "instance",
-                ApiResourceType::Rack => "rack",
-                ApiResourceType::Sled => "sled",
-            }
-        )
+        write!(f, "{}", match self {
+            ApiResourceType::Project => "project",
+            ApiResourceType::Disk => "disk",
+            ApiResourceType::DiskAttachment => "disk attachment",
+            ApiResourceType::Instance => "instance",
+            ApiResourceType::Rack => "rack",
+            ApiResourceType::Sled => "sled",
+        })
     }
 }
 
@@ -441,7 +437,9 @@ pub struct ApiProject {
 impl ApiObject for ApiProject {
     type View = ApiProjectView;
     fn to_view(&self) -> ApiProjectView {
-        ApiProjectView { identity: self.identity.clone() }
+        ApiProjectView {
+            identity: self.identity.clone(),
+        }
     }
 }
 
@@ -925,7 +923,9 @@ pub struct ApiRack {
 impl ApiObject for ApiRack {
     type View = ApiRackView;
     fn to_view(&self) -> ApiRackView {
-        ApiRackView { id: self.id.clone() }
+        ApiRackView {
+            id: self.id.clone(),
+        }
     }
 }
 
