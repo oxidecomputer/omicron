@@ -101,6 +101,7 @@ use super::server::DropshotState;
 use crate::api_description::ApiEndpointParameter;
 use crate::api_description::ApiEndpointParameterLocation;
 use crate::api_description::ApiEndpointParameterName;
+use crate::api_description::ApiSchemaGenerator;
 
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -741,14 +742,11 @@ where
     }
 
     fn generate() -> Vec<ApiEndpointParameter> {
-        let settings = schemars::gen::SchemaSettings::openapi3();
-        let mut generator = schemars::gen::SchemaGenerator::new(settings);
-        let schema = JsonType::json_schema(&mut generator);
         vec![ApiEndpointParameter {
             name: ApiEndpointParameterName::Body,
             description: None,
             required: true,
-            schema: Some(schema),
+            schema: Some(ApiSchemaGenerator(JsonType::json_schema)),
             examples: vec![],
         }]
     }

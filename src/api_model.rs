@@ -14,6 +14,7 @@ use futures::stream::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -93,15 +94,7 @@ pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
  * that's valid as a name.
  */
 #[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
 pub struct ApiName(String);
@@ -179,6 +172,57 @@ where
 {
     fn eq(&self, other: &S) -> bool {
         &self.0 == other.as_ref()
+    }
+}
+
+/**
+ * Custom JsonSchema implementation to encode the constraints on ApiName
+ */
+/*
+ * TODO: 1. make this part of schemars w/ rename and maxlen annotations
+ * TODO: 2. integrate the regex with `try_from`
+ */
+impl JsonSchema for ApiName {
+    fn schema_name() -> String {
+        "ApiName".to_string()
+    }
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A name used in the API".to_string()),
+                description: Some(
+                    "Names must begin with a lower case ASCII letter, be \
+                     composed exclusively of lowercase ASCII, uppercase \
+                     ASCII, numbers, and '-', and may not end with a '-'."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
     }
 }
 
@@ -335,7 +379,7 @@ pub async fn to_view_list<T: ApiObject>(
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -405,7 +449,7 @@ impl ApiObject for ApiProject {
  * Client view of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApiProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
