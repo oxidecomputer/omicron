@@ -15,66 +15,6 @@
  * specification ensures that--at least in many important ways--the
  * implementation cannot diverge from the spec.
  *
- *
- * ## Extractors
- *
- * The types `Query`, `Path`, and `Json` are called _Extractors_ because they
- * cause information to be pulled out of the request and made available to the
- * handler function.
- *
- * * `Query<Q>` extracts parameters from a query string, deserializing them into
- *    an instance of type `Q`. `Q` must implement `serde::Deserialize` and
- *    `dropshot::ExtractedParameter`.
- * * `Path<P>` extracts parameters from HTTP path, deserializing them into
- *    an instance of type `P`. `P` must implement `serde::Deserialize` and
- *    `dropshot::ExtractedParameter`.
- * * `Json<J>` extracts content from the request body by parsing the body as
- *   JSON and deserializing it into an instance of type `J`. `J` must implement
- *   `serde::Deserialize` and `dropshot::ExtractedParameter`.
- *
- * If the handler takes a `Query<Q>`, `Path<P>`, or a `Json<J>` and the
- * corresponding extraction cannot be completed, the request fails with status
- * code 400 and an error message reflecting a validation error.
- *
- * As with any serde-deserializable type, you can make fields optional by having
- * the corresponding property of the type be an `Option`.  Here's an example of
- * an endpoint that takes two arguments via query parameters: "limit", a
- * required u32, and "marker", an optional string:
- *
- * ```
- * use http::StatusCode;
- * use dropshot::ExtractedParameter;
- * use dropshot::HttpError;
- * use dropshot::Json;
- * use dropshot::Query;
- * use dropshot::RequestContext;
- * use hyper::Body;
- * use hyper::Response;
- * use std::sync::Arc;
- *
- * #[derive(serde::Deserialize, ExtractedParameter)]
- * struct MyQueryArgs {
- *     limit: u32,
- *     marker: Option<String>
- * }
- *
- * async fn handle_request(
- *     _: Arc<RequestContext>,
- *     query: Query<MyQueryArgs>)
- *     -> Result<Response<Body>, HttpError>
- * {
- *     let query_args = query.into_inner();
- *     let limit: u32 = query_args.limit;
- *     let marker: Option<String> = query_args.marker;
- *     Ok(Response::builder()
- *         .status(StatusCode::OK)
- *         .body(format!("limit = {}, marker = {:?}\n", limit, marker).into())?)
- * }
- * ```
- *
- *
- * ## Endpoint function return types
- *
  * Just like we want API input types to be represented in function arguments, we
  * want API response types to be represented in function return values so that
  * OpenAPI tooling can identify them at build time.  The more specific a type
