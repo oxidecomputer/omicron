@@ -12,6 +12,7 @@ use crate::router::PathSegment;
 use crate::Extractor;
 
 use http::Method;
+use http::StatusCode;
 use std::collections::HashSet;
 
 /**
@@ -26,6 +27,7 @@ pub struct ApiEndpoint {
     pub method: Method,
     pub path: String,
     pub parameters: Vec<ApiEndpointParameter>,
+    pub response: ApiEndpointResponse,
     pub description: Option<String>,
 }
 
@@ -45,6 +47,7 @@ impl<'a> ApiEndpoint {
             method: method,
             path: path.to_string(),
             parameters: FuncParams::generate(),
+            response: ResponseType::generate(),
             description: None,
         }
     }
@@ -89,6 +92,13 @@ impl From<(ApiEndpointParameterLocation, String)> for ApiEndpointParameterName {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct ApiEndpointResponse {
+    pub schema: Option<ApiSchemaGenerator>,
+    pub success: Option<StatusCode>,
+}
+
 /**
  * Wrapper for our schema generator callback so that we can impl Debug
  */
@@ -280,10 +290,15 @@ impl ApiDescription {
                         _ => return None,
                     }
 
-                    let schema = param
-                        .schema
-                        .as_ref()
-                        .map(|schema| j2oas_schema(&schema.0(&mut generator)));
+                    let schema = param.schema.as_ref().map(|schema| {
+                        let js = schema.0(&mut generator);
+                        println!(
+                            "{} {:?}",
+                            &endpoint.description.as_ref().unwrap(),
+                            js
+                        );
+                        j2oas_schema(&js)
+                    });
 
                     let mut content = indexmap::map::IndexMap::new();
                     content.insert(
@@ -291,8 +306,8 @@ impl ApiDescription {
                         openapiv3::MediaType {
                             schema: schema,
                             example: None,
-                            examples: indexmap::map::IndexMap::new(),
-                            encoding: indexmap::map::IndexMap::new(),
+                            examples: indexmap::IndexMap::new(),
+                            encoding: indexmap::IndexMap::new(),
                         },
                     );
 
@@ -304,6 +319,41 @@ impl ApiDescription {
                 })
                 .nth(0);
 
+            if let Some(schema) = &endpoint.response.schema {
+                let js = schema.0(&mut generator);
+                println!(
+                    "{} {:?}",
+                    &endpoint.description.as_ref().unwrap(),
+                    js
+                );
+
+                let mut content = indexmap::map::IndexMap::new();
+                if !is_null(&js) {
+                    content.insert(
+                        "application/json".to_string(),
+                        openapiv3::MediaType {
+                            schema: Some(j2oas_schema(&js)),
+                            example: None,
+                            examples: indexmap::map::IndexMap::new(),
+                            encoding: indexmap::map::IndexMap::new(),
+                        },
+                    );
+                }
+
+                let response = openapiv3::Response {
+                    description: "TODO: placeholder".to_string(),
+                    headers: indexmap::IndexMap::new(),
+                    content: content,
+                    links: indexmap::IndexMap::new(),
+                };
+
+                operation.responses = openapiv3::Responses {
+                    default: Some(openapiv3::ReferenceOr::Item(response)),
+                    responses: indexmap::IndexMap::new(),
+                }
+            }
+
+            // Drop in the operation.
             method_ref.replace(operation);
         }
 
@@ -327,6 +377,22 @@ impl ApiDescription {
     pub fn into_router(self) -> HttpRouter {
         self.router
     }
+}
+
+/**
+ * Returns true iff the schema represents the null type i.e. the rust type `()`.
+ */
+fn is_null(schema: &schemars::schema::Schema) -> bool {
+    if let schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        instance_type: Some(schemars::schema::SingleOrVec::Single(it)),
+        ..
+    }) = schema
+    {
+        if let schemars::schema::InstanceType::Null = it.as_ref() {
+            return true;
+        }
+    }
+    false
 }
 
 /**
@@ -571,6 +637,7 @@ mod test {
     use super::super::Path;
     use super::ApiDescription;
     use super::ApiEndpoint;
+    use super::ApiEndpointResponse;
     use http::Method;
     use hyper::Body;
     use hyper::Response;
@@ -597,6 +664,10 @@ mod test {
             method: method,
             path: path.to_string(),
             parameters: vec![],
+            response: ApiEndpointResponse {
+                schema: None,
+                success: None,
+            },
             description: None,
         }
     }

@@ -125,11 +125,12 @@
  * use dropshot::HttpResponseOkObjectList;
  * use dropshot::RequestContext;
  * use http::Method;
+ * use schemars::JsonSchema;
  * use serde::Serialize;
  * use std::sync::Arc;
  *
  * /** Represents a project in our API */
- * #[derive(Serialize)]
+ * #[derive(Serialize, JsonSchema)]
  * struct Project {
  *     /** name of the project */
  *     name: String,
@@ -303,6 +304,7 @@ pub use api_description::ApiDescription;
 pub use api_description::ApiEndpoint;
 pub use api_description::ApiEndpointParameter;
 pub use api_description::ApiEndpointParameterLocation;
+pub use api_description::ApiEndpointResponse;
 pub use config::ConfigDropshot;
 pub use error::HttpError;
 pub use error::HttpErrorResponseBody;

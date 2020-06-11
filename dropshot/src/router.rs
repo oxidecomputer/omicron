@@ -509,6 +509,7 @@ mod test {
     use super::super::handler::RouteHandler;
     use super::HttpRouter;
     use crate::ApiEndpoint;
+    use crate::ApiEndpointResponse;
     use http::Method;
     use http::StatusCode;
     use hyper::Body;
@@ -539,6 +540,10 @@ mod test {
             method: method,
             path: path.to_string(),
             parameters: vec![],
+            response: ApiEndpointResponse {
+                schema: None,
+                success: None,
+            },
             description: None,
         }
     }
