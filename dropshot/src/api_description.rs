@@ -3,13 +3,14 @@
  */
 
 use crate::handler::HttpHandlerFunc;
-use crate::handler::HttpResponseWrap;
+use crate::handler::HttpResponse;
 use crate::handler::HttpRouteHandler;
 use crate::handler::RouteHandler;
 use crate::router::path_to_segments;
 use crate::router::HttpRouter;
 use crate::router::PathSegment;
 use crate::Extractor;
+use crate::CONTENT_TYPE_JSON;
 
 use http::Method;
 use http::StatusCode;
@@ -40,7 +41,7 @@ impl<'a> ApiEndpoint {
     where
         HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
         FuncParams: Extractor + 'static,
-        ResponseType: HttpResponseWrap + Send + Sync + 'static,
+        ResponseType: HttpResponse + Send + Sync + 'static,
     {
         ApiEndpoint {
             handler: HttpRouteHandler::new(handler),
@@ -292,17 +293,12 @@ impl ApiDescription {
 
                     let schema = param.schema.as_ref().map(|schema| {
                         let js = schema.0(&mut generator);
-                        println!(
-                            "{} {:?}",
-                            &endpoint.description.as_ref().unwrap(),
-                            js
-                        );
                         j2oas_schema(&js)
                     });
 
                     let mut content = indexmap::map::IndexMap::new();
                     content.insert(
-                        "application/json".to_string(),
+                        CONTENT_TYPE_JSON.to_string(),
                         openapiv3::MediaType {
                             schema: schema,
                             example: None,
@@ -321,16 +317,10 @@ impl ApiDescription {
 
             if let Some(schema) = &endpoint.response.schema {
                 let js = schema.0(&mut generator);
-                println!(
-                    "{} {:?}",
-                    &endpoint.description.as_ref().unwrap(),
-                    js
-                );
-
                 let mut content = indexmap::map::IndexMap::new();
                 if !is_null(&js) {
                     content.insert(
-                        "application/json".to_string(),
+                        CONTENT_TYPE_JSON.to_string(),
                         openapiv3::MediaType {
                             schema: Some(j2oas_schema(&js)),
                             example: None,
@@ -446,7 +436,7 @@ fn j2oas_schema_object(
             j2oas_number(&obj.format, &obj.number)
         }
         (Some(schemars::schema::InstanceType::String), None) => {
-            j2oas_string(&obj.string)
+            j2oas_string(&obj.format, &obj.string, &obj.enum_values)
         }
         (Some(schemars::schema::InstanceType::Integer), None) => {
             j2oas_integer(&obj.format, &obj.number, &obj.enum_values)
@@ -574,15 +564,55 @@ fn j2oas_number(
 }
 
 fn j2oas_string(
+    format: &Option<String>,
     string: &Option<Box<schemars::schema::StringValidation>>,
+    enum_values: &Option<Vec<serde_json::value::Value>>,
 ) -> openapiv3::SchemaKind {
-    let mut string_type = openapiv3::StringType::default();
-    if let Some(string) = string.as_ref() {
-        string_type.max_length = string.max_length.map(|n| n as usize);
-        string_type.min_length = string.min_length.map(|n| n as usize);
-        string_type.pattern = string.pattern.clone();
-    }
-    openapiv3::SchemaKind::Type(openapiv3::Type::String(string_type))
+    let format = match format.as_ref().map(|s| s.as_str()) {
+        None => openapiv3::VariantOrUnknownOrEmpty::Empty,
+        Some("date") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::StringFormat::Date,
+        ),
+        Some("date-time") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::StringFormat::DateTime,
+        ),
+        Some("password") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::StringFormat::Password,
+        ),
+        Some("byte") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::StringFormat::Byte,
+        ),
+        Some("binary") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::StringFormat::Binary,
+        ),
+        Some(other) => {
+            openapiv3::VariantOrUnknownOrEmpty::Unknown(other.to_string())
+        }
+    };
+
+    let (max_length, min_length, pattern) = match string.as_ref() {
+        None => (None, None, None),
+        Some(string) => (
+            string.max_length.map(|n| n as usize),
+            string.min_length.map(|n| n as usize),
+            string.pattern.clone(),
+        ),
+    };
+
+    let enumeration = enum_values
+        .iter()
+        .flat_map(|v| v.iter().map(|vv| vv.as_str().unwrap().to_string()))
+        .collect::<Vec<_>>();
+
+    openapiv3::SchemaKind::Type(openapiv3::Type::String(
+        openapiv3::StringType {
+            format,
+            pattern,
+            enumeration,
+            min_length,
+            max_length,
+        },
+    ))
 }
 
 fn j2oas_array(
