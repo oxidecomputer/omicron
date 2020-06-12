@@ -24,6 +24,7 @@ use std::collections::HashSet;
  */
 #[derive(Debug)]
 pub struct ApiEndpoint {
+    pub operation_id: String,
     pub handler: Box<dyn RouteHandler>,
     pub method: Method,
     pub path: String,
@@ -34,6 +35,7 @@ pub struct ApiEndpoint {
 
 impl<'a> ApiEndpoint {
     pub fn new<HandlerType, FuncParams, ResponseType>(
+        operation_id: String,
         handler: HandlerType,
         method: Method,
         path: &'a str,
@@ -44,6 +46,7 @@ impl<'a> ApiEndpoint {
         ResponseType: HttpResponse + Send + Sync + 'static,
     {
         ApiEndpoint {
+            operation_id: operation_id,
             handler: HttpRouteHandler::new(handler),
             method: method,
             path: path.to_string(),
@@ -200,6 +203,22 @@ impl ApiDescription {
     pub fn print_openapi(&self) {
         let mut openapi = openapiv3::OpenAPI::default();
 
+        openapi.openapi = "3.0.3".to_string();
+        openapi.info = openapiv3::Info {
+            title: "Oxide Region API".to_string(),
+            description: Some(
+                "API for interacting with the Oxide control plane".to_string(),
+            ),
+            terms_of_service: None,
+            contact: Some(openapiv3::Contact {
+                name: None,
+                url: Some("https://oxide.computer".to_string()),
+                email: Some("api@oxide.computer".to_string()),
+            }),
+            license: None,
+            version: "0.0.1".to_string(),
+        };
+
         let settings = schemars::gen::SchemaSettings::openapi3();
         let mut generator = schemars::gen::SchemaGenerator::new(settings);
 
@@ -225,6 +244,7 @@ impl ApiDescription {
                 other => panic!("unexpected method `{}`", other),
             };
             let mut operation = openapiv3::Operation::default();
+            operation.operation_id = Some(endpoint.operation_id.clone());
             operation.description = endpoint.description.clone();
 
             operation.parameters = endpoint
@@ -337,9 +357,17 @@ impl ApiDescription {
                     links: indexmap::IndexMap::new(),
                 };
 
-                operation.responses = openapiv3::Responses {
-                    default: Some(openapiv3::ReferenceOr::Item(response)),
-                    responses: indexmap::IndexMap::new(),
+                match &endpoint.response.success {
+                    None => {
+                        operation.responses.default =
+                            Some(openapiv3::ReferenceOr::Item(response))
+                    }
+                    Some(code) => {
+                        operation.responses.responses.insert(
+                            openapiv3::StatusCode::Code(code.as_u16()),
+                            openapiv3::ReferenceOr::Item(response),
+                        );
+                    }
                 }
             }
 
@@ -690,6 +718,7 @@ mod test {
         path: &str,
     ) -> ApiEndpoint {
         ApiEndpoint {
+            operation_id: "testOperation".to_string(),
             handler: handler,
             method: method,
             path: path.to_string(),
@@ -740,6 +769,7 @@ mod test {
     fn test_badpath1() {
         let mut api = ApiDescription::new();
         let ret = api.register(ApiEndpoint::new(
+            "test_badpath_handler".to_string(),
             test_badpath_handler,
             Method::GET,
             "/",
@@ -755,6 +785,7 @@ mod test {
     fn test_badpath2() {
         let mut api = ApiDescription::new();
         let ret = api.register(ApiEndpoint::new(
+            "test_badpath_handler".to_string(),
             test_badpath_handler,
             Method::GET,
             "/{a}/{aa}/{b}/{bb}",
@@ -769,6 +800,7 @@ mod test {
     fn test_badpath3() {
         let mut api = ApiDescription::new();
         let ret = api.register(ApiEndpoint::new(
+            "test_badpath_handler".to_string(),
             test_badpath_handler,
             Method::GET,
             "/{c}/{d}",

@@ -536,6 +536,7 @@ mod test {
         path: &str,
     ) -> ApiEndpoint {
         ApiEndpoint {
+            operation_id: "test_handler".to_string(),
             handler: handler,
             method: method,
             path: path.to_string(),

@@ -251,7 +251,7 @@ impl HttpError {
             status_code.canonical_reason().unwrap().to_string();
         HttpError {
             status_code,
-            error_code: error_code,
+            error_code,
             internal_message,
             external_message,
         }
