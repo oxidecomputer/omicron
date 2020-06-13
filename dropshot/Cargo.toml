@@ -26,6 +26,7 @@ slog-term = "2.5"
 tokio = { version = "0.2", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
+impl-trait-for-tuples = { path = "../../impl-trait-for-tuples" }
 
 [dependencies.slog]
 version = "2.5"

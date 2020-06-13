@@ -120,34 +120,25 @@ pub trait Extractor: Send + Sync + Sized {
     fn generate() -> Vec<ApiEndpointParameter>;
 }
 
-/**
- * `impl_derived_for_tuple!` defines implementations of `Extractor` for tuples
- * whose elements themselves implement `Extractor`.
- */
-macro_rules! impl_derived_for_tuple {
-    ($( $T:ident),*) => {
-    #[async_trait]
-    impl< $($T: Extractor + 'static,)* > Extractor for ($($T,)*)
-    {
-        async fn from_request(_rqctx: Arc<RequestContext>)
-            -> Result<( $($T,)* ), HttpError>
-        {
-            Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
-        }
-
-        fn generate() -> Vec<ApiEndpointParameter> {
-            #[allow(unused_mut)]
-            let mut v = vec![];
-            $( v.append(&mut $T::generate()); )*
-            v
-        }
+// Implement `Extractor` for tuples whose elements themselves are `Extractor`.
+#[impl_trait_for_tuples::impl_for_tuples(3)]
+#[async_trait]
+impl Extractor for Tuple {
+    async fn from_request(
+        _rqctx: Arc<RequestContext>,
+    ) -> Result<Self, HttpError> {
+        Ok(for_tuples!(
+            ( #( Tuple::from_request(Arc::clone(&_rqctx)).await?),* )
+        ))
     }
-}}
 
-impl_derived_for_tuple!();
-impl_derived_for_tuple!(T1);
-impl_derived_for_tuple!(T1, T2);
-impl_derived_for_tuple!(T1, T2, T3);
+    fn generate() -> Vec<ApiEndpointParameter> {
+        #[allow(unused_mut)]
+        let mut v = vec![];
+        for_tuples!( #( v.append(&mut Tuple::generate()); )* );
+        v
+    }
+}
 
 pub trait ExtractedParameter: DeserializeOwned {
     fn generate(inn: ApiEndpointParameterLocation)
@@ -265,42 +256,32 @@ where
  * implementing `HttpResponse<Body = Type>`. The latter gives us a typed
  * structure as well as response code that we use to generate rich OpenAPI
  * content.
- *
- * Note: the macro parameters really ought to be `$i:literal` and `$T:ident`,
- * however that causes us to run afoul of issue dtolnay/async-trait#46. The
- * workaround is to make both parameters `tt` (token tree).
  */
-macro_rules! impl_HttpHandlerFunc_for_func_with_params {
-    ($(($i:tt, $T:tt)),*) => {
+#[impl_trait_for_tuples::impl_for_tuples(3)]
+#[tuple_types_not_self]
+#[async_trait]
+impl<FuncType, FutureType, ResponseType>
+    HttpHandlerFunc<for_tuples!( (#(Tuple),*) ), ResponseType> for FuncType
+where
+    FuncType: Fn(Arc<RequestContext>, for_tuples!( #(Tuple),* )) -> FutureType
+        + Send
+        + Sync
+        + 'static,
+    FutureType:
+        Future<Output = Result<ResponseType, HttpError>> + Send + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
+{
+    // Define the bounds for Tuple elements.
+    for_tuples!( where #( Tuple: Extractor + Send + Sync + 'static )* );
 
-    #[async_trait]
-    impl<FuncType, FutureType, ResponseType, $($T,)*>
-        HttpHandlerFunc<($($T,)*), ResponseType> for FuncType
-    where
-        FuncType: Fn(Arc<RequestContext>, $($T,)*)
-            -> FutureType + Send + Sync + 'static,
-        FutureType: Future<Output = Result<ResponseType, HttpError>>
-            + Send + 'static,
-        ResponseType: HttpResponse + Send + Sync + 'static,
-        $($T: Extractor + Send + Sync + 'static,)*
-    {
-        async fn handle_request(
-            &self,
-            rqctx: Arc<RequestContext>,
-            _param_tuple: ($($T,)*)
-        ) -> HttpHandlerResult
-        {
-            let response: ResponseType =
-                (self)(rqctx, $(_param_tuple.$i,)*).await?;
-            response.to_result()
-        }
+    async fn handle_request(
+        &self,
+        rqctx: Arc<RequestContext>,
+        _param_tuple: for_tuples!( (#(Tuple),*) ),
+    ) -> HttpHandlerResult {
+        (self)(rqctx, for_tuples!( #(_param_tuple.Tuple),* )).await?.to_result()
     }
-}}
-
-impl_HttpHandlerFunc_for_func_with_params!();
-impl_HttpHandlerFunc_for_func_with_params!((0, T0));
-impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2));
-impl_HttpHandlerFunc_for_func_with_params!((0, T1), (1, T2), (2, T3));
+}
 
 /**
  * `RouteHandler` abstracts an `HttpHandlerFunc<FuncParams, ResponseType>` in a

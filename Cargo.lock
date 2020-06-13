@@ -188,6 +188,7 @@ dependencies = [
  "hostname 0.3.1",
  "http",
  "hyper",
+ "impl-trait-for-tuples",
  "indexmap",
  "openapiv3",
  "schemars",
@@ -456,6 +457,15 @@ dependencies = [
  "matches",
  "unicode-bidi",
  "unicode-normalization",
+]
+
+[[package]]
+name = "impl-trait-for-tuples"
+version = "0.1.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
