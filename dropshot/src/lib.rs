@@ -63,7 +63,8 @@
  *         ConfigLogging::StderrTerminal {
  *             level: ConfigLoggingLevel::Info,
  *         }
- *         .to_logger("minimal-example")?;
+ *         .to_logger("minimal-example")
+ *         .map_err(|e| e.to_string())?;
  *
  *     // Describe the API.
  *     let mut api = ApiDescription::new();

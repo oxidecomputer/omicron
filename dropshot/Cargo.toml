@@ -30,3 +30,6 @@ uuid = { version = "0.8", features = [ "serde", "v4" ] }
 [dependencies.slog]
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dev-dependencies]
+libc = "0.2.71"

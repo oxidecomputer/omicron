@@ -625,9 +625,8 @@ pub fn log_file_for_test(test_name: &str) -> PathBuf {
 pub fn read_config<T: DeserializeOwned + Debug>(
     label: &str,
     contents: &str,
-) -> Result<T, String> {
-    let result: Result<T, String> =
-        toml::from_str(contents).map_err(|error| format!("{}", error));
+) -> Result<T, toml::de::Error> {
+    let result = toml::from_str(contents);
     eprintln!("config \"{}\": {:?}", label, result);
     result
 }
@@ -653,7 +652,7 @@ pub struct BunyanLogRecord {
 /**
  * Read a file containing a Bunyan-format log, returning an array of records.
  */
-pub fn read_bunyan_log(logpath: &str) -> Vec<BunyanLogRecord> {
+pub fn read_bunyan_log(logpath: &Path) -> Vec<BunyanLogRecord> {
     let log_contents = fs::read_to_string(logpath).unwrap();
     let log_records = log_contents
         .split("\n")

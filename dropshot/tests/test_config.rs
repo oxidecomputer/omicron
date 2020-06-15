@@ -19,7 +19,8 @@ fn test_config_bad_bind_address_port_too_small() {
         "bad_bind_address_port_too_small",
         "bind_address = \"127.0.0.1:-3\"",
     )
-    .unwrap_err();
+    .unwrap_err()
+    .to_string();
     assert!(
         error.starts_with("invalid IP address syntax for key `bind_address`")
     );
@@ -31,7 +32,8 @@ fn test_config_bad_bind_address_port_too_large() {
         "bad_bind_address_port_too_large",
         "bind_address = \"127.0.0.1:65536\"",
     )
-    .unwrap_err();
+    .unwrap_err()
+    .to_string();
     assert!(
         error.starts_with("invalid IP address syntax for key `bind_address`")
     );
@@ -43,7 +45,8 @@ fn test_config_bad_bind_address_garbage() {
         "bad_bind_address_garbage",
         "bind_address = \"garbage\"",
     )
-    .unwrap_err();
+    .unwrap_err()
+    .to_string();
     assert!(
         error.starts_with("invalid IP address syntax for key `bind_address`")
     );

@@ -10,7 +10,7 @@ use slog::Drain;
 use slog::Level;
 use slog::Logger;
 use std::fs::OpenOptions;
-use std::path::Path;
+use std::{io, path::Path};
 
 /**
  * Represents the logging configuration for a server.  This is expected to be a
@@ -77,7 +77,7 @@ impl ConfigLogging {
     pub fn to_logger<S: AsRef<str>>(
         &self,
         log_name: S,
-    ) -> Result<Logger, String> {
+    ) -> Result<Logger, io::Error> {
         match self {
             ConfigLogging::StderrTerminal {
                 level,
@@ -141,18 +141,12 @@ fn log_drain_for_file(
     open_options: &OpenOptions,
     path: &Path,
     log_name: String,
-) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, String> {
+) -> Result<slog::Fuse<slog_json::Json<std::fs::File>>, io::Error> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            let p = path.display();
-            format!("open log file \"{}\": {}", p, e)
-        })?;
+        std::fs::create_dir_all(parent)?;
     }
 
-    let file = open_options.open(path).map_err(|e| {
-        let p = path.display();
-        format!("open log file \"{}\": {}", p, e)
-    })?;
+    let file = open_options.open(path)?;
 
     /*
      * Record a message to the stderr so that a reader who doesn't already know
@@ -180,10 +174,11 @@ mod test {
     use crate::test_util::verify_bunyan_records_sequential;
     use crate::test_util::BunyanLogRecordSpec;
     use crate::ConfigLogging;
+    use libc;
     use slog::Logger;
     use std::fs;
     use std::path::Path;
-    use std::path::PathBuf;
+    use std::{io, path::PathBuf};
 
     /**
      * Generates a temporary filesystem path unique for the given label.
@@ -207,7 +202,7 @@ mod test {
     fn read_config_and_create_logger(
         label: &str,
         contents: &str,
-    ) -> Result<Logger, String> {
+    ) -> Result<Logger, io::Error> {
         let config = read_config::<ConfigLogging>(label, contents).unwrap();
         let result = config.to_logger("test-logger");
         if let Err(ref error) = result {
@@ -224,7 +219,8 @@ mod test {
     fn test_config_bad_log_mode() {
         let bad_config = r##" mode = "bonkers" "##;
         let error = read_config::<ConfigLogging>("bad_log_mode", bad_config)
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(error.starts_with(
             "unknown variant `bonkers`, expected `stderr-terminal` or `file` \
              for key `mode`"
@@ -243,7 +239,8 @@ mod test {
         let bad_config = r##" mode = "stderr-terminal" "##;
         assert_eq!(
             read_config::<ConfigLogging>("bad_terminal_no_level", bad_config)
-                .unwrap_err(),
+                .unwrap_err()
+                .to_string(),
             "missing field `level`"
         );
     }
@@ -256,7 +253,8 @@ mod test {
             "##;
         assert_eq!(
             read_config::<ConfigLogging>("bad_terminal_bad_level", bad_config)
-                .unwrap_err(),
+                .unwrap_err()
+                .to_string(),
             "unknown variant `everything`, expected one of `trace`, `debug`, \
              `info`, `warn`, `error`, `critical`"
         );
@@ -296,7 +294,8 @@ mod test {
             "##;
         let error =
             read_config::<ConfigLogging>("bad_file_no_file", bad_config)
-                .unwrap_err();
+                .unwrap_err()
+                .to_string();
         assert_eq!(error, "missing field `path`");
     }
 
@@ -308,7 +307,8 @@ mod test {
             "##;
         let error =
             read_config::<ConfigLogging>("bad_file_no_level", bad_config)
-                .unwrap_err();
+                .unwrap_err()
+                .to_string();
         assert_eq!(error, "missing field `level`");
     }
 
@@ -357,34 +357,32 @@ mod test {
 
         /**
          * Records that the caller intends to create a directory with relative
-         * path "path" underneath the root directory for this log test.  Returns
-         * a String representing the path to this directory.  This directory
-         * will be removed during teardown.  Directories and files must be
-         * recorded in the order they would be created so that the order can be
-         * reversed at teardown (without needing any kind of recursive removal).
+         * path "path" underneath the root directory for this log test. Returns
+         * the path to this directory. This directory will be removed during
+         * teardown. Directories and files must be recorded in the order they
+         * would be created so that the order can be reversed at teardown
+         * (without needing any kind of recursive removal).
          */
-        fn will_create_dir(&mut self, path: &str) -> String {
+        fn will_create_dir(&mut self, path: &str) -> PathBuf {
             let mut pathbuf = self.directory.clone();
             pathbuf.push(path);
-            let rv = pathbuf.as_path().display().to_string();
-            self.cleanup_list.push(LogTestCleanup::Directory(pathbuf));
-            rv
+            self.cleanup_list.push(LogTestCleanup::Directory(pathbuf.clone()));
+            pathbuf
         }
 
         /**
          * Records that the caller intends to create a file with relative path
-         * "path" underneath the root directory for this log test.  Returns a
-         * String representing the path to this file.  This file will be removed
-         * during teardown.  Directories and files must be recorded in the order
-         * they would be created so that the order can be reversed at teardown
-         * (without needing any kind of recursive removal).
+         * "path" underneath the root directory for this log test. Returns a
+         * the path to this file. This file will be removed during teardown.
+         * Directories and files must be recorded in the order they would be
+         * created so that the order can be reversed at teardown (without
+         * needing any kind of recursive removal).
          */
-        fn will_create_file(&mut self, path: &str) -> String {
+        fn will_create_file(&mut self, path: &str) -> PathBuf {
             let mut pathbuf = self.directory.clone();
             pathbuf.push(path);
-            let rv = pathbuf.as_path().display().to_string();
-            self.cleanup_list.push(LogTestCleanup::File(pathbuf));
-            rv
+            self.cleanup_list.push(LogTestCleanup::File(pathbuf.clone()));
+            pathbuf
         }
     }
 
@@ -413,14 +411,18 @@ mod test {
         let path = logtest.will_create_dir("log_file_as_dir");
         fs::create_dir(&path).unwrap();
 
+        // Windows paths need to have \ turned into \\
+        let escaped_path =
+            path.display().to_string().escape_default().to_string();
+
         let bad_config = format!(
-            "{}\"{}\"\n",
-            r##"
+            r#"
             mode = "file"
             level = "warn"
             if_exists = "append"
-            path = "##,
-            &path
+            path = "{}"
+            "#,
+            escaped_path
         );
 
         let error = read_config_and_create_logger(
@@ -428,11 +430,13 @@ mod test {
             &bad_config,
         )
         .unwrap_err();
-        let message = format!("{}", error);
-        assert!(message.starts_with(&format!(
-            "open log file \"{}\": Is a directory",
-            &path
-        )));
+
+        if cfg!(windows) {
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        } else {
+            assert_eq!(error.kind(), std::io::ErrorKind::Other);
+            assert_eq!(error.raw_os_error(), Some(libc::EISDIR));
+        }
     }
 
     #[test]
@@ -441,14 +445,18 @@ mod test {
         let logpath = logtest.will_create_file("log.out");
         fs::write(&logpath, "").expect("writing empty file");
 
+        // Windows paths need to have \ turned into \\
+        let escaped_path =
+            logpath.display().to_string().escape_default().to_string();
+
         let bad_config = format!(
-            "{}\"{}\"\n",
-            r##"
+            r#"
             mode = "file"
             level = "warn"
             if_exists = "fail"
-            path = "##,
-            &logpath
+            path = "{}"
+            "#,
+            escaped_path
         );
 
         let error = read_config_and_create_logger(
@@ -456,11 +464,8 @@ mod test {
             &bad_config,
         )
         .unwrap_err();
-        let message = format!("{}", error);
-        assert!(message.starts_with(&format!(
-            "open log file \"{}\": File exists",
-            &logpath
-        )));
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
     }
 
     /*
@@ -475,15 +480,19 @@ mod test {
         let logpath = logtest.will_create_file("log.out");
         let time_before = chrono::offset::Utc::now();
 
+        // Windows paths need to have \ turned into \\
+        let escaped_path =
+            logpath.display().to_string().escape_default().to_string();
+
         /* The first attempt should succeed.  The log file doesn't exist yet. */
         let config = format!(
-            "{}\"{}\"\n",
-            r##"
+            r#"
             mode = "file"
             level = "warn"
             if_exists = "fail"
-            path = "##,
-            &logpath
+            path = "{}"
+            "#,
+            escaped_path
         );
 
         {
@@ -499,13 +508,13 @@ mod test {
 
         /* Try again with if_exists = "append".  This should also work. */
         let config = format!(
-            "{}\"{}\"\n",
-            r##"
+            r#"
             mode = "file"
             level = "warn"
             if_exists = "append"
-            path = "##,
-            &logpath
+            path = "{}"
+            "#,
+            escaped_path
         );
 
         {
@@ -541,13 +550,13 @@ mod test {
         let time_before = time_after;
         let time_after = chrono::offset::Utc::now();
         let config = format!(
-            "{}\"{}\"\n",
-            r##"
+            r#"
             mode = "file"
             level = "trace"
             if_exists = "truncate"
-            path = "##,
-            &logpath
+            path = "{}"
+            "#,
+            escaped_path
         );
 
         {
