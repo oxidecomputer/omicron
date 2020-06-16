@@ -277,7 +277,7 @@ impl ApiDescription {
                             }),
                         ),
                         example: None,
-                        examples: indexmap::map::IndexMap::new(),
+                        examples: indexmap::IndexMap::new(),
                     };
                     match location {
                         ApiEndpointParameterLocation::Query => {
@@ -316,7 +316,7 @@ impl ApiDescription {
                         j2oas_schema(&js)
                     });
 
-                    let mut content = indexmap::map::IndexMap::new();
+                    let mut content = indexmap::IndexMap::new();
                     content.insert(
                         CONTENT_TYPE_JSON.to_string(),
                         openapiv3::MediaType {
@@ -337,15 +337,15 @@ impl ApiDescription {
 
             if let Some(schema) = &endpoint.response.schema {
                 let js = schema.0(&mut generator);
-                let mut content = indexmap::map::IndexMap::new();
+                let mut content = indexmap::IndexMap::new();
                 if !is_null(&js) {
                     content.insert(
                         CONTENT_TYPE_JSON.to_string(),
                         openapiv3::MediaType {
                             schema: Some(j2oas_schema(&js)),
                             example: None,
-                            examples: indexmap::map::IndexMap::new(),
-                            encoding: indexmap::map::IndexMap::new(),
+                            examples: indexmap::IndexMap::new(),
+                            encoding: indexmap::IndexMap::new(),
                         },
                     );
                 }

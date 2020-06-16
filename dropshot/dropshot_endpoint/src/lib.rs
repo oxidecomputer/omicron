@@ -72,7 +72,6 @@ fn do_endpoint(
 
     let name = &ast.sig.ident;
     let name_str = name.to_string();
-    let name_quoted = format!("{}", name);
     let method_ident = format_ident!("{}", method);
 
     let description_text_provided = extract_doc_from_attrs(&ast.attrs);
@@ -111,7 +110,7 @@ fn do_endpoint(
 
                 #[allow(unused_mut)]
                 let mut endpoint = #dropshot::ApiEndpoint::new(
-                    #name_quoted.to_string(),
+                    #name_str.to_string(),
                     #name,
                     #dropshot::Method::#method_ident,
                     #path,
