@@ -961,7 +961,7 @@ impl ApiObject for ApiSled {
 }
 
 /**
- * Client view of an [`ApiServer`]
+ * Client view of an [`ApiSled`]
  */
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
