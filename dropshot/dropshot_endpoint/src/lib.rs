@@ -11,10 +11,9 @@ use quote::ToTokens;
 use serde::Deserialize;
 use serde_derive_internals::ast::Container;
 use serde_derive_internals::{Ctxt, Derive};
-use syn::{parse_macro_input, DeriveInput, ItemFn};
-
 use serde_tokenstream::from_tokenstream;
 use serde_tokenstream::Error;
+use syn::{parse_macro_input, DeriveInput, ItemFn};
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
@@ -111,6 +110,7 @@ fn do_endpoint(
 
                 #[allow(unused_mut)]
                 let mut endpoint = #dropshot::ApiEndpoint::new(
+                    #name_str.to_string(),
                     #name,
                     #dropshot::Method::#method_ident,
                     #path,
@@ -193,7 +193,7 @@ fn do_derive_parameter(
         impl #impl_generics #dropshot::ExtractedParameter for #name #ty_generics
         #where_clause
         {
-            fn generate(
+            fn metadata(
                 _in: #dropshot::ApiEndpointParameterLocation,
             ) -> Vec<#dropshot::ApiEndpointParameter>
             {
@@ -316,6 +316,7 @@ mod tests {
                     #[allow(unused_mut)]
                     let mut endpoint =
                         dropshot::ApiEndpoint::new(
+                            "handler_xyz".to_string(),
                             handler_xyz,
                             dropshot::Method::GET,
                             "/a/b/c",
@@ -356,6 +357,7 @@ mod tests {
                     #[allow(unused_mut)]
                     let mut endpoint =
                         dropshot::ApiEndpoint::new(
+                            "handler_xyz".to_string(),
                             handler_xyz,
                             dropshot::Method::GET,
                             "/a/b/c",
@@ -440,7 +442,7 @@ mod tests {
 
         let expected = quote! {
             impl dropshot::ExtractedParameter for Foo {
-                fn generate(
+                fn metadata(
                     _in: dropshot::ApiEndpointParameterLocation,
                 ) -> Vec<dropshot::ApiEndpointParameter> {
                     vec![

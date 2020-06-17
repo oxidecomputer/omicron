@@ -375,7 +375,7 @@ pub async fn to_view_list<T: ApiObject>(
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -447,7 +447,7 @@ impl ApiObject for ApiProject {
  * Client view of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -628,7 +628,7 @@ pub struct ApiInstanceRuntimeStateRequested {
  * Client view of an [`ApiInstanceRuntimeState`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateView {
     pub run_state: ApiInstanceState,
     pub time_run_state_updated: DateTime<Utc>,
@@ -648,7 +648,7 @@ impl ApiObject for ApiInstanceRuntimeState {
  * Client view of an [`ApiInstance`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -727,7 +727,7 @@ pub struct ApiDisk {
  * Client view of an [`ApiDisk`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
@@ -933,7 +933,7 @@ impl ApiObject for ApiRack {
  * Client view of an [`ApiRack`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiRackView {
     pub id: Uuid,
 }
@@ -964,7 +964,7 @@ impl ApiObject for ApiSled {
  * Client view of an [`ApiSled`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiSledView {
     pub id: Uuid,
     pub service_address: SocketAddr,

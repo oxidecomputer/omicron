@@ -29,7 +29,7 @@
  * here, like extractors for backend server state, headers, and so on; allowing
  * for server and request parameters to be omitted; and so on; but those other
  * facilities don't seem that valuable right now since they largely don't affect
- * the OpenAPI spec.
+ * OpenAPI document generation.
  */
 
 use super::error::HttpError;
@@ -41,6 +41,7 @@ use super::server::DropshotState;
 use crate::api_description::ApiEndpointParameter;
 use crate::api_description::ApiEndpointParameterLocation;
 use crate::api_description::ApiEndpointParameterName;
+use crate::api_description::ApiEndpointResponse;
 use crate::api_description::ApiSchemaGenerator;
 
 use async_trait::async_trait;
@@ -97,10 +98,11 @@ pub struct RequestContext {
  * `RequestContext`.  Unlike most traits, `Extractor` essentially defines only a
  * constructor function, not instance functions.
  *
- * The extractors that we provide (e.g., `Query`, `Json`) implement `Extractor` in
- * order to construct themselves from the request.  For example, `Extractor` is
- * implemented for `Query<Q>` with a function that reads the query string from
- * the request, parses it, and constructs a `Query<Q>` with it.
+ * The extractors that we provide (`Query`, `Path`, `Json`) implement
+ * `Extractor` in order to construct themselves from the request. For example,
+ * `Extractor` is implemented for `Query<Q>` with a function that reads the
+ * query string from the request, parses it, and constructs a `Query<Q>` with
+ * it.
  *
  * We also define implementations of `Extractor` for tuples of types that
  * themselves implement `Extractor`.  See the implementation of
@@ -115,14 +117,15 @@ pub trait Extractor: Send + Sync + Sized {
         rqctx: Arc<RequestContext>,
     ) -> Result<Self, HttpError>;
 
-    fn generate() -> Vec<ApiEndpointParameter>;
+    fn metadata() -> Vec<ApiEndpointParameter>;
 }
 
 /**
  * `impl_derived_for_tuple!` defines implementations of `Extractor` for tuples
  * whose elements themselves implement `Extractor`.
  */
-macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
+macro_rules! impl_extractor_for_tuple {
+    ($( $T:ident),*) => {
     #[async_trait]
     impl< $($T: Extractor + 'static,)* > Extractor for ($($T,)*)
     {
@@ -132,22 +135,22 @@ macro_rules! impl_derived_for_tuple ({ $( $T:ident),*} => {
             Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
         }
 
-        fn generate() -> Vec<ApiEndpointParameter> {
+        fn metadata() -> Vec<ApiEndpointParameter> {
             #[allow(unused_mut)]
             let mut v = vec![];
-            $( v.append(&mut $T::generate()); )*
+            $( v.append(&mut $T::metadata()); )*
             v
         }
     }
-});
+}}
 
-impl_derived_for_tuple!();
-impl_derived_for_tuple!(T1);
-impl_derived_for_tuple!(T1, T2);
-impl_derived_for_tuple!(T1, T2, T3);
+impl_extractor_for_tuple!();
+impl_extractor_for_tuple!(T1);
+impl_extractor_for_tuple!(T1, T2);
+impl_extractor_for_tuple!(T1, T2, T3);
 
 pub trait ExtractedParameter: DeserializeOwned {
-    fn generate(inn: ApiEndpointParameterLocation)
+    fn metadata(inn: ApiEndpointParameterLocation)
         -> Vec<ApiEndpointParameter>;
 }
 
@@ -173,7 +176,7 @@ pub trait HttpHandlerFunc<FuncParams, ResponseType>:
     Send + Sync + 'static
 where
     FuncParams: Extractor,
-    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
 {
     async fn handle_request(
         &self,
@@ -212,8 +215,7 @@ where
  * 3. Converts the return type of the underlying function into the uniform
  *    return type expected by callers of `handle_request()`.  This, too, is
  *    easier than it sounds because we require that the return value implement
- *    `Into<HttpResponseWrap>` and we have a converter from that into the final
- *    return type.
+ *    `HttpResponse`.
  *
  * As mentioned above, we're implementing the trait `HttpHandlerFunc` on _any_
  * type `FuncType` that matches the trait bounds below.  In particular, it must
@@ -227,10 +229,11 @@ where
  * functions to return a variety of different return types that are ultimately
  * converted into `Result<Response<Body>, HttpError>`.  To do that, the trait
  * bounds below say that the function must produce a `Result<ResponseType,
- * HttpError>` where `ResponseType` is a type that implements
- * `Into<HttpResponseWrap>`.  In turn, `Into<Result<Response<Body>, HttpError>`
- * is implemented for `HttpResponseWrap`.  This probably all sounds more
- * complicated than it needs to be.  It looks like this:
+ * HttpError>` where `ResponseType` is a type that implements `HttpResponse`.
+ * We provide a few implementations of the trait `HttpTypedResponse` that
+ * includes a HTTP status code and structured output. In addition we allow for
+ * functions to hand-craft a `Response<Body>`. For both we implement
+ * `HttpResponse` (trivially in the latter case).
  *
  *      1. Handler function
  *            |
@@ -238,77 +241,34 @@ where
  *            v
  *      2. Result<ResponseType, HttpError>
  *            |
+ *            | This may fail with an HttpError which we return immediately.
  *            | On success, this will be Ok(ResponseType) for some specific
- *            | ResponseType that provides Into<HttpResponseWrap>.  It
- *            | likely provides this by providing
- *            | Into<Result<Response<Body>, HttpError>.  We'll end up
+ *            | ResponseType that implements HttpResponse.  We'll end up
  *            | invoking:
  *            v
- *      3. ResponseType::into<Result<Response<Body>, HttpError>>()
+ *      3. ResponseType::to_result()
  *            |
  *            | This is a type-specific conversion from `ResponseType` into
  *            | `Response<Body>` that's allowed to fail with an `HttpError`.
  *            v
  *      4. Result<Response<Body>, HttpError>
- *            |
- *            | Now, for reasons explained below, we'll wind up invoking:
- *            v
- *      5. HttpResponseWrap::from<Result<Response<Body>, HttpError>>
- *            |
- *            | As the name implies, `HttpResponseWrap` just wraps the object
- *            | it's given, producing:
- *            v
- *      6. HttpResponseWrap
- *            |
- *            | Finally, we perform a conversion:
- *            v
- *      7. HttpResponseWrap::into<Result<Response<Body>, HttpError>>
- *            |
- *            | giving us what we really wanted:
- *            v
- *      8. Result<Response<Body>, HttpError>
  *
- * A fair observation might be: we already had what we wanted at step 4.  Why
- * have `HttpResponseWrap` and the extra conversions at all?  To skip that, we
- * might like to have the handler function's return type be something like
- * `Result<ResponseType, HttpError>` with `ResponseType: Into<Response<Body>>`.
- * The problem with this: the conversion from `ResponseType` to `Response<Body>`
- * is allowed to fail (with an `HttpError`, primarily because
- * `serde_json::to_string()` is allowed to fail).  Okay, so let's make it return
- * `Result<ResponseType, HttpError>` with `ResponseType:
- * Into<Result<Response<Body>>, HttpError>`.  Note that we'd have an extra level
- * of `Result` here, but that's okay.  Now comes the real problem: that means
- * we'd have to define a conversion from `Response<Body>` (an important
- * `ResponseType` to `Result<Response<Body>, HttpError>`.  That's trivial, of
- * course, but we're not allowed to do that because both `Response` and `Result`
- * are foreign to this crate.  So instead, we define conversions to our
- * intermediate type `HttpResponseWrap` and trust that the compiler optimizes
- * most of these steps away anyway.  (Another approach might be to define a
- * different implementation of `HttpHandlerFunc` for the special case of
- * functions that return `Response<Body>` and drop `ResponseType` altogether in
- * that implementation.  However, that implementation would conflict with the
- * more generic one because our two implementations would differ only in their
- * type bounds, which are not considered when determining conflicts.
+ * Note that the handler function may fail due to an internal error *or* the
+ * conversion to JSON may successively fail in the call to
+ * `serde_json::to_string()`.
  *
- * Another way to think about it is that if you just follow the trait bounds,
- * you would go straight from step 2 to step 6 via a conversion from
- * `ResponseType` into `HttpResponseWrap`.  That doesn't look so silly.  It's
- * just that in order to avoid `ResponseType` implementors having to know about
- * our extra type, we allow them to instead define conversions to
- * `Result<Response<Body>, HttpError>` and we provide our own converter from
- * that to `HttpResponseWrap` (which ends up looking silly, as shown above).
+ * The `HttpResponse` trait lets us handle both generic responses via
+ * `Response<Body>` as well as more structured responses via structures
+ * implementing `HttpResponse<Body = Type>`. The latter gives us a typed
+ * structure as well as response code that we use to generate rich OpenAPI
+ * content.
  *
  * Note: the macro parameters really ought to be `$i:literal` and `$T:ident`,
  * however that causes us to run afoul of issue dtolnay/async-trait#46. The
  * workaround is to make both parameters `tt` (token tree).
- *
- * TODO-cleanup: could this all be a lot simpler if we made callers that want to
- * use `Response<Body>` wrap it in our own type?  That'd be nice anyway because
- * we want that to be the uncommon case.  We could even generate a warning that
- * has to be gagged or something.
  */
 macro_rules! impl_HttpHandlerFunc_for_func_with_params {
-    ( $(($i:tt, $T:tt)),*) => {
+    ($(($i:tt, $T:tt)),*) => {
 
     #[async_trait]
     impl<FuncType, FutureType, ResponseType, $($T,)*>
@@ -318,7 +278,7 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params {
             -> FutureType + Send + Sync + 'static,
         FutureType: Future<Output = Result<ResponseType, HttpError>>
             + Send + 'static,
-        ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+        ResponseType: HttpResponse + Send + Sync + 'static,
         $($T: Extractor + Send + Sync + 'static,)*
     {
         async fn handle_request(
@@ -329,8 +289,7 @@ macro_rules! impl_HttpHandlerFunc_for_func_with_params {
         {
             let response: ResponseType =
                 (self)(rqctx, $(_param_tuple.$i,)*).await?;
-            let response_as_wrap: HttpResponseWrap = response.into();
-            response_as_wrap.into()
+            response.to_result()
         }
     }
 }}
@@ -376,7 +335,7 @@ pub struct HttpRouteHandler<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Extractor,
-    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
 {
     /** the actual HttpHandlerFunc used to implement this route */
     handler: HandlerType,
@@ -400,7 +359,7 @@ impl<HandlerType, FuncParams, ResponseType> Debug
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Extractor,
-    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "handler: {}", self.label)
@@ -413,7 +372,7 @@ impl<HandlerType, FuncParams, ResponseType> RouteHandler
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Extractor + 'static,
-    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
 {
     fn label(&self) -> &str {
         &self.label
@@ -457,7 +416,7 @@ impl<HandlerType, FuncParams, ResponseType>
 where
     HandlerType: HttpHandlerFunc<FuncParams, ResponseType>,
     FuncParams: Extractor + 'static,
-    ResponseType: Into<HttpResponseWrap> + Send + Sync + 'static,
+    ResponseType: HttpResponse + Send + Sync + 'static,
 {
     /**
      * Given a function matching one of the supported API handler function
@@ -557,8 +516,8 @@ where
         http_request_load_query(&request)
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
-        QueryType::generate(ApiEndpointParameterLocation::Query)
+    fn metadata() -> Vec<ApiEndpointParameter> {
+        QueryType::metadata(ApiEndpointParameterLocation::Query)
     }
 }
 
@@ -604,8 +563,8 @@ where
         })
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
-        PathType::generate(ApiEndpointParameterLocation::Path)
+    fn metadata() -> Vec<ApiEndpointParameter> {
+        PathType::metadata(ApiEndpointParameterLocation::Path)
     }
 }
 
@@ -681,7 +640,7 @@ where
         http_request_load_json_body(rqctx).await
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
+    fn metadata() -> Vec<ApiEndpointParameter> {
         vec![ApiEndpointParameter {
             name: ApiEndpointParameterName::Body,
             description: None,
@@ -700,82 +659,90 @@ where
  */
 
 /**
- * HttpResponseWrap just wraps a `Result<Response<Body>, HttpError>`.  It should
- * not be outside the module in which it's defined, but it must be made public
- * because it's part of trait bounds.
+ * HttpResponse must produce a `Result<Response<Body>, HttpError>` and generate
+ * the response metadata.  Typically one should use `Response<Body>` or an
+ * implementation of `HttpTypedResponse`.
  */
-pub struct HttpResponseWrap {
-    wrapped: HttpHandlerResult,
+pub trait HttpResponse {
+    /**
+     * Generate the response to the HTTP call.
+     */
+    fn to_result(self) -> HttpHandlerResult;
+
+    /**
+     * Extract status code and structure metadata for the non-error response.
+     * Type information for errors is handled generically across all endpoints.
+     */
+    fn metadata() -> ApiEndpointResponse;
 }
 
-impl HttpResponseWrap {
-    fn new(result: HttpHandlerResult) -> HttpResponseWrap {
-        HttpResponseWrap {
-            wrapped: result,
+/**
+ * `Response<Body>` is used for free-form responses. The implementation of
+ * `to_result()` is trivial, and we don't have any typed metadata to return.
+ */
+impl HttpResponse for Response<Body> {
+    fn to_result(self) -> HttpHandlerResult {
+        Ok(self)
+    }
+    fn metadata() -> ApiEndpointResponse {
+        ApiEndpointResponse {
+            schema: None,
+            success: None,
         }
-    }
-}
-
-/**
- * This conversion is necessary for the last stage of the return type
- * conversion: ultimately, we need to provide this Result type.
- */
-impl From<HttpResponseWrap> for HttpHandlerResult {
-    fn from(wrap: HttpResponseWrap) -> HttpHandlerResult {
-        wrap.wrapped
-    }
-}
-
-/**
- * This conversion is necessary because it's clearer to let custom response
- * types implement conversions to this Result type rather than
- * `HttpResponseWrap`, but that means we have to do this conversion ourselves.
- */
-impl From<HttpHandlerResult> for HttpResponseWrap {
-    fn from(result: HttpHandlerResult) -> HttpResponseWrap {
-        HttpResponseWrap::new(result)
-    }
-}
-
-/**
- * This conversion is necessary for handler functions that return
- * `HttpHandlerResult` because the `Respose<Body>` itself needs
- * to be convertible into `HttpResponseWrap.
- */
-impl From<Response<Body>> for HttpResponseWrap {
-    fn from(response: Response<Body>) -> HttpResponseWrap {
-        HttpResponseWrap::new(Ok(response))
-    }
-}
-
-/**
- * This conversion is necessary for handler functions that return any of our
- * specific types that implement `HttpResponse`.
- */
-impl<T: HttpResponse> From<T> for HttpResponseWrap {
-    fn from(t: T) -> HttpResponseWrap {
-        HttpResponseWrap::new(t.into())
     }
 }
 
 /*
  * Specific Response Types
  *
- * The `HttpResponse` trait and the concrete types below are provided so that
- * handler functions can return types that indicate at compile time the kind of
- * HTTP response body they produce.
+ * The `HttpTypedResponse` trait and the concrete types below are provided so
+ * that handler functions can return types that indicate at compile time the
+ * kind of HTTP response body they produce.
  */
 
 /**
- * The `HttpResponse` trait is used for all of the specific response types that
- * we provide.  It doesn't provide any functionality on its own but is useful
- * for marking these related types.
+ * The `HttpTypedResponse` trait is used for all of the specific response types
+ * that we provide. We use it in particular to encode the success status code
+ * and the type information of the return value.
  */
-pub trait HttpResponse:
+pub trait HttpTypedResponse:
     Into<HttpHandlerResult> + Send + Sync + 'static
 {
+    type Body: JsonSchema + Serialize;
+    const STATUS_CODE: StatusCode;
+
+    /**
+     * Convenience method to produce a response based on the input
+     * `body_object` (whose specific type is defined by the implementing type)
+     * and the STATUS_CODE specified by the implementing type. This is a default
+     * trait method to allow callers to avoid redundant type specification.
+     */
+    fn for_object(&self, body_object: &Self::Body) -> HttpHandlerResult {
+        let serialized = serde_json::to_string(&body_object)?;
+        Ok(Response::builder()
+            .status(Self::STATUS_CODE)
+            .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
+            .body(serialized.into())?)
+    }
 }
 
+/**
+ * Provide results and metadata generation for all implementing types.
+ */
+impl<T> HttpResponse for T
+where
+    T: HttpTypedResponse,
+{
+    fn to_result(self) -> HttpHandlerResult {
+        self.into()
+    }
+    fn metadata() -> ApiEndpointResponse {
+        ApiEndpointResponse {
+            schema: Some(ApiSchemaGenerator(T::Body::json_schema)),
+            success: Some(T::STATUS_CODE),
+        }
+    }
+}
 /**
  * `HttpResponseCreated<T: Serialize>` wraps an object of any serializable type.
  * It denotes an HTTP 201 "Created" response whose body is generated by
@@ -787,18 +754,18 @@ pub trait HttpResponse:
  * field having type T::View).
  */
 pub struct HttpResponseCreated<T: Serialize + Send + Sync + 'static>(pub T);
-impl<T: Serialize + Send + Sync + 'static> HttpResponse
+impl<T: JsonSchema + Serialize + Send + Sync + 'static> HttpTypedResponse
     for HttpResponseCreated<T>
 {
+    type Body = T;
+    const STATUS_CODE: StatusCode = StatusCode::CREATED;
 }
-impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
-    for HttpHandlerResult
+impl<T: JsonSchema + Serialize + Send + Sync + 'static>
+    From<HttpResponseCreated<T>> for HttpHandlerResult
 {
-    fn from(
-        HttpResponseCreated(body_object): HttpResponseCreated<T>,
-    ) -> HttpHandlerResult {
+    fn from(response: HttpResponseCreated<T>) -> HttpHandlerResult {
         /* TODO-correctness (or polish?): add Location header */
-        response_for_object(body_object, StatusCode::CREATED)
+        response.for_object(&response.0)
     }
 }
 
@@ -808,17 +775,17 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseCreated<T>>
  * generated by serializing the object.
  */
 pub struct HttpResponseAccepted<T: Serialize + Send + Sync + 'static>(pub T);
-impl<T: Serialize + Send + Sync + 'static> HttpResponse
+impl<T: JsonSchema + Serialize + Send + Sync + 'static> HttpTypedResponse
     for HttpResponseAccepted<T>
 {
+    type Body = T;
+    const STATUS_CODE: StatusCode = StatusCode::ACCEPTED;
 }
-impl<T: Serialize + Send + Sync + 'static> From<HttpResponseAccepted<T>>
-    for HttpHandlerResult
+impl<T: JsonSchema + Serialize + Send + Sync + 'static>
+    From<HttpResponseAccepted<T>> for HttpHandlerResult
 {
-    fn from(
-        HttpResponseAccepted(body_object): HttpResponseAccepted<T>,
-    ) -> HttpHandlerResult {
-        response_for_object(body_object, StatusCode::ACCEPTED)
+    fn from(response: HttpResponseAccepted<T>) -> HttpHandlerResult {
+        response.for_object(&response.0)
     }
 }
 
@@ -828,17 +795,17 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseAccepted<T>>
  * serializing the object.
  */
 pub struct HttpResponseOkObject<T: Serialize + Send + Sync + 'static>(pub T);
-impl<T: Serialize + Send + Sync + 'static> HttpResponse
+impl<T: JsonSchema + Serialize + Send + Sync + 'static> HttpTypedResponse
     for HttpResponseOkObject<T>
 {
+    type Body = T;
+    const STATUS_CODE: StatusCode = StatusCode::OK;
 }
-impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
-    for HttpHandlerResult
+impl<T: JsonSchema + Serialize + Send + Sync + 'static>
+    From<HttpResponseOkObject<T>> for HttpHandlerResult
 {
-    fn from(
-        HttpResponseOkObject(body_object): HttpResponseOkObject<T>,
-    ) -> HttpHandlerResult {
-        response_for_object(body_object, StatusCode::OK)
+    fn from(response: HttpResponseOkObject<T>) -> HttpHandlerResult {
+        response.for_object(&response.0)
     }
 }
 
@@ -853,12 +820,14 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObject<T>>
 pub struct HttpResponseOkObjectList<T: Serialize + Send + Sync + 'static>(
     pub Vec<T>,
 );
-impl<T: Serialize + Send + Sync + 'static> HttpResponse
+impl<T: JsonSchema + Serialize + Send + Sync + 'static> HttpTypedResponse
     for HttpResponseOkObjectList<T>
 {
+    type Body = T;
+    const STATUS_CODE: StatusCode = StatusCode::OK;
 }
-impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
-    for HttpHandlerResult
+impl<T: JsonSchema + Serialize + Send + Sync + 'static>
+    From<HttpResponseOkObjectList<T>> for HttpHandlerResult
 {
     fn from(list_wrap: HttpResponseOkObjectList<T>) -> HttpHandlerResult {
         let list = list_wrap.0;
@@ -870,7 +839,7 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
         }
 
         Ok(Response::builder()
-            .status(StatusCode::OK)
+            .status(HttpResponseOkObjectList::<T>::STATUS_CODE)
             .header(http::header::CONTENT_TYPE, CONTENT_TYPE_NDJSON)
             .body(bytebuf.freeze().into())?)
     }
@@ -881,11 +850,15 @@ impl<T: Serialize + Send + Sync + 'static> From<HttpResponseOkObjectList<T>>
  * for use when an API operation has successfully deleted an object.
  */
 pub struct HttpResponseDeleted();
-impl HttpResponse for HttpResponseDeleted {}
+
+impl HttpTypedResponse for HttpResponseDeleted {
+    type Body = ();
+    const STATUS_CODE: StatusCode = StatusCode::NO_CONTENT;
+}
 impl From<HttpResponseDeleted> for HttpHandlerResult {
     fn from(_: HttpResponseDeleted) -> HttpHandlerResult {
         Ok(Response::builder()
-            .status(StatusCode::NO_CONTENT)
+            .status(HttpResponseDeleted::STATUS_CODE)
             .body(Body::empty())?)
     }
 }
@@ -896,24 +869,16 @@ impl From<HttpResponseDeleted> for HttpHandlerResult {
  * has nothing to return.
  */
 pub struct HttpResponseUpdatedNoContent();
-impl HttpResponse for HttpResponseUpdatedNoContent {}
+impl HttpTypedResponse for HttpResponseUpdatedNoContent {
+    type Body = ();
+    const STATUS_CODE: StatusCode = StatusCode::NO_CONTENT;
+}
 impl From<HttpResponseUpdatedNoContent> for HttpHandlerResult {
     fn from(_: HttpResponseUpdatedNoContent) -> HttpHandlerResult {
         Ok(Response::builder()
-            .status(StatusCode::NO_CONTENT)
+            .status(HttpResponseUpdatedNoContent::STATUS_CODE)
             .body(Body::empty())?)
     }
-}
-
-fn response_for_object<T: Serialize>(
-    body_object: T,
-    status_code: StatusCode,
-) -> HttpHandlerResult {
-    let serialized = serde_json::to_string(&body_object)?;
-    Ok(Response::builder()
-        .status(status_code)
-        .header(http::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
-        .body(serialized.into())?)
 }
 
 /**
