@@ -28,7 +28,17 @@ use uuid::Uuid;
  * to stdout.
  */
 pub fn controller_run_openapi_external() {
-    controller_external_api().print_openapi();
+    controller_external_api().print_openapi(
+        &"Oxide Region API",
+        Some(&"API for interacting with the Oxide control plane"),
+        None,
+        None,
+        Some(&"https://oxide.computer"),
+        Some(&"api@oxide.computer"),
+        None,
+        None,
+        &"0.0.1",
+    );
 }
 
 /**

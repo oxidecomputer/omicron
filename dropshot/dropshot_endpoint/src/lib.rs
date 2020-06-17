@@ -193,7 +193,7 @@ fn do_derive_parameter(
         impl #impl_generics #dropshot::ExtractedParameter for #name #ty_generics
         #where_clause
         {
-            fn generate(
+            fn metadata(
                 _in: #dropshot::ApiEndpointParameterLocation,
             ) -> Vec<#dropshot::ApiEndpointParameter>
             {
@@ -442,7 +442,7 @@ mod tests {
 
         let expected = quote! {
             impl dropshot::ExtractedParameter for Foo {
-                fn generate(
+                fn metadata(
                     _in: dropshot::ApiEndpointParameterLocation,
                 ) -> Vec<dropshot::ApiEndpointParameter> {
                     vec![

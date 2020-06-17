@@ -117,14 +117,14 @@ pub trait Extractor: Send + Sync + Sized {
         rqctx: Arc<RequestContext>,
     ) -> Result<Self, HttpError>;
 
-    fn generate() -> Vec<ApiEndpointParameter>;
+    fn metadata() -> Vec<ApiEndpointParameter>;
 }
 
 /**
  * `impl_derived_for_tuple!` defines implementations of `Extractor` for tuples
  * whose elements themselves implement `Extractor`.
  */
-macro_rules! impl_derived_for_tuple {
+macro_rules! impl_extractor_for_tuple {
     ($( $T:ident),*) => {
     #[async_trait]
     impl< $($T: Extractor + 'static,)* > Extractor for ($($T,)*)
@@ -135,22 +135,22 @@ macro_rules! impl_derived_for_tuple {
             Ok( ($($T::from_request(Arc::clone(&_rqctx)).await?,)* ) )
         }
 
-        fn generate() -> Vec<ApiEndpointParameter> {
+        fn metadata() -> Vec<ApiEndpointParameter> {
             #[allow(unused_mut)]
             let mut v = vec![];
-            $( v.append(&mut $T::generate()); )*
+            $( v.append(&mut $T::metadata()); )*
             v
         }
     }
 }}
 
-impl_derived_for_tuple!();
-impl_derived_for_tuple!(T1);
-impl_derived_for_tuple!(T1, T2);
-impl_derived_for_tuple!(T1, T2, T3);
+impl_extractor_for_tuple!();
+impl_extractor_for_tuple!(T1);
+impl_extractor_for_tuple!(T1, T2);
+impl_extractor_for_tuple!(T1, T2, T3);
 
 pub trait ExtractedParameter: DeserializeOwned {
-    fn generate(inn: ApiEndpointParameterLocation)
+    fn metadata(inn: ApiEndpointParameterLocation)
         -> Vec<ApiEndpointParameter>;
 }
 
@@ -215,8 +215,7 @@ where
  * 3. Converts the return type of the underlying function into the uniform
  *    return type expected by callers of `handle_request()`.  This, too, is
  *    easier than it sounds because we require that the return value implement
- *    `Into<HttpResponseWrap>` and we have a converter from that into the final
- *    return type.
+ *    `HttpResponse`.
  *
  * As mentioned above, we're implementing the trait `HttpHandlerFunc` on _any_
  * type `FuncType` that matches the trait bounds below.  In particular, it must
@@ -253,8 +252,6 @@ where
  *            | `Response<Body>` that's allowed to fail with an `HttpError`.
  *            v
  *      4. Result<Response<Body>, HttpError>
- *
- * TODO: work on the text below
  *
  * Note that the handler function may fail due to an internal error *or* the
  * conversion to JSON may successively fail in the call to
@@ -519,8 +516,8 @@ where
         http_request_load_query(&request)
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
-        QueryType::generate(ApiEndpointParameterLocation::Query)
+    fn metadata() -> Vec<ApiEndpointParameter> {
+        QueryType::metadata(ApiEndpointParameterLocation::Query)
     }
 }
 
@@ -566,8 +563,8 @@ where
         })
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
-        PathType::generate(ApiEndpointParameterLocation::Path)
+    fn metadata() -> Vec<ApiEndpointParameter> {
+        PathType::metadata(ApiEndpointParameterLocation::Path)
     }
 }
 
@@ -643,7 +640,7 @@ where
         http_request_load_json_body(rqctx).await
     }
 
-    fn generate() -> Vec<ApiEndpointParameter> {
+    fn metadata() -> Vec<ApiEndpointParameter> {
         vec![ApiEndpointParameter {
             name: ApiEndpointParameterName::Body,
             description: None,
@@ -663,20 +660,31 @@ where
 
 /**
  * HttpResponse must produce a `Result<Response<Body>, HttpError>` and generate
- * the response metadata. It should not be outside the module in which it's
- * defined, but it must be made public because it's part of trait bounds.
+ * the response metadata.  Typically one should use `Response<Body>` or an
+ * implementation of `HttpTypedResponse`.
  */
 pub trait HttpResponse {
+    /**
+     * Generate the response to the HTTP call.
+     */
     fn to_result(self) -> HttpHandlerResult;
 
-    fn generate() -> ApiEndpointResponse;
+    /**
+     * Extract status code and structure metadata for the non-error response.
+     * Type information for errors is handled generically across all endpoints.
+     */
+    fn metadata() -> ApiEndpointResponse;
 }
 
+/**
+ * `Response<Body>` is used for free-form responses. The implementation of
+ * `to_result()` is trivial, and we don't have any typed metadata to return.
+ */
 impl HttpResponse for Response<Body> {
     fn to_result(self) -> HttpHandlerResult {
         Ok(self)
     }
-    fn generate() -> ApiEndpointResponse {
+    fn metadata() -> ApiEndpointResponse {
         ApiEndpointResponse {
             schema: None,
             success: None,
@@ -694,8 +702,8 @@ impl HttpResponse for Response<Body> {
 
 /**
  * The `HttpTypedResponse` trait is used for all of the specific response types
- * that we provide. It doesn't provide any functionality on its own but is
- * useful for marking these related types.
+ * that we provide. We use it in particular to encode the success status code
+ * and the type information of the return value.
  */
 pub trait HttpTypedResponse:
     Into<HttpHandlerResult> + Send + Sync + 'static
@@ -728,7 +736,7 @@ where
     fn to_result(self) -> HttpHandlerResult {
         self.into()
     }
-    fn generate() -> ApiEndpointResponse {
+    fn metadata() -> ApiEndpointResponse {
         ApiEndpointResponse {
             schema: Some(ApiSchemaGenerator(T::Body::json_schema)),
             success: Some(T::STATUS_CODE),

@@ -50,8 +50,8 @@ impl<'a> ApiEndpoint {
             handler: HttpRouteHandler::new(handler),
             method: method,
             path: path.to_string(),
-            parameters: FuncParams::generate(),
-            response: ResponseType::generate(),
+            parameters: FuncParams::metadata(),
+            response: ResponseType::metadata(),
             description: None,
         }
     }
@@ -97,6 +97,9 @@ impl From<(ApiEndpointParameterLocation, String)> for ApiEndpointParameterName {
     }
 }
 
+/**
+ * Metadata for an API endpoint response: type information and status code.
+ */
 #[derive(Debug)]
 pub struct ApiEndpointResponse {
     pub schema: Option<ApiSchemaGenerator>,
@@ -200,23 +203,35 @@ impl ApiDescription {
      */
     // TODO: There's a bunch of error handling we need here such as checking
     // for duplicate parameter names.
-    pub fn print_openapi(&self) {
+    pub fn print_openapi(
+        &self,
+        title: &dyn ToString,
+        description: Option<&dyn ToString>,
+        terms_of_service: Option<&dyn ToString>,
+        contact_name: Option<&dyn ToString>,
+        contact_url: Option<&dyn ToString>,
+        contact_email: Option<&dyn ToString>,
+        license_name: Option<&dyn ToString>,
+        license_url: Option<&dyn ToString>,
+        version: &dyn ToString,
+    ) {
         let mut openapi = openapiv3::OpenAPI::default();
 
         openapi.openapi = "3.0.3".to_string();
         openapi.info = openapiv3::Info {
-            title: "Oxide Region API".to_string(),
-            description: Some(
-                "API for interacting with the Oxide control plane".to_string(),
-            ),
-            terms_of_service: None,
+            title: title.to_string(),
+            description: description.map(ToString::to_string),
+            terms_of_service: terms_of_service.map(ToString::to_string),
             contact: Some(openapiv3::Contact {
-                name: None,
-                url: Some("https://oxide.computer".to_string()),
-                email: Some("api@oxide.computer".to_string()),
+                name: contact_name.map(ToString::to_string),
+                url: contact_url.map(ToString::to_string),
+                email: contact_email.map(ToString::to_string),
             }),
-            license: None,
-            version: "0.0.1".to_string(),
+            license: license_name.map(|name| openapiv3::License {
+                name: name.to_string(),
+                url: license_url.map(ToString::to_string),
+            }),
+            version: version.to_string(),
         };
 
         let settings = schemars::gen::SchemaSettings::openapi3();
@@ -351,7 +366,7 @@ impl ApiDescription {
                 }
 
                 let response = openapiv3::Response {
-                    description: "TODO: placeholder".to_string(),
+                    description: "TODO: placeholder".to_string(), // TODO
                     headers: indexmap::IndexMap::new(),
                     content: content,
                     links: indexmap::IndexMap::new(),
@@ -453,7 +468,9 @@ fn j2oas_schema_object(
 
     let kind = match (ty, &obj.subschemas) {
         (Some(schemars::schema::InstanceType::Null), None) => todo!(),
-        (Some(schemars::schema::InstanceType::Boolean), None) => todo!(),
+        (Some(schemars::schema::InstanceType::Boolean), None) => {
+            openapiv3::SchemaKind::Type(openapiv3::Type::Boolean {})
+        }
         (Some(schemars::schema::InstanceType::Object), None) => {
             j2oas_object(&obj.object)
         }
@@ -461,7 +478,7 @@ fn j2oas_schema_object(
             j2oas_array(&obj.array)
         }
         (Some(schemars::schema::InstanceType::Number), None) => {
-            j2oas_number(&obj.format, &obj.number)
+            j2oas_number(&obj.format, &obj.number, &obj.enum_values)
         }
         (Some(schemars::schema::InstanceType::String), None) => {
             j2oas_string(&obj.format, &obj.string, &obj.enum_values)
@@ -585,10 +602,69 @@ fn j2oas_integer(
 }
 
 fn j2oas_number(
-    _format: &Option<String>,
-    _number: &Option<Box<schemars::schema::NumberValidation>>,
+    format: &Option<String>,
+    number: &Option<Box<schemars::schema::NumberValidation>>,
+    enum_values: &Option<Vec<serde_json::value::Value>>,
 ) -> openapiv3::SchemaKind {
-    todo!()
+    let format = match format.as_ref().map(|s| s.as_str()) {
+        None => openapiv3::VariantOrUnknownOrEmpty::Empty,
+        Some("float") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::NumberFormat::Float,
+        ),
+        Some("double") => openapiv3::VariantOrUnknownOrEmpty::Item(
+            openapiv3::NumberFormat::Double,
+        ),
+        Some(other) => {
+            openapiv3::VariantOrUnknownOrEmpty::Unknown(other.to_string())
+        }
+    };
+
+    let (multiple_of, minimum, exclusive_minimum, maximum, exclusive_maximum) =
+        match number {
+            None => (None, None, false, None, false),
+            Some(number) => {
+                let multiple_of = number.multiple_of;
+                let (minimum, exclusive_minimum) =
+                    match (number.minimum, number.exclusive_minimum) {
+                        (None, None) => (None, false),
+                        (s @ Some(_), None) => (s, false),
+                        (None, s @ Some(_)) => (s, true),
+                        _ => panic!("invalid"),
+                    };
+                let (maximum, exclusive_maximum) =
+                    match (number.maximum, number.exclusive_maximum) {
+                        (None, None) => (None, false),
+                        (s @ Some(_), None) => (s, false),
+                        (None, s @ Some(_)) => (s, true),
+                        _ => panic!("invalid"),
+                    };
+
+                (
+                    multiple_of,
+                    minimum,
+                    exclusive_minimum,
+                    maximum,
+                    exclusive_maximum,
+                )
+            }
+        };
+
+    let enumeration = enum_values
+        .iter()
+        .flat_map(|v| v.iter().map(|vv| vv.as_f64().unwrap() as f64))
+        .collect::<Vec<_>>();
+
+    openapiv3::SchemaKind::Type(openapiv3::Type::Number(
+        openapiv3::NumberType {
+            format,
+            multiple_of,
+            exclusive_minimum,
+            exclusive_maximum,
+            minimum,
+            maximum,
+            enumeration,
+        },
+    ))
 }
 
 fn j2oas_string(
@@ -644,45 +720,67 @@ fn j2oas_string(
 }
 
 fn j2oas_array(
-    _array: &Option<Box<schemars::schema::ArrayValidation>>,
+    array: &Option<Box<schemars::schema::ArrayValidation>>,
 ) -> openapiv3::SchemaKind {
-    todo!()
+    let arr = array.as_ref().unwrap();
+
+    openapiv3::SchemaKind::Type(openapiv3::Type::Array(openapiv3::ArrayType {
+        items: match &arr.items {
+            Some(schemars::schema::SingleOrVec::Single(schema)) => {
+                box_reference_or(j2oas_schema(&schema))
+            }
+            _ => unimplemented!("don't think this is valid"),
+        },
+        min_items: arr.min_items.map(|n| n as usize),
+        max_items: arr.max_items.map(|n| n as usize),
+        unique_items: arr.unique_items.unwrap_or(false),
+    }))
+}
+
+fn box_reference_or<T>(
+    r: openapiv3::ReferenceOr<T>,
+) -> openapiv3::ReferenceOr<Box<T>> {
+    match r {
+        openapiv3::ReferenceOr::Item(schema) => {
+            openapiv3::ReferenceOr::boxed_item(schema)
+        }
+        openapiv3::ReferenceOr::Reference {
+            reference,
+        } => openapiv3::ReferenceOr::Reference {
+            reference,
+        },
+    }
 }
 
 fn j2oas_object(
     object: &Option<Box<schemars::schema::ObjectValidation>>,
 ) -> openapiv3::SchemaKind {
-    let obj = object.as_ref().unwrap();
-    openapiv3::SchemaKind::Type(openapiv3::Type::Object(
-        openapiv3::ObjectType {
-            properties: obj
-                .properties
-                .iter()
-                .map(|(prop, schema)| {
-                    (prop.clone(), match j2oas_schema(schema) {
-                        openapiv3::ReferenceOr::Item(schema) => {
-                            openapiv3::ReferenceOr::boxed_item(schema)
-                        }
-                        openapiv3::ReferenceOr::Reference {
-                            reference,
-                        } => openapiv3::ReferenceOr::Reference {
-                            reference,
-                        },
+    match object {
+        None => openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+            openapiv3::ObjectType::default(),
+        )),
+        Some(obj) => openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+            openapiv3::ObjectType {
+                properties: obj
+                    .properties
+                    .iter()
+                    .map(|(prop, schema)| {
+                        (prop.clone(), box_reference_or(j2oas_schema(schema)))
                     })
-                })
-                .collect::<_>(),
-            required: obj.required.iter().map(|s| s.clone()).collect::<_>(),
-            additional_properties: obj.additional_properties.as_ref().map(
-                |schema| {
-                    openapiv3::AdditionalProperties::Schema(Box::new(
-                        j2oas_schema(schema),
-                    ))
-                },
-            ),
-            min_properties: obj.min_properties.map(|n| n as usize),
-            max_properties: obj.max_properties.map(|n| n as usize),
-        },
-    ))
+                    .collect::<_>(),
+                required: obj.required.iter().map(|s| s.clone()).collect::<_>(),
+                additional_properties: obj.additional_properties.as_ref().map(
+                    |schema| {
+                        openapiv3::AdditionalProperties::Schema(Box::new(
+                            j2oas_schema(schema),
+                        ))
+                    },
+                ),
+                min_properties: obj.min_properties.map(|n| n as usize),
+                max_properties: obj.max_properties.map(|n| n as usize),
+            },
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -693,12 +791,14 @@ mod test {
     use super::super::handler::RouteHandler;
     use super::super::ExtractedParameter;
     use super::super::Path;
+    use super::j2oas_schema;
     use super::ApiDescription;
     use super::ApiEndpoint;
     use super::ApiEndpointResponse;
     use http::Method;
     use hyper::Body;
     use hyper::Response;
+    use schemars::JsonSchema;
     use serde::Deserialize;
     use std::sync::Arc;
 
@@ -745,7 +845,17 @@ mod test {
             "/",
         ))?;
 
-        api.print_openapi();
+        api.print_openapi(
+            &"test API",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &"9000",
+        );
 
         Ok(())
     }
@@ -811,5 +921,58 @@ mod test {
                  parameters do not appear in the path (a,b)"
                 .to_string())
         );
+    }
+
+    #[test]
+    fn test_empty_struct() {
+        #[derive(JsonSchema)]
+        struct Empty {}
+
+        let settings = schemars::gen::SchemaSettings::openapi3();
+        let mut generator = schemars::gen::SchemaGenerator::new(settings);
+
+        let schema = Empty::json_schema(&mut generator);
+        let _ = j2oas_schema(&schema);
+    }
+
+    #[test]
+    fn test_garbage_barge_structure_conversion() {
+        #[allow(dead_code)]
+        #[derive(JsonSchema)]
+        struct SuperGarbage {
+            string: String,
+            strings: Vec<String>,
+            more_strings: [String; 3],
+            substruct: Substruct,
+            more: Option<Substruct>,
+            union: Union,
+            map: std::collections::BTreeMap<String, String>,
+        }
+
+        #[allow(dead_code)]
+        #[derive(JsonSchema)]
+        struct Substruct {
+            ii32: i32,
+            uu64: u64,
+            ff: f32,
+            dd: f64,
+            b: bool,
+        }
+
+        #[allow(dead_code)]
+        #[derive(JsonSchema)]
+        enum Union {
+            A { a: u32 },
+            B { b: f32 },
+        }
+
+        let settings = schemars::gen::SchemaSettings::openapi3();
+        let mut generator = schemars::gen::SchemaGenerator::new(settings);
+
+        let schema = SuperGarbage::json_schema(&mut generator);
+        let _ = j2oas_schema(&schema);
+        for (_, schema) in generator.definitions().iter() {
+            let _ = j2oas_schema(&schema);
+        }
     }
 }

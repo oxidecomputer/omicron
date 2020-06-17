@@ -261,15 +261,11 @@
  * we say "return type" below, we use that as shorthand for the output of the
  * future.
  *
- * An endpoint function can return anything that Dropshot can convert into a
- * `Response<Body>`.  That includes:
- *
- * * `Response<Body>` directly
- * * `Result<Response<Body>, HttpError>`: a generic case that allows the
- *   function to return an error or any body that it wants
- * * `Result< /* specific response type */, HttpError>`: a more specific case
- *   that enables Dropshot to produce a more useful OpenAPI schema for this
- *   endpoint
+ * An endpoint function must return a type that implements `HttpResponse`.
+ * Typically this should be a type that implements `HttpTypedResponse` (either
+ * one of the Dropshot-provided ones or one of your own creation). In
+ * situations where the response schema is not fixed, the endpoint should
+ * return `Response<Body`>, which also implements `HttpResponse`.
  *
  * The more specific a type returned by the handler function, the more can be
  * validated at build-time, and the more specific an OpenAPI schema can be
@@ -310,6 +306,7 @@ pub use error::HttpError;
 pub use error::HttpErrorResponseBody;
 pub use handler::ExtractedParameter;
 pub use handler::Extractor;
+pub use handler::HttpResponse;
 pub use handler::HttpResponseAccepted;
 pub use handler::HttpResponseCreated;
 pub use handler::HttpResponseDeleted;
