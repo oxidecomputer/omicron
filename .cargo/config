@@ -1,0 +1,8 @@
+#
+# Build private documentation for this package to serve as internal developer
+# documentation.  (The "library" in this package only exists to implement the
+# binaries and the test suite.  There's no need for typical library
+# documentation of public interfaces.)
+#
+[build]
+rustdocflags = "--document-private-items"

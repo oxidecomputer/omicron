@@ -1,0 +1,9 @@
+#
+# Override the rustdoc flags that are set for the parent crate in this
+# workspace.  (This is kind of an unfortunate way to do this -- all we really
+# want to do here is to turn off --document-private-items so that this crate
+# gets documented like a normal library crate.  However, the only way we can do
+# this is to remove all configured rustdoc flags.)
+#
+[build]
+rustdocflags = ""

@@ -27,6 +27,17 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
 default-members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
 
+#
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+#
+[[bin]]
+name = "oxide_controller"
+doc = false
+[[bin]]
+name = "sled_agent"
+doc = false
+
 [profile.dev]
 panic = "abort"
 [profile.release]
