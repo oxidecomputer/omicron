@@ -1059,14 +1059,13 @@ mod test {
         logctx: &LogContext,
         initial_state: ApiInstanceState,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let now = Utc::now();
         let initial_runtime = {
             ApiInstanceRuntimeState {
                 run_state: initial_state,
                 reboot_in_progress: false,
                 sled_uuid: uuid::Uuid::new_v4(),
                 gen: 1,
-                time_updated: now,
+                time_updated: Utc::now(),
             }
         };
 
@@ -1077,12 +1076,11 @@ mod test {
         logctx: &LogContext,
         initial_state: ApiDiskState,
     ) -> (SimObject<SimDisk>, Receiver<()>) {
-        let now = Utc::now();
         let initial_runtime = {
             ApiDiskRuntimeState {
                 disk_state: initial_state,
                 gen: 1,
-                time_updated: now,
+                time_updated: Utc::now(),
             }
         };
 
@@ -1317,8 +1315,13 @@ mod test {
             .is_none());
         instance.transition_finish();
         let (rprev, rnext) = (r1, instance.current_state.clone());
-        assert!(rnext.gen > rprev.gen);
 
+        // Chrono doesn't give us enough precision, so sleep a bit
+        if cfg!(windows) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        assert!(rnext.gen > rprev.gen);
         /*
          * Now, take it through a reboot sequence.
          */
@@ -1330,6 +1333,12 @@ mod test {
             .unwrap()
             .is_none());
         let (rprev, rnext) = (rnext, instance.current_state.clone());
+
+        // Chrono doesn't give us enough precision, so sleep a bit
+        if cfg!(windows) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
@@ -1337,6 +1346,12 @@ mod test {
         assert!(instance.requested_state.is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.current_state.clone());
+
+        // Chrono doesn't give us enough precision, so sleep a bit
+        if cfg!(windows) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);

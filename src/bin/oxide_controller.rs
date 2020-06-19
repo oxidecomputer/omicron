@@ -44,7 +44,8 @@ async fn do_run() -> Result<(), String> {
 
     let config_file = matches.value_of("CONFIG_FILE_PATH").unwrap();
     let config_file_path = Path::new(config_file);
-    let config = ConfigController::from_file(config_file_path)?;
+    let config = ConfigController::from_file(config_file_path)
+        .map_err(|e| e.to_string())?;
 
     if matches.is_present("openapi") {
         Ok(controller_run_openapi_external())

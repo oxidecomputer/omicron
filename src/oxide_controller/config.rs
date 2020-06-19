@@ -7,7 +7,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
-use std::path::Path;
+use std::fmt;
+use std::path::{Path, PathBuf};
 
 /**
  * Configuration for an OXC server
@@ -22,6 +23,60 @@ pub struct ConfigController {
     pub log: ConfigLogging,
 }
 
+#[derive(Debug)]
+pub struct LoadError {
+    path: PathBuf,
+    kind: LoadErrorKind,
+}
+#[derive(Debug)]
+pub enum LoadErrorKind {
+    Io(std::io::Error),
+    Parse(toml::de::Error),
+}
+
+impl From<(PathBuf, std::io::Error)> for LoadError {
+    fn from((path, err): (PathBuf, std::io::Error)) -> Self {
+        LoadError {
+            path,
+            kind: LoadErrorKind::Io(err),
+        }
+    }
+}
+
+impl From<(PathBuf, toml::de::Error)> for LoadError {
+    fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
+        LoadError {
+            path,
+            kind: LoadErrorKind::Parse(err),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.kind {
+            LoadErrorKind::Io(e) => {
+                write!(f, "read \"{}\": {:?}", self.path.display(), e)
+            }
+            LoadErrorKind::Parse(e) => {
+                write!(f, "parse \"{}\": {:?}", self.path.display(), e)
+            }
+        }
+    }
+}
+
+impl std::cmp::PartialEq<std::io::Error> for LoadError {
+    fn eq(&self, other: &std::io::Error) -> bool {
+        if let LoadErrorKind::Io(e) = &self.kind {
+            e.kind() == other.kind()
+        } else {
+            false
+        }
+    }
+}
+
 impl ConfigController {
     /**
      * Load a `ConfigController` from the given TOML file
@@ -29,15 +84,11 @@ impl ConfigController {
      * This config object can then be used to create a new `OxideController`.
      * The format is described in the README.
      */
-    pub fn from_file(path: &Path) -> Result<ConfigController, String> {
-        let file_read = std::fs::read_to_string(path);
-        let file_contents = file_read.map_err(|error| {
-            format!("read \"{}\": {}", path.display(), error)
-        })?;
+    pub fn from_file(path: &Path) -> Result<ConfigController, LoadError> {
+        let file_contents = std::fs::read_to_string(path)
+            .map_err(|e| (path.to_path_buf(), e))?;
         let config_parsed: ConfigController = toml::from_str(&file_contents)
-            .map_err(|error| {
-                format!("parse \"{}\": {}", path.display(), error)
-            })?;
+            .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
 }
@@ -45,10 +96,12 @@ impl ConfigController {
 #[cfg(test)]
 mod test {
     use super::ConfigController;
+    use super::{LoadError, LoadErrorKind};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    use libc;
     use std::fs;
     use std::net::SocketAddr;
     use std::path::Path;
@@ -80,7 +133,7 @@ mod test {
     fn read_config(
         label: &str,
         contents: &str,
-    ) -> Result<ConfigController, String> {
+    ) -> Result<ConfigController, LoadError> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path.display());
@@ -100,16 +153,26 @@ mod test {
     fn test_config_nonexistent() {
         let error = ConfigController::from_file(Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
-        assert!(error
-            .starts_with("read \"/nonexistent\": No such file or directory"));
+        let expected = std::io::Error::from_raw_os_error(libc::ENOENT);
+        assert_eq!(error, expected);
     }
 
     #[test]
     fn test_config_bad_toml() {
         let error =
             read_config("bad_toml", "foo =").expect_err("expected failure");
-        assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": unexpected eof"));
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert_eq!(error.line_col(), Some((0, 5)));
+            assert_eq!(
+                error.to_string(),
+                "unexpected eof encountered at line 1 column 6"
+            );
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
     }
 
     /*
@@ -120,8 +183,15 @@ mod test {
     #[test]
     fn test_config_empty() {
         let error = read_config("empty", "").expect_err("expected failure");
-        assert!(error.starts_with("parse \""));
-        assert!(error.contains("\": missing field"));
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert_eq!(error.line_col(), None);
+            assert_eq!(error.to_string(), "missing field `dropshot_external`");
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
     }
 
     /*
