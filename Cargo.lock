@@ -179,6 +179,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.1.0"
+source = "git+ssh://git@github.com/oxidecomputer/dropshot#5378e28bcbd66af61e4f0a8c7623a4a9c812d7ce"
 dependencies = [
  "async-trait",
  "bytes",
@@ -189,7 +190,6 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "libc",
  "openapiv3",
  "schemars",
  "serde",
@@ -208,6 +208,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.1.0"
+source = "git+ssh://git@github.com/oxidecomputer/dropshot#5378e28bcbd66af61e4f0a8c7623a4a9c812d7ce"
 dependencies = [
  "proc-macro2",
  "quote",

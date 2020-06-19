@@ -10,7 +10,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 clap = "2"
 futures = "0.3.1"
 http = "0.2.0"
-dropshot = { path = "dropshot" }
+dropshot = { git = "ssh://git@github.com/oxidecomputer/dropshot" }
 hyper = "0.13"
 schemars = { version = "0.7", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -26,9 +26,12 @@ libc = "0.2.71"
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
-[workspace]
-members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
-default-members = [".", "dropshot", "dropshot/dropshot_endpoint" ]
+#
+# It's common during development to use a local copy of dropshot in the parent
+# directory.  If you want to use that, uncomment this block.
+#
+#[patch."ssh://git@github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot" }
 
 [profile.dev]
 panic = "abort"
