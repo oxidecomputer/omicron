@@ -108,17 +108,17 @@ impl TryFrom<String> for ApiName {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.len() > 63 {
-            return Err(format!("name may contain at most 63 characters"));
+            return Err(String::from("name may contain at most 63 characters"));
         }
 
         let mut iter = value.chars();
 
-        let first = iter
-            .next()
-            .ok_or_else(|| format!("name requires at least one character"))?;
+        let first = iter.next().ok_or_else(|| {
+            String::from("name requires at least one character")
+        })?;
         if !first.is_ascii_lowercase() {
-            return Err(format!(
-                "name must begin with an ASCII lowercase character"
+            return Err(String::from(
+                "name must begin with an ASCII lowercase character",
             ));
         }
 
@@ -136,7 +136,7 @@ impl TryFrom<String> for ApiName {
         }
 
         if last == '-' {
-            return Err(format!("name cannot end with \"-\""));
+            return Err(String::from("name cannot end with \"-\""));
         }
 
         Ok(ApiName(value))
@@ -171,7 +171,7 @@ where
     S: AsRef<str>,
 {
     fn eq(&self, other: &S) -> bool {
-        &self.0 == other.as_ref()
+        self.0 == other.as_ref()
     }
 }
 
@@ -582,7 +582,7 @@ impl ApiObject for ApiInstance {
     fn to_view(&self) -> ApiInstanceView {
         ApiInstanceView {
             identity: self.identity.clone(),
-            project_id: self.project_id.clone(),
+            project_id: self.project_id,
             ncpus: self.ncpus,
             memory: self.memory,
             boot_disk_size: self.boot_disk_size,
@@ -749,9 +749,9 @@ impl ApiObject for ApiDisk {
             format!("/mnt/{}", String::from(self.identity.name.clone()),);
         ApiDiskView {
             identity: self.identity.clone(),
-            project_id: self.project_id.clone(),
-            snapshot_id: self.create_snapshot_id.clone(),
-            size: self.size.clone(),
+            project_id: self.project_id,
+            snapshot_id: self.create_snapshot_id,
+            size: self.size,
             state: self.runtime.disk_state.clone(),
             device_path,
         }
@@ -924,7 +924,7 @@ impl ApiObject for ApiRack {
     type View = ApiRackView;
     fn to_view(&self) -> ApiRackView {
         ApiRackView {
-            id: self.id.clone(),
+            id: self.id,
         }
     }
 }
@@ -954,8 +954,8 @@ impl ApiObject for ApiSled {
     type View = ApiSledView;
     fn to_view(&self) -> ApiSledView {
         ApiSledView {
-            id: self.id.clone(),
-            service_address: self.service_address.clone(),
+            id: self.id,
+            service_address: self.service_address,
         }
     }
 }

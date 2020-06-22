@@ -48,13 +48,14 @@ async fn do_run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     if matches.is_present("openapi") {
-        Ok(controller_run_openapi_external())
+        controller_run_openapi_external();
+        Ok(())
     } else {
         controller_run_server(&config).await
     }
 }
 
 fn fatal(message: String) -> ! {
-    eprintln!("{}: {}", std::env::args().nth(0).unwrap(), message);
+    eprintln!("{}: {}", std::env::args().next().unwrap(), message);
     exit(1);
 }

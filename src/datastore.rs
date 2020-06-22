@@ -120,11 +120,11 @@ impl ControlDataStore {
         let now = Utc::now();
         let project = Arc::new(ApiProject {
             identity: ApiIdentityMetadata {
-                id: new_uuid.clone(),
+                id: new_uuid,
                 name: newname.clone(),
                 description: new_project.identity.description.clone(),
-                time_created: now.clone(),
-                time_modified: now.clone(),
+                time_created: now,
+                time_modified: now,
             },
             generation: 1,
         });
@@ -132,7 +132,7 @@ impl ControlDataStore {
         let rv = Arc::clone(&project);
         let projects_by_name = &mut data.projects_by_name;
         projects_by_name.insert(newname.clone(), project);
-        data.instances_by_project_id.insert(new_uuid.clone(), BTreeMap::new());
+        data.instances_by_project_id.insert(new_uuid, BTreeMap::new());
         data.disks_by_project_id.insert(new_uuid, BTreeMap::new());
         Ok(rv)
     }
@@ -169,11 +169,11 @@ impl ControlDataStore {
                 &ApiError::not_found_by_name,
             )?;
 
-            project.identity.id.clone()
+            project.identity.id
         };
         let instances = data.instances_by_project_id.get(&project_id).unwrap();
 
-        if instances.len() > 0 {
+        if !instances.is_empty() {
             return Err(ApiError::InvalidRequest {
                 message: String::from("project still has instances"),
             });
@@ -212,11 +212,11 @@ impl ControlDataStore {
 
         let newvalue = Arc::new(ApiProject {
             identity: ApiIdentityMetadata {
-                id: oldproject.identity.id.clone(),
+                id: oldproject.identity.id,
                 name: (*newname).clone(),
                 description: (*newdescription).clone(),
-                time_created: oldproject.identity.time_created.clone(),
-                time_modified: now.clone(),
+                time_created: oldproject.identity.time_created,
+                time_modified: now,
             },
             generation: newgen,
         });
@@ -267,7 +267,7 @@ impl ControlDataStore {
                 ApiResourceType::Project,
                 &ApiError::not_found_by_name,
             )?;
-            project.identity.id.clone()
+            project.identity.id
         };
 
         let instances = data
@@ -287,10 +287,10 @@ impl ControlDataStore {
                 id: Uuid::new_v4(),
                 name: params.identity.name.clone(),
                 description: params.identity.description.clone(),
-                time_created: now.clone(),
-                time_modified: now.clone(),
+                time_created: now,
+                time_modified: now,
             },
-            project_id: project_id,
+            project_id,
             ncpus: params.ncpus,
             memory: params.memory,
             boot_disk_size: params.boot_disk_size,
@@ -300,7 +300,7 @@ impl ControlDataStore {
 
         instances.insert(newname, Arc::clone(&instance));
         data.instances_by_id
-            .insert(instance.identity.id.clone(), Arc::clone(&instance));
+            .insert(instance.identity.id, Arc::clone(&instance));
         Ok(instance)
     }
 
@@ -342,7 +342,7 @@ impl ControlDataStore {
                 ApiResourceType::Project,
                 &ApiError::not_found_by_name,
             )?;
-            project.identity.id.clone()
+            project.identity.id
         };
         let project_instances = &mut data.instances_by_project_id;
         let instances = project_instances
@@ -382,7 +382,7 @@ impl ControlDataStore {
         &self,
         new_instance: Arc<ApiInstance>,
     ) -> Result<(), ApiError> {
-        let id = new_instance.identity.id.clone();
+        let id = new_instance.identity.id;
         let instance_name = new_instance.identity.name.clone();
         let mut data = self.data.lock().await;
         let old_name = {
@@ -471,7 +471,7 @@ impl ControlDataStore {
                 ApiResourceType::Project,
                 &ApiError::not_found_by_name,
             )?;
-            project.identity.id.clone()
+            project.identity.id
         };
         let all_disks = &data.disks_by_id;
         let disks_by_project = &data.disks_by_project_id;
@@ -513,7 +513,7 @@ impl ControlDataStore {
         let mut data = self.data.lock().await;
 
         let disk_id = &disk.identity.id;
-        if let Some(_) = data.disks_by_id.get(&disk_id) {
+        if data.disks_by_id.get(&disk_id).is_some() {
             panic!("attempted to add disk that already exists");
         }
 
@@ -524,15 +524,15 @@ impl ControlDataStore {
             })?;
 
         let disk_name = &disk.identity.name;
-        if let Some(_) = project_disks.get(&disk_name) {
+        if project_disks.get(&disk_name).is_some() {
             return Err(ApiError::ObjectAlreadyExists {
                 type_name: ApiResourceType::Disk,
                 object_name: String::from(disk_name.clone()),
             });
         }
 
-        project_disks.insert(disk_name.clone(), disk_id.clone());
-        data.disks_by_id.insert(disk_id.clone(), Arc::clone(&disk));
+        project_disks.insert(disk_name.clone(), *disk_id);
+        data.disks_by_id.insert(*disk_id, Arc::clone(&disk));
         Ok(disk)
     }
 
@@ -557,7 +557,7 @@ impl ControlDataStore {
         &self,
         new_disk: Arc<ApiDisk>,
     ) -> Result<(), ApiError> {
-        let id = new_disk.identity.id.clone();
+        let id = new_disk.identity.id;
         let disk_name = new_disk.identity.name.clone();
         let mut data = self.data.lock().await;
         let old_name = {
@@ -594,7 +594,7 @@ impl ControlDataStore {
         &self,
         new_disk: Arc<ApiDisk>,
     ) -> Result<(), ApiError> {
-        let id = new_disk.identity.id.clone();
+        let id = new_disk.identity.id;
         let mut data = self.data.lock().await;
         let old_name = {
             let old_disk = collection_lookup(

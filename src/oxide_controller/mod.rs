@@ -122,18 +122,16 @@ impl OxideControllerServer {
 
         match (result_external, result_internal) {
             (Ok(()), Ok(())) => Ok(()),
-            (Err(error_external), Err(error_internal)) => {
-                return Err(format!(
-                    "errors from both external and internal HTTP \
-                     servers(external: \"{}\", internal: \"{}\"",
-                    error_external, error_internal
-                ));
-            }
+            (Err(error_external), Err(error_internal)) => Err(format!(
+                "errors from both external and internal HTTP \
+                 servers(external: \"{}\", internal: \"{}\"",
+                error_external, error_internal
+            )),
             (Err(error_external), Ok(())) => {
-                return Err(format!("external server: {}", error_external));
+                Err(format!("external server: {}", error_external))
             }
             (Ok(()), Err(error_internal)) => {
-                return Err(format!("internal server: {}", error_internal));
+                Err(format!("internal server: {}", error_internal))
             }
         }
     }

@@ -45,8 +45,8 @@ impl SledAgentClient {
         log: Logger,
     ) -> SledAgentClient {
         SledAgentClient {
-            id: id.clone(),
-            service_address: server_addr.clone(),
+            id: *id,
+            service_address: server_addr,
             client: HttpClient::new("sled agent", server_addr, log),
         }
     }

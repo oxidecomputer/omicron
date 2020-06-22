@@ -63,7 +63,7 @@ impl ApiError {
         name: &ApiName,
     ) -> ApiError {
         ApiError::ObjectNotFound {
-            type_name: type_name,
+            type_name,
             lookup_type: LookupType::ByName(String::from(name.clone())),
         }
     }
@@ -73,8 +73,8 @@ impl ApiError {
      */
     pub fn not_found_by_id(type_name: ApiResourceType, id: &Uuid) -> ApiError {
         ApiError::ObjectNotFound {
-            type_name: type_name,
-            lookup_type: LookupType::ById(id.clone()),
+            type_name,
+            lookup_type: LookupType::ById(*id),
         }
     }
 
@@ -87,7 +87,7 @@ impl ApiError {
         message: String,
     ) -> ApiError {
         ApiError::ObjectNotFound {
-            type_name: type_name,
+            type_name,
             lookup_type: LookupType::Other(message),
         }
     }
@@ -109,7 +109,7 @@ impl ApiError {
          * others of these (e.g., ObjectNotFound), we will probably need to
          * include more information in the HttpErrorResponseBody.
          */
-        match error_response.error_code.as_ref().map(|s| s.as_str()) {
+        match error_response.error_code.as_deref() {
             Some("InvalidRequest") => ApiError::InvalidRequest {
                 message: error_response.message,
             },

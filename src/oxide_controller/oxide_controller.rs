@@ -112,10 +112,10 @@ impl OxideController {
      */
     pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
         OxideController {
-            id: id.clone(),
-            log: log,
+            id: *id,
+            log,
             api_rack: Arc::new(ApiRack {
-                id: id.clone(),
+                id: *id,
             }),
             datastore: ControlDataStore::new(),
             sled_agents: Mutex::new(BTreeMap::new()),
@@ -130,7 +130,7 @@ impl OxideController {
         let mut scs = self.sled_agents.lock().await;
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
-        scs.insert(sa.id.clone(), sa);
+        scs.insert(sa.id, sa);
     }
 
     /*
@@ -214,12 +214,12 @@ impl OxideController {
                 id: Uuid::new_v4(),
                 name: params.identity.name.clone(),
                 description: params.identity.description.clone(),
-                time_created: now.clone(),
-                time_modified: now.clone(),
+                time_created: now,
+                time_modified: now,
             },
-            project_id: project.identity.id.clone(),
-            create_snapshot_id: params.snapshot_id.clone(),
-            size: params.size.clone(),
+            project_id: project.identity.id,
+            create_snapshot_id: params.snapshot_id,
+            size: params.size,
             runtime: ApiDiskRuntimeState {
                 disk_state: ApiDiskState::Creating,
                 gen: 1,
@@ -242,7 +242,7 @@ impl OxideController {
          */
         let mut new_disk = (*disk_created).clone();
         new_disk.runtime.disk_state = ApiDiskState::Detached;
-        new_disk.runtime.gen = new_disk.runtime.gen + 1;
+        new_disk.runtime.gen += 1;
         new_disk.runtime.time_updated = Utc::now();
         self.datastore.disk_update(Arc::new(new_disk)).await?;
 
@@ -319,7 +319,7 @@ impl OxideController {
         _params: &'params ApiInstanceCreateParams,
     ) -> Result<&'se Arc<SledAgentClient>, ApiError> {
         /* TODO replace this with a real allocation policy. */
-        sleds.values().nth(0).ok_or_else(|| ApiError::ServiceUnavailable {
+        sleds.values().next().ok_or_else(|| ApiError::ServiceUnavailable {
             message: String::from("no sleds available for new Instance"),
         })
     }
@@ -513,7 +513,7 @@ impl OxideController {
         Ok(Arc::clone(sled_agents.get(said).ok_or_else(|| {
             let message = format!("no sled agent for sled_uuid \"{}\"", said);
             ApiError::ServiceUnavailable {
-                message: message,
+                message,
             }
         })?))
     }
@@ -622,7 +622,7 @@ impl OxideController {
          */
         let new_runtime_state = sa
             .instance_ensure(
-                instance.identity.id.clone(),
+                instance.identity.id,
                 instance.runtime.clone(),
                 runtime_params,
             )
@@ -655,9 +655,9 @@ impl OxideController {
                 let disk = maybe_disk.unwrap();
                 Ok(Arc::new(ApiDiskAttachment {
                     instance_name: instance.identity.name.clone(),
-                    instance_id: instance.identity.id.clone(),
+                    instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
-                    disk_id: disk.identity.id.clone(),
+                    disk_id: disk.identity.id,
                     disk_state: disk.runtime.disk_state.clone(),
                 }))
             })
@@ -687,22 +687,22 @@ impl OxideController {
             if instance_id == &instance.identity.id {
                 return Ok(Arc::new(ApiDiskAttachment {
                     instance_name: instance.identity.name.clone(),
-                    instance_id: instance.identity.id.clone(),
+                    instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
-                    disk_id: disk.identity.id.clone(),
+                    disk_id: disk.identity.id,
                     disk_state: disk.runtime.disk_state.clone(),
                 }));
             }
         }
 
-        return Err(ApiError::not_found_other(
+        Err(ApiError::not_found_other(
             ApiResourceType::DiskAttachment,
             format!(
                 "disk \"{}\" is not attached to instance \"{}\"",
                 String::from(disk_name.clone()),
                 String::from(instance_name.clone())
             ),
-        ));
+        ))
     }
 
     /**
@@ -733,8 +733,8 @@ impl OxideController {
             );
             Ok(Arc::new(ApiDiskAttachment {
                 instance_name: instance.identity.name.clone(),
-                instance_id: instance_id.clone(),
-                disk_id: disk.identity.id.clone(),
+                instance_id: *instance_id,
+                disk_id: disk.identity.id,
                 disk_name: disk.identity.name.clone(),
                 disk_state: disk.runtime.disk_state.clone(),
             }))
@@ -771,7 +771,7 @@ impl OxideController {
                 disk_status
             );
             Err(ApiError::InvalidRequest {
-                message: message,
+                message,
             })
         }
 
@@ -814,7 +814,6 @@ impl OxideController {
             ApiDiskState::Detached => (),
             ApiDiskState::Attaching(id) => {
                 assert_eq!(id, instance_id);
-                ()
             }
         }
 
@@ -822,7 +821,7 @@ impl OxideController {
             .disk_set_runtime(
                 disk,
                 self.instance_sled(&instance).await?,
-                ApiDiskStateRequested::Attached(instance_id.clone()),
+                ApiDiskStateRequested::Attached(*instance_id),
             )
             .await?;
         disk_attachment_for(&instance, &disk)
@@ -905,11 +904,7 @@ impl OxideController {
          * reflect the new intermediate state.
          */
         let new_runtime = sa
-            .disk_ensure(
-                disk.identity.id.clone(),
-                disk.runtime.clone(),
-                requested,
-            )
+            .disk_ensure(disk.identity.id, disk.runtime.clone(), requested)
             .await?;
         let disk_ref = Arc::make_mut(&mut disk);
         disk_ref.runtime = new_runtime;
@@ -1043,7 +1038,7 @@ impl OxideController {
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state,
                     "error" => ?error);
-                Err(error.into())
+                Err(error)
             }
         }
     }
@@ -1100,7 +1095,7 @@ impl OxideController {
                     "disk_id" => %id,
                     "new_state" => ?new_state,
                     "error" => ?error);
-                Err(error.into())
+                Err(error)
             }
         }
     }

@@ -62,16 +62,16 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
 
         SledAgent {
-            id: id.clone(),
+            id: *id,
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&ctlsc),
                 instance_log,
-                sim_mode.clone(),
+                sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
                 Arc::clone(&ctlsc),
                 disk_log,
-                sim_mode.clone(),
+                sim_mode,
             )),
         }
     }
@@ -387,7 +387,7 @@ impl<S: Simulatable> SimObject<S> {
          *     could identify this case at compile time (e.g., using an enum),
          *     but that's not currently the case.
          */
-        if let Some(_) = &requested_state {
+        if requested_state.is_some() {
             self.requested_state = requested_state;
             if let Some(ref mut tx) = self.channel_tx {
                 let result = tx.try_send(());
@@ -484,7 +484,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      * This is only used for `SimMode::Auto`.
      */
     async fn sim_step(&self, id: Uuid, mut rx: Receiver<()>) {
-        while let Some(_) = rx.next().await {
+        while rx.next().await.is_some() {
             tokio::time::delay_for(Duration::from_millis(1500)).await;
             self.sim_poke(id).await;
         }
@@ -517,7 +517,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             {
                 (after, Some(object))
             } else {
-                objects.insert(id.clone(), object);
+                objects.insert(id, object);
                 (after, None)
             }
         };
@@ -574,7 +574,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
                 (current_object, false)
             } else {
                 /* Create a new SimObject */
-                let idc = id.clone();
+                let idc = *id;
                 let log = self.log.new(o!("id" => idc.to_string()));
 
                 if let SimMode::Auto = self.sim_mode {
@@ -591,11 +591,10 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             }
         };
 
-        let rv = object
-            .transition(target)
-            .and_then(|_| Ok(object.current_state.clone()));
+        let rv =
+            object.transition(target).map(|_| object.current_state.clone());
         if rv.is_ok() || !is_new {
-            objects.insert(id.clone(), object);
+            objects.insert(*id, object);
         }
         rv
     }
@@ -727,7 +726,7 @@ impl Simulatable for SimInstance {
         let next_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
             reboot_in_progress: reb_wanted,
-            sled_uuid: current.sled_uuid.clone(),
+            sled_uuid: current.sled_uuid,
             gen: current.gen + 1,
             time_updated: Utc::now(),
         };
@@ -780,7 +779,7 @@ impl Simulatable for SimInstance {
         let next_state = ApiInstanceRuntimeState {
             run_state: run_state_after.clone(),
             reboot_in_progress: pending.reboot_wanted,
-            sled_uuid: current.sled_uuid.clone(),
+            sled_uuid: current.sled_uuid,
             gen: current.gen + 1,
             time_updated: Utc::now(),
         };
@@ -802,7 +801,7 @@ impl Simulatable for SimInstance {
         state1: &Self::CurrentState,
         state2: &Self::CurrentState,
     ) -> bool {
-        return state1.gen == state2.gen;
+        state1.gen == state2.gen
     }
 
     fn ready_to_destroy(current: &Self::CurrentState) -> bool {
@@ -862,7 +861,7 @@ impl Simulatable for SimDisk {
                 assert!(pending.is_none());
                 if id1 != id2 {
                     return Err(ApiError::InvalidRequest {
-                        message: format!("disk is already attached"),
+                        message: String::from("disk is already attached"),
                     });
                 }
 
@@ -890,19 +889,19 @@ impl Simulatable for SimDisk {
              */
             (ApiDiskState::Creating, ApiDiskStateRequested::Attached(id)) => {
                 assert!(pending.is_none());
-                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+                Some((ApiDiskState::Attaching(*id), Some(state_after)))
             }
             (ApiDiskState::Detached, ApiDiskStateRequested::Attached(id)) => {
                 assert!(pending.is_none());
-                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+                Some((ApiDiskState::Attaching(*id), Some(state_after)))
             }
             (ApiDiskState::Destroyed, ApiDiskStateRequested::Attached(id)) => {
                 assert!(pending.is_none());
-                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+                Some((ApiDiskState::Attaching(*id), Some(state_after)))
             }
             (ApiDiskState::Faulted, ApiDiskStateRequested::Attached(id)) => {
                 assert!(pending.is_none());
-                Some((ApiDiskState::Attaching(id.clone()), Some(state_after)))
+                Some((ApiDiskState::Attaching(*id), Some(state_after)))
             }
 
             /*
@@ -919,11 +918,11 @@ impl Simulatable for SimDisk {
             ) => {
                 if id1 != id2 {
                     return Err(ApiError::InvalidRequest {
-                        message: format!("disk is already attached"),
+                        message: String::from("disk is already attached"),
                     });
                 }
 
-                Some((ApiDiskState::Attaching(id2.clone()), Some(state_after)))
+                Some((ApiDiskState::Attaching(*id2), Some(state_after)))
             }
 
             (
@@ -931,7 +930,7 @@ impl Simulatable for SimDisk {
                 ApiDiskStateRequested::Attached(_),
             ) => {
                 return Err(ApiError::InvalidRequest {
-                    message: format!("cannot attach while detaching"),
+                    message: String::from("cannot attach while detaching"),
                 });
             }
 
@@ -943,7 +942,7 @@ impl Simulatable for SimDisk {
                 if from_state.is_attached() && !to_state.is_attached() =>
             {
                 let id = from_state.attached_instance_id().unwrap();
-                Some((ApiDiskState::Detaching(id.clone()), Some(to_state)))
+                Some((ApiDiskState::Detaching(*id), Some(to_state)))
             }
 
             /*
@@ -978,7 +977,7 @@ impl Simulatable for SimDisk {
             time_updated: Utc::now(),
         };
 
-        Ok((next_state, next_async.map(|s| s.clone())))
+        Ok((next_state, next_async.cloned()))
     }
 
     fn next_state_for_async_transition_finish(
@@ -993,9 +992,8 @@ impl Simulatable for SimDisk {
         };
         let next_state = match pending {
             ApiDiskStateRequested::Attached(id) => {
-                let id = id.clone();
-                assert_eq!(state_before, &ApiDiskState::Attaching(id));
-                ApiDiskState::Attached(id)
+                assert_eq!(state_before, &ApiDiskState::Attaching(*id));
+                ApiDiskState::Attached(*id)
             }
             ApiDiskStateRequested::Faulted => {
                 assert!(is_detaching);
@@ -1022,7 +1020,7 @@ impl Simulatable for SimDisk {
         state1: &Self::CurrentState,
         state2: &Self::CurrentState,
     ) -> bool {
-        return state1.gen == state2.gen;
+        state1.gen == state2.gen
     }
 
     fn ready_to_destroy(current: &Self::CurrentState) -> bool {

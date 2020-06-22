@@ -89,6 +89,6 @@ async fn do_run() -> Result<(), String> {
 }
 
 fn fatal(message: String) -> ! {
-    eprintln!("{}: {}", std::env::args().nth(0).unwrap(), message);
+    eprintln!("{}: {}", std::env::args().next().unwrap(), message);
     exit(1);
 }

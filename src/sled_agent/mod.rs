@@ -51,7 +51,7 @@ impl SledAgentServer {
 
         let client_log = log.new(o!("component" => "ControllerClient"));
         let controller_client = Arc::new(ControllerClient::new(
-            config.controller_address.clone(),
+            config.controller_address,
             client_log,
         ));
 
@@ -90,12 +90,9 @@ impl SledAgentServer {
         loop {
             debug!(log, "contacting server controller");
             let result = controller_client
-                .notify_sled_agent_online(
-                    config.id.clone(),
-                    ApiSledAgentStartupInfo {
-                        sa_address: http_server.local_addr(),
-                    },
-                )
+                .notify_sled_agent_online(config.id, ApiSledAgentStartupInfo {
+                    sa_address: http_server.local_addr(),
+                })
                 .await;
             match result {
                 Ok(()) => break,
@@ -113,7 +110,7 @@ impl SledAgentServer {
         info!(log, "contacted server controller");
 
         Ok(SledAgentServer {
-            sled_agent: sled_agent,
+            sled_agent,
             http_server,
             join_handle,
         })

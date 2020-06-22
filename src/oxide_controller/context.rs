@@ -31,7 +31,7 @@ impl ControllerServerContext {
                 rack_id,
                 log.new(o!("component" => "controller")),
             )),
-            log: log,
+            log,
         })
     }
 
