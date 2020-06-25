@@ -4,6 +4,7 @@
 
 mod config;
 mod http_entrypoints;
+#[allow(clippy::module_inception)]
 mod sled_agent;
 mod sled_agent_client;
 

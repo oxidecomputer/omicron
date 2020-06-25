@@ -7,6 +7,7 @@ mod context;
 mod controller_client;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
+#[allow(clippy::module_inception)]
 mod oxide_controller;
 
 pub use config::ConfigController;

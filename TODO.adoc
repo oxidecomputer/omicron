@@ -13,12 +13,10 @@ Work queue (see also: existing GitHub issues):
 * deferred cleanup / polish up for more help
 ** clarify use of OXC / OXCP / OxideController / controller
 ** clean up datastore?
-* do a demo????
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?
 * general maintenance and cleanup
 ** add a test that runs --openapi (to make sure it works)
-** cargo clippy
 ** scope out switching to sync
 ** create separate exports for internal vs. external models
 ** proper config + logging for sled agent
