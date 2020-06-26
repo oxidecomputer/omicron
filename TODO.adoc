@@ -3,6 +3,10 @@
 
 = TODO
 
+* Recent regression:
+
+    target/debug/oxide_controller: read "asdflkj": Os { code: 2, kind: NotFound, message: "No such file or directory" }
+
 API endpoints:
 
 * RFD 24: regions, AZs, etc
@@ -16,7 +20,6 @@ Work queue (see also: existing GitHub issues):
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?
 * general maintenance and cleanup
-** add a test that runs --openapi (to make sure it works)
 ** scope out switching to sync
 ** create separate exports for internal vs. external models
 ** proper config + logging for sled agent
