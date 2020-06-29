@@ -14,6 +14,7 @@ use std::borrow::Cow;
 use std::env::current_exe;
 use std::env::temp_dir;
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::process;
 use std::sync::atomic::AtomicU32;
@@ -160,6 +161,14 @@ fn nlconvert(text: &String) -> Cow<str> {
     }
 }
 
+/**
+ * Returns the OS-specific error message for the case where a file was not
+ * found.
+ */
+fn error_for_enoent() -> String {
+    io::Error::from_raw_os_error(libc::ENOENT).to_string()
+}
+
 /*
  * Tests
  */
@@ -209,7 +218,10 @@ fn test_controller_bad_config() {
     );
     assert_eq!(
         nlconvert(&stderr_text),
-        include_str!("test_controller_bad_config-stderr")
+        format!(
+            "oxide_controller: read \"nonexistent\": {}\n",
+            error_for_enoent()
+        )
     );
 }
 
