@@ -3,10 +3,6 @@
 
 = TODO
 
-* Recent regression:
-
-    target/debug/oxide_controller: read "asdflkj": Os { code: 2, kind: NotFound, message: "No such file or directory" }
-
 API endpoints:
 
 * RFD 24: regions, AZs, etc
