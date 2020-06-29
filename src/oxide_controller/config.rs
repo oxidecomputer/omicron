@@ -58,10 +58,10 @@ impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.kind {
             LoadErrorKind::Io(e) => {
-                write!(f, "read \"{}\": {:?}", self.path.display(), e)
+                write!(f, "read \"{}\": {}", self.path.display(), e)
             }
             LoadErrorKind::Parse(e) => {
-                write!(f, "parse \"{}\": {:?}", self.path.display(), e)
+                write!(f, "parse \"{}\": {}", self.path.display(), e)
             }
         }
     }

@@ -54,6 +54,7 @@
 
 mod api_error;
 pub mod api_model;
+mod cmd;
 mod datastore;
 mod http_client;
 mod oxide_controller;
@@ -75,6 +76,9 @@ pub use sled_agent::SimMode;
 pub use sled_agent::SledAgentClient;
 pub use sled_agent::SledAgentServer;
 pub use sled_agent::SledAgentTestInterfaces;
+
+pub use cmd::fatal;
+pub use cmd::CmdError;
 
 #[macro_use]
 extern crate slog;

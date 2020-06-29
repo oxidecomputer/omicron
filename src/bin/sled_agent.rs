@@ -6,13 +6,13 @@
  * TODO see the TODO for oxide-controller.
  */
 
-use std::process::exit;
-
 use clap::{App, Arg};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use oxide_api_prototype::fatal;
 use oxide_api_prototype::sa_run_server;
+use oxide_api_prototype::CmdError;
 use oxide_api_prototype::ConfigSledAgent;
 use oxide_api_prototype::SimMode;
 use std::net::SocketAddr;
@@ -25,7 +25,7 @@ async fn main() {
     }
 }
 
-async fn do_run() -> Result<(), String> {
+async fn do_run() -> Result<(), CmdError> {
     let matches = App::new("sled_agent")
         .after_help("See README.adoc for more information")
         .arg(
@@ -42,27 +42,30 @@ async fn do_run() -> Result<(), String> {
         .arg(Arg::with_name("CONTROLLER_IP:PORT").required(true).index(3))
         .get_matches_safe()
         .map_err(|clap_error| {
-            format!("parsing arguments: {}", clap_error.message)
+            CmdError::Usage(format!(
+                "parsing arguments: {}",
+                clap_error.message
+            ))
         })?;
 
     let sa_id = {
         let value_str = matches.value_of("SA_UUID").unwrap();
         Uuid::parse_str(value_str)
-            .map_err(|e| format!("parsing SA_UUID: {}", e))?
+            .map_err(|e| CmdError::Usage(format!("parsing SA_UUID: {}", e)))?
     };
 
     let sa_addr = {
         let value_str = matches.value_of("SA_IP:PORT").unwrap();
-        value_str
-            .parse::<SocketAddr>()
-            .map_err(|e| format!("parsing SA_IP:PORT: {}", e))?
+        value_str.parse::<SocketAddr>().map_err(|e| {
+            CmdError::Usage(format!("parsing SA_IP:PORT: {}", e))
+        })?
     };
 
     let controller_addr = {
         let value_str = matches.value_of("CONTROLLER_IP:PORT").unwrap();
-        value_str
-            .parse::<SocketAddr>()
-            .map_err(|e| format!("parsing CONTROLLER_IP:PORT: {}", e))?
+        value_str.parse::<SocketAddr>().map_err(|e| {
+            CmdError::Usage(format!("parsing CONTROLLER_IP:PORT: {}", e))
+        })?
     };
 
     let sim_mode = match matches.value_of("sim-mode").unwrap() {
@@ -85,10 +88,5 @@ async fn do_run() -> Result<(), String> {
         },
     };
 
-    sa_run_server(&config).await
-}
-
-fn fatal(message: String) -> ! {
-    eprintln!("{}: {}", std::env::args().next().unwrap(), message);
-    exit(1);
+    sa_run_server(&config).await.map_err(CmdError::Failure)
 }
