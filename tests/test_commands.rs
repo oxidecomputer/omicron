@@ -5,10 +5,24 @@
  */
 
 /*
+ * Several of the tests in this file compare stdout and stderr output from these
+ * commands to expected output that comes from files on disk via `include_str!`.
+ * To regenerate them, simply run the corresponding executable with the same
+ * arguments and redirect stdout and stderr to the corresponding files.  For
+ * example, for the "test_controller_no_args" test, you could use:
+ *
+ *     ./target/debug/oxide_controller \
+ *         >  ./tests/test_controller_no_args-stdout \
+ *         2> ./tests/test_controller_no_args-stderr
+ *
+ * Make sure that the resulting output is correct before committing changes to
+ * these files!
+ *
  * TODO-coverage:
  * - test success cases of oxide_controller and sled_agent
  */
 
+use newline_converter::dos2unix;
 use openapiv3::OpenAPI;
 use std::env::current_exe;
 use std::env::temp_dir;
@@ -155,6 +169,31 @@ fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
 }
 
+/**
+ * Compares two sets of command output (one actual output, and one expected
+ * output), accounting for potential differences in line endings.
+ */
+/*
+ * This is uglier than expected because the problem is different from what one
+ * might expect.  Our commands should be producing output using
+ * platform-specific line endings (e.g., "\r\n" on Windows, "\n" on Unix-like
+ * systems).  Our expected output files also ought to have the native
+ * platform-specific line ending.  (That's because developers on Unix-like
+ * systems will generally use Unix-style line endings, and developers on Windows
+ * generally have Git's `core.autocrlf` configured to convert these Unix-style
+ * line endings to Windows-style on checkout.)  So this approach should work
+ * without any explicit conversion here.  The real problem is that our programs
+ * often emit Unix-style line endings even on Windows.  See clap-rs/clap#1993
+ * for an example issue about this.  This is essentially a work around for that
+ * bug.
+ *
+ * The simplest implementation accounting for this problem is to convert the
+ * expected output to Unix style.  This will be a noop on Unix systems.
+ */
+fn assert_output_equal(actual: String, expected: &str) {
+    assert_eq!(actual.as_str(), dos2unix(expected));
+}
+
 /*
  * Tests
  */
@@ -168,8 +207,14 @@ fn test_controller_no_args() {
     let exec = Exec::cmd(path_to_controller());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_eq!(&stdout_text, include_str!("test_controller_no_args-stdout"));
-    assert_eq!(&stderr_text, include_str!("test_controller_no_args-stderr"));
+    assert_output_equal(
+        stdout_text,
+        include_str!("test_controller_no_args-stdout"),
+    );
+    assert_output_equal(
+        stderr_text,
+        include_str!("test_controller_no_args-stderr"),
+    );
 }
 
 #[test]
@@ -177,8 +222,14 @@ fn test_sled_agent_no_args() {
     let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_eq!(&stdout_text, include_str!("test_sled_agent_no_args-stdout"));
-    assert_eq!(&stderr_text, include_str!("test_sled_agent_no_args-stderr"));
+    assert_output_equal(
+        stdout_text,
+        include_str!("test_sled_agent_no_args-stdout"),
+    );
+    assert_output_equal(
+        stderr_text,
+        include_str!("test_sled_agent_no_args-stderr"),
+    );
 }
 
 #[test]
@@ -186,7 +237,10 @@ fn test_controller_bad_config() {
     let exec = Exec::cmd(path_to_controller()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
-    assert_eq!(&stdout_text, include_str!("test_controller_bad_config-stdout"));
+    assert_output_equal(
+        stdout_text,
+        include_str!("test_controller_bad_config-stdout"),
+    );
     assert_eq!(
         stderr_text,
         format!(
