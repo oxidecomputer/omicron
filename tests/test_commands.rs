@@ -10,7 +10,6 @@
  */
 
 use openapiv3::OpenAPI;
-use std::borrow::Cow;
 use std::env::current_exe;
 use std::env::temp_dir;
 use std::fs;
@@ -189,7 +188,7 @@ fn test_controller_bad_config() {
     assert_exit_code(exit_status, EXIT_FAILURE);
     assert_eq!(&stdout_text, include_str!("test_controller_bad_config-stdout"));
     assert_eq!(
-        &stderr_text,
+        stderr_text,
         format!(
             "oxide_controller: read \"nonexistent\": {}\n",
             error_for_enoent()
