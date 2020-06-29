@@ -169,14 +169,8 @@ fn test_controller_no_args() {
     let exec = Exec::cmd(path_to_controller());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_eq!(
-        &stdout_text,
-        include_str!("test_controller_no_args-stdout")
-    );
-    assert_eq!(
-        &stderr_text,
-        include_str!("test_controller_no_args-stderr")
-    );
+    assert_eq!(&stdout_text, include_str!("test_controller_no_args-stdout"));
+    assert_eq!(&stderr_text, include_str!("test_controller_no_args-stderr"));
 }
 
 #[test]
@@ -184,14 +178,8 @@ fn test_sled_agent_no_args() {
     let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_eq!(
-        &stdout_text,
-        include_str!("test_sled_agent_no_args-stdout")
-    );
-    assert_eq!(
-        &stderr_text,
-        include_str!("test_sled_agent_no_args-stderr")
-    );
+    assert_eq!(&stdout_text, include_str!("test_sled_agent_no_args-stdout"));
+    assert_eq!(&stderr_text, include_str!("test_sled_agent_no_args-stderr"));
 }
 
 #[test]
@@ -199,10 +187,7 @@ fn test_controller_bad_config() {
     let exec = Exec::cmd(path_to_controller()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
-    assert_eq!(
-        &stdout_text,
-        include_str!("test_controller_bad_config-stdout")
-    );
+    assert_eq!(&stdout_text, include_str!("test_controller_bad_config-stdout"));
     assert_eq!(
         &stderr_text,
         format!(
@@ -230,10 +215,7 @@ fn test_controller_openapi() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_eq!(
-        &stderr_text,
-        include_str!("test_controller_openapi-stderr")
-    );
+    assert_eq!(&stderr_text, include_str!("test_controller_openapi-stderr"));
 
     /*
      * Make sure the result parses as a valid OpenAPI spec and sanity-check a
