@@ -275,9 +275,9 @@ fn test_controller_openapi() {
     /*
      * This is a little goofy: we need a config file for the program.
      * (Arguably, --openapi shouldn't require a config file, but it's
-     * conceivable that the exposed endpoints would depend on the
-     * configuration.)  We ship a config file in "examples", and we may as well
-     * use it here -- it would be a bug if that one didn't work for this
+     * conceivable that the API metadata or the exposed endpoints would depend
+     * on the configuration.)  We ship a config file in "examples", and we may
+     * as well use it here -- it would be a bug if that one didn't work for this
      * purpose.  However, it's not clear how to reliably locate it at runtime.
      * But we do know where it is at compile time, so we load it then.
      */
