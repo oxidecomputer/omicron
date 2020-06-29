@@ -70,10 +70,8 @@ fn path_to_executable(cmd_name: &str) -> PathBuf {
  * Run the given command to completion or up to a hardcoded timeout, whichever
  * is shorter.  The caller provides a `subprocess::Exec` object that's already
  * had its program, arguments, environment, etc. configured, but hasn't been
- * started.  Stdout and stderr will be buffered in a pipe and returned as
- * strings.  (It's possible that deadlock could result if the command tries to
- * write more data than the kernel's pipe buffer, since we will wait first for
- * the command to terminate and after that read the data from the pipe.)
+ * started.  Stdin will be empty, and both stdout and stderr will be buffered to
+ * disk and returned as strings.
  */
 fn run_command(exec: Exec) -> (ExitStatus, String, String) {
     let cmdline = exec.to_cmdline_lossy();
@@ -175,32 +173,37 @@ fn error_for_enoent() -> String {
  */
 /*
  * This is uglier than expected because the problem is different from what one
- * might expect.  Our commands should be producing output using
+ * might expect.  The commands in this package should be producing output using
  * platform-specific line endings (e.g., "\r\n" on Windows, "\n" on Unix-like
- * systems).  Our expected output files also ought to have the native
+ * systems).  The expected output files also ought to have the native
  * platform-specific line ending.  (That's because developers on Unix-like
  * systems will generally use Unix-style line endings, and developers on Windows
  * generally have Git's `core.autocrlf` configured to convert these Unix-style
- * line endings to Windows-style on checkout.)  So this approach should work
- * without any explicit conversion here.  The real problem is that our programs
+ * line endings to Windows-style on checkout.)  So this approach of comparing
+ * the command output to the contents of these files should work without any
+ * explicit conversion of line endings.  The real problem is that our programs
  * often emit Unix-style line endings even on Windows.  See clap-rs/clap#1993
- * for an example issue about this.  This is essentially a work around for that
+ * for an example issue about this.  This is essentially a workaround for that
  * bug.
  *
- * The simplest implementation accounting for this problem is to convert the
- * expected output to Unix style.  This will be a noop on Unix systems.
+ * The simplest implementation that accounts for this problem is to convert the
+ * expected output files to Unix style.  This will be a no-op on systems that
+ * already use Unix-style endings.
  */
 fn assert_output_equal(actual: String, expected: &str) {
     assert_eq!(actual.as_str(), dos2unix(expected));
 }
 
 /*
- * Tests
+ * Standard exit codes
  */
-
 const EXIT_SUCCESS: u32 = libc::EXIT_SUCCESS as u32;
 const EXIT_FAILURE: u32 = libc::EXIT_FAILURE as u32;
 const EXIT_USAGE: u32 = 2;
+
+/*
+ * Tests
+ */
 
 #[test]
 fn test_controller_no_args() {
