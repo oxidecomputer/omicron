@@ -149,19 +149,6 @@ fn assert_exit_code(exit_status: ExitStatus, code: u32) {
 }
 
 /**
- * The stdout and stderr files are stored using Unix-style line endings.  On
- * Windows, our executables emit Windows-style line endings.  This converts them
- * if necessary.
- */
-fn nlconvert(text: &String) -> Cow<str> {
-    if cfg!(windows) {
-        newline_converter::dos2unix(text.as_str())
-    } else {
-        Cow::from(text.as_str())
-    }
-}
-
-/**
  * Returns the OS-specific error message for the case where a file was not
  * found.
  */
@@ -183,11 +170,11 @@ fn test_controller_no_args() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_eq!(
-        nlconvert(&stdout_text),
+        &stdout_text,
         include_str!("test_controller_no_args-stdout")
     );
     assert_eq!(
-        nlconvert(&stderr_text),
+        &stderr_text,
         include_str!("test_controller_no_args-stderr")
     );
 }
@@ -198,11 +185,11 @@ fn test_sled_agent_no_args() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_eq!(
-        nlconvert(&stdout_text),
+        &stdout_text,
         include_str!("test_sled_agent_no_args-stdout")
     );
     assert_eq!(
-        nlconvert(&stderr_text),
+        &stderr_text,
         include_str!("test_sled_agent_no_args-stderr")
     );
 }
@@ -213,11 +200,11 @@ fn test_controller_bad_config() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
     assert_eq!(
-        nlconvert(&stdout_text),
+        &stdout_text,
         include_str!("test_controller_bad_config-stdout")
     );
     assert_eq!(
-        nlconvert(&stderr_text),
+        &stderr_text,
         format!(
             "oxide_controller: read \"nonexistent\": {}\n",
             error_for_enoent()
@@ -244,7 +231,7 @@ fn test_controller_openapi() {
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
     assert_eq!(
-        nlconvert(&stderr_text),
+        &stderr_text,
         include_str!("test_controller_openapi-stderr")
     );
 
