@@ -251,6 +251,26 @@ fn test_controller_bad_config() {
 }
 
 #[test]
+fn test_controller_invalid_config() {
+    let config_path = write_config("");
+    let exec = Exec::cmd(path_to_controller()).arg(&config_path);
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_FAILURE);
+    assert_output_equal(
+        stdout_text,
+        include_str!("test_controller_invalid_config-stdout"),
+    );
+    assert_eq!(
+        stderr_text,
+        format!(
+            "oxide_controller: parse \"{}\": missing field \
+             `dropshot_external`\n",
+            config_path.display()
+        ),
+    );
+}
+
+#[test]
 fn test_controller_openapi() {
     /*
      * This is a little goofy: we need a config file for the program.
