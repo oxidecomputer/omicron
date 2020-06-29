@@ -20,7 +20,7 @@ pub fn fatal(cmd_error: CmdError) -> ! {
     let arg0_result = current_exe().ok();
     let arg0 = arg0_result
         .as_deref()
-        .and_then(|pathbuf| pathbuf.file_name())
+        .and_then(|pathbuf| pathbuf.file_stem())
         .and_then(|file_name| file_name.to_str())
         .unwrap_or("command");
     let (exit_code, message) = match cmd_error {

@@ -622,6 +622,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "newline-converter"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff9ae3574d1a57e937b8789201c223501e8178b4b42849d7b1a40d2cb2592a51"
+
+[[package]]
 name = "num"
 version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -696,6 +702,7 @@ dependencies = [
  "http",
  "hyper",
  "libc",
+ "newline-converter",
  "openapiv3",
  "schemars",
  "serde",
