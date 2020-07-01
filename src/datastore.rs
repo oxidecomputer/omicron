@@ -74,6 +74,7 @@ struct CdsData {
  * One idea would be that there's a way to look up a project, disk, or instance
  * by name (and project *id*, for instances and disks), and after that, you
  * always have to operate using the whole object (instead of its name).
+ * Really, this should resemble what we expect to get from the real database.
  */
 impl ControlDataStore {
     pub fn new() -> ControlDataStore {
@@ -221,7 +222,8 @@ impl ControlDataStore {
         });
 
         let rv = Arc::clone(&newvalue);
-        data.projects_by_name.insert(newvalue.identity.name.clone(), project_id);
+        data.projects_by_name
+            .insert(newvalue.identity.name.clone(), project_id);
         data.projects_by_id.insert(project_id, newvalue);
         Ok(rv)
     }
@@ -456,7 +458,7 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiDisk> {
         let data = self.data.lock().await;
-        let project_id =  collection_lookup(
+        let project_id = collection_lookup(
             &data.projects_by_name,
             &project_name,
             ApiResourceType::Project,

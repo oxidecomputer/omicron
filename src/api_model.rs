@@ -9,7 +9,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use dropshot::ExtractedParameter;
 use futures::future::ready;
-use futures::stream::Stream;
+use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -21,7 +21,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -45,8 +44,7 @@ pub type LookupResult<T> = Result<Arc<T>, ApiError>;
 pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
 
 /** A stream of Results, each potentially representing an object in the API */
-pub type ObjectStream<T> =
-    Pin<Box<dyn Stream<Item = Result<Arc<T>, ApiError>> + Send>>;
+pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;
 
 /*
  * General-purpose types used for client request parameters and return values.
