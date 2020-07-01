@@ -46,16 +46,11 @@ pub struct ControlDataStore {
  * this were a traditional database or a distributed SQL-like database, since
  * that's ultimately what we expect to put here.
  */
-/*
- * TODO-cleanup: We could clean up the internal interfaces for projects here by
- * storing projects_by_id (a map from Uuid to Arc<ApiProject>).  We may want to
- * change `projects_by_name` to map from ApiName to Uuid.  This will allow a
- * clearer interface for getting information about a project by either id or
- * name without duplicating a reference to the project.
- */
 struct CdsData {
-    /** projects in the system, indexed by name */
-    projects_by_name: BTreeMap<ApiName, Arc<ApiProject>>,
+    /** projects in the system */
+    projects_by_id: BTreeMap<Uuid, Arc<ApiProject>>,
+    /** index mapping project name to project id */
+    projects_by_name: BTreeMap<ApiName, Uuid>,
     /** project instances, indexed by project name, then by instance name */
     instances_by_project_id:
         BTreeMap<Uuid, BTreeMap<ApiName, Arc<ApiInstance>>>,
@@ -84,6 +79,7 @@ impl ControlDataStore {
     pub fn new() -> ControlDataStore {
         ControlDataStore {
             data: Mutex::new(CdsData {
+                projects_by_id: BTreeMap::new(),
                 projects_by_name: BTreeMap::new(),
                 instances_by_project_id: BTreeMap::new(),
                 instances_by_id: BTreeMap::new(),
@@ -110,6 +106,7 @@ impl ControlDataStore {
         let mut data = self.data.lock().await;
         assert!(!data.instances_by_project_id.contains_key(&new_uuid));
         assert!(!data.disks_by_project_id.contains_key(&new_uuid));
+        assert!(!data.projects_by_id.contains_key(&new_uuid));
         if data.projects_by_name.contains_key(&newname) {
             return Err(ApiError::ObjectAlreadyExists {
                 type_name: ApiResourceType::Project,
@@ -130,8 +127,8 @@ impl ControlDataStore {
         });
 
         let rv = Arc::clone(&project);
-        let projects_by_name = &mut data.projects_by_name;
-        projects_by_name.insert(newname.clone(), project);
+        data.projects_by_id.insert(new_uuid, project);
+        data.projects_by_name.insert(newname.clone(), new_uuid);
         data.instances_by_project_id.insert(new_uuid, BTreeMap::new());
         data.disks_by_project_id.insert(new_uuid, BTreeMap::new());
         Ok(rv)
@@ -142,8 +139,9 @@ impl ControlDataStore {
         name: &ApiName,
     ) -> LookupResult<ApiProject> {
         let data = self.data.lock().await;
-        let project = collection_lookup(
+        let project = collection_lookup_via_id(
             &data.projects_by_name,
+            &data.projects_by_id,
             name,
             ApiResourceType::Project,
             &ApiError::not_found_by_name,
@@ -156,21 +154,21 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiProject> {
         let data = self.data.lock().await;
-        collection_page(&data.projects_by_name, pagparams)
+        collection_page_via_id(
+            &data.projects_by_name,
+            pagparams,
+            &data.projects_by_id,
+        )
     }
 
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
         let mut data = self.data.lock().await;
-        let project_id = {
-            let project = collection_lookup(
-                &data.projects_by_name,
-                name,
-                ApiResourceType::Project,
-                &ApiError::not_found_by_name,
-            )?;
-
-            project.identity.id
-        };
+        let project_id = *collection_lookup(
+            &data.projects_by_name,
+            name,
+            ApiResourceType::Project,
+            &ApiError::not_found_by_name,
+        )?;
         let instances = data.instances_by_project_id.get(&project_id).unwrap();
 
         if !instances.is_empty() {
@@ -181,6 +179,7 @@ impl ControlDataStore {
 
         data.instances_by_project_id.remove(&project_id).unwrap();
         data.disks_by_project_id.remove(&project_id).unwrap();
+        data.projects_by_id.remove(&project_id).unwrap();
         data.projects_by_name.remove(name).unwrap();
         Ok(())
     }
@@ -192,12 +191,12 @@ impl ControlDataStore {
     ) -> UpdateResult<ApiProject> {
         let now = Utc::now();
         let mut data = self.data.lock().await;
-        let projects = &mut data.projects_by_name;
 
-        let oldproject: Arc<ApiProject> =
-            projects.remove(name).ok_or_else(|| {
+        let project_id =
+            data.projects_by_name.remove(name).ok_or_else(|| {
                 ApiError::not_found_by_name(ApiResourceType::Project, name)
             })?;
+        let oldproject = data.projects_by_id.get(&project_id).unwrap();
         let newname = &new_params
             .identity
             .name
@@ -212,7 +211,7 @@ impl ControlDataStore {
 
         let newvalue = Arc::new(ApiProject {
             identity: ApiIdentityMetadata {
-                id: oldproject.identity.id,
+                id: project_id,
                 name: (*newname).clone(),
                 description: (*newdescription).clone(),
                 time_created: oldproject.identity.time_created,
@@ -222,7 +221,8 @@ impl ControlDataStore {
         });
 
         let rv = Arc::clone(&newvalue);
-        projects.insert(newvalue.identity.name.clone(), newvalue);
+        data.projects_by_name.insert(newvalue.identity.name.clone(), project_id);
+        data.projects_by_id.insert(project_id, newvalue);
         Ok(rv)
     }
 
@@ -236,7 +236,7 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiInstance> {
         let data = self.data.lock().await;
-        let project = collection_lookup(
+        let project_id = collection_lookup(
             &data.projects_by_name,
             project_name,
             ApiResourceType::Project,
@@ -244,7 +244,7 @@ impl ControlDataStore {
         )?;
         let project_instances = &data.instances_by_project_id;
         let instances = project_instances
-            .get(&project.identity.id)
+            .get(&project_id)
             .expect("project existed but had no instance collection");
         collection_page(&instances, pagparams)
     }
@@ -260,15 +260,12 @@ impl ControlDataStore {
 
         let mut data = self.data.lock().await;
 
-        let project_id = {
-            let project = collection_lookup(
-                &data.projects_by_name,
-                project_name,
-                ApiResourceType::Project,
-                &ApiError::not_found_by_name,
-            )?;
-            project.identity.id
-        };
+        let project_id = *collection_lookup(
+            &data.projects_by_name,
+            project_name,
+            ApiResourceType::Project,
+            &ApiError::not_found_by_name,
+        )?;
 
         let instances = data
             .instances_by_project_id
@@ -310,7 +307,7 @@ impl ControlDataStore {
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
         let data = self.data.lock().await;
-        let project = collection_lookup(
+        let project_id = collection_lookup(
             &data.projects_by_name,
             project_name,
             ApiResourceType::Project,
@@ -318,7 +315,7 @@ impl ControlDataStore {
         )?;
         let project_instances = &data.instances_by_project_id;
         let instances = project_instances
-            .get(&project.identity.id)
+            .get(&project_id)
             .expect("project existed but had no instance collection");
         let instance = collection_lookup(
             &instances,
@@ -335,15 +332,12 @@ impl ControlDataStore {
         instance_name: &ApiName,
     ) -> DeleteResult {
         let mut data = self.data.lock().await;
-        let project_id = {
-            let project = collection_lookup(
-                &data.projects_by_name,
-                project_name,
-                ApiResourceType::Project,
-                &ApiError::not_found_by_name,
-            )?;
-            project.identity.id
-        };
+        let project_id = *collection_lookup(
+            &data.projects_by_name,
+            project_name,
+            ApiResourceType::Project,
+            &ApiError::not_found_by_name,
+        )?;
         let project_instances = &mut data.instances_by_project_id;
         let instances = project_instances
             .get_mut(&project_id)
@@ -375,8 +369,6 @@ impl ControlDataStore {
      * TODO-correctness This ought to take some kind of generation counter or
      * etag that can be used for optimistic concurrency control inside the
      * datastore.
-     * TODO-cleanup We really ought to refactor this so that you don't need to
-     * update two data structures.
      */
     pub async fn instance_update(
         &self,
@@ -464,15 +456,12 @@ impl ControlDataStore {
         pagparams: &PaginationParams<ApiName>,
     ) -> ListResult<ApiDisk> {
         let data = self.data.lock().await;
-        let project_id = {
-            let project = collection_lookup(
-                &data.projects_by_name,
-                &project_name,
-                ApiResourceType::Project,
-                &ApiError::not_found_by_name,
-            )?;
-            project.identity.id
-        };
+        let project_id =  collection_lookup(
+            &data.projects_by_name,
+            &project_name,
+            ApiResourceType::Project,
+            &ApiError::not_found_by_name,
+        )?;
         let all_disks = &data.disks_by_id;
         let disks_by_project = &data.disks_by_project_id;
         let project_disks = disks_by_project
@@ -487,7 +476,7 @@ impl ControlDataStore {
         disk_name: &ApiName,
     ) -> LookupResult<ApiDisk> {
         let data = self.data.lock().await;
-        let project = collection_lookup(
+        let project_id = collection_lookup(
             &data.projects_by_name,
             project_name,
             ApiResourceType::Project,
@@ -495,7 +484,7 @@ impl ControlDataStore {
         )?;
         let disks_by_project = &data.disks_by_project_id;
         let project_disks = disks_by_project
-            .get(&project.identity.id)
+            .get(&project_id)
             .expect("project existed but had no disk collection");
         Ok(Arc::clone(collection_lookup_via_id(
             project_disks,
@@ -574,7 +563,7 @@ impl ControlDataStore {
 
         /*
          * In case this update changes the name, remove it from the list of
-         * instances in the project and re-add it with the new name.
+         * disks in the project and re-add it with the new name.
          */
         let disks =
             data.disks_by_project_id.get_mut(&new_disk.project_id).unwrap();
@@ -689,11 +678,11 @@ where
  * [`collection_lookup_via_id`].
  */
 fn collection_lookup<'a, 'b, KeyType, ValueType>(
-    tree: &'b BTreeMap<KeyType, Arc<ValueType>>,
+    tree: &'b BTreeMap<KeyType, ValueType>,
     lookup_key: &'a KeyType,
     resource_type: ApiResourceType,
     mkerror: &dyn Fn(ApiResourceType, &KeyType) -> ApiError,
-) -> Result<&'b Arc<ValueType>, ApiError>
+) -> Result<&'b ValueType, ApiError>
 where
     KeyType: std::cmp::Ord,
 {
