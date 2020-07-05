@@ -33,8 +33,8 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 # It's common during development to use a local copy of dropshot in the parent
 # directory.  If you want to use that, uncomment this block.
 #
-#[patch."ssh://git@github.com/oxidecomputer/dropshot"]
-#dropshot = { path = "../dropshot" }
+#[patch."https://github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot/dropshot" }
 
 #
 # Disable doc builds by default for our binaries to work around issue
