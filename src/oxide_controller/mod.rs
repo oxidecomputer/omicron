@@ -28,18 +28,22 @@ use uuid::Uuid;
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec
  * to stdout.
  */
-pub fn controller_run_openapi_external() {
-    controller_external_api().print_openapi(
-        &"Oxide Region API",
-        Some(&"API for interacting with the Oxide control plane"),
-        None,
-        None,
-        Some(&"https://oxide.computer"),
-        Some(&"api@oxide.computer"),
-        None,
-        None,
-        &"0.0.1",
-    );
+pub fn controller_run_openapi_external() -> Result<(), String> {
+    controller_external_api()
+        .print_openapi(
+            &mut std::io::stdout(),
+            &"Oxide Region API",
+            Some(&"API for interacting with the Oxide control plane"),
+            None,
+            None,
+            Some(&"https://oxide.computer"),
+            Some(&"api@oxide.computer"),
+            None,
+            None,
+            &"0.0.1",
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /**
