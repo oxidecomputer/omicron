@@ -52,8 +52,7 @@ async fn do_run() -> Result<(), CmdError> {
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
     if matches.is_present("openapi") {
-        controller_run_openapi_external();
-        Ok(())
+        controller_run_openapi_external().map_err(CmdError::Failure)
     } else {
         controller_run_server(&config).await.map_err(CmdError::Failure)
     }

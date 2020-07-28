@@ -178,8 +178,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dropshot#7a80b81e61c37186c10cef74a0c8abee2ee04b5f"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/dropshot#6c1b105c715a25445ec0602531065d0baaeb1279"
 dependencies = [
  "async-trait",
  "bytes",
@@ -207,8 +207,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dropshot#7a80b81e61c37186c10cef74a0c8abee2ee04b5f"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/dropshot#6c1b105c715a25445ec0602531065d0baaeb1279"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -934,7 +934,8 @@ dependencies = [
 [[package]]
 name = "serde_tokenstream"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/serde_tokenstream#67c3d3c34150e64f9b1300642593cce1521d913c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1319fd28edf99e7ea038608cd20d6c20c28b2afe57ed1f8a4a7284bbfe76aaa5"
 dependencies = [
  "proc-macro2",
  "serde",
