@@ -7,7 +7,6 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use dropshot::ExtractedParameter;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
@@ -67,7 +66,7 @@ pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;
  * `NameType` is the type of the field used to sort the returned values and it's
  * usually `ApiName`.
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 pub struct PaginationParams<NameType> {
     /**
      * If present, this is the value of the sort field for the last object seen

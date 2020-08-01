@@ -22,7 +22,6 @@ use crate::api_model::ApiSledView;
 use crate::api_model::PaginationParams;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -33,6 +32,7 @@ use dropshot::Json;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -153,7 +153,7 @@ async fn api_projects_post(
 /**
  * Path parameters for Project requests
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct ProjectPathParam {
     /// The project's unique ID.
     project_name: ApiName,
@@ -280,7 +280,7 @@ async fn api_project_disks_post(
 /**
  * Path parameters for Disk requests
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     project_name: ApiName,
     disk_name: ApiName,
@@ -388,7 +388,7 @@ async fn api_project_instances_post(
 /**
  * Path parameters for Instance requests
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     project_name: ApiName,
     instance_name: ApiName,
@@ -528,7 +528,7 @@ async fn api_instance_disks_get(
 /**
  * Path parameters for requests that access Disks attached to an Instance
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct InstanceDiskPathParam {
     project_name: ApiName,
     instance_name: ApiName,
@@ -630,7 +630,7 @@ async fn api_hardware_racks_get(
 /**
  * Path parameters for Rack requests
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct RackPathParam {
     /** The rack's unique ID. */
     rack_id: Uuid,
@@ -680,7 +680,7 @@ async fn api_hardware_sleds_get(
 /**
  * Path parameters for Sled requests
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct SledPathParam {
     /** The sled's unique ID. */
     sled_id: Uuid,

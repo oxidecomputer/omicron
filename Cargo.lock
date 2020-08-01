@@ -179,7 +179,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/dropshot#6c1b105c715a25445ec0602531065d0baaeb1279"
+source = "git+https://github.com/oxidecomputer/dropshot#a5a4a08484bae3c6473351626a0d1558201065e9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -208,13 +208,12 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/dropshot#6c1b105c715a25445ec0602531065d0baaeb1279"
+source = "git+https://github.com/oxidecomputer/dropshot#a5a4a08484bae3c6473351626a0d1558201065e9"
 dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
  "serde",
- "serde_derive_internals",
  "serde_tokenstream",
  "syn",
 ]

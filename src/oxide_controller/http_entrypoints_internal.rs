@@ -10,12 +10,12 @@ use crate::api_model::ApiSledAgentStartupInfo;
 use crate::SledAgentClient;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Json;
 use dropshot::Path;
 use dropshot::RequestContext;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -41,7 +41,7 @@ pub fn controller_internal_api() -> ApiDescription {
 /**
  * Path parameters for Sled Agent requests (internal API)
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct SledAgentPathParam {
     sled_id: Uuid,
 }
@@ -74,7 +74,7 @@ async fn cpapi_sled_agents_post(
 /**
  * Path parameters for Instance requests (internal API)
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     instance_id: Uuid,
 }
@@ -102,7 +102,7 @@ async fn cpapi_instances_put(
 /**
  * Path parameters for Disk requests (internal API)
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     disk_id: Uuid,
 }

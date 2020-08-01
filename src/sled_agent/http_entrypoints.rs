@@ -8,13 +8,13 @@ use crate::api_model::DiskEnsureBody;
 use crate::api_model::InstanceEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::ExtractedParameter;
 use dropshot::HttpError;
 use dropshot::HttpResponseOkObject;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Json;
 use dropshot::Path;
 use dropshot::RequestContext;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::any::Any;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ fn rqctx_to_sa(rqctx: &Arc<RequestContext>) -> Arc<SledAgent> {
 /**
  * Path parameters for Instance requests (sled agent API)
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     instance_id: Uuid,
 }
@@ -98,7 +98,7 @@ async fn scapi_instance_poke_post(
 /**
  * Path parameters for Disk requests (sled agent API)
  */
-#[derive(Deserialize, ExtractedParameter)]
+#[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     disk_id: Uuid,
 }
