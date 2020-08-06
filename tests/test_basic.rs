@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
@@ -449,7 +450,7 @@ async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<ApiProjectView> {
-    object_get::<Vec<ApiProjectView>>(client, projects_url).await
+    objects_list_page::<ApiProjectView>(client, projects_url).await.items
 }
 
 async fn project_get(

@@ -10,6 +10,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "api_identity"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "arc-swap"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -713,6 +722,7 @@ dependencies = [
 name = "oxide-api-prototype"
 version = "0.1.0"
 dependencies = [
+ "api_identity",
  "async-trait",
  "chrono 0.4.13",
  "clap",

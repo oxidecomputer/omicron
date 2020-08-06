@@ -22,6 +22,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
@@ -408,7 +409,7 @@ async fn instances_list(
     client: &ClientTestContext,
     instances_url: &str,
 ) -> Vec<ApiInstanceView> {
-    object_get::<Vec<ApiInstanceView>>(client, instances_url).await
+    objects_list_page::<ApiInstanceView>(client, instances_url).await.items
 }
 
 /**

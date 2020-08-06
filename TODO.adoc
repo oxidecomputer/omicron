@@ -10,6 +10,10 @@ API endpoints:
 
 Work queue (see also: existing GitHub issues):
 
+* use CARGO_BIN_EXE for paths to binaries
+https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
+* rename sled agent back to serveragent? Ugh.
+* dropshot: allow consumers to provide error codes for dropshot errors
 * deferred cleanup / polish up for more help
 ** clarify use of OXC / OXCP / OxideController / controller
 * decide on a code name for the whole control plane and rename the repo
@@ -35,10 +39,6 @@ Work queue (see also: existing GitHub issues):
 * implement hardening in RFD 10
 * implement ETag / If-Match / If-None-Match
 * implement limits for all types of resources
-* polish pagination interface
-** Decide if we want to use an opaque token or not.
-** If we stick with NDJSON, use serde_json::StreamDeserializer.  Maybe we should
-   just return a big object, though.
 * integrate a real data storage backend
 * implement scheme for API versioning
 ** how to identify the requested version -- header or URI?

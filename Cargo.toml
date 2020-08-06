@@ -5,6 +5,7 @@ authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2018"
 
 [dependencies]
+api_identity = { "path" = "./api_identity" }
 async-trait = "0.1.24"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = "2"
@@ -51,3 +52,7 @@ doc = false
 panic = "abort"
 [profile.release]
 panic = "abort"
+
+[workspace]
+members = [".", "api_identity" ]
+default-members = [".", "api_identity" ]

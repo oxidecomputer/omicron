@@ -14,8 +14,7 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
-use crate::api_model::PaginationParams;
-use crate::api_model::DEFAULT_LIST_PAGE_SIZE;
+use crate::api_model::DataPageParams;
 
 use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
@@ -27,6 +26,7 @@ use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -150,9 +150,17 @@ impl ControlDataStore {
         Ok(Arc::clone(project))
     }
 
-    pub async fn projects_list(
+    pub async fn projects_list_by_id(
         &self,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResult<ApiProject> {
+        let data = self.data.lock().await;
+        collection_page(&data.projects_by_id, pagparams)
+    }
+
+    pub async fn projects_list_by_name(
+        &self,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiProject> {
         let data = self.data.lock().await;
         collection_page_via_id(
@@ -235,7 +243,7 @@ impl ControlDataStore {
     pub async fn project_list_instances(
         &self,
         project_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
         let data = self.data.lock().await;
         let project_id = collection_lookup(
@@ -411,7 +419,7 @@ impl ControlDataStore {
     pub async fn instance_list_disks(
         &self,
         instance: &Arc<ApiInstance>,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         /*
          * For most of the other queries made to the data store, we keep data
@@ -455,7 +463,7 @@ impl ControlDataStore {
     pub async fn project_list_disks(
         &self,
         project_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         let data = self.data.lock().await;
         let project_id = collection_lookup(
@@ -620,7 +628,7 @@ impl ControlDataStore {
  */
 pub fn collection_page<'a, 'b, KeyType, ValueType>(
     search_tree: &'a BTreeMap<KeyType, Arc<ValueType>>,
-    pagparams: &'b PaginationParams<KeyType>,
+    pagparams: &'b DataPageParams<'_, KeyType>,
 ) -> ListResult<ValueType>
 where
     KeyType: std::cmp::Ord,
@@ -642,28 +650,26 @@ where
  */
 fn collection_page_as_iter<'a, 'b, KeyType, ValueType>(
     search_tree: &'a BTreeMap<KeyType, ValueType>,
-    pagparams: &'b PaginationParams<KeyType>,
+    pagparams: &'b DataPageParams<'_, KeyType>,
 ) -> Box<dyn Iterator<Item = (&'a KeyType, &'a ValueType)> + 'a>
 where
     KeyType: std::cmp::Ord,
 {
-    let limit = pagparams.limit.unwrap_or(DEFAULT_LIST_PAGE_SIZE);
-    match &pagparams.marker {
-        None => Box::new(search_tree.iter().take(limit)),
-        /*
-         * NOTE: This range is inclusive on the low end because that
-         * makes it easier for the client to know that it hasn't missed
-         * some items in the namespace.  This does mean that clients
-         * have to know to skip the first item on each page because
-         * it'll be the same as the last item on the previous page.
-         * TODO-cleanup would it be a problem to just make this an
-         * exclusive bound?  It seems like you couldn't fail to see any
-         * items that were present for the whole scan, which seems like
-         * the main constraint.
-         */
-        Some(start_value) => {
-            Box::new(search_tree.range(start_value..).take(limit))
-        }
+    let limit = pagparams.limit.get();
+    match (pagparams.direction, &pagparams.marker) {
+        (true, None) => Box::new(search_tree.iter().take(limit)),
+        (false, None) => Box::new(search_tree.iter().rev().take(limit)),
+        (true, Some(start_value)) => Box::new(
+            search_tree
+                .range((Bound::Excluded(*start_value), Bound::Unbounded))
+                .take(limit),
+        ),
+        (false, Some(start_value)) => Box::new(
+            search_tree
+                .range((Bound::Unbounded, Bound::Excluded(*start_value)))
+                .rev()
+                .take(limit),
+        ),
     }
 }
 
@@ -724,7 +730,7 @@ where
  */
 pub fn collection_page_via_id<KeyType, IdType, ValueType>(
     search_tree: &BTreeMap<KeyType, IdType>,
-    pagparams: &PaginationParams<KeyType>,
+    pagparams: &DataPageParams<'_, KeyType>,
     value_tree: &BTreeMap<IdType, Arc<ValueType>>,
 ) -> ListResult<ValueType>
 where
