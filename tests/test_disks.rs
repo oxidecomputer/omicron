@@ -25,7 +25,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::test_util::object_get;
-use dropshot::test_util::objects_list;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
@@ -155,7 +154,8 @@ async fn test_disks() {
         String::from(disk.identity.name.clone())
     );
     let attachments =
-        objects_list::<ApiDiskAttachment>(&client, &url_instance_disks).await;
+        object_get::<Vec<ApiDiskAttachment>>(&client, &url_instance_disks)
+            .await;
     assert_eq!(attachments.len(), 0);
     let error = client
         .make_request_error(
@@ -524,7 +524,7 @@ async fn disks_list(
     client: &ClientTestContext,
     list_url: &str,
 ) -> Vec<ApiDiskView> {
-    objects_list::<ApiDiskView>(client, list_url).await
+    object_get::<Vec<ApiDiskView>>(client, list_url).await
 }
 
 fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {
