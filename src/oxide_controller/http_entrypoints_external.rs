@@ -26,11 +26,11 @@ use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
-use dropshot::HttpResponseOkObject;
-use dropshot::Json;
+use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -123,13 +123,13 @@ pub fn controller_external_api() -> ApiDescription {
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
     query_params: Query<PaginationParams<ApiName>>,
-) -> Result<HttpResponseOkObject<Vec<ApiProjectView>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiProjectView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let project_stream = controller.projects_list(&query).await?;
     let view_list = to_view_list(project_stream).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -141,7 +141,7 @@ async fn api_projects_get(
 }]
 async fn api_projects_post(
     rqctx: Arc<RequestContext>,
-    new_project: Json<ApiProjectCreateParams>,
+    new_project: TypedBody<ApiProjectCreateParams>,
 ) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
@@ -168,14 +168,14 @@ struct ProjectPathParam {
 async fn api_projects_get_project(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
+) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let project: Arc<ApiProject> =
         controller.project_lookup(&project_name).await?;
-    Ok(HttpResponseOkObject(project.to_view()))
+    Ok(HttpResponseOk(project.to_view()))
 }
 
 /**
@@ -213,8 +213,8 @@ async fn api_projects_delete_project(
 async fn api_projects_put_project(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
-    updated_project: Json<ApiProjectUpdateParams>,
-) -> Result<HttpResponseOkObject<ApiProjectView>, HttpError> {
+    updated_project: TypedBody<ApiProjectUpdateParams>,
+) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -222,7 +222,7 @@ async fn api_projects_put_project(
     let newproject = controller
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
-    Ok(HttpResponseOkObject(newproject.to_view()))
+    Ok(HttpResponseOk(newproject.to_view()))
 }
 
 /*
@@ -240,7 +240,7 @@ async fn api_project_disks_get(
     rqctx: Arc<RequestContext>,
     query_params: Query<PaginationParams<ApiName>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOkObject<Vec<ApiDiskView>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiDiskView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
@@ -249,7 +249,7 @@ async fn api_project_disks_get(
     let disk_stream =
         controller.project_list_disks(project_name, &query).await?;
     let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -264,7 +264,7 @@ async fn api_project_disks_get(
 async fn api_project_disks_post(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
-    new_disk: Json<ApiDiskCreateParams>,
+    new_disk: TypedBody<ApiDiskCreateParams>,
 ) -> Result<HttpResponseCreated<ApiDiskView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
@@ -295,7 +295,7 @@ struct DiskPathParam {
 async fn api_project_disks_get_disk(
     rqctx: Arc<RequestContext>,
     path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseOkObject<ApiDiskView>, HttpError> {
+) -> Result<HttpResponseOk<ApiDiskView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -303,7 +303,7 @@ async fn api_project_disks_get_disk(
     let disk_name = &path.disk_name;
     let disk =
         controller.project_lookup_disk(&project_name, &disk_name).await?;
-    Ok(HttpResponseOkObject(disk.to_view()))
+    Ok(HttpResponseOk(disk.to_view()))
 }
 
 /**
@@ -341,7 +341,7 @@ async fn api_project_instances_get(
     rqctx: Arc<RequestContext>,
     query_params: Query<PaginationParams<ApiName>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOkObject<Vec<ApiInstanceView>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiInstanceView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
@@ -350,7 +350,7 @@ async fn api_project_instances_get(
     let instance_stream =
         controller.project_list_instances(&project_name, &query).await?;
     let view_list = to_view_list(instance_stream).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -371,7 +371,7 @@ async fn api_project_instances_get(
 async fn api_project_instances_post(
     rqctx: Arc<RequestContext>,
     path_params: Path<ProjectPathParam>,
-    new_instance: Json<ApiInstanceCreateParams>,
+    new_instance: TypedBody<ApiInstanceCreateParams>,
 ) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
@@ -403,7 +403,7 @@ struct InstancePathParam {
 async fn api_project_instances_get_instance(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOkObject<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseOk<ApiInstanceView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -412,7 +412,7 @@ async fn api_project_instances_get_instance(
     let instance: Arc<ApiInstance> = controller
         .project_lookup_instance(&project_name, &instance_name)
         .await?;
-    Ok(HttpResponseOkObject(instance.to_view()))
+    Ok(HttpResponseOk(instance.to_view()))
 }
 
 /**
@@ -510,7 +510,7 @@ async fn api_instance_disks_get(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
     query_params: Query<PaginationParams<ApiName>>,
-) -> Result<HttpResponseOkObject<Vec<ApiDiskAttachment>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiDiskAttachment>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -521,7 +521,7 @@ async fn api_instance_disks_get(
         .instance_list_disks(&project_name, &instance_name, &query)
         .await?;
     let view_list = to_view_list(disk_list).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -544,7 +544,7 @@ struct InstanceDiskPathParam {
 async fn api_instance_disks_get_disk(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseOkObject<ApiDiskAttachment>, HttpError> {
+) -> Result<HttpResponseOk<ApiDiskAttachment>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
@@ -554,7 +554,7 @@ async fn api_instance_disks_get_disk(
     let attachment = controller
         .instance_get_disk(&project_name, &instance_name, &disk_name)
         .await?;
-    Ok(HttpResponseOkObject(attachment.to_view()))
+    Ok(HttpResponseOk(attachment.to_view()))
 }
 
 /**
@@ -617,13 +617,13 @@ async fn api_instance_disks_delete_disk(
 async fn api_hardware_racks_get(
     rqctx: Arc<RequestContext>,
     params_raw: Query<PaginationParams<Uuid>>,
-) -> Result<HttpResponseOkObject<Vec<ApiRackView>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiRackView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let params = params_raw.into_inner();
     let rack_stream = controller.racks_list(&params).await?;
     let view_list = to_view_list(rack_stream).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -645,12 +645,12 @@ struct RackPathParam {
 async fn api_hardware_racks_get_rack(
     rqctx: Arc<RequestContext>,
     path_params: Path<RackPathParam>,
-) -> Result<HttpResponseOkObject<ApiRackView>, HttpError> {
+) -> Result<HttpResponseOk<ApiRackView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let rack_info = controller.rack_lookup(&path.rack_id).await?;
-    Ok(HttpResponseOkObject(rack_info.to_view()))
+    Ok(HttpResponseOk(rack_info.to_view()))
 }
 
 /*
@@ -667,13 +667,13 @@ async fn api_hardware_racks_get_rack(
 async fn api_hardware_sleds_get(
     rqctx: Arc<RequestContext>,
     params_raw: Query<PaginationParams<Uuid>>,
-) -> Result<HttpResponseOkObject<Vec<ApiSledView>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiSledView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let params = params_raw.into_inner();
     let sled_stream = controller.sleds_list(&params).await?;
     let view_list = to_view_list(sled_stream).await;
-    Ok(HttpResponseOkObject(view_list))
+    Ok(HttpResponseOk(view_list))
 }
 
 /**
@@ -695,10 +695,10 @@ struct SledPathParam {
 async fn api_hardware_sleds_get_sled(
     rqctx: Arc<RequestContext>,
     path_params: Path<SledPathParam>,
-) -> Result<HttpResponseOkObject<ApiSledView>, HttpError> {
+) -> Result<HttpResponseOk<ApiSledView>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let sled_info = controller.sled_lookup(&path.sled_id).await?;
-    Ok(HttpResponseOkObject(sled_info.to_view()))
+    Ok(HttpResponseOk(sled_info.to_view()))
 }

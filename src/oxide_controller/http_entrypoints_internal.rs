@@ -12,9 +12,9 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::Json;
 use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -56,7 +56,7 @@ struct SledAgentPathParam {
 async fn cpapi_sled_agents_post(
     rqctx: Arc<RequestContext>,
     path_params: Path<SledAgentPathParam>,
-    sled_info: Json<ApiSledAgentStartupInfo>,
+    sled_info: TypedBody<ApiSledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
@@ -89,7 +89,7 @@ struct InstancePathParam {
 async fn cpapi_instances_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-    new_runtime_state: Json<ApiInstanceRuntimeState>,
+    new_runtime_state: TypedBody<ApiInstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
@@ -117,7 +117,7 @@ struct DiskPathParam {
 async fn cpapi_disks_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<DiskPathParam>,
-    new_runtime_state: Json<ApiDiskRuntimeState>,
+    new_runtime_state: TypedBody<ApiDiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;

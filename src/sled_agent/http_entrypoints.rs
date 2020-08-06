@@ -9,11 +9,11 @@ use crate::api_model::InstanceEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
-use dropshot::HttpResponseOkObject;
+use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::Json;
 use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::any::Any;
@@ -66,12 +66,12 @@ struct InstancePathParam {
 async fn scapi_instance_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-    body: Json<InstanceEnsureBody>,
-) -> Result<HttpResponseOkObject<ApiInstanceRuntimeState>, HttpError> {
+    body: TypedBody<InstanceEnsureBody>,
+) -> Result<HttpResponseOk<ApiInstanceRuntimeState>, HttpError> {
     let sa = rqctx_to_sa(&rqctx);
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(
+    Ok(HttpResponseOk(
         sa.instance_ensure(
             instance_id,
             body_args.initial_runtime.clone(),
@@ -110,12 +110,12 @@ struct DiskPathParam {
 async fn scapi_disk_put(
     rqctx: Arc<RequestContext>,
     path_params: Path<DiskPathParam>,
-    body: Json<DiskEnsureBody>,
-) -> Result<HttpResponseOkObject<ApiDiskRuntimeState>, HttpError> {
+    body: TypedBody<DiskEnsureBody>,
+) -> Result<HttpResponseOk<ApiDiskRuntimeState>, HttpError> {
     let sa = rqctx_to_sa(&rqctx);
     let disk_id = path_params.into_inner().disk_id;
     let body_args = body.into_inner();
-    Ok(HttpResponseOkObject(
+    Ok(HttpResponseOk(
         sa.disk_ensure(
             disk_id,
             body_args.initial_runtime.clone(),
