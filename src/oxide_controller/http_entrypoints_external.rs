@@ -20,6 +20,7 @@ use crate::api_model::ApiProjectView;
 use crate::api_model::ApiRackView;
 use crate::api_model::ApiSledView;
 use crate::api_model::DataPageParams;
+use crate::api_model::PaginationOrder;
 use crate::http_pagination::data_page_params_id;
 use crate::http_pagination::data_page_params_name;
 use crate::http_pagination::data_page_params_nameid_id;
@@ -552,7 +553,7 @@ async fn api_instance_disks_get(
     let instance_name = &path.instance_name;
     let fake_query = DataPageParams {
         marker: None,
-        direction: true,
+        direction: PaginationOrder::Ascending,
         limit: NonZeroUsize::new(std::usize::MAX).unwrap(),
     };
     let disk_list = controller

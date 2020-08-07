@@ -15,6 +15,8 @@ use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DataPageParams;
+use crate::api_model::PaginationOrder::Ascending;
+use crate::api_model::PaginationOrder::Descending;
 
 use crate::api_model::CreateResult;
 use crate::api_model::DeleteResult;
@@ -657,14 +659,14 @@ where
 {
     let limit = pagparams.limit.get();
     match (pagparams.direction, &pagparams.marker) {
-        (true, None) => Box::new(search_tree.iter().take(limit)),
-        (false, None) => Box::new(search_tree.iter().rev().take(limit)),
-        (true, Some(start_value)) => Box::new(
+        (Ascending, None) => Box::new(search_tree.iter().take(limit)),
+        (Descending, None) => Box::new(search_tree.iter().rev().take(limit)),
+        (Ascending, Some(start_value)) => Box::new(
             search_tree
                 .range((Bound::Excluded(*start_value), Bound::Unbounded))
                 .take(limit),
         ),
-        (false, Some(start_value)) => Box::new(
+        (Descending, Some(start_value)) => Box::new(
             search_tree
                 .range((Bound::Unbounded, Bound::Excluded(*start_value)))
                 .rev()

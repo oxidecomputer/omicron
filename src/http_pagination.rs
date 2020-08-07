@@ -41,6 +41,7 @@
 use crate::api_model::ApiName;
 use crate::api_model::ApiObjectIdentity;
 use crate::api_model::DataPageParams;
+use crate::api_model::PaginationOrder;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
@@ -133,7 +134,7 @@ pub fn data_page_params_name<'a>(
 
     Ok(DataPageParams {
         marker,
-        direction: true,
+        direction: PaginationOrder::Ascending,
         limit,
     })
 }
@@ -219,7 +220,7 @@ pub fn data_page_params_id<'a>(
 
     Ok(DataPageParams {
         marker,
-        direction: true,
+        direction: PaginationOrder::Ascending,
         limit,
     })
 }
@@ -364,8 +365,8 @@ pub fn data_page_params_nameid_name<'a>(
     let scan_params = scan_params_for_query(pag_params)?;
 
     let direction = match &scan_params.sort_by {
-        ApiNameOrIdSortMode::NameAscending => true,
-        ApiNameOrIdSortMode::NameDescending => false,
+        ApiNameOrIdSortMode::NameAscending => PaginationOrder::Ascending,
+        ApiNameOrIdSortMode::NameDescending => PaginationOrder::Descending,
         _ => return Err(bad_token_error()),
     };
 
@@ -412,7 +413,7 @@ pub fn data_page_params_nameid_id<'a>(
 
     Ok(DataPageParams {
         marker,
-        direction: true,
+        direction: PaginationOrder::Ascending,
         limit,
     })
 }

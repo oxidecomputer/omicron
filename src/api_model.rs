@@ -7,6 +7,7 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
@@ -84,7 +85,7 @@ pub struct DataPageParams<'a, NameType> {
     /**
      * Whether the sort is in ascending order
      */
-    pub direction: bool,
+    pub direction: PaginationOrder,
 
     /**
      * This identifies how many results should be returned on this page.
@@ -981,7 +982,9 @@ impl ApiObject for ApiSled {
  * Client view of an [`ApiSled`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiSledView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
