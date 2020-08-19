@@ -56,20 +56,12 @@ use uuid::Uuid;
  * Pagination by name in ascending order only (most resources today)
  */
 
-/**
- * Query parameters for pagination by name only
- */
+/** Query parameters for pagination by name only */
 pub type ApiPaginatedByName =
     PaginationParams<ApiScanByName, ApiPageSelectorByName>;
-
-/**
- * Page selector for pagination by name only
- */
+/** Page selector for pagination by name only */
 pub type ApiPageSelectorByName = ApiPageSelector<ApiScanByName, ApiName>;
-
-/**
- * Scan parameters for resources that support scanning by name only
- */
+/** Scan parameters for resources that support scanning by name only */
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 pub struct ApiScanByName {
     #[serde(default = "default_name_sort_mode")]
@@ -139,19 +131,13 @@ pub fn data_page_params_name<'a>(
  * Pagination by id in ascending order only (for some anonymous resources today)
  */
 
-/**
- * Query parameters for pagination by id only
- */
+/** Query parameters for pagination by id only */
 pub type ApiPaginatedById = PaginationParams<ApiScanById, ApiPageSelectorById>;
 
-/**
- * Page selector for pagination by name only
- */
+/** Page selector for pagination by name only */
 pub type ApiPageSelectorById = ApiPageSelector<ApiScanById, Uuid>;
 
-/**
- * Scan parameters for resources that support scanning by id only
- */
+/** Scan parameters for resources that support scanning by id only */
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 pub struct ApiScanById {
     #[serde(default = "default_id_sort_mode")]
@@ -222,30 +208,21 @@ pub fn data_page_params_id<'a>(
  * We include this now primarily to exercise the interface for doing so.
  */
 
-/**
- * Query parameters for pagination by name or id
- */
+/** Query parameters for pagination by name or id */
 pub type ApiPaginatedByNameOrId =
     PaginationParams<ApiScanByNameOrId, ApiPageSelectorByNameOrId>;
-
-/**
- * Page selector for pagination by name or id
- */
+/** Page selector for pagination by name or id */
 pub type ApiPageSelectorByNameOrId =
     ApiPageSelector<ApiScanByNameOrId, ApiNameOrIdMarker>;
 
-/**
- * Scan parameters for resources that support scanning by name or id
- */
+/** Scan parameters for resources that support scanning by name or id */
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 pub struct ApiScanByNameOrId {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: ApiNameOrIdSortMode,
 }
 
-/**
- * Supported set of sort modes for scanning by name or id
- */
+/** Supported set of sort modes for scanning by name or id */
 #[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiNameOrIdSortMode {
