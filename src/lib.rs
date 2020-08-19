@@ -80,7 +80,6 @@ pub use sled_agent::SledAgentTestInterfaces;
 
 pub use cmd::fatal;
 pub use cmd::CmdError;
-pub use http_pagination::ApiResultsPage;
 
 #[macro_use]
 extern crate slog;

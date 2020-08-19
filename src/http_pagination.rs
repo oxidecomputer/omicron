@@ -45,6 +45,7 @@ use crate::api_model::PaginationOrder;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
+use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -54,19 +55,94 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /*
- * For our own purposes, we define a ScanParams trait that we can use to
- * implement some common functions.
+ * General pagination infrastructure
+ */
+
+/**
+ * Specifies which page of results we're on
+ *
+ * This type is generic over the different scan modes that we support.
+ */
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct ApiPageSelector<ScanParams, MarkerType> {
+    /** parameters describing the scan */
+    #[serde(flatten)]
+    scan: ScanParams,
+    /** value of the marker field last seen by the client */
+    last_seen: MarkerType,
+}
+
+/**
+ * Describes one of our supported scan modes
+ *
+ * To minimize boilerplate, we provide common functions needed by our consumers
+ * (e.g., `ScanParams::results_page`) as well as the Dropshot interface (e.g.,
+ * `page_selector_for`).  This trait encapsulates the functionality that differs
+ * among the different scan modes that we support.  Much of the functionality
+ * here isn't so much a property of the Dropshot "scan parameters" as much as it
+ * is specific to a scan using those parameters.  As a result, several of these
+ * are associated functions rather than methods.
  */
 pub trait ScanParams:
     Clone + DeserializeOwned + JsonSchema + Serialize
 {
+    /**
+     * Type of the "marker" field for this scan mode
+     *
+     * For example, when scanning by name, this would be `ApiName`.
+     */
     type MarkerValue: Clone + DeserializeOwned + Serialize;
-    fn marker_for<T: ApiObjectIdentity>(&self, t: &T) -> Self::MarkerValue;
+
+    /**
+     * Return the direction of the scan
+     */
+    fn direction(&self) -> PaginationOrder;
+
+    /**
+     * Given an item, return the appropriate marker value
+     *
+     * For example, when scanning by name, this returns the "name" field of the
+     * item.
+     */
+    fn marker_for_item<T: ApiObjectIdentity>(&self, t: &T)
+        -> Self::MarkerValue;
+
+    /**
+     * Given pagination parameters, return the current scan parameters
+     *
+     * This can fail if the pagination parameters are not self-consistent (e.g.,
+     * if the scan parameters indicate we're going in ascending order by name,
+     * but the marker is an id rather than a name).
+     */
     fn from_query(
         q: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError>;
+
+    /**
+     * Generate a page of results for a paginated endpoint that lists items of
+     * type `T`
+     *
+     * `list` contains the items that should appear on the page.  It's not
+     * expected that consumers would override this implementation.
+     */
+    fn results_page<T>(
+        query: &PaginationParams<
+            Self,
+            ApiPageSelector<Self, Self::MarkerValue>,
+        >,
+        list: Vec<T>,
+    ) -> Result<ResultsPage<T>, dropshot::HttpError>
+    where
+        T: ApiObjectIdentity + Serialize,
+    {
+        let scan_params = Self::from_query(query)?;
+        ResultsPage::new(list, scan_params, page_selector_for)
+    }
 }
 
+/**
+ * See `dropshot::ResultsPage::new`
+ */
 fn page_selector_for<T, S, M>(
     item: &T,
     scan_params: &S,
@@ -78,8 +154,40 @@ where
 {
     ApiPageSelector {
         scan: scan_params.clone(),
-        last_seen: scan_params.marker_for(item).clone(),
+        last_seen: scan_params.marker_for_item(item).clone(),
     }
+}
+
+/**
+ * Given a request and pagination parameters, return a [`DataPageParams`]
+ * describing the current page of results to return
+ *
+ * This implementation is used for `ApiScanByName` and `ApiScanById`.  See
+ * [`data_page_params_for_nameid_name`] and [`data_page_params_for_nameid_id`]
+ * for variants that can be used for `ApiScanByNameOrId`.
+ */
+pub fn data_page_params_for<'a, S>(
+    rqctx: &'a Arc<RequestContext>,
+    pag_params: &'a PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
+where
+    S: ScanParams,
+{
+    let limit = rqctx.page_limit(&pag_params)?;
+    let marker = match &pag_params.page {
+        WhichPage::First(..) => None,
+        WhichPage::Next(ApiPageSelector {
+            last_seen, ..
+        }) => Some(last_seen),
+    };
+    let scan_params = S::from_query(pag_params)?;
+    let direction = scan_params.direction();
+
+    Ok(DataPageParams {
+        marker,
+        direction,
+        limit,
+    })
 }
 
 /*
@@ -97,24 +205,6 @@ pub struct ApiScanByName {
     #[serde(default = "default_name_sort_mode")]
     sort_by: ApiNameSortMode,
 }
-
-impl ScanParams for ApiScanByName {
-    type MarkerValue = ApiName;
-    fn marker_for<T: ApiObjectIdentity>(&self, item: &T) -> ApiName {
-        item.identity().name.clone()
-    }
-    fn from_query(
-        p: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
-    ) -> Result<&Self, HttpError> {
-        Ok(match p.page {
-            WhichPage::First(ref scan_params) => scan_params,
-            WhichPage::Next(ApiPageSelector {
-                ref scan, ..
-            }) => scan,
-        })
-    }
-}
-
 /**
  * Supported set of sort modes for scanning by name only
  *
@@ -131,55 +221,13 @@ fn default_name_sort_mode() -> ApiNameSortMode {
     ApiNameSortMode::NameAscending
 }
 
-/**
- * Given the request context `rqctx` and Dropshot pagination parameters
- * `pag_params` for a name-based scan, construct a `DataPageParams` describing
- * the page of data that we want.
- */
-pub fn data_page_params_name<'a>(
-    rqctx: &'a Arc<RequestContext>,
-    pag_params: &'a ApiPaginatedByName,
-) -> Result<DataPageParams<'a, ApiName>, HttpError> {
-    let limit = rqctx.page_limit(&pag_params)?;
-    let marker = match &pag_params.page {
-        WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelector {
-            scan:
-                ApiScanByName {
-                    sort_by: ApiNameSortMode::NameAscending,
-                },
-            last_seen,
-        }) => Some(last_seen),
-    };
-
-    Ok(DataPageParams {
-        marker,
-        direction: PaginationOrder::Ascending,
-        limit,
-    })
-}
-
-/*
- * Pagination by id in ascending order only (for some anonymous resources today)
- */
-
-/** Query parameters for pagination by id only */
-pub type ApiPaginatedById = PaginationParams<ApiScanById, ApiPageSelectorById>;
-
-/** Page selector for pagination by name only */
-pub type ApiPageSelectorById = ApiPageSelector<ApiScanById, Uuid>;
-
-/** Scan parameters for resources that support scanning by id only */
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
-pub struct ApiScanById {
-    #[serde(default = "default_id_sort_mode")]
-    sort_by: ApiIdSortMode,
-}
-
-impl ScanParams for ApiScanById {
-    type MarkerValue = Uuid;
-    fn marker_for<T: ApiObjectIdentity>(&self, item: &T) -> Uuid {
-        item.identity().id.clone()
+impl ScanParams for ApiScanByName {
+    type MarkerValue = ApiName;
+    fn direction(&self) -> PaginationOrder {
+        PaginationOrder::Ascending
+    }
+    fn marker_for_item<T: ApiObjectIdentity>(&self, item: &T) -> ApiName {
+        item.identity().name.clone()
     }
     fn from_query(
         p: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
@@ -191,6 +239,21 @@ impl ScanParams for ApiScanById {
             }) => scan,
         })
     }
+}
+
+/*
+ * Pagination by id in ascending order only (for some anonymous resources today)
+ */
+
+/** Query parameters for pagination by id only */
+pub type ApiPaginatedById = PaginationParams<ApiScanById, ApiPageSelectorById>;
+/** Page selector for pagination by name only */
+pub type ApiPageSelectorById = ApiPageSelector<ApiScanById, Uuid>;
+/** Scan parameters for resources that support scanning by id only */
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+pub struct ApiScanById {
+    #[serde(default = "default_id_sort_mode")]
+    sort_by: ApiIdSortMode,
 }
 
 /**
@@ -209,32 +272,22 @@ fn default_id_sort_mode() -> ApiIdSortMode {
     ApiIdSortMode::IdAscending
 }
 
-/**
- * Given the request context `rqctx` and Dropshot pagination parameters
- * `pag_params` for an id-based scan, construct a `DataPageParams` describing
- * the page of data that we want.
- */
-pub fn data_page_params_id<'a>(
-    rqctx: &'a Arc<RequestContext>,
-    pag_params: &'a ApiPaginatedById,
-) -> Result<DataPageParams<'a, Uuid>, HttpError> {
-    let limit = rqctx.page_limit(&pag_params)?;
-    let marker = match &pag_params.page {
-        WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelectorById {
-            scan:
-                ApiScanById {
-                    sort_by: ApiIdSortMode::IdAscending,
-                },
-            last_seen,
-        }) => Some(last_seen),
-    };
-
-    Ok(DataPageParams {
-        marker,
-        direction: PaginationOrder::Ascending,
-        limit,
-    })
+impl ScanParams for ApiScanById {
+    type MarkerValue = Uuid;
+    fn direction(&self) -> PaginationOrder {
+        PaginationOrder::Ascending
+    }
+    fn marker_for_item<T: ApiObjectIdentity>(&self, item: &T) -> Uuid {
+        item.identity().id.clone()
+    }
+    fn from_query(p: &ApiPaginatedById) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(ApiPageSelector {
+                ref scan, ..
+            }) => scan,
+        })
+    }
 }
 
 /*
@@ -248,23 +301,74 @@ pub type ApiPaginatedByNameOrId =
 /** Page selector for pagination by name or id */
 pub type ApiPageSelectorByNameOrId =
     ApiPageSelector<ApiScanByNameOrId, ApiNameOrIdMarker>;
-
 /** Scan parameters for resources that support scanning by name or id */
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 pub struct ApiScanByNameOrId {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: ApiNameOrIdSortMode,
 }
+/** Supported set of sort modes for scanning by name or id */
+#[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApiNameOrIdSortMode {
+    /** sort in increasing order of "name" */
+    NameAscending,
+    /** sort in decreasing order of "name" */
+    NameDescending,
+    /** sort in increasing order of "id" */
+    IdAscending,
+}
+
+fn default_nameid_sort_mode() -> ApiNameOrIdSortMode {
+    ApiNameOrIdSortMode::NameAscending
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApiNameOrIdMarker {
+    Id(Uuid),
+    Name(ApiName),
+}
+
+fn bad_token_error() -> HttpError {
+    HttpError::for_bad_request(None, String::from("invalid page token"))
+}
+
+pub enum ApiPagField {
+    Id,
+    Name,
+}
+
+pub fn pagination_field_for_scan_params(p: &ApiScanByNameOrId) -> ApiPagField {
+    match p.sort_by {
+        ApiNameOrIdSortMode::NameAscending => ApiPagField::Name,
+        ApiNameOrIdSortMode::NameDescending => ApiPagField::Name,
+        ApiNameOrIdSortMode::IdAscending => ApiPagField::Id,
+    }
+}
 
 impl ScanParams for ApiScanByNameOrId {
     type MarkerValue = ApiNameOrIdMarker;
-    fn marker_for<T: ApiObjectIdentity>(&self, item: &T) -> ApiNameOrIdMarker {
+
+    fn direction(&self) -> PaginationOrder {
+        match self.sort_by {
+            ApiNameOrIdSortMode::NameAscending => PaginationOrder::Ascending,
+            ApiNameOrIdSortMode::NameDescending => PaginationOrder::Descending,
+            ApiNameOrIdSortMode::IdAscending => PaginationOrder::Ascending,
+        }
+    }
+
+    fn marker_for_item<T: ApiObjectIdentity>(
+        &self,
+        item: &T,
+    ) -> ApiNameOrIdMarker {
         let identity = item.identity();
         match pagination_field_for_scan_params(self) {
             ApiPagField::Name => ApiNameOrIdMarker::Name(identity.name.clone()),
             ApiPagField::Id => ApiNameOrIdMarker::Id(identity.id.clone()),
         }
     }
+
     fn from_query(
         p: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError> {
@@ -293,163 +397,56 @@ impl ScanParams for ApiScanByNameOrId {
     }
 }
 
-/** Supported set of sort modes for scanning by name or id */
-#[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ApiNameOrIdSortMode {
-    /** sort in increasing order of "name" */
-    NameAscending,
-    /** sort in decreasing order of "name" */
-    NameDescending,
-    /** sort in increasing order of "id" */
-    IdAscending,
-}
-
-fn default_nameid_sort_mode() -> ApiNameOrIdSortMode {
-    ApiNameOrIdSortMode::NameAscending
-}
-
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ApiNameOrIdMarker {
-    Id(Uuid),
-    Name(ApiName),
-}
-
-pub enum ApiPagField {
-    Id,
-    Name,
-}
-
-fn bad_token_error() -> HttpError {
-    HttpError::for_bad_request(None, String::from("invalid page token"))
-}
-
-pub fn pagination_field_for_scan_params(p: &ApiScanByNameOrId) -> ApiPagField {
-    match p.sort_by {
-        ApiNameOrIdSortMode::NameAscending => ApiPagField::Name,
-        ApiNameOrIdSortMode::NameDescending => ApiPagField::Name,
-        ApiNameOrIdSortMode::IdAscending => ApiPagField::Id,
-    }
-}
-
 /**
- * Given the request context `rqctx` and Dropshot pagination parameters
- * `pag_params` for a name-based scan, construct a `DataPageParams` describing
- * the page of data that we want.
+ * Serves the same purpose as [`data_page_params_for`] for the specific case of
+ * `ApiScanByNameOrId` when scanning by `name`
+ *
+ * Why do we need a separate function here?  Because `data_page_params_for` only
+ * knows how to return the (statically-defined) marker value from the page
+ * selector.  For `ApiScanByNameOrId`, this would return the enum
+ * `ApiNameOrIdMarker`.  But at some point our caller needs the specific type
+ * (e.g., `ApiName` for a scan by name or `Uuid` for a scan by Uuid).  They get
+ * that from this function and its partner, [`data_page_params_nameid_id`].
+ * These functions are where we look at the enum variant and extract the
+ * specific marker value out.
  */
 pub fn data_page_params_nameid_name<'a>(
     rqctx: &'a Arc<RequestContext>,
     pag_params: &'a ApiPaginatedByNameOrId,
 ) -> Result<DataPageParams<'a, ApiName>, HttpError> {
-    let limit = rqctx.page_limit(&pag_params)?;
-    let scan_params = ApiScanByNameOrId::from_query(pag_params)?;
-
-    let direction = match &scan_params.sort_by {
-        ApiNameOrIdSortMode::NameAscending => PaginationOrder::Ascending,
-        ApiNameOrIdSortMode::NameDescending => PaginationOrder::Descending,
-        _ => return Err(bad_token_error()),
+    let data_page = data_page_params_for(rqctx, pag_params)?;
+    let limit = data_page.limit;
+    let direction = data_page.direction;
+    let marker = match data_page.marker {
+        None => None,
+        Some(ApiNameOrIdMarker::Name(name)) => Some(name),
+        Some(ApiNameOrIdMarker::Id(_)) => return Err(bad_token_error()),
     };
-
-    let marker = match &pag_params.page {
-        WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelectorByNameOrId {
-            last_seen: ApiNameOrIdMarker::Name(name),
-            ..
-        }) => Some(name),
-        WhichPage::Next(ApiPageSelectorByNameOrId {
-            last_seen: ApiNameOrIdMarker::Id(_),
-            ..
-        }) => return Err(bad_token_error()),
-    };
-
     Ok(DataPageParams {
-        marker,
-        direction,
         limit,
+        direction,
+        marker,
     })
 }
 
 /**
- * Given the request context `rqctx` and Dropshot pagination parameters
- * `pag_params` for a name-based scan, construct a `DataPageParams` describing
- * the page of data that we want.
+ * See [`data_page_params_nameid_name`].
  */
 pub fn data_page_params_nameid_id<'a>(
     rqctx: &'a Arc<RequestContext>,
     pag_params: &'a ApiPaginatedByNameOrId,
 ) -> Result<DataPageParams<'a, Uuid>, HttpError> {
-    let limit = rqctx.page_limit(&pag_params)?;
-    let marker = match &pag_params.page {
-        WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelectorByNameOrId {
-            last_seen: ApiNameOrIdMarker::Id(id),
-            ..
-        }) => Some(id),
-        WhichPage::Next(ApiPageSelectorByNameOrId {
-            last_seen: ApiNameOrIdMarker::Name(_),
-            ..
-        }) => return Err(bad_token_error()),
+    let data_page = data_page_params_for(rqctx, pag_params)?;
+    let limit = data_page.limit;
+    let direction = data_page.direction;
+    let marker = match data_page.marker {
+        None => None,
+        Some(ApiNameOrIdMarker::Id(id)) => Some(id),
+        Some(ApiNameOrIdMarker::Name(_)) => return Err(bad_token_error()),
     };
-
     Ok(DataPageParams {
-        marker,
-        direction: PaginationOrder::Ascending,
         limit,
+        direction,
+        marker,
     })
-}
-
-/*
- * General pagination infrastructure
- */
-
-/**
- * Specifies which page of results we're on
- */
-#[derive(Deserialize, JsonSchema, Serialize)]
-pub struct ApiPageSelector<ScanParams, MarkerType> {
-    /** parameters describing the scan */
-    #[serde(flatten)]
-    scan: ScanParams,
-    /** value of the marker field last seen by the client */
-    last_seen: MarkerType,
-}
-
-/**
- * A page of results in the API
- */
-/*
- * This wraps the corresponding Dropshot type to provide slightly more
- * convenient constructors for our common case.
- */
-#[derive(Serialize, JsonSchema)]
-pub struct ApiResultsPage<T> {
-    #[serde(flatten)]
-    results: dropshot::ResultsPage<T>,
-}
-
-impl<T: ApiObjectIdentity + Serialize> ApiResultsPage<T> {
-    /**
-     * Generate a page of results for a paginated endpoint that lists items of
-     * type `T`
-     *
-     * `list` contains the items that should appear on the page.
-     */
-    pub fn new<S, P>(
-        query: &PaginationParams<S, ApiPageSelector<S, P>>,
-        list: Vec<T>,
-    ) -> Result<Self, dropshot::HttpError>
-    where
-        S: ScanParams<MarkerValue = P>,
-        P: Clone + DeserializeOwned + Serialize,
-    {
-        let scan_params = S::from_query(query)?;
-        Ok(ApiResultsPage {
-            results: dropshot::ResultsPage::new(
-                list,
-                scan_params,
-                page_selector_for,
-            )?,
-        })
-    }
 }
