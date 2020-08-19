@@ -26,12 +26,13 @@ use crate::http_pagination::data_page_params_name;
 use crate::http_pagination::data_page_params_nameid_id;
 use crate::http_pagination::data_page_params_nameid_name;
 use crate::http_pagination::pagination_field_for_scan_params;
-use crate::http_pagination::scan_params_for_query;
 use crate::http_pagination::ApiPagField;
 use crate::http_pagination::ApiPaginatedById;
 use crate::http_pagination::ApiPaginatedByName;
 use crate::http_pagination::ApiPaginatedByNameOrId;
 use crate::http_pagination::ApiResultsPage;
+use crate::http_pagination::ApiScanByNameOrId;
+use crate::http_pagination::ScanParams;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -140,7 +141,7 @@ async fn api_projects_get(
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
-    let params = scan_params_for_query(&query)?;
+    let params = ApiScanByNameOrId::from_query(&query)?;
     let field = pagination_field_for_scan_params(params);
 
     let project_stream = match field {
@@ -156,7 +157,7 @@ async fn api_projects_get(
     };
 
     let view_list = to_view_list(project_stream).await;
-    Ok(HttpResponseOk(ApiResultsPage::new_by(params, view_list)?))
+    Ok(HttpResponseOk(ApiResultsPage::new(&query, view_list)?))
 }
 
 /**
@@ -280,7 +281,7 @@ async fn api_project_disks_get(
         )
         .await?;
     let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOk(ApiResultsPage::new_by_name(&query, view_list)?))
+    Ok(HttpResponseOk(ApiResultsPage::new(&query, view_list)?))
 }
 
 /**
@@ -385,7 +386,7 @@ async fn api_project_instances_get(
         )
         .await?;
     let view_list = to_view_list(instance_stream).await;
-    Ok(HttpResponseOk(ApiResultsPage::new_by_name(&query, view_list)?))
+    Ok(HttpResponseOk(ApiResultsPage::new(&query, view_list)?))
 }
 
 /**
@@ -663,7 +664,7 @@ async fn api_hardware_racks_get(
     let rack_stream =
         controller.racks_list(&data_page_params_id(&rqctx, &query)?).await?;
     let view_list = to_view_list(rack_stream).await;
-    Ok(HttpResponseOk(ApiResultsPage::new_by_id(&query, view_list)?))
+    Ok(HttpResponseOk(ApiResultsPage::new(&query, view_list)?))
 }
 
 /**
@@ -714,7 +715,7 @@ async fn api_hardware_sleds_get(
     let sled_stream =
         controller.sleds_list(&data_page_params_id(&rqctx, &query)?).await?;
     let view_list = to_view_list(sled_stream).await;
-    Ok(HttpResponseOk(ApiResultsPage::new_by_id(&query, view_list)?))
+    Ok(HttpResponseOk(ApiResultsPage::new(&query, view_list)?))
 }
 
 /**
