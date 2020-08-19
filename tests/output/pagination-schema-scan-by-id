@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApiScanById",
+  "description": "Scan parameters for resources that support scanning by id only",
+  "type": "object",
+  "properties": {
+    "sort_by": {
+      "default": "id-ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ApiIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ApiIdSortMode": {
+      "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+      "type": "string",
+      "enum": [
+        "id-ascending"
+      ]
+    }
+  }
+}

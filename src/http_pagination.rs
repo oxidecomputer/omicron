@@ -450,3 +450,107 @@ pub fn data_page_params_nameid_id<'a>(
         marker,
     })
 }
+
+#[cfg(test)]
+mod test {
+    use expectorate::assert_contents;
+    use schemars::schema_for;
+    use serde_json::to_string_pretty;
+
+    use super::ApiIdSortMode;
+    use super::ApiNameOrIdSortMode;
+    use super::ApiNameSortMode;
+    use super::ApiPageSelectorById;
+    use super::ApiPageSelectorByName;
+    use super::ApiPageSelectorByNameOrId;
+    use super::ApiScanById;
+    use super::ApiScanByName;
+    use super::ApiScanByNameOrId;
+
+    /*
+     * It's important to verify the schema for the page selectors because this
+     * is a part of our interface that does not appear in the OpenAPI spec
+     * because it's obscured by Dropshot's automatic encoding of the page
+     * selector.
+     *
+     * Below, we also check the schema for the scan parameters because it's easy
+     * to do and useful to have the examples there.  We may want to remove this
+     * if/when we add a test case that checks the entire OpenAPI schema for our
+     * various APIs, since this will then be redundant.
+     */
+    #[test]
+    fn test_pagination_schemas() {
+        let schemas = vec![
+            (
+                schema_for!(ApiPageSelectorByName),
+                "pagination-schema-page-selector-name",
+            ),
+            (
+                schema_for!(ApiPageSelectorById),
+                "pagination-schema-page-selector-id",
+            ),
+            (
+                schema_for!(ApiPageSelectorByNameOrId),
+                "pagination-schema-page-selector-name-id",
+            ),
+            (schema_for!(ApiScanByName), "pagination-schema-scan-by-name"),
+            (schema_for!(ApiScanById), "pagination-schema-scan-by-id"),
+            (
+                schema_for!(ApiScanByNameOrId),
+                "pagination-schema-scan-by-name-id",
+            ),
+        ];
+
+        for (schema, file_path) in schemas {
+            let path = format!("tests/output/{}", file_path);
+            assert_contents(&path, &to_string_pretty(&schema).unwrap());
+        }
+    }
+
+    /*
+     * As much for illustration as anything, we check examples of the scan
+     * parameters and page selectors here.
+     */
+    #[test]
+    fn test_pagination_examples() {
+        let examples = vec![
+            /* scan parameters only */
+            (
+                to_string_pretty(&ApiScanById {
+                    sort_by: ApiIdSortMode::IdAscending,
+                })
+                .unwrap(),
+                "pagination-example-scan-by-id-asc",
+            ),
+            (
+                to_string_pretty(&ApiScanByName {
+                    sort_by: ApiNameSortMode::NameAscending,
+                })
+                .unwrap(),
+                "pagination-example-scan-by-name-asc",
+            ),
+            (
+                to_string_pretty(&ApiScanByNameOrId {
+                    sort_by: ApiNameOrIdSortMode::NameAscending,
+                })
+                .unwrap(),
+                "pagination-example-scan-by-name-id-name-asc",
+            ),
+            (
+                to_string_pretty(&ApiScanByNameOrId {
+                    sort_by: ApiNameOrIdSortMode::IdAscending,
+                })
+                .unwrap(),
+                "pagination-example-scan-by-name-id-id-asc",
+            ),
+
+            /* page selectors */
+            // XXX working here
+        ];
+
+        for (value, file_path) in examples {
+            let path = format!("tests/output/{}", file_path);
+            assert_contents(&path, &value);
+        }
+    }
+}

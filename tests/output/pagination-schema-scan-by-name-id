@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApiScanByNameOrId",
+  "description": "Scan parameters for resources that support scanning by name or id",
+  "type": "object",
+  "properties": {
+    "sort_by": {
+      "default": "name-ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ApiNameOrIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ApiNameOrIdSortMode": {
+      "description": "Supported set of sort modes for scanning by name or id",
+      "type": "string",
+      "enum": [
+        "name-ascending",
+        "name-descending",
+        "id-ascending"
+      ]
+    }
+  }
+}
