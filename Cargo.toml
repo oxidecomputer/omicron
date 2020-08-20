@@ -21,6 +21,7 @@ toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 
 [dev-dependencies]
+expectorate = "1.0.1"
 libc = "0.2.71"
 openapiv3 = "0.3.0"
 subprocess = "0.2.4"
