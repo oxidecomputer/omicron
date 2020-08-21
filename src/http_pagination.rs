@@ -697,13 +697,18 @@ mod test {
     /**
      * Function for running a bunch of tests on a ScanParams type.
      */
-    fn test_scan_param_basic<S>(
+    fn test_scan_param_common<S>(
         list: &Vec<MyThing>,
         scan: &S,
+        querystring: &str,
         item0_marker: &S::MarkerValue,
         itemlast_marker: &S::MarkerValue,
         scan_default: &S,
-    ) where
+    ) -> (
+        PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+        PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+    )
+    where
         S: ScanParams,
     {
         let li = list.len() - 1;
@@ -725,23 +730,77 @@ mod test {
         let p: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str("").unwrap();
         assert_eq!(S::from_query(&p).unwrap(), scan_default);
+
+        /*
+         * Test from_query() based on an explicit querystring corresponding to
+         * the first page in a scan with "scan" as the scan parameters.
+         */
+        let p0: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+            serde_urlencoded::from_str(querystring).unwrap();
+        assert_eq!(S::from_query(&p0).unwrap(), scan);
+
+        /*
+         * Generate a results page from that, verify it, pull the token out, and
+         * use it to generate pagination parameters for a NextPage request.
+         */
+        let page = S::results_page(&p0, list.clone()).unwrap();
+        assert_eq!(&page.items, list);
+        assert!(page.next_page.is_some());
+        let q = format!("page_token={}", page.next_page.unwrap());
+        let p1: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+            serde_urlencoded::from_str(&q).unwrap();
+
+        /*
+         * Now pull the information out of that, including the "last_seen"
+         * marker.  This should match `itemlast_marker`.  That will tell us that
+         * the results page was properly generated.
+         */
+        assert_eq!(S::from_query(&p1).unwrap(), scan);
+        if let WhichPage::Next(ApiPageSelector {
+            ref last_seen, ..
+        }) = p1.page
+        {
+            assert_eq!(last_seen, itemlast_marker);
+        } else {
+            panic!("expected WhichPage::Next");
+        }
+
+        /*
+         * Return these two sets of pagination parameters to the caller for more
+         * testing.
+         */
+        (p0, p1)
     }
 
     #[test]
     fn test_scan_by_name() {
+        /* Start with the common battery of tests. */
         let scan = ApiScanByName {
             sort_by: ApiNameSortMode::NameAscending,
         };
 
         let list = list_of_things();
-        test_scan_param_basic(
+        let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
+            "sort_by=name-ascending",
             &ApiName::try_from(String::from("thing0")).unwrap(),
             &ApiName::try_from(String::from("thing19")).unwrap(),
             &scan,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
+
+        /* Verify data pages based on the query params. */
+        let limit = NonZeroUsize::new(123).unwrap();
+        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
+        assert_eq!(data_page.marker, None);
+        assert_eq!(data_page.direction, PaginationOrder::Ascending);
+        assert_eq!(data_page.limit, limit);
+
+        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
+        assert_eq!(data_page.marker.unwrap().as_str(), "thing19");
+        assert_eq!(data_page.direction, PaginationOrder::Ascending);
+        assert_eq!(data_page.limit, limit);
 
         /* Test from_query(): error case. */
         let error = serde_urlencoded::from_str::<ApiPaginatedByName>(
@@ -752,61 +811,37 @@ mod test {
             error.to_string(),
             "unknown variant `name-descending`, expected `name-ascending`"
         );
+    }
 
-        /*
-         * Test from_query() in the success case for the first page in a scan.
-         * Construct a ResultsPage, get the page token out, create a querystring
-         * for the next page in the scan, use from_query() on that, and make
-         * sure we got the marker we expect.  This verifies the machinery that
-         * goes into the ResultsPage as well as pulling out "last_seen".
-         */
-        let p0: ApiPaginatedByName =
-            serde_urlencoded::from_str("sort_by=name-ascending").unwrap();
-        assert_eq!(*ApiScanByName::from_query(&p0).unwrap(), scan);
+    #[test]
+    fn test_scan_by_id() {
+        /* Start with the common battery of tests. */
+        let scan = ApiScanById {
+            sort_by: ApiIdSortMode::IdAscending,
+        };
 
+        let list = list_of_things();
+        let (p0, p1) = test_scan_param_common(
+            &list,
+            &scan,
+            "sort_by=id-ascending",
+            &list[0].identity.id,
+            &list[list.len() - 1].identity.id,
+            &scan,
+        );
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
+
+        /* Verify data pages based on the query params. */
         let limit = NonZeroUsize::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
 
-        let page = ApiScanByName::results_page(&p0, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
-        let q = format!("page_token={}", page.next_page.unwrap());
-        let p1: ApiPaginatedByName = serde_urlencoded::from_str(&q).unwrap();
-        assert_eq!(*ApiScanByName::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelectorByName {
-            ref last_seen, ..
-        }) = p1.page
-        {
-            assert_eq!(String::from(last_seen.clone()), "thing19");
-        } else {
-            panic!("expected WhichPage::Next");
-        }
-
         let data_page = data_page_params_with_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker.unwrap().as_str(), "thing19");
+        assert_eq!(data_page.marker, Some(&list[19].identity.id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
-    }
-
-    /* XXX commonize with test_scan_by_name()? */
-    #[test]
-    fn test_scan_by_id() {
-        let scan = ApiScanById {
-            sort_by: ApiIdSortMode::IdAscending,
-        };
-
-        let list = list_of_things();
-        test_scan_param_basic(
-            &list,
-            &scan,
-            &list[0].identity.id,
-            &list[list.len() - 1].identity.id,
-            &scan,
-        );
-        assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         /* Test from_query(): error case. */
         let error = serde_urlencoded::from_str::<ApiPaginatedById>(
@@ -817,36 +852,6 @@ mod test {
             error.to_string(),
             "unknown variant `id-descending`, expected `id-ascending`"
         );
-
-        /* See test_scan_by_name(). */
-        let p0: ApiPaginatedById =
-            serde_urlencoded::from_str("sort_by=id-ascending").unwrap();
-        assert_eq!(*ApiScanById::from_query(&p0).unwrap(), scan);
-
-        let limit = NonZeroUsize::new(123).unwrap();
-        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
-        assert_eq!(data_page.marker, None);
-        assert_eq!(data_page.direction, PaginationOrder::Ascending);
-        assert_eq!(data_page.limit, limit);
-
-        let page = ApiScanById::results_page(&p0, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
-        let q = format!("page_token={}", page.next_page.unwrap());
-        let p1: ApiPaginatedById = serde_urlencoded::from_str(&q).unwrap();
-        assert_eq!(*ApiScanById::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelectorById {
-            last_seen, ..
-        }) = p1.page
-        {
-            assert_eq!(list[19].identity.id, last_seen);
-        } else {
-            panic!("expected WhichPage::Next");
-        }
-        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker, Some(&list[19].identity.id));
-        assert_eq!(data_page.direction, PaginationOrder::Ascending);
-        assert_eq!(data_page.limit, limit);
     }
 
     #[test]
@@ -874,6 +879,7 @@ mod test {
 
     #[test]
     fn test_scan_by_nameid_name() {
+        /* Start with the common battery of tests. */
         let scan = ApiScanByNameOrId {
             sort_by: ApiNameOrIdSortMode::NameDescending,
         };
@@ -887,9 +893,10 @@ mod test {
         let thinglast_name =
             ApiName::try_from(String::from("thing19")).unwrap();
         let thinglast_marker = ApiNameOrIdMarker::Name(thinglast_name.clone());
-        test_scan_param_basic(
+        let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
+            "sort_by=name-descending",
             &thing0_marker,
             &thinglast_marker,
             &ApiScanByNameOrId {
@@ -897,33 +904,12 @@ mod test {
             },
         );
 
-        /* See test_scan_by_name(). */
-        let p0: ApiPaginatedByNameOrId =
-            serde_urlencoded::from_str("sort_by=name-descending").unwrap();
-        assert_eq!(*ApiScanByNameOrId::from_query(&p0).unwrap(), scan);
-
+        /* Verify data pages based on the query params. */
         let limit = NonZeroUsize::new(123).unwrap();
         let data_page = data_page_params_nameid_name_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
-
-        let page = ApiScanByNameOrId::results_page(&p0, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
-        let q = format!("page_token={}", page.next_page.unwrap());
-        let p1: ApiPaginatedByNameOrId =
-            serde_urlencoded::from_str(&q).unwrap();
-        assert_eq!(*ApiScanByNameOrId::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelectorByNameOrId {
-            ref last_seen,
-            ..
-        }) = p1.page
-        {
-            assert_eq!(&thinglast_marker, last_seen);
-        } else {
-            panic!("expected WhichPage::Next with name");
-        }
 
         let data_page = data_page_params_nameid_name_limit(limit, &p1).unwrap();
         assert_eq!(data_page.marker, Some(&thinglast_name));
@@ -937,6 +923,7 @@ mod test {
 
     #[test]
     fn test_scan_by_nameid_id() {
+        /* Start with the common battery of tests. */
         let scan = ApiScanByNameOrId {
             sort_by: ApiNameOrIdSortMode::IdAscending,
         };
@@ -948,9 +935,10 @@ mod test {
         let thinglast_id = list[list.len() - 1].identity.id;
         let thinglast_marker =
             ApiNameOrIdMarker::Id(list[list.len() - 1].identity.id);
-        test_scan_param_basic(
+        let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
+            "sort_by=id-ascending",
             &thing0_marker,
             &thinglast_marker,
             &ApiScanByNameOrId {
@@ -958,33 +946,12 @@ mod test {
             },
         );
 
-        /* See test_scan_by_name(). */
-        let p0: ApiPaginatedByNameOrId =
-            serde_urlencoded::from_str("sort_by=id-ascending").unwrap();
-        assert_eq!(*ApiScanByNameOrId::from_query(&p0).unwrap(), scan);
-
+        /* Verify data pages based on the query params. */
         let limit = NonZeroUsize::new(123).unwrap();
         let data_page = data_page_params_nameid_id_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
-
-        let page = ApiScanByNameOrId::results_page(&p0, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
-        let q = format!("page_token={}", page.next_page.unwrap());
-        let p1: ApiPaginatedByNameOrId =
-            serde_urlencoded::from_str(&q).unwrap();
-        assert_eq!(*ApiScanByNameOrId::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelectorByNameOrId {
-            ref last_seen,
-            ..
-        }) = p1.page
-        {
-            assert_eq!(&thinglast_marker, last_seen);
-        } else {
-            panic!("expected WhichPage::Next with id");
-        }
 
         let data_page = data_page_params_nameid_id_limit(limit, &p1).unwrap();
         assert_eq!(data_page.marker, Some(&thinglast_id));
