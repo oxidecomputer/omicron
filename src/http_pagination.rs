@@ -325,6 +325,7 @@ fn default_nameid_sort_mode() -> ApiNameOrIdSortMode {
 
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(untagged)]
 pub enum ApiNameOrIdMarker {
     Id(Uuid),
     Name(ApiName),
@@ -453,11 +454,9 @@ pub fn data_page_params_nameid_id<'a>(
 
 #[cfg(test)]
 mod test {
-    use expectorate::assert_contents;
-    use schemars::schema_for;
-    use serde_json::to_string_pretty;
-
     use super::ApiIdSortMode;
+    use super::ApiName;
+    use super::ApiNameOrIdMarker;
     use super::ApiNameOrIdSortMode;
     use super::ApiNameSortMode;
     use super::ApiPageSelectorById;
@@ -466,6 +465,11 @@ mod test {
     use super::ApiScanById;
     use super::ApiScanByName;
     use super::ApiScanByNameOrId;
+    use expectorate::assert_contents;
+    use schemars::schema_for;
+    use serde_json::to_string_pretty;
+    use std::convert::TryFrom;
+    use uuid::Uuid;
 
     /*
      * It's important to verify the schema for the page selectors because this
@@ -481,30 +485,36 @@ mod test {
     #[test]
     fn test_pagination_schemas() {
         let schemas = vec![
+            ("scan parameters, scan by name only", schema_for!(ApiScanByName)),
+            ("scan parameters, scan by id only", schema_for!(ApiScanById)),
             (
-                schema_for!(ApiPageSelectorByName),
-                "pagination-schema-page-selector-name",
-            ),
-            (
-                schema_for!(ApiPageSelectorById),
-                "pagination-schema-page-selector-id",
-            ),
-            (
-                schema_for!(ApiPageSelectorByNameOrId),
-                "pagination-schema-page-selector-name-id",
-            ),
-            (schema_for!(ApiScanByName), "pagination-schema-scan-by-name"),
-            (schema_for!(ApiScanById), "pagination-schema-scan-by-id"),
-            (
+                "scan parameters, scan by name or id",
                 schema_for!(ApiScanByNameOrId),
-                "pagination-schema-scan-by-name-id",
+            ),
+            (
+                "page selector, scan by name only",
+                schema_for!(ApiPageSelectorByName),
+            ),
+            (
+                "page selector, scan by id only",
+                schema_for!(ApiPageSelectorById),
+            ),
+            (
+                "page selector, scan by name or id",
+                schema_for!(ApiPageSelectorByNameOrId),
             ),
         ];
 
-        for (schema, file_path) in schemas {
-            let path = format!("tests/output/{}", file_path);
-            assert_contents(&path, &to_string_pretty(&schema).unwrap());
+        let mut found_output = String::new();
+        for (label, output) in schemas {
+            found_output.push_str(&format!(
+                "schema for pagination parameters: {}\n{}\n",
+                label,
+                to_string_pretty(&output).unwrap()
+            ));
         }
+
+        assert_contents("tests/output/pagination-schema.txt", &found_output);
     }
 
     /*
@@ -513,44 +523,78 @@ mod test {
      */
     #[test]
     fn test_pagination_examples() {
+        let scan_by_id = ApiScanById {
+            sort_by: ApiIdSortMode::IdAscending,
+        };
+        let scan_by_name = ApiScanByName {
+            sort_by: ApiNameSortMode::NameAscending,
+        };
+        let scan_by_nameid_name = ApiScanByNameOrId {
+            sort_by: ApiNameOrIdSortMode::NameAscending,
+        };
+        let scan_by_nameid_id = ApiScanByNameOrId {
+            sort_by: ApiNameOrIdSortMode::IdAscending,
+        };
+        let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
+        let name = ApiName::try_from(String::from("bort")).unwrap();
         let examples = vec![
             /* scan parameters only */
+            ("scan by id ascending", to_string_pretty(&scan_by_id).unwrap()),
             (
-                to_string_pretty(&ApiScanById {
-                    sort_by: ApiIdSortMode::IdAscending,
-                })
-                .unwrap(),
-                "pagination-example-scan-by-id-asc",
+                "scan by name ascending",
+                to_string_pretty(&scan_by_name).unwrap(),
             ),
             (
-                to_string_pretty(&ApiScanByName {
-                    sort_by: ApiNameSortMode::NameAscending,
-                })
-                .unwrap(),
-                "pagination-example-scan-by-name-asc",
+                "scan by name or id, using id ascending",
+                to_string_pretty(&scan_by_nameid_id).unwrap(),
             ),
             (
-                to_string_pretty(&ApiScanByNameOrId {
-                    sort_by: ApiNameOrIdSortMode::NameAscending,
-                })
-                .unwrap(),
-                "pagination-example-scan-by-name-id-name-asc",
+                "scan by name or id, using name ascending",
+                to_string_pretty(&scan_by_nameid_name).unwrap(),
             ),
-            (
-                to_string_pretty(&ApiScanByNameOrId {
-                    sort_by: ApiNameOrIdSortMode::IdAscending,
-                })
-                .unwrap(),
-                "pagination-example-scan-by-name-id-id-asc",
-            ),
-
             /* page selectors */
-            // XXX working here
+            (
+                "page selector: by id ascending",
+                to_string_pretty(&ApiPageSelectorById {
+                    scan: scan_by_id,
+                    last_seen: id,
+                })
+                .unwrap(),
+            ),
+            (
+                "page selector: by name ascending",
+                to_string_pretty(&ApiPageSelectorByName {
+                    scan: scan_by_name,
+                    last_seen: name.clone(),
+                })
+                .unwrap(),
+            ),
+            (
+                "page selector: by name or id, using id ascending",
+                to_string_pretty(&ApiPageSelectorByNameOrId {
+                    scan: scan_by_nameid_id,
+                    last_seen: ApiNameOrIdMarker::Id(id),
+                })
+                .unwrap(),
+            ),
+            (
+                "page selector: by name or id, using id ascending",
+                to_string_pretty(&ApiPageSelectorByNameOrId {
+                    scan: scan_by_nameid_name,
+                    last_seen: ApiNameOrIdMarker::Name(name.clone()),
+                })
+                .unwrap(),
+            ),
         ];
 
-        for (value, file_path) in examples {
-            let path = format!("tests/output/{}", file_path);
-            assert_contents(&path, &value);
+        let mut found_output = String::new();
+        for (label, output) in examples {
+            found_output.push_str(&format!(
+                "example pagination parameters: {}\n{}\n",
+                label, output
+            ));
         }
+
+        assert_contents("tests/output/pagination-examples.txt", &found_output);
     }
 }
