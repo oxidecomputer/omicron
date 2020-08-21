@@ -51,6 +51,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Debug;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -85,14 +86,14 @@ pub struct ApiPageSelector<ScanParams, MarkerType> {
  * are associated functions rather than methods.
  */
 pub trait ScanParams:
-    Clone + DeserializeOwned + JsonSchema + Serialize
+    Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize
 {
     /**
      * Type of the "marker" field for this scan mode
      *
      * For example, when scanning by name, this would be `ApiName`.
      */
-    type MarkerValue: Clone + DeserializeOwned + Serialize;
+    type MarkerValue: Clone + Debug + DeserializeOwned + PartialEq + Serialize;
 
     /**
      * Return the direction of the scan
@@ -151,7 +152,7 @@ fn page_selector_for<T, S, M>(
 where
     T: ApiObjectIdentity,
     S: ScanParams<MarkerValue = M>,
-    M: Clone + DeserializeOwned + Serialize,
+    M: Clone + Debug + DeserializeOwned + PartialEq + Serialize,
 {
     ApiPageSelector {
         scan: scan_params.clone(),
@@ -516,6 +517,7 @@ mod test {
     use super::ApiNameOrIdSortMode;
     use super::ApiNameSortMode;
     use super::ApiPagField;
+    use super::ApiPageSelector;
     use super::ApiPageSelectorById;
     use super::ApiPageSelectorByName;
     use super::ApiPageSelectorByNameOrId;
@@ -531,6 +533,7 @@ mod test {
     use api_identity::ApiObjectIdentity;
     use chrono::Utc;
     use dropshot::PaginationOrder;
+    use dropshot::PaginationParams;
     use dropshot::WhichPage;
     use expectorate::assert_contents;
     use http::StatusCode;
@@ -691,6 +694,39 @@ mod test {
             .collect()
     }
 
+    /**
+     * Function for running a bunch of tests on a ScanParams type.
+     */
+    fn test_scan_param_basic<S>(
+        list: &Vec<MyThing>,
+        scan: &S,
+        item0_marker: &S::MarkerValue,
+        itemlast_marker: &S::MarkerValue,
+        scan_default: &S,
+    ) where
+        S: ScanParams,
+    {
+        let li = list.len() - 1;
+
+        /* Test basic parts of ScanParams interface. */
+        assert_eq!(&scan.marker_for_item(&list[0]), item0_marker);
+        assert_eq!(&scan.marker_for_item(&list[li]), itemlast_marker);
+
+        /* Test page_selector_for(). */
+        let page_selector = page_selector_for(&list[0], scan);
+        assert_eq!(&page_selector.scan, scan);
+        assert_eq!(&page_selector.last_seen, item0_marker);
+
+        let page_selector = page_selector_for(&list[li], scan);
+        assert_eq!(&page_selector.scan, scan);
+        assert_eq!(&page_selector.last_seen, itemlast_marker);
+
+        /* Test from_query() with the default scan parameters. */
+        let p: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+            serde_urlencoded::from_str("").unwrap();
+        assert_eq!(S::from_query(&p).unwrap(), scan_default);
+    }
+
     #[test]
     fn test_scan_by_name() {
         let scan = ApiScanByName {
@@ -698,23 +734,14 @@ mod test {
         };
 
         let list = list_of_things();
-
-        /*
-         * TODO-coverage it'd be nice to test data_page_params_for(), but that
-         * requires a RequestContext for getting the page limit.  At least we
-         * can test some of the underlying pieces.
-         */
+        test_scan_param_basic(
+            &list,
+            &scan,
+            &ApiName::try_from(String::from("thing0")).unwrap(),
+            &ApiName::try_from(String::from("thing19")).unwrap(),
+            &scan,
+        );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
-        assert_eq!(scan.marker_for_item(&list[0]), "thing0");
-        assert_eq!(scan.marker_for_item(&list[6]), "thing6");
-
-        /* Test page_selector_for(). */
-        let page_selector = page_selector_for(&list[0], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(String::from(page_selector.last_seen).as_str(), "thing0");
-        let page_selector = page_selector_for(&list[6], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(String::from(page_selector.last_seen).as_str(), "thing6");
 
         /* Test from_query(): error case. */
         let error = serde_urlencoded::from_str::<ApiPaginatedByName>(
@@ -762,13 +789,6 @@ mod test {
         assert_eq!(data_page.marker.unwrap().as_str(), "thing19");
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
-
-        /* Test with the default scan parameters. */
-        let p: ApiPaginatedByName = serde_urlencoded::from_str("").unwrap();
-        assert_eq!(*ApiScanByName::from_query(&p).unwrap(), scan);
-        let page = ApiScanByName::results_page(&p, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
     }
 
     /* XXX commonize with test_scan_by_name()? */
@@ -779,19 +799,14 @@ mod test {
         };
 
         let list = list_of_things();
-
-        /* TODO-coverage See test_scan_by_name(). */
+        test_scan_param_basic(
+            &list,
+            &scan,
+            &list[0].identity.id,
+            &list[list.len() - 1].identity.id,
+            &scan,
+        );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
-        assert_eq!(scan.marker_for_item(&list[0]), list[0].identity.id);
-        assert_eq!(scan.marker_for_item(&list[6]), list[6].identity.id);
-
-        /* Test page_selector_for(). */
-        let page_selector = page_selector_for(&list[0], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, list[0].identity.id);
-        let page_selector = page_selector_for(&list[6], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, list[6].identity.id);
 
         /* Test from_query(): error case. */
         let error = serde_urlencoded::from_str::<ApiPaginatedById>(
@@ -832,13 +847,6 @@ mod test {
         assert_eq!(data_page.marker, Some(&list[19].identity.id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
-
-        /* Test with the default scan parameters. */
-        let p: ApiPaginatedById = serde_urlencoded::from_str("").unwrap();
-        assert_eq!(*ApiScanById::from_query(&p).unwrap(), scan);
-        let page = ApiScanById::results_page(&p, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
     }
 
     #[test]
@@ -853,17 +861,6 @@ mod test {
             "unknown variant `id-descending`, expected one of \
              `name-ascending`, `name-descending`, `id-ascending`"
         );
-
-        /* Test with the default scan parameters. */
-        let p: ApiPaginatedByNameOrId = serde_urlencoded::from_str("").unwrap();
-        assert_eq!(
-            ApiScanByNameOrId::from_query(&p).unwrap().sort_by,
-            ApiNameOrIdSortMode::NameAscending
-        );
-        let list = list_of_things();
-        let page = ApiScanByNameOrId::results_page(&p, list.clone()).unwrap();
-        assert!(page.next_page.is_some());
-        assert_eq!(page.items, list);
 
         /*
          * TODO-coverage It'd be nice to exercise the from_query() error cases
@@ -881,29 +878,24 @@ mod test {
             sort_by: ApiNameOrIdSortMode::NameDescending,
         };
         assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Name);
+        assert_eq!(scan.direction(), PaginationOrder::Descending);
 
         let list = list_of_things();
         let thing0_marker = ApiNameOrIdMarker::Name(
             ApiName::try_from(String::from("thing0")).unwrap(),
         );
-        let thing6_marker = ApiNameOrIdMarker::Name(
-            ApiName::try_from(String::from("thing6")).unwrap(),
+        let thinglast_name =
+            ApiName::try_from(String::from("thing19")).unwrap();
+        let thinglast_marker = ApiNameOrIdMarker::Name(thinglast_name.clone());
+        test_scan_param_basic(
+            &list,
+            &scan,
+            &thing0_marker,
+            &thinglast_marker,
+            &ApiScanByNameOrId {
+                sort_by: ApiNameOrIdSortMode::NameAscending,
+            },
         );
-        let thing19_name = ApiName::try_from(String::from("thing19")).unwrap();
-        let thing19_marker = ApiNameOrIdMarker::Name(thing19_name.clone());
-
-        /* TODO-coverage See test_scan_by_name(). */
-        assert_eq!(scan.direction(), PaginationOrder::Descending);
-        assert_eq!(scan.marker_for_item(&list[0]), thing0_marker);
-        assert_eq!(scan.marker_for_item(&list[6]), thing6_marker);
-
-        /* Test page_selector_for(). */
-        let page_selector = page_selector_for(&list[0], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, thing0_marker);
-        let page_selector = page_selector_for(&list[6], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, thing6_marker);
 
         /* See test_scan_by_name(). */
         let p0: ApiPaginatedByNameOrId =
@@ -928,13 +920,13 @@ mod test {
             ..
         }) = p1.page
         {
-            assert_eq!(&thing19_marker, last_seen);
+            assert_eq!(&thinglast_marker, last_seen);
         } else {
             panic!("expected WhichPage::Next with name");
         }
 
         let data_page = data_page_params_nameid_name_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker, Some(&thing19_name));
+        assert_eq!(data_page.marker, Some(&thinglast_name));
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
 
@@ -949,25 +941,22 @@ mod test {
             sort_by: ApiNameOrIdSortMode::IdAscending,
         };
         assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Id);
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         let list = list_of_things();
         let thing0_marker = ApiNameOrIdMarker::Id(list[0].identity.id);
-        let thing6_marker = ApiNameOrIdMarker::Id(list[6].identity.id);
-        let thing19_id = list[19].identity.id;
-        let thing19_marker = ApiNameOrIdMarker::Id(list[19].identity.id);
-
-        /* TODO-coverage See test_scan_by_name(). */
-        assert_eq!(scan.direction(), PaginationOrder::Ascending);
-        assert_eq!(scan.marker_for_item(&list[0]), thing0_marker);
-        assert_eq!(scan.marker_for_item(&list[6]), thing6_marker);
-
-        /* Test page_selector_for(). */
-        let page_selector = page_selector_for(&list[0], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, thing0_marker);
-        let page_selector = page_selector_for(&list[6], &scan);
-        assert_eq!(page_selector.scan, scan);
-        assert_eq!(page_selector.last_seen, thing6_marker);
+        let thinglast_id = list[list.len() - 1].identity.id;
+        let thinglast_marker =
+            ApiNameOrIdMarker::Id(list[list.len() - 1].identity.id);
+        test_scan_param_basic(
+            &list,
+            &scan,
+            &thing0_marker,
+            &thinglast_marker,
+            &ApiScanByNameOrId {
+                sort_by: ApiNameOrIdSortMode::NameAscending,
+            },
+        );
 
         /* See test_scan_by_name(). */
         let p0: ApiPaginatedByNameOrId =
@@ -992,13 +981,13 @@ mod test {
             ..
         }) = p1.page
         {
-            assert_eq!(&thing19_marker, last_seen);
+            assert_eq!(&thinglast_marker, last_seen);
         } else {
             panic!("expected WhichPage::Next with id");
         }
 
         let data_page = data_page_params_nameid_id_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker, Some(&thing19_id));
+        assert_eq!(data_page.marker, Some(&thinglast_id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
 
