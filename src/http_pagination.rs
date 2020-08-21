@@ -200,7 +200,7 @@ pub type ApiPaginatedByName =
 /** Page selector for pagination by name only */
 pub type ApiPageSelectorByName = ApiPageSelector<ApiScanByName, ApiName>;
 /** Scan parameters for resources that support scanning by name only */
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ApiScanByName {
     #[serde(default = "default_name_sort_mode")]
     sort_by: ApiNameSortMode,
@@ -210,7 +210,7 @@ pub struct ApiScanByName {
  *
  * Currently, we only support scanning in ascending order.
  */
-#[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiNameSortMode {
     /** sort in increasing order of "name" */
@@ -250,7 +250,7 @@ pub type ApiPaginatedById = PaginationParams<ApiScanById, ApiPageSelectorById>;
 /** Page selector for pagination by name only */
 pub type ApiPageSelectorById = ApiPageSelector<ApiScanById, Uuid>;
 /** Scan parameters for resources that support scanning by id only */
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ApiScanById {
     #[serde(default = "default_id_sort_mode")]
     sort_by: ApiIdSortMode,
@@ -261,7 +261,7 @@ pub struct ApiScanById {
  *
  * Currently, we only support scanning in ascending order.
  */
-#[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiIdSortMode {
     /** sort in increasing order of "id" */
@@ -302,13 +302,13 @@ pub type ApiPaginatedByNameOrId =
 pub type ApiPageSelectorByNameOrId =
     ApiPageSelector<ApiScanByNameOrId, ApiNameOrIdMarker>;
 /** Scan parameters for resources that support scanning by name or id */
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ApiScanByNameOrId {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: ApiNameOrIdSortMode,
 }
 /** Supported set of sort modes for scanning by name or id */
-#[derive(Copy, Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiNameOrIdSortMode {
     /** sort in increasing order of "name" */
@@ -334,7 +334,7 @@ fn default_nameid_sort_mode() -> ApiNameOrIdSortMode {
  * `Deserialize` to do this.  This might be worth revisiting before we commit to
  * any particular version of the API.
  */
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ApiNameOrIdMarker {
     Id(Uuid),
@@ -345,6 +345,7 @@ fn bad_token_error() -> HttpError {
     HttpError::for_bad_request(None, String::from("invalid page token"))
 }
 
+#[derive(Debug, PartialEq)]
 pub enum ApiPagField {
     Id,
     Name,
@@ -464,6 +465,7 @@ pub fn data_page_params_nameid_id<'a>(
 
 #[cfg(test)]
 mod test {
+    use super::page_selector_for;
     use super::ApiIdSortMode;
     use super::ApiName;
     use super::ApiNameOrIdMarker;
@@ -475,8 +477,15 @@ mod test {
     use super::ApiScanById;
     use super::ApiScanByName;
     use super::ApiScanByNameOrId;
+    use super::ScanParams;
+    use crate::api_model::ApiIdentityMetadata;
+    use crate::api_model::ApiObjectIdentity;
+    use api_identity::ApiObjectIdentity;
+    use chrono::Utc;
+    use dropshot::PaginationOrder;
     use expectorate::assert_contents;
     use schemars::schema_for;
+    use serde::Serialize;
     use serde_json::to_string_pretty;
     use std::convert::TryFrom;
     use uuid::Uuid;
@@ -606,5 +615,139 @@ mod test {
         }
 
         assert_contents("tests/output/pagination-examples.txt", &found_output);
+    }
+
+    #[derive(ApiObjectIdentity, Clone, Serialize)]
+    struct MyThing {
+        identity: ApiIdentityMetadata,
+    }
+
+    fn list_of_things() -> Vec<MyThing> {
+        (0..20)
+            .map(|i| {
+                let name = ApiName::try_from(format!("thing{}", i)).unwrap();
+                let now = Utc::now();
+                MyThing {
+                    identity: ApiIdentityMetadata {
+                        id: Uuid::new_v4(),
+                        name,
+                        description: String::from(""),
+                        time_created: now,
+                        time_modified: now,
+                    },
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_scan_by_name() {
+        let scan = ApiScanByName {
+            sort_by: ApiNameSortMode::NameAscending,
+        };
+
+        let list = list_of_things();
+
+        /*
+         * TODO-coverage it'd be nice to test data_page_params_for(), but that
+         * requires a RequestContext for getting the page limit.  At least we
+         * can test some of the underlying pieces.
+         */
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
+        assert_eq!(scan.marker_for_item(&list[0]), "thing0");
+        assert_eq!(scan.marker_for_item(&list[6]), "thing6");
+
+        /* Test page_selector_for(). */
+        let page_selector = page_selector_for(&list[0], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(String::from(page_selector.last_seen).as_str(), "thing0");
+        let page_selector = page_selector_for(&list[6], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(String::from(page_selector.last_seen).as_str(), "thing6");
+
+        /*
+         * TODO-coverage it'd be nice to test from_query() and results_page()
+         * but we can't construct a PaginationParams outside of Dropshot.
+         */
+    }
+
+    #[test]
+    fn test_scan_by_id() {
+        let scan = ApiScanById {
+            sort_by: ApiIdSortMode::IdAscending,
+        };
+
+        let list = list_of_things();
+
+        /* TODO-coverage See test_scan_by_name(). */
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
+        assert_eq!(scan.marker_for_item(&list[0]), list[0].identity.id);
+        assert_eq!(scan.marker_for_item(&list[6]), list[6].identity.id);
+
+        /* Test page_selector_for(). */
+        let page_selector = page_selector_for(&list[0], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, list[0].identity.id);
+        let page_selector = page_selector_for(&list[6], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, list[6].identity.id);
+
+        /* TODO-coverage See test_scan_by_name(). */
+    }
+
+    #[test]
+    fn test_scan_by_nameid_name() {
+        let scan = ApiScanByNameOrId {
+            sort_by: ApiNameOrIdSortMode::NameDescending,
+        };
+
+        let list = list_of_things();
+        let thing0_marker = ApiNameOrIdMarker::Name(
+            ApiName::try_from(String::from("thing0")).unwrap(),
+        );
+        let thing6_marker = ApiNameOrIdMarker::Name(
+            ApiName::try_from(String::from("thing6")).unwrap(),
+        );
+
+        /* TODO-coverage See test_scan_by_name(). */
+        assert_eq!(scan.direction(), PaginationOrder::Descending);
+        assert_eq!(scan.marker_for_item(&list[0]), thing0_marker);
+        assert_eq!(scan.marker_for_item(&list[6]), thing6_marker);
+
+        /* Test page_selector_for(). */
+        let page_selector = page_selector_for(&list[0], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, thing0_marker);
+        let page_selector = page_selector_for(&list[6], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, thing6_marker);
+
+        /* TODO-coverage See test_scan_by_name(). */
+    }
+
+    #[test]
+    fn test_scan_by_nameid_id() {
+        let scan = ApiScanByNameOrId {
+            sort_by: ApiNameOrIdSortMode::IdAscending,
+        };
+
+        let list = list_of_things();
+        let thing0_marker = ApiNameOrIdMarker::Id(list[0].identity.id);
+        let thing6_marker = ApiNameOrIdMarker::Id(list[6].identity.id);
+
+        /* TODO-coverage See test_scan_by_name(). */
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
+        assert_eq!(scan.marker_for_item(&list[0]), thing0_marker);
+        assert_eq!(scan.marker_for_item(&list[6]), thing6_marker);
+
+        /* Test page_selector_for(). */
+        let page_selector = page_selector_for(&list[0], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, thing0_marker);
+        let page_selector = page_selector_for(&list[6], &scan);
+        assert_eq!(page_selector.scan, scan);
+        assert_eq!(page_selector.last_seen, thing6_marker);
+
+        /* TODO-coverage See test_scan_by_name(). */
     }
 }
