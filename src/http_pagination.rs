@@ -323,9 +323,19 @@ fn default_nameid_sort_mode() -> ApiNameOrIdSortMode {
     ApiNameOrIdSortMode::NameAscending
 }
 
+/*
+ * TODO-correctness It's tempting to make this a serde(untagged) enum, which
+ * would clean up the format of the page selector parameter.  However, it would
+ * have the side effect that if the name happened to be a valid uuid, then we'd
+ * parse it as a uuid here, even if the corresponding scan parameters indicated
+ * that we were doing a scan by name.  Then we'd fail later on an invalid
+ * combination.  We could infer the correct variant here from the "sort_by"
+ * field of the adjacent scan params, but we'd have to write our own
+ * `Deserialize` to do this.  This might be worth revisiting before we commit to
+ * any particular version of the API.
+ */
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(untagged)]
 pub enum ApiNameOrIdMarker {
     Id(Uuid),
     Name(ApiName),

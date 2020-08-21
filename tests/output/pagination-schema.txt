@@ -194,11 +194,27 @@ schema for pagination parameters: page selector, scan by name or id
     "ApiNameOrIdMarker": {
       "anyOf": [
         {
-          "type": "string",
-          "format": "uuid"
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         },
         {
-          "$ref": "#/definitions/ApiName"
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/ApiName"
+            }
+          }
         }
       ]
     },
