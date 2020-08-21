@@ -23,9 +23,10 @@ uuid = { version = "0.8", features = [ "serde", "v4" ] }
 [dev-dependencies]
 expectorate = "1.0.1"
 libc = "0.2.71"
-openapiv3 = "0.3.0"
-subprocess = "0.2.4"
 newline-converter = "0.1.0"
+openapiv3 = "0.3.0"
+serde_urlencoded = "0.6.1"
+subprocess = "0.2.4"
 
 [dependencies.slog]
 version = "2.5"

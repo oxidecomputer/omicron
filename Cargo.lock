@@ -754,6 +754,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "slog",
  "subprocess",
  "tokio",

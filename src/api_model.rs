@@ -76,6 +76,7 @@ pub trait ApiObjectIdentity {
  * `NameType` is the type of the field used to sort the returned values and it's
  * usually `ApiName`.
  */
+#[derive(Debug)]
 pub struct DataPageParams<'a, NameType> {
     /**
      * If present, this is the value of the sort field for the last object seen
@@ -165,6 +166,8 @@ impl TryFrom<&str> for ApiName {
 
 /**
  * Convert an `ApiName` into the `String` representing the actual name.
+ * TODO-cleanup It probably makes more sense to use `as_str()` but there's a
+ * bunch of code using this implementation.
  */
 impl From<ApiName> for String {
     fn from(value: ApiName) -> String {
@@ -247,6 +250,13 @@ impl ApiName {
             label: String::from(label),
             message: e,
         })
+    }
+
+    /**
+     * Return the `&str` representing the actual name.
+     */
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -385,7 +395,7 @@ pub async fn to_view_list<T: ApiObject>(
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
