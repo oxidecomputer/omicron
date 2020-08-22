@@ -25,8 +25,8 @@ pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: OxideControllerServer,
+    pub logctx: LogContext,
     sled_agent: SledAgentServer,
-    logctx: LogContext,
 }
 
 impl ControlPlaneTestContext {
