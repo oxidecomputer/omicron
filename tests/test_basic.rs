@@ -5,6 +5,7 @@
  * TODO-coverage add test for racks, sleds
  */
 
+use dropshot::test_util::iter_collection;
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
@@ -19,7 +20,6 @@ use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
 use oxide_api_prototype::api_model::ApiSledView;
-use serde::de::DeserializeOwned;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -642,38 +642,4 @@ async fn sleds_list(
     sleds_url: &str,
 ) -> Vec<ApiSledView> {
     objects_list_page::<ApiSledView>(client, sleds_url).await.items
-}
-
-/*
- * TODO-cleanup This is copied from Dropshot's test_pagination.  It really
- * should be exposed from Dropshot's test_util.
- */
-async fn iter_collection<T: Clone + DeserializeOwned>(
-    client: &ClientTestContext,
-    path: &str,
-    initial_params: &str,
-    limit: usize,
-) -> (Vec<T>, usize) {
-    let mut page = objects_list_page::<T>(
-        &client,
-        &format!("{}?limit={}&{}", path, limit, initial_params),
-    )
-    .await;
-    assert!(page.items.len() <= limit);
-
-    let mut rv = page.items.clone();
-    let mut npages = 1;
-
-    while let Some(token) = page.next_page {
-        page = objects_list_page::<T>(
-            &client,
-            &format!("{}?limit={}&page_token={}", path, limit, token),
-        )
-        .await;
-        assert!(page.items.len() <= limit);
-        rv.extend_from_slice(&page.items);
-        npages += 1
-    }
-
-    (rv, npages)
 }
