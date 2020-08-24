@@ -161,6 +161,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "difference"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
+
+[[package]]
 name = "dirs"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,6 +235,16 @@ name = "dtoa"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "134951f4028bdadb9b84baf4232681efbf277da25144b9b0ad65df75946c422b"
+
+[[package]]
+name = "expectorate"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3afbfbf86dd72ef37fd75f385189b307b8909c4d7a2d37c9820e0374a27b377d"
+dependencies = [
+ "difference",
+ "newline-converter",
+]
 
 [[package]]
 name = "fnv"
@@ -717,11 +733,11 @@ dependencies = [
  "chrono 0.4.13",
  "clap",
  "dropshot",
+ "expectorate",
  "futures",
  "http",
  "hyper",
  "libc",
- "newline-converter",
  "openapiv3",
  "schemars",
  "serde",
