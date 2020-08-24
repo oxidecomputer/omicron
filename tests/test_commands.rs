@@ -35,6 +35,24 @@ const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
  */
 const TIMEOUT: Duration = Duration::from_millis(10000);
 
+fn path_to_controller() -> PathBuf {
+    path_to_executable(CMD_CONTROLLER)
+}
+
+fn path_to_sled_agent() -> PathBuf {
+    path_to_executable(CMD_SLED_AGENT)
+}
+
+fn path_to_executable(cmd_name: &str) -> PathBuf {
+    let mut rv = PathBuf::from(cmd_name);
+    /*
+     * Drop the ".exe" extension on Windows.  Otherwise, this appears in stderr
+     * output, which then differs across platforms.
+     */
+    rv.set_extension("");
+    rv
+}
+
 /**
  * Run the given command to completion or up to a hardcoded timeout, whichever
  * is shorter.  The caller provides a `subprocess::Exec` object that's already
@@ -149,7 +167,7 @@ const EXIT_USAGE: u32 = 2;
 
 #[test]
 fn test_controller_no_args() {
-    let exec = Exec::cmd(CMD_CONTROLLER);
+    let exec = Exec::cmd(path_to_controller());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents("tests/output/cmd-controller-noargs-stdout", &stdout_text);
@@ -158,7 +176,7 @@ fn test_controller_no_args() {
 
 #[test]
 fn test_sled_agent_no_args() {
-    let exec = Exec::cmd(CMD_SLED_AGENT);
+    let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents("tests/output/cmd-sled_agent-noargs-stdout", &stdout_text);
@@ -167,7 +185,7 @@ fn test_sled_agent_no_args() {
 
 #[test]
 fn test_controller_bad_config() {
-    let exec = Exec::cmd(CMD_CONTROLLER).arg("nonexistent");
+    let exec = Exec::cmd(path_to_controller()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
     assert_contents(
@@ -186,7 +204,7 @@ fn test_controller_bad_config() {
 #[test]
 fn test_controller_invalid_config() {
     let config_path = write_config("");
-    let exec = Exec::cmd(CMD_CONTROLLER).arg(&config_path);
+    let exec = Exec::cmd(path_to_controller()).arg(&config_path);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_FAILURE);
@@ -217,11 +235,12 @@ fn test_controller_openapi() {
      */
     let config = include_str!("../examples/config.toml");
     let config_path = write_config(config);
-    let exec = Exec::cmd(CMD_CONTROLLER).arg(&config_path).arg("--openapi");
+    let exec =
+        Exec::cmd(path_to_controller()).arg(&config_path).arg("--openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_eq!(&stderr_text, include_str!("test_controller_openapi-stderr"));
+    assert_contents("tests/output/cmd-controller-openapi-stderr", &stderr_text);
 
     /*
      * Make sure the result parses as a valid OpenAPI spec and sanity-check a
