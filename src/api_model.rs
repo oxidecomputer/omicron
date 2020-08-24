@@ -5,6 +5,8 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
+use crate::api_error::ApiError;
+use api_identity::ApiObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 pub use dropshot::PaginationOrder;
@@ -24,11 +26,6 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use uuid::Uuid;
-
-extern crate api_identity;
-use api_identity::ApiObjectIdentity;
-
-use crate::api_error::ApiError;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return

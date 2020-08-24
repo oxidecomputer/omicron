@@ -8,6 +8,7 @@ extern crate proc_macro;
 
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::Fields;
 use syn::ItemStruct;
 
 /**
@@ -25,6 +26,23 @@ pub fn api_identity(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 fn do_api_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let ast: ItemStruct = syn::parse2(item)?;
     let name = &ast.ident;
+
+    if !match ast.fields {
+        Fields::Named(ref fields) => {
+            fields.named.iter().any(|field| match &field.ident {
+                Some(ident) if ident.to_string() == "identity" => true,
+                _ => false,
+            })
+        }
+        _ => false,
+    } {
+        return Err(syn::Error::new_spanned(
+            ast,
+            "deriving ApiObjectIdentity on a struct requires that it have an \
+             `identity` field",
+        ));
+    };
+
     let stream = quote! {
         impl ApiObjectIdentity for #name {
             fn identity(&self) -> &ApiIdentityMetadata {
@@ -59,5 +77,18 @@ mod test {
         };
 
         assert_eq!(expected.to_string(), ret.unwrap().to_string());
+    }
+
+    #[test]
+    fn test_identity_no_field() {
+        let ret = do_api_identity(
+            quote! {
+                struct Foo {}
+            }
+            .into(),
+        );
+
+        let error = ret.unwrap_err();
+        assert!(error.to_string().starts_with("deriving ApiObjectIdentity"));
     }
 }
