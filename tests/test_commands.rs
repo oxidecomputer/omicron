@@ -5,26 +5,11 @@
  */
 
 /*
- * Several of the tests in this file compare stdout and stderr output from these
- * commands to expected output that comes from files on disk via `include_str!`.
- * To regenerate them, simply run the corresponding executable with the same
- * arguments and redirect stdout and stderr to the corresponding files.  For
- * example, for the "test_controller_no_args" test, you could use:
- *
- *     ./target/debug/oxide_controller \
- *         >  ./tests/test_controller_no_args-stdout \
- *         2> ./tests/test_controller_no_args-stderr
- *
- * Make sure that the resulting output is correct before committing changes to
- * these files!
- *
- * TODO-coverage:
- * - test success cases of oxide_controller and sled_agent
+ * TODO-coverage: test success cases of oxide_controller and sled_agent
  */
 
-use newline_converter::dos2unix;
+use expectorate::assert_contents;
 use openapiv3::OpenAPI;
-use std::env::current_exe;
 use std::env::temp_dir;
 use std::fs;
 use std::io;
@@ -39,9 +24,9 @@ use subprocess::NullFile;
 use subprocess::Redirection;
 
 /** name of the "oxide_controller" executable */
-const CMD_CONTROLLER: &str = "oxide_controller";
+const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_oxide_controller");
 /** name of the "sled_agent" executable */
-const CMD_SLED_AGENT: &str = "sled_agent";
+const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
 /**
  * maximum time to wait for any command
  *
@@ -59,10 +44,12 @@ fn path_to_sled_agent() -> PathBuf {
 }
 
 fn path_to_executable(cmd_name: &str) -> PathBuf {
-    let mut rv = current_exe().expect("failed to find path to test program");
-    rv.pop();
-    assert_eq!(rv.file_name().unwrap(), "deps");
-    rv.set_file_name(cmd_name);
+    let mut rv = PathBuf::from(cmd_name);
+    /*
+     * Drop the ".exe" extension on Windows.  Otherwise, this appears in stderr
+     * output, which then differs across platforms.
+     */
+    rv.set_extension("");
     rv
 }
 
@@ -167,33 +154,6 @@ fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
 }
 
-/**
- * Compares two sets of command output (one actual output, and one expected
- * output), accounting for potential differences in line endings.
- */
-/*
- * This is uglier than expected because the problem is different from what one
- * might expect.  The commands in this package should be producing output using
- * platform-specific line endings (e.g., "\r\n" on Windows, "\n" on Unix-like
- * systems).  The expected output files also ought to have the native
- * platform-specific line ending.  (That's because developers on Unix-like
- * systems will generally use Unix-style line endings, and developers on Windows
- * generally have Git's `core.autocrlf` configured to convert these Unix-style
- * line endings to Windows-style on checkout.)  So this approach of comparing
- * the command output to the contents of these files should work without any
- * explicit conversion of line endings.  The real problem is that our programs
- * often emit Unix-style line endings even on Windows.  See clap-rs/clap#1993
- * for an example issue about this.  This is essentially a workaround for that
- * bug.
- *
- * The simplest implementation that accounts for this problem is to convert the
- * expected output files to Unix style.  This will be a no-op on systems that
- * already use Unix-style endings.
- */
-fn assert_output_equal(actual: String, expected: &str) {
-    assert_eq!(actual.as_str(), dos2unix(expected));
-}
-
 /*
  * Standard exit codes
  */
@@ -210,14 +170,8 @@ fn test_controller_no_args() {
     let exec = Exec::cmd(path_to_controller());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_output_equal(
-        stdout_text,
-        include_str!("test_controller_no_args-stdout"),
-    );
-    assert_output_equal(
-        stderr_text,
-        include_str!("test_controller_no_args-stderr"),
-    );
+    assert_contents("tests/output/cmd-controller-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-controller-noargs-stderr", &stderr_text);
 }
 
 #[test]
@@ -225,14 +179,8 @@ fn test_sled_agent_no_args() {
     let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_output_equal(
-        stdout_text,
-        include_str!("test_sled_agent_no_args-stdout"),
-    );
-    assert_output_equal(
-        stderr_text,
-        include_str!("test_sled_agent_no_args-stderr"),
-    );
+    assert_contents("tests/output/cmd-sled_agent-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-sled_agent-noargs-stderr", &stderr_text);
 }
 
 #[test]
@@ -240,9 +188,9 @@ fn test_controller_bad_config() {
     let exec = Exec::cmd(path_to_controller()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
-    assert_output_equal(
-        stdout_text,
-        include_str!("test_controller_bad_config-stdout"),
+    assert_contents(
+        "tests/output/cmd-controller-badconfig-stdout",
+        &stdout_text,
     );
     assert_eq!(
         stderr_text,
@@ -258,10 +206,11 @@ fn test_controller_invalid_config() {
     let config_path = write_config("");
     let exec = Exec::cmd(path_to_controller()).arg(&config_path);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_FAILURE);
-    assert_output_equal(
-        stdout_text,
-        include_str!("test_controller_invalid_config-stdout"),
+    assert_contents(
+        "tests/output/cmd-controller-invalidconfig-stdout",
+        &stdout_text,
     );
     assert_eq!(
         stderr_text,
@@ -291,7 +240,7 @@ fn test_controller_openapi() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_eq!(&stderr_text, include_str!("test_controller_openapi-stderr"));
+    assert_contents("tests/output/cmd-controller-openapi-stderr", &stderr_text);
 
     /*
      * Make sure the result parses as a valid OpenAPI spec and sanity-check a

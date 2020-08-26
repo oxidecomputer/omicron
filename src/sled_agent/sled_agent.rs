@@ -1645,5 +1645,7 @@ mod test {
         }
         disk.transition_finish();
         assert_eq!(disk.current_state.disk_state, ApiDiskState::Faulted);
+
+        logctx.cleanup_successful();
     }
 }

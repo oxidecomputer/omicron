@@ -161,6 +161,8 @@ async fn test_basic_failures() {
          (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
+
+    testctx.teardown().await;
 }
 
 #[tokio::test]
