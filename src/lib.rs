@@ -57,6 +57,7 @@ pub mod api_model;
 mod cmd;
 mod datastore;
 mod http_client;
+mod http_pagination;
 mod oxide_controller;
 mod sled_agent;
 mod test_util;

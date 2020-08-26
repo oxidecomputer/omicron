@@ -24,12 +24,11 @@ use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiSled;
 use crate::api_model::CreateResult;
+use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
-use crate::api_model::PaginationParams;
 use crate::api_model::UpdateResult;
-
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
 use crate::SledAgentClient;
@@ -41,6 +40,7 @@ use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -110,12 +110,19 @@ impl OxideController {
      * The state of the system is maintained in memory, so we always start from
      * a clean slate.
      */
+    /* TODO-polish revisit rack metadata */
     pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
         OxideController {
             id: *id,
             log,
             api_rack: Arc::new(ApiRack {
-                id: *id,
+                identity: ApiIdentityMetadata {
+                    id: *id,
+                    name: ApiName::try_from(format!("rack-{}", *id)).unwrap(),
+                    description: String::from(""),
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                },
             }),
             datastore: ControlDataStore::new(),
             sled_agents: Mutex::new(BTreeMap::new()),
@@ -159,11 +166,18 @@ impl OxideController {
         self.datastore.project_lookup(name).await
     }
 
-    pub async fn projects_list(
+    pub async fn projects_list_by_name(
         &self,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiProject> {
-        self.datastore.projects_list(pagparams).await
+        self.datastore.projects_list_by_name(pagparams).await
+    }
+
+    pub async fn projects_list_by_id(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResult<ApiProject> {
+        self.datastore.projects_list_by_id(pagparams).await
     }
 
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
@@ -185,7 +199,7 @@ impl OxideController {
     pub async fn project_list_disks(
         &self,
         project_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         self.datastore.project_list_disks(project_name, pagparams).await
     }
@@ -327,7 +341,7 @@ impl OxideController {
     pub async fn project_list_instances(
         &self,
         project_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
         self.datastore.project_list_instances(project_name, pagparams).await
     }
@@ -641,7 +655,7 @@ impl OxideController {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-        pagparams: &PaginationParams<ApiName>,
+        pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDiskAttachment> {
         let instance = self
             .datastore
@@ -922,10 +936,10 @@ impl OxideController {
 
     pub async fn racks_list(
         &self,
-        pagparams: &PaginationParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiRack> {
         if let Some(marker) = pagparams.marker {
-            if marker > self.id {
+            if *marker >= self.id {
                 return Ok(futures::stream::empty().boxed());
             }
         }
@@ -950,7 +964,7 @@ impl OxideController {
      */
     pub async fn sleds_list(
         &self,
-        pagparams: &PaginationParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiSled> {
         let sled_agents = self.sled_agents.lock().await;
         let sleds = collection_page(&sled_agents, pagparams)?
@@ -958,7 +972,15 @@ impl OxideController {
             .map(|sa| {
                 let sa = sa.unwrap();
                 Ok(Arc::new(ApiSled {
-                    id: sa.id,
+                    identity: ApiIdentityMetadata {
+                        /* TODO-correctness cons up real metadata here */
+                        id: sa.id,
+                        name: ApiName::try_from(format!("sled-{}", sa.id))
+                            .unwrap(),
+                        description: String::from(""),
+                        time_created: Utc::now(),
+                        time_modified: Utc::now(),
+                    },
                     service_address: sa.service_address,
                 }))
             })
@@ -974,7 +996,14 @@ impl OxideController {
         })?;
 
         Ok(Arc::new(ApiSled {
-            id: sa.id,
+            identity: ApiIdentityMetadata {
+                /* TODO-correctness cons up real metadata here */
+                id: sa.id,
+                name: ApiName::try_from(format!("sled-{}", sa.id)).unwrap(),
+                description: String::from(""),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
             service_address: sa.service_address,
         }))
     }

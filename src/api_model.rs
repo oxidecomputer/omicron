@@ -5,8 +5,11 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
+use crate::api_error::ApiError;
+use api_identity::ApiObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
@@ -20,10 +23,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use crate::api_error::ApiError;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
@@ -50,38 +52,47 @@ pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;
  */
 
 /**
- * Parameters for requesting a specific page of results when listing a
+ * Describes an `ApiObject` that has its own identity metadata.  This is
+ * currently used only for pagination.
+ */
+pub trait ApiObjectIdentity {
+    fn identity(&self) -> &ApiIdentityMetadata;
+}
+
+/**
+ * Parameters used to request a specific page of results when listing a
  * collection of objects
  *
- * All list operations in the API are paginated, meaning that there's a limit on
- * the number of objects returned in a single request and clients are expected
- * to make additional requests to fetch the next page of results until the end
- * of the list is reached or the client has found what it needs.  For any list
- * operation, objects are sorted by a particular field that is unique among
- * objects in the list (usually a UTF-8 name or a UUID).  For all requests after
- * the first, the client is expected to provide the value of this field for the
- * last object seen, called the _marker_.  The server will return a page of
- * objects that appear immediately after the object that has this marker.
+ * This is logically analogous to Dropshot's `PageSelector` (plus the limit from
+ * Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
+ * importantly, by the time this struct is generated, we know the type of the
+ * sort field and we can specialize `DataPageParams` to that type.  This makes
+ * it considerably simpler to implement the backend for most of our paginated
+ * APIs.
  *
  * `NameType` is the type of the field used to sort the returned values and it's
  * usually `ApiName`.
  */
-#[derive(Deserialize, JsonSchema)]
-pub struct PaginationParams<NameType> {
+#[derive(Debug)]
+pub struct DataPageParams<'a, NameType> {
     /**
      * If present, this is the value of the sort field for the last object seen
      */
-    pub marker: Option<NameType>,
+    pub marker: Option<&'a NameType>,
 
     /**
-     * If present, this is an upper bound on how many objects the client wants
-     * in this page of results.  The server may choose to use a lower limit.
+     * Whether the sort is in ascending order
      */
-    pub limit: Option<usize>,
-}
+    pub direction: PaginationOrder,
 
-/** Default maximum number of items per page of "list" results */
-pub const DEFAULT_LIST_PAGE_SIZE: usize = 100;
+    /**
+     * This identifies how many results should be returned on this page.
+     * Backend implementations must provide this many results unless we're at
+     * the end of the scan.  Dropshot assumes that if we provide fewer results
+     * than this number, then we're done with the scan.
+     */
+    pub limit: NonZeroUsize,
+}
 
 /**
  * A name used in the API
@@ -152,6 +163,8 @@ impl TryFrom<&str> for ApiName {
 
 /**
  * Convert an `ApiName` into the `String` representing the actual name.
+ * TODO-cleanup It probably makes more sense to use `as_str()` but there's a
+ * bunch of code using this implementation.
  */
 impl From<ApiName> for String {
     fn from(value: ApiName) -> String {
@@ -234,6 +247,13 @@ impl ApiName {
             label: String::from(label),
             message: e,
         })
+    }
+
+    /**
+     * Return the `&str` representing the actual name.
+     */
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -372,7 +392,7 @@ pub async fn to_view_list<T: ApiObject>(
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -444,7 +464,9 @@ impl ApiObject for ApiProject {
  * Client view of an [`ApiProject`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -645,7 +667,9 @@ impl ApiObject for ApiInstanceRuntimeState {
  * Client view of an [`ApiInstance`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiInstanceView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -724,7 +748,9 @@ pub struct ApiDisk {
  * Client view of an [`ApiDisk`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiDiskView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
@@ -914,14 +940,14 @@ impl ApiDiskStateRequested {
  * A Rack in the external API
  */
 pub struct ApiRack {
-    pub id: Uuid,
+    pub identity: ApiIdentityMetadata,
 }
 
 impl ApiObject for ApiRack {
     type View = ApiRackView;
     fn to_view(&self) -> ApiRackView {
         ApiRackView {
-            id: self.id,
+            identity: self.identity.clone(),
         }
     }
 }
@@ -930,9 +956,11 @@ impl ApiObject for ApiRack {
  * Client view of an [`ApiRack`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiRackView {
-    pub id: Uuid,
+    pub identity: ApiIdentityMetadata,
 }
 
 /*
@@ -943,7 +971,7 @@ pub struct ApiRackView {
  * A Sled in the external API
  */
 pub struct ApiSled {
-    pub id: Uuid,
+    pub identity: ApiIdentityMetadata,
     pub service_address: SocketAddr,
 }
 
@@ -951,7 +979,7 @@ impl ApiObject for ApiSled {
     type View = ApiSledView;
     fn to_view(&self) -> ApiSledView {
         ApiSledView {
-            id: self.id,
+            identity: self.identity.clone(),
             service_address: self.service_address,
         }
     }
@@ -961,9 +989,12 @@ impl ApiObject for ApiSled {
  * Client view of an [`ApiSled`]
  */
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
+)]
 pub struct ApiSledView {
-    pub id: Uuid,
+    #[serde(flatten)]
+    pub identity: ApiIdentityMetadata,
     pub service_address: SocketAddr,
 }
 

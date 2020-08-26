@@ -25,6 +25,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
@@ -524,7 +525,7 @@ async fn disks_list(
     client: &ClientTestContext,
     list_url: &str,
 ) -> Vec<ApiDiskView> {
-    object_get::<Vec<ApiDiskView>>(client, list_url).await
+    objects_list_page::<ApiDiskView>(client, list_url).await.items
 }
 
 fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {

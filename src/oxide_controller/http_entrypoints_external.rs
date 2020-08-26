@@ -19,7 +19,20 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
 use crate::api_model::ApiRackView;
 use crate::api_model::ApiSledView;
-use crate::api_model::PaginationParams;
+use crate::api_model::DataPageParams;
+use crate::api_model::PaginationOrder;
+use crate::http_pagination::data_page_params_for;
+use crate::http_pagination::data_page_params_nameid_id;
+use crate::http_pagination::data_page_params_nameid_name;
+use crate::http_pagination::pagination_field_for_scan_params;
+use crate::http_pagination::ApiPagField;
+use crate::http_pagination::ApiPaginatedById;
+use crate::http_pagination::ApiPaginatedByName;
+use crate::http_pagination::ApiPaginatedByNameOrId;
+use crate::http_pagination::ApiScanById;
+use crate::http_pagination::ApiScanByName;
+use crate::http_pagination::ApiScanByNameOrId;
+use crate::http_pagination::ScanParams;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -30,9 +43,11 @@ use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -122,14 +137,28 @@ pub fn controller_external_api() -> ApiDescription {
  }]
 async fn api_projects_get(
     rqctx: Arc<RequestContext>,
-    query_params: Query<PaginationParams<ApiName>>,
-) -> Result<HttpResponseOk<Vec<ApiProjectView>>, HttpError> {
+    query_params: Query<ApiPaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<ApiProjectView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
-    let project_stream = controller.projects_list(&query).await?;
+    let params = ApiScanByNameOrId::from_query(&query)?;
+    let field = pagination_field_for_scan_params(params);
+
+    let project_stream = match field {
+        ApiPagField::Id => {
+            let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+            controller.projects_list_by_id(&page_selector).await?
+        }
+
+        ApiPagField::Name => {
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
+            controller.projects_list_by_name(&page_selector).await?
+        }
+    };
+
     let view_list = to_view_list(project_stream).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(ApiScanByNameOrId::results_page(&query, view_list)?))
 }
 
 /**
@@ -238,18 +267,22 @@ async fn api_projects_put_project(
  }]
 async fn api_project_disks_get(
     rqctx: Arc<RequestContext>,
-    query_params: Query<PaginationParams<ApiName>>,
+    query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<Vec<ApiDiskView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<ApiDiskView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let disk_stream =
-        controller.project_list_disks(project_name, &query).await?;
+    let disk_stream = controller
+        .project_list_disks(
+            project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
     let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 
 /**
@@ -339,18 +372,22 @@ async fn api_project_disks_delete_disk(
  }]
 async fn api_project_instances_get(
     rqctx: Arc<RequestContext>,
-    query_params: Query<PaginationParams<ApiName>>,
+    query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<Vec<ApiInstanceView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<ApiInstanceView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let instance_stream =
-        controller.project_list_instances(&project_name, &query).await?;
+    let instance_stream = controller
+        .project_list_instances(
+            &project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
     let view_list = to_view_list(instance_stream).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 
 /**
@@ -502,6 +539,7 @@ async fn api_project_instances_instance_stop(
 /**
  * List disks attached to this instance.
  */
+/* TODO-scalability needs to be paginated */
 #[endpoint {
     method = GET,
     path = "/projects/{project_name}/instances/{instance_name}/disks"
@@ -509,16 +547,19 @@ async fn api_project_instances_instance_stop(
 async fn api_instance_disks_get(
     rqctx: Arc<RequestContext>,
     path_params: Path<InstancePathParam>,
-    query_params: Query<PaginationParams<ApiName>>,
 ) -> Result<HttpResponseOk<Vec<ApiDiskAttachment>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let query = query_params.into_inner();
+    let fake_query = DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit: NonZeroUsize::new(std::usize::MAX).unwrap(),
+    };
     let disk_list = controller
-        .instance_list_disks(&project_name, &instance_name, &query)
+        .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
     let view_list = to_view_list(disk_list).await;
     Ok(HttpResponseOk(view_list))
@@ -616,14 +657,15 @@ async fn api_instance_disks_delete_disk(
  }]
 async fn api_hardware_racks_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<PaginationParams<Uuid>>,
-) -> Result<HttpResponseOk<Vec<ApiRackView>>, HttpError> {
+    query_params: Query<ApiPaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ApiRackView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
-    let params = params_raw.into_inner();
-    let rack_stream = controller.racks_list(&params).await?;
+    let query = query_params.into_inner();
+    let rack_stream =
+        controller.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list = to_view_list(rack_stream).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
 }
 
 /**
@@ -666,14 +708,15 @@ async fn api_hardware_racks_get_rack(
  }]
 async fn api_hardware_sleds_get(
     rqctx: Arc<RequestContext>,
-    params_raw: Query<PaginationParams<Uuid>>,
-) -> Result<HttpResponseOk<Vec<ApiSledView>>, HttpError> {
+    query_params: Query<ApiPaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ApiSledView>>, HttpError> {
     let apictx = ControllerServerContext::from_request(&rqctx);
     let controller = &apictx.controller;
-    let params = params_raw.into_inner();
-    let sled_stream = controller.sleds_list(&params).await?;
+    let query = query_params.into_inner();
+    let sled_stream =
+        controller.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list = to_view_list(sled_stream).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
 }
 
 /**

@@ -5,6 +5,12 @@
  * TODO-coverage add test for racks, sleds
  */
 
+use dropshot::test_util::iter_collection;
+use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list_page;
+use dropshot::test_util::objects_post;
+use dropshot::test_util::read_json;
+use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use oxide_api_prototype::api_model::ApiIdentityMetadataCreateParams;
@@ -13,15 +19,12 @@ use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectUpdateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
+use oxide_api_prototype::api_model::ApiSledView;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-use dropshot::test_util::object_get;
-use dropshot::test_util::objects_post;
-use dropshot::test_util::read_json;
-use dropshot::test_util::ClientTestContext;
-
 pub mod common;
+use common::start_sled_agent;
 use common::test_setup;
 
 #[macro_use]
@@ -445,11 +448,186 @@ async fn test_projects() {
     testctx.teardown().await;
 }
 
+#[tokio::test]
+async fn test_projects_list() {
+    let testctx = test_setup("test_projects_list").await;
+    let client = &testctx.external_client;
+
+    /* Verify that there are no projects to begin with. */
+    let projects_url = "/projects";
+    assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
+
+    /* Create a large number of projects that we can page through. */
+    let nprojects = 1000;
+    let mut projects_created = Vec::with_capacity(nprojects);
+    for _ in 0..nprojects {
+        /*
+         * We'll use uuids for the names to make sure that works, and that we
+         * can paginate through by _name_ even though the names happen to be
+         * uuids.  Names have to start with a letter, though, so we've got to
+         * make sure our uuid has one.
+         */
+        let mut name = Uuid::new_v4().to_string();
+        name.replace_range(0..1, "a");
+        let create_params = ApiProjectCreateParams {
+            identity: ApiIdentityMetadataCreateParams {
+                name: ApiName::try_from(name).unwrap(),
+                description: String::from("test suite project"),
+            },
+        };
+
+        let project = objects_post::<_, ApiProjectView>(
+            &client,
+            &projects_url,
+            create_params,
+        )
+        .await;
+        projects_created.push(project.identity);
+    }
+
+    let project_names_by_name = {
+        let mut clone = projects_created.clone();
+        clone.sort_by_key(|v| v.name.clone());
+        assert_ne!(clone, projects_created);
+        clone.iter().map(|v| v.name.clone()).collect::<Vec<ApiName>>()
+    };
+
+    let project_names_by_id = {
+        let mut clone = projects_created.clone();
+        clone.sort_by_key(|v| v.id);
+        assert_ne!(clone, projects_created);
+        clone.iter().map(|v| v.id).collect::<Vec<Uuid>>()
+    };
+
+    /*
+     * Page through all the projects in the default order, which should be in
+     * increasing order of name.
+     */
+    let found_projects_by_name =
+        iter_collection::<ApiProjectView>(&client, projects_url, "", 99)
+            .await
+            .0;
+    assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
+    assert_eq!(
+        project_names_by_name,
+        found_projects_by_name
+            .iter()
+            .map(|v| v.identity.name.clone())
+            .collect::<Vec<ApiName>>()
+    );
+
+    /*
+     * Page through all the projects in ascending order by name, which should be
+     * the same as above.
+     */
+    let found_projects_by_name = iter_collection::<ApiProjectView>(
+        &client,
+        projects_url,
+        "sort_by=name-ascending",
+        99,
+    )
+    .await
+    .0;
+    assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
+    assert_eq!(
+        project_names_by_name,
+        found_projects_by_name
+            .iter()
+            .map(|v| v.identity.name.clone())
+            .collect::<Vec<ApiName>>()
+    );
+
+    /*
+     * Page through all the projects in descending order by name, which should be
+     * the reverse of the above.
+     */
+    let mut found_projects_by_name = iter_collection::<ApiProjectView>(
+        &client,
+        projects_url,
+        "sort_by=name-descending",
+        99,
+    )
+    .await
+    .0;
+    assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
+    found_projects_by_name.reverse();
+    assert_eq!(
+        project_names_by_name,
+        found_projects_by_name
+            .iter()
+            .map(|v| v.identity.name.clone())
+            .collect::<Vec<ApiName>>()
+    );
+
+    /*
+     * Page through the projects in ascending order by id.
+     */
+    let found_projects_by_id = iter_collection::<ApiProjectView>(
+        &client,
+        projects_url,
+        "sort_by=id-ascending",
+        99,
+    )
+    .await
+    .0;
+    assert_eq!(found_projects_by_id.len(), project_names_by_id.len());
+    assert_eq!(
+        project_names_by_id,
+        found_projects_by_id
+            .iter()
+            .map(|v| v.identity.id)
+            .collect::<Vec<Uuid>>()
+    );
+
+    testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_sleds_list() {
+    let testctx = test_setup("test_sleds_list").await;
+    let client = &testctx.external_client;
+
+    /* Verify that there is one sled to begin with. */
+    let sleds_url = "/hardware/sleds";
+    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
+
+    /* Now start a few more sled agents. */
+    let nsleds = 3;
+    let mut sas = Vec::with_capacity(nsleds);
+    for _ in 0..nsleds {
+        let sa_id = Uuid::new_v4();
+        let log = testctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = testctx.server.http_server_internal.local_addr();
+        sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
+    }
+
+    /* List sleds again. */
+    let sleds_found = sleds_list(&client, &sleds_url).await;
+    assert_eq!(sleds_found.len(), nsleds + 1);
+
+    let sledids_found =
+        sleds_found.iter().map(|sv| sv.identity.id).collect::<Vec<Uuid>>();
+    let mut sledids_found_sorted = sledids_found.clone();
+    sledids_found_sorted.sort();
+    assert_eq!(sledids_found, sledids_found_sorted);
+
+    /* Tear down the agents. */
+    for sa in sas {
+        /*
+         * TODO-correctness see note in testctx.teardown() about shutting down
+         * sled agents.
+         */
+        sa.http_server.close();
+    }
+
+    testctx.teardown().await;
+}
+
 async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<ApiProjectView> {
-    object_get::<Vec<ApiProjectView>>(client, projects_url).await
+    objects_list_page::<ApiProjectView>(client, projects_url).await.items
 }
 
 async fn project_get(
@@ -457,4 +635,11 @@ async fn project_get(
     project_url: &str,
 ) -> ApiProjectView {
     object_get::<ApiProjectView>(client, project_url).await
+}
+
+async fn sleds_list(
+    client: &ClientTestContext,
+    sleds_url: &str,
+) -> Vec<ApiSledView> {
+    objects_list_page::<ApiSledView>(client, sleds_url).await.items
 }
