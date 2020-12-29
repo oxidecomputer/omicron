@@ -80,8 +80,10 @@ async fn do_run() -> Result<(), CmdError> {
         id: sa_id,
         sim_mode,
         controller_address: controller_addr,
-        dropshot: ConfigDropshot {
-            bind_address: sa_addr,
+        dropshot: {
+            let mut c = ConfigDropshot::default();
+            c.bind_address = sa_addr;
+            c
         },
         log: ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Info,

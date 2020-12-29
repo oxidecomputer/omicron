@@ -207,8 +207,10 @@ mod test {
             r##"
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
             [log]
             mode = "file"
             level = "debug"
@@ -217,12 +219,17 @@ mod test {
             "##,
         )
         .unwrap();
+
         assert_eq!(config, ConfigController {
-            dropshot_external: ConfigDropshot {
-                bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
+            dropshot_external: {
+                let mut c = ConfigDropshot::default();
+                c.bind_address = "10.1.2.3:4567".parse::<SocketAddr>().unwrap();
+                c
             },
-            dropshot_internal: ConfigDropshot {
-                bind_address: "10.1.2.3:4568".parse::<SocketAddr>().unwrap(),
+            dropshot_internal: {
+                let mut c = ConfigDropshot::default();
+                c.bind_address = "10.1.2.3:4568".parse::<SocketAddr>().unwrap();
+                c
             },
             log: ConfigLogging::File {
                 level: ConfigLoggingLevel::Debug,
