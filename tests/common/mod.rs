@@ -103,10 +103,9 @@ pub async fn start_sled_agent(
         id,
         sim_mode: SimMode::Explicit,
         controller_address,
-        dropshot: {
-            let mut c = ConfigDropshot::default();
-            c.bind_address = SocketAddr::new("127.0.0.1".parse().unwrap(), 0);
-            c
+        dropshot: ConfigDropshot {
+            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+            ..Default::default()
         },
         /* TODO-cleanup this is unused */
         log: ConfigLogging::StderrTerminal {

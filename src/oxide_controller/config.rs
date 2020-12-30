@@ -221,15 +221,13 @@ mod test {
         .unwrap();
 
         assert_eq!(config, ConfigController {
-            dropshot_external: {
-                let mut c = ConfigDropshot::default();
-                c.bind_address = "10.1.2.3:4567".parse::<SocketAddr>().unwrap();
-                c
+            dropshot_external: ConfigDropshot {
+                bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
+                ..Default::default()
             },
-            dropshot_internal: {
-                let mut c = ConfigDropshot::default();
-                c.bind_address = "10.1.2.3:4568".parse::<SocketAddr>().unwrap();
-                c
+            dropshot_internal: ConfigDropshot {
+                bind_address: "10.1.2.3:4568".parse::<SocketAddr>().unwrap(),
+                ..Default::default()
             },
             log: ConfigLogging::File {
                 level: ConfigLoggingLevel::Debug,
