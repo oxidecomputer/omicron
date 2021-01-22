@@ -91,9 +91,12 @@ impl SledAgentServer {
         loop {
             debug!(log, "contacting server controller");
             let result = controller_client
-                .notify_sled_agent_online(config.id, ApiSledAgentStartupInfo {
-                    sa_address: http_server.local_addr(),
-                })
+                .notify_sled_agent_online(
+                    config.id,
+                    ApiSledAgentStartupInfo {
+                        sa_address: http_server.local_addr(),
+                    },
+                )
                 .await;
             match result {
                 Ok(()) => break,
@@ -110,11 +113,7 @@ impl SledAgentServer {
 
         info!(log, "contacted server controller");
 
-        Ok(SledAgentServer {
-            sled_agent,
-            http_server,
-            join_handle,
-        })
+        Ok(SledAgentServer { sled_agent, http_server, join_handle })
     }
 
     /**

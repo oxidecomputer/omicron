@@ -110,9 +110,9 @@ impl ApiError {
          * include more information in the HttpErrorResponseBody.
          */
         match error_response.error_code.as_deref() {
-            Some("InvalidRequest") => ApiError::InvalidRequest {
-                message: error_response.message,
-            },
+            Some("InvalidRequest") => {
+                ApiError::InvalidRequest { message: error_response.message }
+            }
             _ => ApiError::InternalError {
                 message: format!(
                     "{}: unknown error from dependency: {:?}",
@@ -131,10 +131,7 @@ impl From<ApiError> for HttpError {
      */
     fn from(error: ApiError) -> HttpError {
         match error {
-            ApiError::ObjectNotFound {
-                type_name: t,
-                lookup_type: lt,
-            } => {
+            ApiError::ObjectNotFound { type_name: t, lookup_type: lt } => {
                 if let LookupType::Other(message) = lt {
                     HttpError::for_client_error(
                         Some(String::from("ObjectNotFound")),
@@ -160,10 +157,7 @@ impl From<ApiError> for HttpError {
                 }
             }
 
-            ApiError::ObjectAlreadyExists {
-                type_name: t,
-                object_name: n,
-            } => {
+            ApiError::ObjectAlreadyExists { type_name: t, object_name: n } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
                 HttpError::for_bad_request(
                     Some(String::from("ObjectAlreadyExists")),
@@ -171,17 +165,12 @@ impl From<ApiError> for HttpError {
                 )
             }
 
-            ApiError::InvalidRequest {
-                message,
-            } => HttpError::for_bad_request(
+            ApiError::InvalidRequest { message } => HttpError::for_bad_request(
                 Some(String::from("InvalidRequest")),
                 message,
             ),
 
-            ApiError::InvalidValue {
-                label,
-                message,
-            } => {
+            ApiError::InvalidValue { label, message } => {
                 let message =
                     format!("unsupported value for \"{}\": {}", label, message);
                 HttpError::for_bad_request(
@@ -190,13 +179,11 @@ impl From<ApiError> for HttpError {
                 )
             }
 
-            ApiError::InternalError {
-                message,
-            } => HttpError::for_internal_error(message),
+            ApiError::InternalError { message } => {
+                HttpError::for_internal_error(message)
+            }
 
-            ApiError::ServiceUnavailable {
-                message,
-            } => HttpError::for_unavail(
+            ApiError::ServiceUnavailable { message } => HttpError::for_unavail(
                 Some(String::from("ServiceNotAvailable")),
                 message,
             ),
