@@ -11,13 +11,8 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: actions-rs/toolchain@b223206e28798aa3c3668bdd6409258e6dc29172
-      with:
-        toolchain: nightly-2020-06-02
-        default: false
-        components: rustfmt
     - name: Check style
-      run: cargo +nightly-2020-06-02 fmt -- --check
+      run: cargo fmt -- --check
 
   build-and-test:
     runs-on: ${{ matrix.os }}
