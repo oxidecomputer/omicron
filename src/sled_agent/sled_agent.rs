@@ -485,7 +485,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      */
     async fn sim_step(&self, id: Uuid, mut rx: Receiver<()>) {
         while rx.next().await.is_some() {
-            tokio::time::delay_for(Duration::from_millis(1500)).await;
+            tokio::time::sleep(Duration::from_millis(1500)).await;
             self.sim_poke(id).await;
         }
     }

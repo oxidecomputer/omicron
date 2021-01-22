@@ -37,7 +37,7 @@ pub struct SledAgentServer {
     /** dropshot server for the API */
     pub http_server: dropshot::HttpServer,
     /** task handle for the dropshot server */
-    join_handle: JoinHandle<Result<(), hyper::error::Error>>,
+    join_handle: JoinHandle<Result<(), hyper::Error>>,
 }
 
 impl SledAgentServer {
@@ -100,7 +100,7 @@ impl SledAgentServer {
                 Err(error) => {
                     warn!(log, "failed to contact controller (will retry)";
                         "error" => ?error);
-                    tokio::time::delay_for(Duration::from_millis(
+                    tokio::time::sleep(Duration::from_millis(
                         SLED_AGENT_NOTIFY_DELAY_MS,
                     ))
                     .await;

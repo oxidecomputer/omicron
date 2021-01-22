@@ -30,20 +30,12 @@ use uuid::Uuid;
  */
 pub fn controller_run_openapi_external() -> Result<(), String> {
     controller_external_api()
-        .print_openapi(
-            &mut std::io::stdout(),
-            &"Oxide Region API",
-            Some(&"API for interacting with the Oxide control plane"),
-            None,
-            None,
-            Some(&"https://oxide.computer"),
-            Some(&"api@oxide.computer"),
-            None,
-            None,
-            &"0.0.1",
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .openapi("Oxide Region API", "0.0.1")
+        .description("API for interacting with the Oxide control plane")
+        .contact_url("https://oxide.computer")
+        .contact_email("api@oxide.computer")
+        .write(&mut std::io::stdout())
+        .map_err(|e| e.to_string())
 }
 
 /**
@@ -59,9 +51,9 @@ pub struct OxideControllerServer {
     pub http_server_internal: dropshot::HttpServer,
 
     /** task handle for the external API server */
-    join_handle_external: JoinHandle<Result<(), hyper::error::Error>>,
+    join_handle_external: JoinHandle<Result<(), hyper::Error>>,
     /** task handle for the internal API server */
-    join_handle_internal: JoinHandle<Result<(), hyper::error::Error>>,
+    join_handle_internal: JoinHandle<Result<(), hyper::Error>>,
 }
 
 impl OxideControllerServer {
