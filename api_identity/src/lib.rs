@@ -28,12 +28,9 @@ fn do_api_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let name = &ast.ident;
 
     if !match ast.fields {
-        Fields::Named(ref fields) => {
-            fields.named.iter().any(|field| match &field.ident {
-                Some(ident) if ident.to_string() == "identity" => true,
-                _ => false,
-            })
-        }
+        Fields::Named(ref fields) => fields.named.iter().any(
+            |field| matches!(&field.ident, Some(ident) if *ident == "identity"),
+        ),
         _ => false,
     } {
         return Err(syn::Error::new_spanned(

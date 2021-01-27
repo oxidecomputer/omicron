@@ -628,9 +628,9 @@ impl ControlDataStore {
  * TODO-cleanup this is only public because we haven't built Servers into the
  * datastore yet so the controller needs this interface.
  */
-pub fn collection_page<'a, 'b, KeyType, ValueType>(
-    search_tree: &'a BTreeMap<KeyType, Arc<ValueType>>,
-    pagparams: &'b DataPageParams<'_, KeyType>,
+pub fn collection_page<KeyType, ValueType>(
+    search_tree: &BTreeMap<KeyType, Arc<ValueType>>,
+    pagparams: &DataPageParams<'_, KeyType>,
 ) -> ListResult<ValueType>
 where
     KeyType: std::cmp::Ord,

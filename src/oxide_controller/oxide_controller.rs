@@ -739,19 +739,19 @@ impl OxideController {
         fn disk_attachment_for(
             instance: &Arc<ApiInstance>,
             disk: &Arc<ApiDisk>,
-        ) -> CreateResult<ApiDiskAttachment> {
+        ) -> Arc<ApiDiskAttachment> {
             let instance_id = &instance.identity.id;
             assert_eq!(
                 instance_id,
                 disk.runtime.disk_state.attached_instance_id().unwrap()
             );
-            Ok(Arc::new(ApiDiskAttachment {
+            Arc::new(ApiDiskAttachment {
                 instance_name: instance.identity.name.clone(),
                 instance_id: *instance_id,
                 disk_id: disk.identity.id,
                 disk_name: disk.identity.name.clone(),
                 disk_state: disk.runtime.disk_state.clone(),
-            }))
+            })
         }
 
         fn disk_attachment_error(
@@ -795,7 +795,7 @@ impl OxideController {
              * there's nothing else to do.
              */
             ApiDiskState::Attached(id) if id == instance_id => {
-                return disk_attachment_for(&instance, &disk);
+                return Ok(disk_attachment_for(&instance, &disk));
             }
 
             /*
@@ -838,7 +838,7 @@ impl OxideController {
                 ApiDiskStateRequested::Attached(*instance_id),
             )
             .await?;
-        disk_attachment_for(&instance, &disk)
+        Ok(disk_attachment_for(&instance, &disk))
     }
 
     /**
