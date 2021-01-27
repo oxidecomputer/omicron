@@ -23,18 +23,15 @@ https://61.rfd.oxide.computer[RFD 61].
 
 For design and API docs, see the
 https://rust.docs.corp.oxide.computer/oxide_api_prototype/[generated
-documentation].  You can generate this yourself withfootnote:[Like many other
-Rust crates, the rustdoc in this crate makes heavy use of
-https://doc.rust-lang.org/rustdoc/unstable-features.html?highlight=link#linking-to-items-by-type[intra-document
-linking], which requires a nightly version of `rustdoc`.]:
+documentation].  You can generate this yourself with:
 
 [source,text]
 ----
-$ cargo +nightly doc --document-private-items
+$ cargo doc --document-private-items
 ----
 
 Note that `--document-private-items` is configured by default, so you can
-actually just use `cargo +nightly doc`.
+actually just use `cargo doc`.
 
 == Status
 
@@ -59,8 +56,8 @@ See TODO.adoc for more info.
 You can **build and run the whole test suite** with `cargo test`.  The test
 suite runs cleanly and should remain clean.
 
-You can **format the code** using `cargo +nightly fmt`.  Make sure to run this
-before pushing changes.  The CI checks that the code is correctly formatted.
+You can **format the code** using `cargo fmt`.  Make sure to run this before
+pushing changes.  The CI checks that the code is correctly formatted.
 
 To **run the system:** there are two executables: the `oxide_controller` (which
 is a real prototype backed by an in-memory store; this component manages an

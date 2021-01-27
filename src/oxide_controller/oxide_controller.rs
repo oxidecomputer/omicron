@@ -526,9 +526,7 @@ impl OxideController {
         let said = &instance.runtime.sled_uuid;
         Ok(Arc::clone(sled_agents.get(said).ok_or_else(|| {
             let message = format!("no sled agent for sled_uuid \"{}\"", said);
-            ApiError::ServiceUnavailable {
-                message,
-            }
+            ApiError::ServiceUnavailable { message }
         })?))
     }
 
@@ -784,9 +782,7 @@ impl OxideController {
                 String::from(disk.identity.name.clone()),
                 disk_status
             );
-            Err(ApiError::InvalidRequest {
-                message,
-            })
+            Err(ApiError::InvalidRequest { message })
         }
 
         match &disk.runtime.disk_state {
@@ -1050,9 +1046,7 @@ impl OxideController {
              * and in that case, we'd need some async task for cleaning these
              * up.
              */
-            Err(ApiError::ObjectNotFound {
-                ..
-            }) => {
+            Err(ApiError::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
@@ -1107,9 +1101,7 @@ impl OxideController {
              * and in that case, we'd need some async task for cleaning these
              * up.
              */
-            Err(ApiError::ObjectNotFound {
-                ..
-            }) => {
+            Err(ApiError::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent disk updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => ?new_state);

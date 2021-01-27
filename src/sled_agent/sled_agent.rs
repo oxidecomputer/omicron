@@ -1576,10 +1576,7 @@ mod test {
         let error = disk
             .transition(ApiDiskStateRequested::Attached(id2.clone()))
             .unwrap_err();
-        if let ApiError::InvalidRequest {
-            message,
-        } = error
-        {
+        if let ApiError::InvalidRequest { message } = error {
             assert_eq!("disk is already attached", message);
         } else {
             panic!("unexpected error type");
@@ -1635,10 +1632,7 @@ mod test {
         let error = disk
             .transition(ApiDiskStateRequested::Attached(id.clone()))
             .unwrap_err();
-        if let ApiError::InvalidRequest {
-            message,
-        } = error
-        {
+        if let ApiError::InvalidRequest { message } = error {
             assert_eq!("cannot attach while detaching", message);
         } else {
             panic!("unexpected error type");

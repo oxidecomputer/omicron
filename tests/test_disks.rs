@@ -51,14 +51,17 @@ async fn test_disks() {
     /* Create a project for testing. */
     let project_name = "springfield-squidport-disks";
     let url_disks = format!("/projects/{}/disks", project_name);
-    let project: ApiProjectView =
-        objects_post(&client, "/projects", ApiProjectCreateParams {
+    let project: ApiProjectView = objects_post(
+        &client,
+        "/projects",
+        ApiProjectCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
             },
-        })
-        .await;
+        },
+    )
+    .await;
 
     /* List disks.  There aren't any yet. */
     let disks = disks_list(&client, &url_disks).await;
@@ -126,8 +129,10 @@ async fn test_disks() {
 
     /* Create an instance to attach the disk. */
     let url_instances = format!("/projects/{}/instances", project_name);
-    let instance: ApiInstanceView =
-        objects_post(&client, &url_instances, ApiInstanceCreateParams {
+    let instance: ApiInstanceView = objects_post(
+        &client,
+        &url_instances,
+        ApiInstanceCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from("just-rainsticks").unwrap(),
                 description: String::from("sells rainsticks"),
@@ -136,8 +141,9 @@ async fn test_disks() {
             memory: ApiByteCount::from_mebibytes(256),
             boot_disk_size: ApiByteCount::from_gibibytes(1),
             hostname: String::from("rainsticks"),
-        })
-        .await;
+        },
+    )
+    .await;
 
     /*
      * Verify that there are no disks attached to the instance, and specifically
@@ -244,8 +250,10 @@ async fn test_disks() {
      * Create a second instance and try to attach the disk to that.  This should
      * fail and the disk should remain attached to the first instance.
      */
-    let instance2: ApiInstanceView =
-        objects_post(&client, &url_instances, ApiInstanceCreateParams {
+    let instance2: ApiInstanceView = objects_post(
+        &client,
+        &url_instances,
+        ApiInstanceCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from("instance2").unwrap(),
                 description: String::from("instance2"),
@@ -254,8 +262,9 @@ async fn test_disks() {
             memory: ApiByteCount::from_mebibytes(256),
             boot_disk_size: ApiByteCount::from_gibibytes(1),
             hostname: String::from("instance2"),
-        })
-        .await;
+        },
+    )
+    .await;
     let url_instance2_disk = format!(
         "/projects/{}/instances/{}/disks/{}",
         project_name,

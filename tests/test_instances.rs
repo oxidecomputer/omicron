@@ -44,14 +44,17 @@ async fn test_instances() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
-    let _: ApiProjectView =
-        objects_post(&client, "/projects", ApiProjectCreateParams {
+    let _: ApiProjectView = objects_post(
+        &client,
+        "/projects",
+        ApiProjectCreateParams {
             identity: ApiIdentityMetadataCreateParams {
                 name: ApiName::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
             },
-        })
-        .await;
+        },
+    )
+    .await;
 
     /* List instances.  There aren't any yet. */
     let instances = instances_list(&client, &url_instances).await;
@@ -425,11 +428,15 @@ async fn instance_post(
     instance_url: &str,
     which: InstanceOp,
 ) -> ApiInstanceView {
-    let url = format!("{}/{}", instance_url, match which {
-        InstanceOp::Start => "start",
-        InstanceOp::Stop => "stop",
-        InstanceOp::Reboot => "reboot",
-    });
+    let url = format!(
+        "{}/{}",
+        instance_url,
+        match which {
+            InstanceOp::Start => "start",
+            InstanceOp::Stop => "stop",
+            InstanceOp::Reboot => "reboot",
+        }
+    );
     let mut response = client
         .make_request_with_body(
             Method::POST,

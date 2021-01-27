@@ -108,9 +108,7 @@ pub async fn start_sled_agent(
             ..Default::default()
         },
         /* TODO-cleanup this is unused */
-        log: ConfigLogging::StderrTerminal {
-            level: ConfigLoggingLevel::Debug,
-        },
+        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
     };
 
     SledAgentServer::start(&config, &log).await

@@ -36,19 +36,13 @@ pub enum LoadErrorKind {
 
 impl From<(PathBuf, std::io::Error)> for LoadError {
     fn from((path, err): (PathBuf, std::io::Error)) -> Self {
-        LoadError {
-            path,
-            kind: LoadErrorKind::Io(err),
-        }
+        LoadError { path, kind: LoadErrorKind::Io(err) }
     }
 }
 
 impl From<(PathBuf, toml::de::Error)> for LoadError {
     fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
-        LoadError {
-            path,
-            kind: LoadErrorKind::Parse(err),
-        }
+        LoadError { path, kind: LoadErrorKind::Parse(err) }
     }
 }
 
@@ -220,20 +214,27 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(config, ConfigController {
-            dropshot_external: ConfigDropshot {
-                bind_address: "10.1.2.3:4567".parse::<SocketAddr>().unwrap(),
-                ..Default::default()
-            },
-            dropshot_internal: ConfigDropshot {
-                bind_address: "10.1.2.3:4568".parse::<SocketAddr>().unwrap(),
-                ..Default::default()
-            },
-            log: ConfigLogging::File {
-                level: ConfigLoggingLevel::Debug,
-                if_exists: ConfigLoggingIfExists::Fail,
-                path: "/nonexistent/path".to_string()
+        assert_eq!(
+            config,
+            ConfigController {
+                dropshot_external: ConfigDropshot {
+                    bind_address: "10.1.2.3:4567"
+                        .parse::<SocketAddr>()
+                        .unwrap(),
+                    ..Default::default()
+                },
+                dropshot_internal: ConfigDropshot {
+                    bind_address: "10.1.2.3:4568"
+                        .parse::<SocketAddr>()
+                        .unwrap(),
+                    ..Default::default()
+                },
+                log: ConfigLogging::File {
+                    level: ConfigLoggingLevel::Debug,
+                    if_exists: ConfigLoggingIfExists::Fail,
+                    path: "/nonexistent/path".to_string()
+                }
             }
-        });
+        );
     }
 }
