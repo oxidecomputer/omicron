@@ -165,8 +165,8 @@ where
  * describing the current page of results to return
  *
  * This implementation is used for `ApiScanByName` and `ApiScanById`.  See
- * [`data_page_params_for_nameid_name`] and [`data_page_params_for_nameid_id`]
- * for variants that can be used for `ApiScanByNameOrId`.
+ * [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
+ * variants that can be used for `ApiScanByNameOrId`.
  */
 pub fn data_page_params_for<'a, S>(
     rqctx: &'a Arc<RequestContext>,

@@ -52,6 +52,12 @@
  *   instantiated (from scratch) with each OXC instance.
  */
 
+/*
+ * We only use rustdoc for internal documentation, including private items, so
+ * it's expected that we'll have links to private items in the docs.
+ */
+#![allow(private_intra_doc_links)]
+
 mod api_error;
 pub mod api_model;
 mod cmd;
