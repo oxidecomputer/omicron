@@ -20,16 +20,20 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Run Clippy Lints
+      # TODO: Migrate these options to a config file in the workspace,
+      # once https://github.com/rust-lang/rust-clippy/issues/6625 is resolved.
+      #
+      # - field_reassign_with_default:
+      # Fixed by https://github.com/rust-lang/rust-clippy/issues/6344
+      # Fix exists on nightly, not on stable.
+      #
+      # - unnecessary_wraps:
+      # Many functions (internal to OXCP) propagate result types
+      # as an expected transformation, even when an error case is not possible.
+      # Avoiding this lint is intentional, as it avoids boilerplate.
       run: >
-        # TODO: Migrate these options to a config file in the workspace,
-        # once https://github.com/rust-lang/rust-clippy/issues/6625 is resolved.
         cargo clippy -- -D warnings
-        # TODO: Fixed by https://github.com/rust-lang/rust-clippy/issues/6344
-        # Fix exists on nightly, not on stable.
         -A clippy::field_reassign_with_default
-        # Many functions (internal to OXCP) propagate result types
-        # as an expected transformation, even when an error case is not possible.
-        # Avoiding this lint is intentional, as it avoids boilerplate.
         -A clippy::unnecessary_wraps
 
   build-and-test:
