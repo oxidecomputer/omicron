@@ -59,6 +59,10 @@ suite runs cleanly and should remain clean.
 You can **format the code** using `cargo fmt`.  Make sure to run this before
 pushing changes.  The CI checks that the code is correctly formatted.
 
+The https://github.com/rust-lang/rust-clippy[Clippy Linter] is used to help
+keeep the codebase efficient and idiomatic, and can be executed with
+`cargo clippy`.
+
 To **run the system:** there are two executables: the `oxide_controller` (which
 is a real prototype backed by an in-memory store; this component manages an
 Oxide fleet), and the `sled_agent` (which is a simulation of the component that
