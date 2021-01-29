@@ -26,15 +26,9 @@ jobs:
       # - field_reassign_with_default:
       # Fixed by https://github.com/rust-lang/rust-clippy/issues/6344
       # Fix exists on nightly, not on stable.
-      #
-      # - unnecessary_wraps:
-      # Many functions (internal to OXCP) propagate result types
-      # as an expected transformation, even when an error case is not possible.
-      # Avoiding this lint is intentional, as it avoids boilerplate.
       run: >
         cargo clippy -- -D warnings
         -A clippy::field_reassign_with_default
-        -A clippy::unnecessary_wraps
 
   build-and-test:
     runs-on: ${{ matrix.os }}
