@@ -21,6 +21,8 @@ jobs:
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Check style
       run: >
+        # TODO: Migrate these options to a config file in the workspace,
+        # once https://github.com/rust-lang/rust-clippy/issues/6625 is resolved.
         cargo clippy -- -D warnings
         # TODO: Fixed by https://github.com/rust-lang/rust-clippy/issues/6344
         # Fix exists on nightly, not on stable.
