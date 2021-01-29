@@ -84,9 +84,7 @@ async fn do_run() -> Result<(), CmdError> {
             bind_address: sa_addr,
             ..Default::default()
         },
-        log: ConfigLogging::StderrTerminal {
-            level: ConfigLoggingLevel::Info,
-        },
+        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
     };
 
     sa_run_server(&config).await.map_err(CmdError::Failure)

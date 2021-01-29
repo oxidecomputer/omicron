@@ -95,11 +95,8 @@ impl SledAgentClient {
     ) -> Result<ApiDiskRuntimeState, ApiError> {
         let path = format!("/disks/{}", disk_id);
         let body = Body::from(
-            serde_json::to_string(&DiskEnsureBody {
-                initial_runtime,
-                target,
-            })
-            .unwrap(),
+            serde_json::to_string(&DiskEnsureBody { initial_runtime, target })
+                .unwrap(),
         );
         let mut response =
             self.client.request(Method::PUT, path.as_str(), body).await?;

@@ -165,8 +165,8 @@ where
  * describing the current page of results to return
  *
  * This implementation is used for `ApiScanByName` and `ApiScanById`.  See
- * [`data_page_params_for_nameid_name`] and [`data_page_params_for_nameid_id`]
- * for variants that can be used for `ApiScanByNameOrId`.
+ * [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
+ * variants that can be used for `ApiScanByNameOrId`.
  */
 pub fn data_page_params_for<'a, S>(
     rqctx: &'a Arc<RequestContext>,
@@ -193,18 +193,12 @@ where
 {
     let marker = match &pag_params.page {
         WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelector {
-            last_seen, ..
-        }) => Some(last_seen),
+        WhichPage::Next(ApiPageSelector { last_seen, .. }) => Some(last_seen),
     };
     let scan_params = S::from_query(pag_params)?;
     let direction = scan_params.direction();
 
-    Ok(DataPageParams {
-        marker,
-        direction,
-        limit,
-    })
+    Ok(DataPageParams { marker, direction, limit })
 }
 
 /*
@@ -251,9 +245,7 @@ impl ScanParams for ApiScanByName {
     ) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
-            WhichPage::Next(ApiPageSelector {
-                ref scan, ..
-            }) => scan,
+            WhichPage::Next(ApiPageSelector { ref scan, .. }) => scan,
         })
     }
 }
@@ -300,9 +292,7 @@ impl ScanParams for ApiScanById {
     fn from_query(p: &ApiPaginatedById) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
-            WhichPage::Next(ApiPageSelector {
-                ref scan, ..
-            }) => scan,
+            WhichPage::Next(ApiPageSelector { ref scan, .. }) => scan,
         })
     }
 }
@@ -463,11 +453,7 @@ fn data_page_params_nameid_name_limit(
          */
         Some(ApiNameOrIdMarker::Id(_)) => return Err(bad_token_error()),
     };
-    Ok(DataPageParams {
-        limit,
-        direction,
-        marker,
-    })
+    Ok(DataPageParams { limit, direction, marker })
 }
 
 /**
@@ -497,11 +483,7 @@ fn data_page_params_nameid_id_limit(
          */
         Some(ApiNameOrIdMarker::Name(_)) => return Err(bad_token_error()),
     };
-    Ok(DataPageParams {
-        limit,
-        direction,
-        marker,
-    })
+    Ok(DataPageParams { limit, direction, marker })
 }
 
 #[cfg(test)]
@@ -596,18 +578,13 @@ mod test {
      */
     #[test]
     fn test_pagination_examples() {
-        let scan_by_id = ApiScanById {
-            sort_by: ApiIdSortMode::IdAscending,
-        };
-        let scan_by_name = ApiScanByName {
-            sort_by: ApiNameSortMode::NameAscending,
-        };
-        let scan_by_nameid_name = ApiScanByNameOrId {
-            sort_by: ApiNameOrIdSortMode::NameAscending,
-        };
-        let scan_by_nameid_id = ApiScanByNameOrId {
-            sort_by: ApiNameOrIdSortMode::IdAscending,
-        };
+        let scan_by_id = ApiScanById { sort_by: ApiIdSortMode::IdAscending };
+        let scan_by_name =
+            ApiScanByName { sort_by: ApiNameSortMode::NameAscending };
+        let scan_by_nameid_name =
+            ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::NameAscending };
+        let scan_by_nameid_id =
+            ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::IdAscending };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
         let name = ApiName::try_from(String::from("bort")).unwrap();
         let examples = vec![
@@ -756,9 +733,7 @@ mod test {
          * the results page was properly generated.
          */
         assert_eq!(S::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelector {
-            ref last_seen, ..
-        }) = p1.page
+        if let WhichPage::Next(ApiPageSelector { ref last_seen, .. }) = p1.page
         {
             assert_eq!(last_seen, itemlast_marker);
         } else {
@@ -775,9 +750,7 @@ mod test {
     #[test]
     fn test_scan_by_name() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanByName {
-            sort_by: ApiNameSortMode::NameAscending,
-        };
+        let scan = ApiScanByName { sort_by: ApiNameSortMode::NameAscending };
 
         let list = list_of_things();
         let (p0, p1) = test_scan_param_common(
@@ -816,9 +789,7 @@ mod test {
     #[test]
     fn test_scan_by_id() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanById {
-            sort_by: ApiIdSortMode::IdAscending,
-        };
+        let scan = ApiScanById { sort_by: ApiIdSortMode::IdAscending };
 
         let list = list_of_things();
         let (p0, p1) = test_scan_param_common(
@@ -880,9 +851,8 @@ mod test {
     #[test]
     fn test_scan_by_nameid_name() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanByNameOrId {
-            sort_by: ApiNameOrIdSortMode::NameDescending,
-        };
+        let scan =
+            ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::NameDescending };
         assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Name);
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
@@ -899,9 +869,7 @@ mod test {
             "sort_by=name-descending",
             &thing0_marker,
             &thinglast_marker,
-            &ApiScanByNameOrId {
-                sort_by: ApiNameOrIdSortMode::NameAscending,
-            },
+            &ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::NameAscending },
         );
 
         /* Verify data pages based on the query params. */
@@ -924,9 +892,8 @@ mod test {
     #[test]
     fn test_scan_by_nameid_id() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanByNameOrId {
-            sort_by: ApiNameOrIdSortMode::IdAscending,
-        };
+        let scan =
+            ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::IdAscending };
         assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Id);
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
@@ -941,9 +908,7 @@ mod test {
             "sort_by=id-ascending",
             &thing0_marker,
             &thinglast_marker,
-            &ApiScanByNameOrId {
-                sort_by: ApiNameOrIdSortMode::NameAscending,
-            },
+            &ApiScanByNameOrId { sort_by: ApiNameOrIdSortMode::NameAscending },
         );
 
         /* Verify data pages based on the query params. */
