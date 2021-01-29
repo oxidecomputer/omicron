@@ -60,7 +60,7 @@ You can **format the code** using `cargo fmt`.  Make sure to run this before
 pushing changes.  The CI checks that the code is correctly formatted.
 
 The https://github.com/rust-lang/rust-clippy[Clippy Linter] is used to help
-keeep the codebase efficient and idiomatic, and can be executed with
+keep the codebase efficient and idiomatic, and can be executed with
 `cargo clippy`.
 
 To **run the system:** there are two executables: the `oxide_controller` (which

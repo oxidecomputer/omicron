@@ -20,15 +20,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Run Clippy Lints
-      # TODO: Migrate these options to a config file in the workspace,
-      # once https://github.com/rust-lang/rust-clippy/issues/6625 is resolved.
-      #
-      # - field_reassign_with_default:
-      # Fixed by https://github.com/rust-lang/rust-clippy/issues/6344
-      # Fix exists on nightly, not on stable.
-      run: >
-        cargo clippy -- -D warnings
-        -A clippy::field_reassign_with_default
+      run: cargo clippy -- -D warnings
 
   build-and-test:
     runs-on: ${{ matrix.os }}
