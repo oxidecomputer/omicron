@@ -156,7 +156,7 @@ where
 {
     ApiPageSelector {
         scan: scan_params.clone(),
-        last_seen: scan_params.marker_for_item(item).clone(),
+        last_seen: scan_params.marker_for_item(item),
     }
 }
 
@@ -184,10 +184,10 @@ where
  * test the bulk of the logic without needing to cons up a Dropshot
  * `RequestContext` just to get the limit.
  */
-fn data_page_params_with_limit<'a, S>(
+fn data_page_params_with_limit<S>(
     limit: NonZeroUsize,
-    pag_params: &'a PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
-) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
+    pag_params: &PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+) -> Result<DataPageParams<S::MarkerValue>, HttpError>
 where
     S: ScanParams,
 {
@@ -287,7 +287,7 @@ impl ScanParams for ApiScanById {
         PaginationOrder::Ascending
     }
     fn marker_for_item<T: ApiObjectIdentity>(&self, item: &T) -> Uuid {
-        item.identity().id.clone()
+        item.identity().id
     }
     fn from_query(p: &ApiPaginatedById) -> Result<&Self, HttpError> {
         Ok(match p.page {
@@ -384,7 +384,7 @@ impl ScanParams for ApiScanByNameOrId {
         let identity = item.identity();
         match pagination_field_for_scan_params(self) {
             ApiPagField::Name => ApiNameOrIdMarker::Name(identity.name.clone()),
-            ApiPagField::Id => ApiNameOrIdMarker::Id(identity.id.clone()),
+            ApiPagField::Id => ApiNameOrIdMarker::Id(identity.id),
         }
     }
 
@@ -437,10 +437,10 @@ pub fn data_page_params_nameid_name<'a>(
     data_page_params_nameid_name_limit(limit, pag_params)
 }
 
-fn data_page_params_nameid_name_limit<'a>(
+fn data_page_params_nameid_name_limit(
     limit: NonZeroUsize,
-    pag_params: &'a ApiPaginatedByNameOrId,
-) -> Result<DataPageParams<'a, ApiName>, HttpError> {
+    pag_params: &ApiPaginatedByNameOrId,
+) -> Result<DataPageParams<ApiName>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
     let direction = data_page.direction;
     let marker = match data_page.marker {
@@ -467,10 +467,10 @@ pub fn data_page_params_nameid_id<'a>(
     data_page_params_nameid_id_limit(limit, pag_params)
 }
 
-fn data_page_params_nameid_id_limit<'a>(
+fn data_page_params_nameid_id_limit(
     limit: NonZeroUsize,
-    pag_params: &'a ApiPaginatedByNameOrId,
-) -> Result<DataPageParams<'a, Uuid>, HttpError> {
+    pag_params: &ApiPaginatedByNameOrId,
+) -> Result<DataPageParams<Uuid>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
     let direction = data_page.direction;
     let marker = match data_page.marker {
