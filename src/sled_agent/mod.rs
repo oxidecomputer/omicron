@@ -14,6 +14,7 @@ pub use sled_agent_client::SledAgentClient;
 pub use sled_agent_client::SledAgentTestInterfaces;
 
 use crate::api_model::ApiSledAgentStartupInfo;
+use crate::util::RetryBackoff;
 use crate::ControllerClient;
 use sled_agent::SledAgent;
 use slog::Logger;
@@ -25,7 +26,29 @@ use tokio::task::JoinHandle;
  * Delay time in milliseconds between attempts to notify OXC about a sled agent
  * startup
  */
-const SLED_AGENT_NOTIFY_DELAY_MS: u64 = 5000;
+const SLED_AGENT_NOTIFY_DELAY: Duration = Duration::from_secs(5);
+
+/**
+ * Maximum delay time in milliseconds between attempts to notify OXC about a
+ * sled agent startup.
+ */
+const MAX_SLED_AGENT_NOTIFY_DELAY: Duration = Duration::from_secs(30);
+
+/**
+ * Maximum number of retry attemps to contact OXC.
+ */
+const MAX_SLED_AGENT_RETRY_ATTEMPTS: usize = 10;
+
+/**
+ * Factor by which the delay between OXC contact attempts is increased, with
+ * some additional randomization.
+ */
+const SLED_AGENT_NOTIFY_BACKOFF_FACTOR: f64 = 2.0;
+
+/**
+ * Amount of randomization, as a proportion in [0, 1], applied to the backoff.
+ */
+const SLED_AGENT_NOTIFY_RETRY_RANDOMIZATION: f64 = 0.1;
 
 /**
  * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -81,14 +104,20 @@ impl SledAgentServer {
 
         /*
          * Notify the control plane that we're up, and continue trying this
-         * until it succeeds.
+         * until it succeeds. We retry with an randomized, capped exponential
+         * backoff.
+         *
          * TODO-robustness if this returns a 400 error, we probably want to
          * stop.
-         * TODO-robustness we should probably use randomized, capped exponential
-         * backoff here, as the control plane may be overloaded (e.g., cold
-         * start of rack).
          */
-        loop {
+        let backoff = RetryBackoff::new(
+            SLED_AGENT_NOTIFY_DELAY,
+            MAX_SLED_AGENT_NOTIFY_DELAY,
+            MAX_SLED_AGENT_RETRY_ATTEMPTS,
+            SLED_AGENT_NOTIFY_BACKOFF_FACTOR,
+            SLED_AGENT_NOTIFY_RETRY_RANDOMIZATION,
+        )?;
+        for delay in backoff {
             debug!(log, "contacting server controller");
             let result = controller_client
                 .notify_sled_agent_online(
@@ -99,21 +128,26 @@ impl SledAgentServer {
                 )
                 .await;
             match result {
-                Ok(()) => break,
+                Ok(()) => {
+                    info!(log, "contacted server controller");
+                    return Ok(SledAgentServer {
+                        sled_agent,
+                        http_server,
+                        join_handle,
+                    });
+                }
                 Err(error) => {
                     warn!(log, "failed to contact controller (will retry)";
                         "error" => ?error);
-                    tokio::time::sleep(Duration::from_millis(
-                        SLED_AGENT_NOTIFY_DELAY_MS,
-                    ))
-                    .await;
+                    tokio::time::sleep(delay).await;
                 }
             }
         }
 
-        info!(log, "contacted server controller");
-
-        Ok(SledAgentServer { sled_agent, http_server, join_handle })
+        let msg = "maximum number of retries to contact controller exceeded"
+            .to_string();
+        error!(log, "{}", msg);
+        Err(msg)
     }
 
     /**
