@@ -21,7 +21,6 @@ use http_entrypoints_internal::controller_internal_api;
 
 use slog::Logger;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /**
@@ -49,11 +48,6 @@ pub struct OxideControllerServer {
     pub http_server_external: dropshot::HttpServer,
     /** dropshot server for internal API */
     pub http_server_internal: dropshot::HttpServer,
-
-    /** task handle for the external API server */
-    join_handle_external: JoinHandle<Result<(), hyper::Error>>,
-    /** task handle for the internal API server */
-    join_handle_internal: JoinHandle<Result<(), hyper::Error>>,
 }
 
 impl OxideControllerServer {
@@ -71,7 +65,7 @@ impl OxideControllerServer {
         let apictx = ControllerServerContext::new(rack_id, ctxlog);
 
         let c1 = Arc::clone(&apictx);
-        let mut http_server_external = dropshot::HttpServer::new(
+        let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.dropshot_external,
             controller_external_api(),
             c1,
@@ -80,7 +74,7 @@ impl OxideControllerServer {
         .map_err(|error| format!("initializing external server: {}", error))?;
 
         let c2 = Arc::clone(&apictx);
-        let mut http_server_internal = dropshot::HttpServer::new(
+        let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.dropshot_internal,
             controller_internal_api(),
             c2,
@@ -88,15 +82,13 @@ impl OxideControllerServer {
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
 
-        let join_handle_external = http_server_external.run();
-        let join_handle_internal = http_server_internal.run();
+        let http_server_external = http_server_starter_external.start();
+        let http_server_internal = http_server_starter_internal.start();
 
         Ok(OxideControllerServer {
             apictx,
             http_server_external,
             http_server_internal,
-            join_handle_external,
-            join_handle_internal,
         })
     }
 
@@ -107,15 +99,9 @@ impl OxideControllerServer {
      * immediately after calling `start()`, the program will block indefinitely
      * or until something else initiates a graceful shutdown.
      */
-    pub async fn wait_for_finish(mut self) -> Result<(), String> {
-        let result_external = self
-            .http_server_external
-            .wait_for_shutdown(self.join_handle_external)
-            .await;
-        let result_internal = self
-            .http_server_internal
-            .wait_for_shutdown(self.join_handle_internal)
-            .await;
+    pub async fn wait_for_finish(self) -> Result<(), String> {
+        let result_external = self.http_server_external.await;
+        let result_internal = self.http_server_internal.await;
 
         match (result_external, result_internal) {
             (Ok(()), Ok(())) => Ok(()),

@@ -19,7 +19,6 @@ use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::task::JoinHandle;
 
 /**
  * Delay time in milliseconds between attempts to notify OXC about a sled agent
@@ -36,8 +35,6 @@ pub struct SledAgentServer {
     pub sled_agent: Arc<SledAgent>,
     /** dropshot server for the API */
     pub http_server: dropshot::HttpServer,
-    /** task handle for the dropshot server */
-    join_handle: JoinHandle<Result<(), hyper::Error>>,
 }
 
 impl SledAgentServer {
@@ -69,15 +66,14 @@ impl SledAgentServer {
 
         let sa = Arc::clone(&sled_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mut http_server = dropshot::HttpServer::new(
+        let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_entrypoints::sa_api(),
             sa,
             &dropshot_log,
         )
-        .map_err(|error| format!("initializing server: {}", error))?;
-
-        let join_handle = http_server.run();
+        .map_err(|error| format!("initializing server: {}", error))?
+        .start();
 
         /*
          * Notify the control plane that we're up, and continue trying this
@@ -113,7 +109,7 @@ impl SledAgentServer {
 
         info!(log, "contacted server controller");
 
-        Ok(SledAgentServer { sled_agent, http_server, join_handle })
+        Ok(SledAgentServer { sled_agent, http_server })
     }
 
     /**
@@ -123,8 +119,8 @@ impl SledAgentServer {
      * immediately after calling `start()`, the program will block indefinitely
      * or until something else initiates a graceful shutdown.
      */
-    pub async fn wait_for_finish(mut self) -> Result<(), String> {
-        self.http_server.wait_for_shutdown(self.join_handle).await
+    pub async fn wait_for_finish(self) -> Result<(), String> {
+        self.http_server.await
     }
 }
 

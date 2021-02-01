@@ -615,11 +615,7 @@ async fn test_sleds_list() {
 
     /* Tear down the agents. */
     for sa in sas {
-        /*
-         * TODO-correctness see note in testctx.teardown() about shutting down
-         * sled agents.
-         */
-        sa.http_server.close();
+        sa.http_server.close().await.unwrap();
     }
 
     testctx.teardown().await;
