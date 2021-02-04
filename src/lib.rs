@@ -64,6 +64,7 @@
 
 mod api_error;
 pub mod api_model;
+mod backoff;
 mod cmd;
 mod datastore;
 mod http_client;
@@ -71,7 +72,6 @@ mod http_pagination;
 mod oxide_controller;
 mod sled_agent;
 mod test_util;
-mod util;
 
 pub use oxide_controller::controller_run_openapi_external;
 pub use oxide_controller::controller_run_server;

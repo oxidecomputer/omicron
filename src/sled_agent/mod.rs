@@ -14,41 +14,12 @@ pub use sled_agent_client::SledAgentClient;
 pub use sled_agent_client::SledAgentTestInterfaces;
 
 use crate::api_model::ApiSledAgentStartupInfo;
-use crate::util::RetryBackoff;
+use crate::backoff::{internal_service_policy, retry_notify, BackoffError};
 use crate::ControllerClient;
 use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::task::JoinHandle;
-
-/**
- * Delay time in milliseconds between attempts to notify OXC about a sled agent
- * startup
- */
-const SLED_AGENT_NOTIFY_DELAY: Duration = Duration::from_secs(5);
-
-/**
- * Maximum delay time in milliseconds between attempts to notify OXC about a
- * sled agent startup.
- */
-const MAX_SLED_AGENT_NOTIFY_DELAY: Duration = Duration::from_secs(30);
-
-/**
- * Maximum number of retry attemps to contact OXC.
- */
-const MAX_SLED_AGENT_RETRY_ATTEMPTS: usize = 10;
-
-/**
- * Factor by which the delay between OXC contact attempts is increased, with
- * some additional randomization.
- */
-const SLED_AGENT_NOTIFY_BACKOFF_FACTOR: f64 = 2.0;
-
-/**
- * Amount of randomization, as a proportion in [0, 1], applied to the backoff.
- */
-const SLED_AGENT_NOTIFY_RETRY_RANDOMIZATION: f64 = 0.1;
 
 /**
  * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -108,46 +79,33 @@ impl SledAgentServer {
          * backoff.
          *
          * TODO-robustness if this returns a 400 error, we probably want to
-         * stop.
+         * return a permanent error from the `notify_controller` closure.
          */
-        let backoff = RetryBackoff::new(
-            SLED_AGENT_NOTIFY_DELAY,
-            MAX_SLED_AGENT_NOTIFY_DELAY,
-            MAX_SLED_AGENT_RETRY_ATTEMPTS,
-            SLED_AGENT_NOTIFY_BACKOFF_FACTOR,
-            SLED_AGENT_NOTIFY_RETRY_RANDOMIZATION,
-        )?;
-        for delay in backoff {
+        let sa_address = http_server.local_addr();
+        let notify_controller = || async {
             debug!(log, "contacting server controller");
-            let result = controller_client
+            controller_client
                 .notify_sled_agent_online(
                     config.id,
-                    ApiSledAgentStartupInfo {
-                        sa_address: http_server.local_addr(),
-                    },
+                    ApiSledAgentStartupInfo { sa_address },
                 )
-                .await;
-            match result {
-                Ok(()) => {
-                    info!(log, "contacted server controller");
-                    return Ok(SledAgentServer {
-                        sled_agent,
-                        http_server,
-                        join_handle,
-                    });
-                }
-                Err(error) => {
-                    warn!(log, "failed to contact controller (will retry)";
-                        "error" => ?error);
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-
-        let msg = "maximum number of retries to contact controller exceeded"
-            .to_string();
-        error!(log, "{}", msg);
-        Err(msg)
+                .await
+                .map_err(|e| BackoffError::Transient(e))
+        };
+        let log_notification_failure = |error, delay| {
+            warn!(log, "failed to contact controller, will retry in {:?}", delay;
+                "error" => ?error);
+        };
+        retry_notify(
+            internal_service_policy(),
+            notify_controller,
+            log_notification_failure,
+        )
+        .await
+        .expect(
+            "Expected an infinite retry loop contacting the Oxide controller",
+        );
+        Ok(SledAgentServer { sled_agent, http_server, join_handle })
     }
 
     /**
