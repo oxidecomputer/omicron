@@ -263,6 +263,7 @@ impl ControlDataStore {
 
     pub async fn project_create_instance(
         &self,
+        instance_id: &Uuid,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
@@ -293,7 +294,7 @@ impl ControlDataStore {
 
         let instance = Arc::new(ApiInstance {
             identity: ApiIdentityMetadata {
-                id: Uuid::new_v4(),
+                id: instance_id.clone(),
                 name: params.identity.name.clone(),
                 description: params.identity.description.clone(),
                 time_created: now,

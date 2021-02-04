@@ -5,6 +5,7 @@ authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1"
 async-trait = "0.1.24"
 clap = "2"
 futures = "0.3.1"
@@ -61,6 +62,9 @@ subprocess = "0.2.4"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
+
+[patch."https://github.com/oxidecomputer/steno"]
+steno = { path = "../steno" }
 
 #
 # Disable doc builds by default for our binaries to work around issue
