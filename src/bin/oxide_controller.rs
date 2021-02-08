@@ -34,7 +34,7 @@ struct Args {
     )]
     openapi: bool,
 
-    #[structopt(parse(from_os_str))]
+    #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
     config_file_path: PathBuf,
 }
 

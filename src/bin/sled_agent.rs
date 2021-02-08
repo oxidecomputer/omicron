@@ -40,13 +40,13 @@ struct Args {
     )]
     sim_mode: SimMode,
 
-    #[structopt(parse(try_from_str))]
+    #[structopt(name = "SA_UUID", parse(try_from_str))]
     uuid: Uuid,
 
-    #[structopt(parse(try_from_str))]
+    #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
     sled_agent_addr: SocketAddr,
 
-    #[structopt(parse(try_from_str))]
+    #[structopt(name = "CONTROLLER_IP:PORT", parse(try_from_str))]
     controller_addr: SocketAddr,
 }
 
