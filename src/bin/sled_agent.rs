@@ -6,7 +6,6 @@
  * TODO see the TODO for oxide-controller.
  */
 
-use clap::{App, Arg};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -16,7 +15,40 @@ use oxide_api_prototype::CmdError;
 use oxide_api_prototype::ConfigSledAgent;
 use oxide_api_prototype::SimMode;
 use std::net::SocketAddr;
+use structopt::StructOpt;
 use uuid::Uuid;
+
+fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
+    match src {
+        "auto" => Ok(SimMode::Auto),
+        "explicit" => Ok(SimMode::Explicit),
+        mode => Err(format!("Invalid sim mode: {}", mode)),
+    }
+}
+
+#[derive(Debug, StructOpt)]
+#[structopt(
+    name = "sled_agent",
+    about = "See README.adoc for more information"
+)]
+struct Args {
+    #[structopt(
+        long = "sim-mode",
+        parse(try_from_str = parse_sim_mode),
+        default_value = "auto",
+        help = "Automatically simulate transitions",
+    )]
+    sim_mode: SimMode,
+
+    #[structopt(parse(try_from_str))]
+    uuid: Uuid,
+
+    #[structopt(parse(try_from_str))]
+    sled_agent_addr: SocketAddr,
+
+    #[structopt(parse(try_from_str))]
+    controller_addr: SocketAddr,
+}
 
 #[tokio::main]
 async fn main() {
@@ -26,62 +58,16 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let matches = App::new("sled_agent")
-        .after_help("See README.adoc for more information")
-        .arg(
-            Arg::with_name("sim-mode")
-                .long("sim-mode")
-                .takes_value(true)
-                .help("automatically simulate transitions")
-                .possible_value("auto")
-                .possible_value("explicit")
-                .default_value("auto"),
-        )
-        .arg(Arg::with_name("SA_UUID").required(true).index(1))
-        .arg(Arg::with_name("SA_IP:PORT").required(true).index(2))
-        .arg(Arg::with_name("CONTROLLER_IP:PORT").required(true).index(3))
-        .get_matches_safe()
-        .map_err(|clap_error| {
-            CmdError::Usage(format!(
-                "parsing arguments: {}",
-                clap_error.message
-            ))
-        })?;
-
-    let sa_id = {
-        let value_str = matches.value_of("SA_UUID").unwrap();
-        Uuid::parse_str(value_str)
-            .map_err(|e| CmdError::Usage(format!("parsing SA_UUID: {}", e)))?
-    };
-
-    let sa_addr = {
-        let value_str = matches.value_of("SA_IP:PORT").unwrap();
-        value_str.parse::<SocketAddr>().map_err(|e| {
-            CmdError::Usage(format!("parsing SA_IP:PORT: {}", e))
-        })?
-    };
-
-    let controller_addr = {
-        let value_str = matches.value_of("CONTROLLER_IP:PORT").unwrap();
-        value_str.parse::<SocketAddr>().map_err(|e| {
-            CmdError::Usage(format!("parsing CONTROLLER_IP:PORT: {}", e))
-        })?
-    };
-
-    let sim_mode = match matches.value_of("sim-mode").unwrap() {
-        "auto" => SimMode::Auto,
-        mode => {
-            assert_eq!(mode, "explicit");
-            SimMode::Explicit
-        }
-    };
+    let args = Args::from_args_safe().map_err(|err| {
+        CmdError::Usage(format!("parsing arguments: {}", err.message))
+    })?;
 
     let config = ConfigSledAgent {
-        id: sa_id,
-        sim_mode,
-        controller_address: controller_addr,
+        id: args.uuid,
+        sim_mode: args.sim_mode,
+        controller_address: args.controller_addr,
         dropshot: ConfigDropshot {
-            bind_address: sa_addr,
+            bind_address: args.sled_agent_addr,
             ..Default::default()
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
