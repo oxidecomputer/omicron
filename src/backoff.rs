@@ -12,7 +12,7 @@ pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
  * Return a backoff policy appropriate for retrying internal services indefinitely.
  */
 pub fn internal_service_policy() -> ::backoff::ExponentialBackoff {
-    const INITIAL_INTERVAL: Duration = Duration::from_secs(5);
+    const INITIAL_INTERVAL: Duration = Duration::from_millis(250);
     const MAX_INTERVAL: Duration = Duration::from_secs(60 * 60);
     ::backoff::ExponentialBackoff {
         current_interval: INITIAL_INTERVAL,

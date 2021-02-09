@@ -90,7 +90,7 @@ impl SledAgentServer {
                     ApiSledAgentStartupInfo { sa_address },
                 )
                 .await
-                .map_err(|e| BackoffError::Transient(e))
+                .map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {
             warn!(log, "failed to contact controller, will retry in {:?}", delay;
