@@ -78,7 +78,10 @@ impl ConfigController {
      * This config object can then be used to create a new `OxideController`.
      * The format is described in the README.
      */
-    pub fn from_file(path: &Path) -> Result<ConfigController, LoadError> {
+    pub fn from_file<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<ConfigController, LoadError> {
+        let path = path.as_ref();
         let file_contents = std::fs::read_to_string(path)
             .map_err(|e| (path.to_path_buf(), e))?;
         let config_parsed: ConfigController = toml::from_str(&file_contents)
