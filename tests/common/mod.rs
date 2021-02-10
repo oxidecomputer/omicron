@@ -31,14 +31,9 @@ pub struct ControlPlaneTestContext {
 
 impl ControlPlaneTestContext {
     pub async fn teardown(self) {
-        self.server.http_server_external.close();
-        self.server.http_server_internal.close();
-        /*
-         * TODO-correctness
-         * can we (/ how do we?) wait for these things to shut down?  We want to
-         * use wait_for_finish() here on the http servers.
-         */
-        self.sled_agent.http_server.close();
+        self.server.http_server_external.close().await.unwrap();
+        self.server.http_server_internal.close().await.unwrap();
+        self.sled_agent.http_server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
 }
