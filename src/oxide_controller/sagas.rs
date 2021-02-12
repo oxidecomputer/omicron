@@ -15,18 +15,14 @@
  *   OxcSagaContext)
  * - may want a cache of in-memory-only data?  Not sure (e.g., for storing
  *   SledAgentClient)
- * - may want to be able to specify the error type (so we can expose ApiErrors
- *   instead of converting everything to a SagaError)
  */
 
-use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::oxide_controller::saga_interface::OxcSagaContext;
-use anyhow::anyhow;
 use chrono::Utc;
 use core::future::ready;
 use std::sync::Arc;
@@ -34,6 +30,7 @@ use steno::new_action_noop_undo;
 use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
 use uuid::Uuid;
+use steno::SagaActionError;
 
 pub fn saga_instance_create(
     osagactx: Arc<OxcSagaContext>,
@@ -53,6 +50,9 @@ pub fn saga_instance_create(
     // because in principle the caller is supposed to be able to rerun the saga
     // lots of times.  It might be better if there were a "params" interface in
     // steno.
+    // XXX Compare this to what was previously in instance_create() -- and in
+    // particular the block comment there explaining the order of operations and
+    // crash-safety.
     let project_name_clone = project_name.clone();
     let params_clone = params.clone();
     let osaga_clone = Arc::clone(&osagactx);
@@ -71,11 +71,11 @@ pub fn saga_instance_create(
                     .datastore()
                     .project_lookup(&project_name)
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
                 let sa = osagactx
                     .alloc_server(&project, &params)
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
                 Ok(sa.id)
             }
         }),
@@ -120,7 +120,7 @@ pub fn saga_instance_create(
                         &runtime,
                     )
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
                 Ok(())
             }
         }),
@@ -143,13 +143,13 @@ pub fn saga_instance_create(
                 let sa = osagactx
                     .sled_client(&sled_uuid)
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
                 // XXX Should this be cached from the previous stage?
                 let mut instance = osagactx
                     .datastore()
                     .instance_lookup_by_id(&instance_id)
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
 
                 /*
                  * Ask the SA to begin the state change.  Then update the
@@ -162,7 +162,7 @@ pub fn saga_instance_create(
                         runtime_params,
                     )
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
 
                 let instance_ref = Arc::make_mut(&mut instance);
                 instance_ref.runtime = new_runtime_state.clone();
@@ -170,7 +170,7 @@ pub fn saga_instance_create(
                     .datastore()
                     .instance_update(Arc::clone(&instance))
                     .await
-                    .map_err(api_error_to_anyhow)?;
+                    .map_err(SagaActionError::action_failed)?;
                 Ok(())
             }
         }),
@@ -183,9 +183,4 @@ pub fn saga_instance_create(
      */
 
     template_builder.build()
-}
-
-/* XXX Need to rethink this a bit! */
-pub fn api_error_to_anyhow(e: ApiError) -> anyhow::Error {
-    anyhow!("{:?}", e)
 }

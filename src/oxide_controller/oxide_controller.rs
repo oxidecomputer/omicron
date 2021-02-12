@@ -44,7 +44,9 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use steno::SagaActionError;
 use steno::SagaExecutor;
+use steno::SagaId;
 use uuid::Uuid;
 
 /**
@@ -361,92 +363,28 @@ impl OxideController {
         let saga_template =
             sagas::saga_instance_create(saga_context, project_name, params);
         // XXX fill in saga exec creator
-        let saga_exec = SagaExecutor::new(Arc::new(saga_template), "tmp");
+        let saga_id = SagaId(Uuid::new_v4());
+        let saga_exec =
+            SagaExecutor::new(&saga_id, Arc::new(saga_template), "tmp");
         saga_exec.run().await;
-        let result = saga_exec.result();
-        // XXX Need to produce a better error message here based on how the saga
-        // failed.
-        let instance_id = result
-            .lookup_output::<Uuid>("instance_id")
-            .map_err(|e| ApiError::InternalError { message: e.to_string() })?;
+        let saga_outputs = saga_exec.result().kind.map_err(|saga_error| {
+            match saga_error.error_source {
+                SagaActionError::ActionFailed { source_error } => {
+                    source_error.action_failure_downcast::<ApiError>()
+                }
+                _ => ApiError::InternalError {
+                    message: saga_error.error_source.to_string(),
+                },
+            }
+        })?;
+        let instance_id = saga_outputs.lookup_output::<Uuid>("instance_id");
         // XXX If the instance doesn't exist at this point, that's going to be
-        // strange!
+        // strange!  I guess the saga should output the details...but it's not
+        // clear whether that should be an ApiInstance or an ApiInstanceView or
+        // what.
         let instance =
             self.datastore.instance_lookup_by_id(&instance_id).await?;
         Ok(instance)
-
-        //        let project = self.project_lookup(project_name).await?;
-        //
-        //        /*
-        //         * Allocate a sled and retrieve our handle to its SA.
-        //         */
-        //        let sa = {
-        //            let sleds = self.sled_agents.lock().await;
-        //            let arc =
-        //                self.sled_allocate_instance(&sleds, &project, params).await?;
-        //            Arc::clone(arc)
-        //        };
-        //
-        //        /*
-        //         * The order of operations here is slightly subtle:
-        //         *
-        //         * 1. We want to record the new instance in the database before telling
-        //         *    the SA about it.  This record will have state "Creating" to
-        //         *    distinguish it from other runtime states.  If we crash after this
-        //         *    point, there will be a record in the database for the instance,
-        //         *    but it won't be running, since no SA knows about it.
-        //         *    TODO-robustness How do we want to handle a crash at this point?
-        //         *    One approach would be to say that while an Instance exists in the
-        //         *    "Creating" state, it's not logically present yet.  Thus, if
-        //         *    we crash and leave a record here, there's a small resource leak of
-        //         *    sorts, but there's no problem from the user's perspective.  What
-        //         *    about use of the "name", which is user-controlled and unique?  We
-        //         *    could have the creation process look for an existing instance with
-        //         *    the same name in state "Creating", decide if it appears to be
-        //         *    abandoned by the control plane instance that was working on it,
-        //         *    and then simply delete it and proceed.  We might need to do this
-        //         *    in the Instance rename case as well.  Reliably deciding whether
-        //         *    the record is abandoned seems hard, though.  We would also
-        //         *    probably want something that proactively looks for these abandoned
-        //         *    records and removes them to eliminate the leakage.  A case to
-        //         *    consider is two concurrent attempts to create an Instance with the
-        //         *    same name.  Exactly one should win every time and we shouldn't
-        //         *    wind up with two Instances running at any point.
-        //         *
-        //         * 2. We want to tell the SA about this Instance and have the SA start
-        //         *    it up.  The SA should reply immediately that it's starting the
-        //         *    instance, and we immediately record this into the database, now
-        //         *    with state "Starting".
-        //         *
-        //         * 3. Some time later (after this function has completed), the SA will
-        //         *    notify us that the Instance has changed states to "Running".
-        //         *    We'll record this into the database.
-        //         */
-        //        let runtime = ApiInstanceRuntimeState {
-        //            run_state: ApiInstanceState::Creating,
-        //            reboot_in_progress: false,
-        //            sled_uuid: sa.id,
-        //            gen: 1,
-        //            time_updated: Utc::now(),
-        //        };
-        //
-        //        /*
-        //         * Store the first revision of the Instance into the database.  This
-        //         * will have state "Creating".
-        //         */
-        //        let instance_created = self
-        //            .datastore
-        //            .project_create_instance(project_name, params, &runtime)
-        //            .await?;
-        //        self.instance_set_runtime(
-        //            instance_created,
-        //            sa,
-        //            ApiInstanceRuntimeStateRequested {
-        //                run_state: ApiInstanceState::Running,
-        //                reboot_wanted: false,
-        //            },
-        //        )
-        //        .await
     }
 
     /*
