@@ -18,9 +18,7 @@ pub struct OxcSagaContext {
 
 impl OxcSagaContext {
     pub fn new(controller: Arc<OxideController>) -> OxcSagaContext {
-        OxcSagaContext {
-            controller
-        }
+        OxcSagaContext { controller }
     }
 
     /* XXX These interfaces need work, but they're a rough start. */

@@ -9,8 +9,8 @@ mod http_entrypoints_external;
 mod http_entrypoints_internal;
 #[allow(clippy::module_inception)]
 mod oxide_controller;
-mod sagas;
 mod saga_interface;
+mod sagas;
 
 pub use config::ConfigController;
 pub use context::ControllerServerContext;
