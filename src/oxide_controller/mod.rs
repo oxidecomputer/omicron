@@ -45,9 +45,11 @@ pub struct OxideControllerServer {
     /** shared state used by API request handlers */
     pub apictx: Arc<ControllerServerContext>,
     /** dropshot server for external API */
-    pub http_server_external: dropshot::HttpServer,
+    pub http_server_external:
+        dropshot::HttpServer<Arc<ControllerServerContext>>,
     /** dropshot server for internal API */
-    pub http_server_internal: dropshot::HttpServer,
+    pub http_server_internal:
+        dropshot::HttpServer<Arc<ControllerServerContext>>,
 }
 
 impl OxideControllerServer {
