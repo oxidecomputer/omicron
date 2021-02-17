@@ -38,22 +38,40 @@ pub fn saga_instance_create(
 ) -> SagaTemplate<Arc<OxcSagaContext>> {
     let mut template_builder = SagaTemplateBuilder::new();
 
+    /*
+     * TODO-cleanup This first action that just emits parameters is a bit icky.
+     * It would be better if Steno first-classed the idea of a saga's parameter,
+     * adding a type parameter for it on SagaTemplate, SagaExecutor, etc.  This
+     * would allow us to load SagaTemplates once, at startup, and create new
+     * executors with a new set of parameters when we need to run them again.
+     * Making this change requires modifying the SagaLog to record the
+     * parameters and to recover these as well.
+     */
+    struct SagaParamsInstanceCreate {
+        project_name: ApiName,
+        create_params: ApiInstanceCreateParams,
+    }
+
+    let saga_params = SagaParamsInstanceCreate {
+        project_name: project_name.clone(),
+        create_params: params.clone(),
+    };
+
+    template_builder.append(
+        "params",
+        "EmitParams",
+        new_action_noop_undo(|_| ready(Ok(saga_params))),
+    );
+
     template_builder.append(
         "instance_id",
         "GenerateInstanceId",
         new_action_noop_undo(|_| ready(Ok(Uuid::new_v4()))),
     );
 
-    // TODO-cleanup These clones should not be necessary.  But we need them in
-    // various saga actions, and those are currently defined to be 'static
-    // because in principle the caller is supposed to be able to rerun the saga
-    // lots of times.  It might be better if there were a "params" interface in
-    // steno.
     // XXX Compare this to what was previously in instance_create() -- and in
     // particular the block comment there explaining the order of operations and
     // crash-safety.
-    let project_name_clone = project_name.clone();
-    let params_clone = params.clone();
     template_builder.append(
         "server_id",
         "AllocServer",
@@ -61,18 +79,17 @@ pub fn saga_instance_create(
         // resources and reservations, etc.
         new_action_noop_undo(
             move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
-                // XXX clones -- see above
                 let osagactx = sagactx.context().clone();
-                let project_name = project_name_clone.clone();
-                let params = params_clone.clone();
+                let params =
+                    sagactx.lookup::<SagaParamsInstanceCreate>("params");
                 async move {
                     let project = osagactx
                         .datastore()
-                        .project_lookup(&project_name)
+                        .project_lookup(&params.project_name)
                         .await
                         .map_err(SagaActionError::action_failed)?;
                     let sa = osagactx
-                        .alloc_server(&project, &params)
+                        .alloc_server(&project, &params.create_params)
                         .await
                         .map_err(SagaActionError::action_failed)?;
                     Ok(sa.id)
@@ -81,18 +98,14 @@ pub fn saga_instance_create(
         ),
     );
 
-    // XXX clones -- see above
-    let project_name_clone = project_name.clone();
-    let params_clone = params.clone();
     template_builder.append(
         "create_instance_record",
         "CreateInstanceRecord",
         new_action_noop_undo(
             move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
-                // XXX clones -- see above
                 let osagactx = sagactx.context().clone();
-                let project_name = project_name_clone.clone();
-                let params = params_clone.clone();
+                let params =
+                    sagactx.lookup::<SagaParamsInstanceCreate>("params");
                 let sled_uuid = sagactx.lookup::<Uuid>("server_id");
                 let instance_id = sagactx.lookup::<Uuid>("instance_id");
                 let runtime = ApiInstanceRuntimeState {
@@ -105,18 +118,17 @@ pub fn saga_instance_create(
 
                 async move {
                     /*
-                     * XXX I think we want to have resolved the project name to an
-                     * id in an earlier step.
-                     * XXX needs to use the instance id we allocated earlier
-                     * XXX needs to handle the case where the record already exists
-                     * and looks similar vs. different
+                     * XXX I think we want to have resolved the project name to
+                     * an id in an earlier step.
+                     * XXX needs to handle the case where the record already
+                     * exists and looks similar vs. different
                      */
                     osagactx
                         .datastore()
                         .project_create_instance(
                             &instance_id,
-                            &project_name,
-                            &params,
+                            &params.project_name,
+                            &params.create_params,
                             &runtime,
                         )
                         .await
@@ -132,7 +144,6 @@ pub fn saga_instance_create(
         "InstanceEnsure",
         new_action_noop_undo(
             move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
-                // XXX clones -- see above
                 let osagactx = sagactx.context().clone();
                 let runtime_params = ApiInstanceRuntimeStateRequested {
                     run_state: ApiInstanceState::Running,
