@@ -360,12 +360,15 @@ impl OxideController {
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
         let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
-        let saga_template =
-            sagas::saga_instance_create(saga_context, project_name, params);
+        let saga_template = sagas::saga_instance_create(project_name, params);
         // XXX fill in saga exec creator
         let saga_id = SagaId(Uuid::new_v4());
-        let saga_exec =
-            SagaExecutor::new(&saga_id, Arc::new(saga_template), "tmp");
+        let saga_exec = SagaExecutor::new(
+            &saga_id,
+            Arc::new(saga_template),
+            "tmp",
+            Arc::new(saga_context),
+        );
         saga_exec.run().await;
         let saga_outputs = saga_exec.result().kind.map_err(|saga_error| {
             match saga_error.error_source {

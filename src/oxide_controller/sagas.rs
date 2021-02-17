@@ -11,8 +11,7 @@
 
 /*
  * XXX thoughts for steno:
- * - may want a first-class way to pass context into each function (e.g., our
- *   OxcSagaContext)
+ * - may want a first-class way to pass parameters into the saga?
  * - may want a cache of in-memory-only data?  Not sure (e.g., for storing
  *   SledAgentClient)
  */
@@ -28,15 +27,15 @@ use core::future::ready;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::SagaActionError;
+use steno::SagaContext;
 use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
 use uuid::Uuid;
 
 pub fn saga_instance_create(
-    osagactx: Arc<OxcSagaContext>,
     project_name: &ApiName,
     params: &ApiInstanceCreateParams,
-) -> SagaTemplate {
+) -> SagaTemplate<Arc<OxcSagaContext>> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
@@ -55,125 +54,128 @@ pub fn saga_instance_create(
     // crash-safety.
     let project_name_clone = project_name.clone();
     let params_clone = params.clone();
-    let osaga_clone = Arc::clone(&osagactx);
     template_builder.append(
         "server_id",
         "AllocServer",
         // XXX needs an undo action, and we should really keep track of
         // resources and reservations, etc.
-        new_action_noop_undo(move |_| {
-            // XXX clones -- see above
-            let osagactx = Arc::clone(&osaga_clone);
-            let project_name = project_name_clone.clone();
-            let params = params_clone.clone();
-            async move {
-                let project = osagactx
-                    .datastore()
-                    .project_lookup(&project_name)
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
-                let sa = osagactx
-                    .alloc_server(&project, &params)
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
-                Ok(sa.id)
-            }
-        }),
+        new_action_noop_undo(
+            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+                // XXX clones -- see above
+                let osagactx = sagactx.context().clone();
+                let project_name = project_name_clone.clone();
+                let params = params_clone.clone();
+                async move {
+                    let project = osagactx
+                        .datastore()
+                        .project_lookup(&project_name)
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
+                    let sa = osagactx
+                        .alloc_server(&project, &params)
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
+                    Ok(sa.id)
+                }
+            },
+        ),
     );
 
     // XXX clones -- see above
     let project_name_clone = project_name.clone();
     let params_clone = params.clone();
-    let osaga_clone = Arc::clone(&osagactx);
     template_builder.append(
         "create_instance_record",
         "CreateInstanceRecord",
-        new_action_noop_undo(move |sagactx| {
-            // XXX clones -- see above
-            let osagactx = Arc::clone(&osaga_clone);
-            let project_name = project_name_clone.clone();
-            let params = params_clone.clone();
-            let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-            let instance_id = sagactx.lookup::<Uuid>("instance_id");
-            let runtime = ApiInstanceRuntimeState {
-                run_state: ApiInstanceState::Creating,
-                reboot_in_progress: false,
-                sled_uuid,
-                gen: 1,
-                time_updated: Utc::now(),
-            };
+        new_action_noop_undo(
+            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+                // XXX clones -- see above
+                let osagactx = sagactx.context().clone();
+                let project_name = project_name_clone.clone();
+                let params = params_clone.clone();
+                let sled_uuid = sagactx.lookup::<Uuid>("server_id");
+                let instance_id = sagactx.lookup::<Uuid>("instance_id");
+                let runtime = ApiInstanceRuntimeState {
+                    run_state: ApiInstanceState::Creating,
+                    reboot_in_progress: false,
+                    sled_uuid,
+                    gen: 1,
+                    time_updated: Utc::now(),
+                };
 
-            async move {
-                /*
-                 * XXX I think we want to have resolved the project name to an
-                 * id in an earlier step.
-                 * XXX needs to use the instance id we allocated earlier
-                 * XXX needs to handle the case where the record already exists
-                 * and looks similar vs. different
-                 */
-                osagactx
-                    .datastore()
-                    .project_create_instance(
-                        &instance_id,
-                        &project_name,
-                        &params,
-                        &runtime,
-                    )
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
-                Ok(())
-            }
-        }),
+                async move {
+                    /*
+                     * XXX I think we want to have resolved the project name to an
+                     * id in an earlier step.
+                     * XXX needs to use the instance id we allocated earlier
+                     * XXX needs to handle the case where the record already exists
+                     * and looks similar vs. different
+                     */
+                    osagactx
+                        .datastore()
+                        .project_create_instance(
+                            &instance_id,
+                            &project_name,
+                            &params,
+                            &runtime,
+                        )
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
+                    Ok(())
+                }
+            },
+        ),
     );
 
-    let osaga_clone = Arc::clone(&osagactx);
     template_builder.append(
         "instance_ensure",
         "InstanceEnsure",
-        new_action_noop_undo(move |sagactx| {
-            // XXX clones -- see above
-            let osagactx = Arc::clone(&osaga_clone);
-            let runtime_params = ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
-                reboot_wanted: false,
-            };
-            let instance_id = sagactx.lookup::<Uuid>("instance_id");
-            let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-            async move {
-                let sa = osagactx
-                    .sled_client(&sled_uuid)
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
-                // XXX Should this be cached from the previous stage?
-                let mut instance = osagactx
-                    .datastore()
-                    .instance_lookup_by_id(&instance_id)
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
+        new_action_noop_undo(
+            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+                // XXX clones -- see above
+                let osagactx = sagactx.context().clone();
+                let runtime_params = ApiInstanceRuntimeStateRequested {
+                    run_state: ApiInstanceState::Running,
+                    reboot_wanted: false,
+                };
+                let instance_id = sagactx.lookup::<Uuid>("instance_id");
+                let sled_uuid = sagactx.lookup::<Uuid>("server_id");
+                async move {
+                    let sa = osagactx
+                        .sled_client(&sled_uuid)
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
+                    // XXX Should this be cached from the previous stage?
+                    let mut instance = osagactx
+                        .datastore()
+                        .instance_lookup_by_id(&instance_id)
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
 
-                /*
-                 * Ask the SA to begin the state change.  Then update the
-                 * database to reflect the new intermediate state.
-                 */
-                let new_runtime_state = sa
-                    .instance_ensure(
-                        instance.identity.id,
-                        instance.runtime.clone(),
-                        runtime_params,
-                    )
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
+                    /*
+                     * Ask the SA to begin the state change.  Then update the
+                     * database to reflect the new intermediate state.
+                     */
+                    let new_runtime_state = sa
+                        .instance_ensure(
+                            instance.identity.id,
+                            instance.runtime.clone(),
+                            runtime_params,
+                        )
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
 
-                let instance_ref = Arc::make_mut(&mut instance);
-                instance_ref.runtime = new_runtime_state.clone();
-                osagactx
-                    .datastore()
-                    .instance_update(Arc::clone(&instance))
-                    .await
-                    .map_err(SagaActionError::action_failed)?;
-                Ok(())
-            }
-        }),
+                    let instance_ref = Arc::make_mut(&mut instance);
+                    instance_ref.runtime = new_runtime_state.clone();
+                    osagactx
+                        .datastore()
+                        .instance_update(Arc::clone(&instance))
+                        .await
+                        .map_err(SagaActionError::action_failed)?;
+                    Ok(())
+                }
+            },
+        ),
     );
 
     /*
