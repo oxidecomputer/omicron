@@ -16,7 +16,6 @@ use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
-use oxide_api_prototype::ControllerServerContext;
 use oxide_api_prototype::OxideController;
 use oxide_api_prototype::OxideControllerTestInterfaces;
 use oxide_api_prototype::SledAgentTestInterfaces;
@@ -45,7 +44,7 @@ extern crate slog;
 async fn test_disks() {
     let cptestctx = test_setup("test_disks").await;
     let client = &cptestctx.external_client;
-    let apictx = ControllerServerContext::from_server(&cptestctx.server);
+    let apictx = &cptestctx.server.apictx;
     let controller = &apictx.controller;
 
     /* Create a project for testing. */

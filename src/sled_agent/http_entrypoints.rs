@@ -16,17 +16,18 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::SledAgent;
 
+type SledApiDescription = ApiDescription<Arc<SledAgent>>;
+
 /**
  * Returns a description of the sled agent API
  */
-pub fn sa_api() -> ApiDescription {
-    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+pub fn sa_api() -> SledApiDescription {
+    fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(scapi_instance_put)?;
         api.register(scapi_instance_poke_post)?;
         api.register(scapi_disk_put)?;
@@ -34,21 +35,11 @@ pub fn sa_api() -> ApiDescription {
         Ok(())
     }
 
-    let mut api = ApiDescription::new();
+    let mut api = SledApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
     api
-}
-
-/**
- * Given a dropshot request context `rqctx`, return our shared state object
- */
-/* TODO-cleanup commonize with ApiContext::from_private? */
-fn rqctx_to_sa(rqctx: &Arc<RequestContext>) -> Arc<SledAgent> {
-    let ctx: Arc<dyn Any + Send + Sync + 'static> =
-        Arc::clone(&rqctx.server.private);
-    ctx.downcast::<SledAgent>().expect("wrong type for private data")
 }
 
 /**
@@ -64,11 +55,11 @@ struct InstancePathParam {
     path = "/instances/{instance_id}",
 }]
 async fn scapi_instance_put(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<ApiInstanceRuntimeState>, HttpError> {
-    let sa = rqctx_to_sa(&rqctx);
+    let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
@@ -86,10 +77,10 @@ async fn scapi_instance_put(
     path = "/instances/{instance_id}/poke",
 }]
 async fn scapi_instance_poke_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx_to_sa(&rqctx);
+    let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     sa.instance_poke(instance_id).await;
     Ok(HttpResponseUpdatedNoContent())
@@ -108,11 +99,11 @@ struct DiskPathParam {
     path = "/disks/{disk_id}",
 }]
 async fn scapi_disk_put(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
 ) -> Result<HttpResponseOk<ApiDiskRuntimeState>, HttpError> {
-    let sa = rqctx_to_sa(&rqctx);
+    let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
@@ -130,10 +121,10 @@ async fn scapi_disk_put(
     path = "/disks/{disk_id}/poke",
 }]
 async fn scapi_disk_poke_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx_to_sa(&rqctx);
+    let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     sa.disk_poke(disk_id).await;
     Ok(HttpResponseUpdatedNoContent())

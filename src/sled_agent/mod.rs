@@ -29,7 +29,7 @@ pub struct SledAgentServer {
     /** underlying sled agent */
     pub sled_agent: Arc<SledAgent>,
     /** dropshot server for the API */
-    pub http_server: dropshot::HttpServer,
+    pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
 }
 
 impl SledAgentServer {
