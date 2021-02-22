@@ -11,7 +11,6 @@
 
 /*
  * XXX thoughts for steno:
- * - may want a first-class way to pass parameters into the saga?
  * - may want a cache of in-memory-only data?  Not sure (e.g., for storing
  *   SledAgentClient)
  */
@@ -24,44 +23,31 @@ use crate::api_model::ApiName;
 use crate::oxide_controller::saga_interface::OxcSagaContext;
 use chrono::Utc;
 use core::future::ready;
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
-use steno::SagaActionError;
-use steno::SagaContext;
+use steno::ActionContext;
+use steno::ActionError;
 use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
+use steno::SagaType;
 use uuid::Uuid;
 
-pub fn saga_instance_create(
-    project_name: &ApiName,
-    params: &ApiInstanceCreateParams,
-) -> SagaTemplate<Arc<OxcSagaContext>> {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ParamsInstanceCreate {
+    pub project_name: ApiName,
+    pub create_params: ApiInstanceCreateParams,
+}
+
+pub struct OxcSagaInstanceCreate;
+impl SagaType for OxcSagaInstanceCreate {
+    type SagaParamsType = Arc<ParamsInstanceCreate>;
+    type ExecContextType = Arc<OxcSagaContext>;
+}
+
+pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
     let mut template_builder = SagaTemplateBuilder::new();
-
-    /*
-     * TODO-cleanup This first action that just emits parameters is a bit icky.
-     * It would be better if Steno first-classed the idea of a saga's parameter,
-     * adding a type parameter for it on SagaTemplate, SagaExecutor, etc.  This
-     * would allow us to load SagaTemplates once, at startup, and create new
-     * executors with a new set of parameters when we need to run them again.
-     * Making this change requires modifying the SagaLog to record the
-     * parameters and to recover these as well.
-     */
-    struct SagaParamsInstanceCreate {
-        project_name: ApiName,
-        create_params: ApiInstanceCreateParams,
-    }
-
-    let saga_params = SagaParamsInstanceCreate {
-        project_name: project_name.clone(),
-        create_params: params.clone(),
-    };
-
-    template_builder.append(
-        "params",
-        "EmitParams",
-        new_action_noop_undo(|_| ready(Ok(saga_params))),
-    );
 
     template_builder.append(
         "instance_id",
@@ -78,20 +64,19 @@ pub fn saga_instance_create(
         // XXX needs an undo action, and we should really keep track of
         // resources and reservations, etc.
         new_action_noop_undo(
-            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
-                let params =
-                    sagactx.lookup::<SagaParamsInstanceCreate>("params");
+                let params = sagactx.saga_params().clone();
                 async move {
                     let project = osagactx
                         .datastore()
                         .project_lookup(&params.project_name)
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
                     let sa = osagactx
                         .alloc_server(&project, &params.create_params)
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
                     Ok(sa.id)
                 }
             },
@@ -102,21 +87,21 @@ pub fn saga_instance_create(
         "create_instance_record",
         "CreateInstanceRecord",
         new_action_noop_undo(
-            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
-                let params =
-                    sagactx.lookup::<SagaParamsInstanceCreate>("params");
+                let params = sagactx.saga_params().clone();
                 let sled_uuid = sagactx.lookup::<Uuid>("server_id");
                 let instance_id = sagactx.lookup::<Uuid>("instance_id");
-                let runtime = ApiInstanceRuntimeState {
-                    run_state: ApiInstanceState::Creating,
-                    reboot_in_progress: false,
-                    sled_uuid,
-                    gen: 1,
-                    time_updated: Utc::now(),
-                };
 
                 async move {
+                    let runtime = ApiInstanceRuntimeState {
+                        run_state: ApiInstanceState::Creating,
+                        reboot_in_progress: false,
+                        sled_uuid: sled_uuid?,
+                        gen: 1,
+                        time_updated: Utc::now(),
+                    };
+
                     /*
                      * XXX I think we want to have resolved the project name to
                      * an id in an earlier step.
@@ -126,13 +111,13 @@ pub fn saga_instance_create(
                     osagactx
                         .datastore()
                         .project_create_instance(
-                            &instance_id,
+                            &instance_id?,
                             &params.project_name,
                             &params.create_params,
                             &runtime,
                         )
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
                     Ok(())
                 }
             },
@@ -143,25 +128,25 @@ pub fn saga_instance_create(
         "instance_ensure",
         "InstanceEnsure",
         new_action_noop_undo(
-            move |sagactx: SagaContext<Arc<OxcSagaContext>>| {
+            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
                 let runtime_params = ApiInstanceRuntimeStateRequested {
                     run_state: ApiInstanceState::Running,
                     reboot_wanted: false,
                 };
-                let instance_id = sagactx.lookup::<Uuid>("instance_id");
-                let sled_uuid = sagactx.lookup::<Uuid>("server_id");
                 async move {
+                    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+                    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
                     let sa = osagactx
                         .sled_client(&sled_uuid)
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
                     // XXX Should this be cached from the previous stage?
                     let mut instance = osagactx
                         .datastore()
                         .instance_lookup_by_id(&instance_id)
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
 
                     /*
                      * Ask the SA to begin the state change.  Then update the
@@ -174,7 +159,7 @@ pub fn saga_instance_create(
                             runtime_params,
                         )
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
 
                     let instance_ref = Arc::make_mut(&mut instance);
                     instance_ref.runtime = new_runtime_state.clone();
@@ -182,7 +167,7 @@ pub fn saga_instance_create(
                         .datastore()
                         .instance_update(Arc::clone(&instance))
                         .await
-                        .map_err(SagaActionError::action_failed)?;
+                        .map_err(ActionError::action_failed)?;
                     Ok(())
                 }
             },

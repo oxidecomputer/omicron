@@ -44,7 +44,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
-use steno::SagaActionError;
 use steno::SagaExecutor;
 use steno::SagaId;
 use uuid::Uuid;
@@ -359,28 +358,33 @@ impl OxideController {
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
+        let saga_template = sagas::saga_instance_create();
         let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
-        let saga_template = sagas::saga_instance_create(project_name, params);
-        // XXX fill in saga exec creator
+        let saga_params = sagas::ParamsInstanceCreate {
+            project_name: project_name.clone(),
+            create_params: params.clone(),
+        };
+        // XXX helper function that handles errors, fills in creator, generates
+        // id, etc.
         let saga_id = SagaId(Uuid::new_v4());
         let saga_exec = SagaExecutor::new(
             &saga_id,
             Arc::new(saga_template),
             "tmp",
             Arc::new(saga_context),
-        );
+            Arc::new(saga_params),
+        )
+        .unwrap();
         saga_exec.run().await;
         let saga_outputs = saga_exec.result().kind.map_err(|saga_error| {
-            match saga_error.error_source {
-                SagaActionError::ActionFailed { source_error } => {
-                    source_error.action_failure_downcast::<ApiError>()
-                }
-                _ => ApiError::InternalError {
-                    message: saga_error.error_source.to_string(),
-                },
-            }
+            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
+                ApiError::InternalError { message: e.to_string() }
+            })
         })?;
-        let instance_id = saga_outputs.lookup_output::<Uuid>("instance_id");
+        /* TODO-error chain */
+        let instance_id = saga_outputs
+            .lookup_output::<Uuid>("instance_id")
+            .map_err(|e| ApiError::InternalError { message: e.to_string() })?;
         // XXX If the instance doesn't exist at this point, that's going to be
         // strange!  I guess the saga should output the details...but it's not
         // clear whether that should be an ApiInstance or an ApiInstanceView or
