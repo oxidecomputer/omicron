@@ -61,8 +61,8 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
     template_builder.append(
         "server_id",
         "AllocServer",
-        // XXX needs an undo action, and we should really keep track of
-        // resources and reservations, etc.
+        // TODO-robustness This still needs an undo action, and we should really
+        // keep track of resources and reservations, etc.
         new_action_noop_undo(
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
