@@ -7,15 +7,19 @@ edition = "2018"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1.24"
-clap = "2"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
 serde_json = "1.0"
+structopt = "0.3"
 toml = "0.5.6"
 
 [dependencies.api_identity]
 path = "./api_identity"
+
+[dependencies.backoff]
+version = "0.3.0"
+features = [ "tokio" ]
 
 [dependencies.chrono]
 version = "0.4"

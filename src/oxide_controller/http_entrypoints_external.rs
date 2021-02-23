@@ -51,11 +51,15 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+type ControllerApiDescription = ApiDescription<Arc<ControllerServerContext>>;
+
 /**
  * Returns a description of the external OXC API
  */
-pub fn controller_external_api() -> ApiDescription {
-    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+pub fn controller_external_api() -> ControllerApiDescription {
+    fn register_endpoints(
+        api: &mut ControllerApiDescription,
+    ) -> Result<(), String> {
         api.register(api_projects_get)?;
         api.register(api_projects_post)?;
         api.register(api_projects_get_project)?;
@@ -88,7 +92,7 @@ pub fn controller_external_api() -> ApiDescription {
         Ok(())
     }
 
-    let mut api = ApiDescription::new();
+    let mut api = ControllerApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
@@ -136,10 +140,10 @@ pub fn controller_external_api() -> ApiDescription {
      path = "/projects",
  }]
 async fn api_projects_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     query_params: Query<ApiPaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiProjectView>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let params = ApiScanByNameOrId::from_query(&query)?;
@@ -169,10 +173,10 @@ async fn api_projects_get(
     path = "/projects"
 }]
 async fn api_projects_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     new_project: TypedBody<ApiProjectCreateParams>,
 ) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let project = controller.project_create(&new_project.into_inner()).await?;
     Ok(HttpResponseCreated(project.to_view()))
@@ -195,10 +199,10 @@ struct ProjectPathParam {
     path = "/projects/{project_name}",
 }]
 async fn api_projects_get_project(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -215,10 +219,10 @@ async fn api_projects_get_project(
      path = "/projects/{project_name}",
  }]
 async fn api_projects_delete_project(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let params = path_params.into_inner();
     let project_name = &params.project_name;
@@ -240,11 +244,11 @@ async fn api_projects_delete_project(
      path = "/projects/{project_name}",
  }]
 async fn api_projects_put_project(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<ApiProjectUpdateParams>,
 ) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -266,11 +270,11 @@ async fn api_projects_put_project(
      path = "/projects/{project_name}/disks",
  }]
 async fn api_project_disks_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiDiskView>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
@@ -295,11 +299,11 @@ async fn api_project_disks_get(
      path = "/projects/{project_name}/disks",
  }]
 async fn api_project_disks_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<ApiDiskCreateParams>,
 ) -> Result<HttpResponseCreated<ApiDiskView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -326,10 +330,10 @@ struct DiskPathParam {
      path = "/projects/{project_name}/disks/{disk_name}",
  }]
 async fn api_project_disks_get_disk(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<ApiDiskView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -347,10 +351,10 @@ async fn api_project_disks_get_disk(
      path = "/projects/{project_name}/disks/{disk_name}",
  }]
 async fn api_project_disks_delete_disk(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -371,11 +375,11 @@ async fn api_project_disks_delete_disk(
      path = "/projects/{project_name}/instances",
  }]
 async fn api_project_instances_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiInstanceView>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
@@ -406,11 +410,11 @@ async fn api_project_instances_get(
      path = "/projects/{project_name}/instances",
  }]
 async fn api_project_instances_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<ApiInstanceCreateParams>,
 ) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -438,10 +442,10 @@ struct InstancePathParam {
      path = "/projects/{project_name}/instances/{instance_name}",
  }]
 async fn api_project_instances_get_instance(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ApiInstanceView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -460,10 +464,10 @@ async fn api_project_instances_get_instance(
      path = "/projects/{project_name}/instances/{instance_name}",
  }]
 async fn api_project_instances_delete_instance(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -480,10 +484,10 @@ async fn api_project_instances_delete_instance(
     path = "/projects/{project_name}/instances/{instance_name}/reboot",
 }]
 async fn api_project_instances_instance_reboot(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -501,10 +505,10 @@ async fn api_project_instances_instance_reboot(
     path = "/projects/{project_name}/instances/{instance_name}/start",
 }]
 async fn api_project_instances_instance_start(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -523,10 +527,10 @@ async fn api_project_instances_instance_start(
 }]
 /* Our naming convention kind of falls apart here. */
 async fn api_project_instances_instance_stop(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -545,10 +549,10 @@ async fn api_project_instances_instance_stop(
     path = "/projects/{project_name}/instances/{instance_name}/disks"
 }]
 async fn api_instance_disks_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<Vec<ApiDiskAttachment>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -583,10 +587,10 @@ struct InstanceDiskPathParam {
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn api_instance_disks_get_disk(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseOk<ApiDiskAttachment>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -606,10 +610,10 @@ async fn api_instance_disks_get_disk(
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn api_instance_disks_put_disk(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseCreated<ApiDiskAttachment>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -629,10 +633,10 @@ async fn api_instance_disks_put_disk(
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn api_instance_disks_delete_disk(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
@@ -656,10 +660,10 @@ async fn api_instance_disks_delete_disk(
      path = "/hardware/racks",
  }]
 async fn api_hardware_racks_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     query_params: Query<ApiPaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiRackView>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let rack_stream =
@@ -685,10 +689,10 @@ struct RackPathParam {
     path = "/hardware/racks/{rack_id}",
 }]
 async fn api_hardware_racks_get_rack(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<ApiRackView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let rack_info = controller.rack_lookup(&path.rack_id).await?;
@@ -707,10 +711,10 @@ async fn api_hardware_racks_get_rack(
      path = "/hardware/sleds",
  }]
 async fn api_hardware_sleds_get(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     query_params: Query<ApiPaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiSledView>>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let query = query_params.into_inner();
     let sled_stream =
@@ -736,10 +740,10 @@ struct SledPathParam {
      path = "/hardware/sleds/{sled_id}",
  }]
 async fn api_hardware_sleds_get_sled(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<ApiSledView>, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let sled_info = controller.sled_lookup(&path.sled_id).await?;

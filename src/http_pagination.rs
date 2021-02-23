@@ -168,12 +168,13 @@ where
  * [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
  * variants that can be used for `ApiScanByNameOrId`.
  */
-pub fn data_page_params_for<'a, S>(
-    rqctx: &'a Arc<RequestContext>,
+pub fn data_page_params_for<'a, S, C>(
+    rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
 where
     S: ScanParams,
+    C: dropshot::ServerContext,
 {
     let limit = rqctx.page_limit(&pag_params)?;
     data_page_params_with_limit(limit, &pag_params)
@@ -429,10 +430,13 @@ impl ScanParams for ApiScanByNameOrId {
  * These functions are where we look at the enum variant and extract the
  * specific marker value out.
  */
-pub fn data_page_params_nameid_name<'a>(
-    rqctx: &'a Arc<RequestContext>,
+pub fn data_page_params_nameid_name<'a, C>(
+    rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a ApiPaginatedByNameOrId,
-) -> Result<DataPageParams<'a, ApiName>, HttpError> {
+) -> Result<DataPageParams<'a, ApiName>, HttpError>
+where
+    C: dropshot::ServerContext,
+{
     let limit = rqctx.page_limit(&pag_params)?;
     data_page_params_nameid_name_limit(limit, pag_params)
 }
@@ -459,10 +463,13 @@ fn data_page_params_nameid_name_limit(
 /**
  * See [`data_page_params_nameid_name`].
  */
-pub fn data_page_params_nameid_id<'a>(
-    rqctx: &'a Arc<RequestContext>,
+pub fn data_page_params_nameid_id<'a, C>(
+    rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a ApiPaginatedByNameOrId,
-) -> Result<DataPageParams<'a, Uuid>, HttpError> {
+) -> Result<DataPageParams<'a, Uuid>, HttpError>
+where
+    C: dropshot::ServerContext,
+{
     let limit = rqctx.page_limit(&pag_params)?;
     data_page_params_nameid_id_limit(limit, pag_params)
 }

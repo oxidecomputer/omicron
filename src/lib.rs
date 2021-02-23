@@ -64,6 +64,7 @@
 
 mod api_error;
 pub mod api_model;
+mod backoff;
 mod cmd;
 mod datastore;
 mod http_client;

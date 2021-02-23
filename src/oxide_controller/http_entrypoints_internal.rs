@@ -20,18 +20,22 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+type ControllerApiDescription = ApiDescription<Arc<ControllerServerContext>>;
+
 /**
  * Returns a description of the internal OXC API
  */
-pub fn controller_internal_api() -> ApiDescription {
-    fn register_endpoints(api: &mut ApiDescription) -> Result<(), String> {
+pub fn controller_internal_api() -> ControllerApiDescription {
+    fn register_endpoints(
+        api: &mut ControllerApiDescription,
+    ) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         Ok(())
     }
 
-    let mut api = ApiDescription::new();
+    let mut api = ControllerApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
@@ -54,11 +58,11 @@ struct SledAgentPathParam {
      path = "/sled_agents/{sled_id}",
  }]
 async fn cpapi_sled_agents_post(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<ApiSledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let si = sled_info.into_inner();
@@ -87,11 +91,11 @@ struct InstancePathParam {
      path = "/instances/{instance_id}",
  }]
 async fn cpapi_instances_put(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<InstancePathParam>,
     new_runtime_state: TypedBody<ApiInstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
@@ -115,11 +119,11 @@ struct DiskPathParam {
      path = "/disks/{disk_id}",
  }]
 async fn cpapi_disks_put(
-    rqctx: Arc<RequestContext>,
+    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
     path_params: Path<DiskPathParam>,
     new_runtime_state: TypedBody<ApiDiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = ControllerServerContext::from_request(&rqctx);
+    let apictx = rqctx.context();
     let controller = &apictx.controller;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
