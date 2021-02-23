@@ -77,6 +77,12 @@ struct CdsData {
  * by name (and project *id*, for instances and disks), and after that, you
  * always have to operate using the whole object (instead of its name).
  * Really, this should resemble what we expect to get from the real database.
+ *
+ * On the other hand: sagas create a use case where we want to be able to
+ * do the lookup early in the saga and get back a token that can be used in
+ * later steps.  That could be the id, but that might result in lots of extra
+ * lookups.  That could be the object itself, but then that thing needs to be
+ * serializable, and the database can't store its own state there.
  */
 impl ControlDataStore {
     pub fn new() -> ControlDataStore {

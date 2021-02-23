@@ -89,8 +89,7 @@ pub struct OxideController {
     api_rack: Arc<ApiRack>,
 
     /** persistent storage for resources in the control plane */
-    // XXX not pub
-    pub datastore: ControlDataStore,
+    datastore: ControlDataStore,
 
     /**
      * List of sled agents known by this controller.
@@ -146,6 +145,10 @@ impl OxideController {
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
+    }
+
+    pub fn datastore(&self) -> &ControlDataStore {
+        self.datastore
     }
 
     /**
@@ -418,10 +421,40 @@ impl OxideController {
         let instance_id = saga_outputs
             .lookup_output::<Uuid>("instance_id")
             .map_err(|e| ApiError::InternalError { message: e.to_string() })?;
-        // XXX If the instance doesn't exist at this point, that's going to be
-        // strange!  I guess the saga should output the details...but it's not
-        // clear whether that should be an ApiInstance or an ApiInstanceView or
-        // what.
+        /*
+         * TODO-correctness TODO-robustness TODO-design It's not quite correct
+         * to take this instance id and look it up again.  It's possible that
+         * it's been modified or even deleted since the saga executed.  In that
+         * case, we might return a different state of the Instance than the one
+         * that the user created or even fail with a 404!  Both of those are
+         * wrong behavior -- we should be returning the very instance that the
+         * user created.
+         *
+         * How can we fix this?  Right now we have internal representations like
+         * ApiInstance and analaogous end-user-facing representations like
+         * ApiInstanceView.  The former is not even serializable.  The saga
+         * _could_ emit the View version, but that's not great for two (related)
+         * reasons: (1) other sagas might want to provision instances and get
+         * back the internal representation to do other things with the
+         * newly-created instance, and (2) even within a saga, it would be
+         * useful to pass a single ApiInstance representation along the saga,
+         * but they probably would want the internal representation, not the
+         * view.
+         *
+         * The saga could emit an ApiInstance directly.  Today, ApiInstance
+         * etc. aren't supposed to even be serializable -- we wanted to be able
+         * to have other datastore state there if needed.  We could have a third
+         * ApiInstanceInternalView...but that's starting to feel pedantic.  We
+         * could just make ApiInstance serializable, store that, and call it a
+         * day.  Does it matter that we might have many copies of the same
+         * objects in memory?
+         *
+         * If we make these serializable, it would be nice if we could leverage
+         * the type system to ensure that we never accidentally send them out a
+         * dropshot endpoint.  (On the other hand, maybe we _do_ want to do
+         * that, for internal interfaces!  Can we do this on a
+         * per-dropshot-server-basis?)
+         */
         let instance =
             self.datastore.instance_lookup_by_id(&instance_id).await?;
         Ok(instance)

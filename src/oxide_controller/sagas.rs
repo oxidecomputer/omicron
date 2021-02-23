@@ -49,9 +49,6 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         new_action_noop_undo(|_| ready(Ok(Uuid::new_v4()))),
     );
 
-    // XXX Compare this to what was previously in instance_create() -- and in
-    // particular the block comment there explaining the order of operations and
-    // crash-safety.
     template_builder.append(
         "server_id",
         "AllocServer",
@@ -97,10 +94,11 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
                     };
 
                     /*
-                     * XXX I think we want to have resolved the project name to
-                     * an id in an earlier step.
-                     * XXX needs to handle the case where the record already
-                     * exists and looks similar vs. different
+                     * TODO-correctness We want to have resolved the project
+                     * name to an id in an earlier step.  To do that, we need to
+                     * fix a bunch of the datastore issues.
+                     * TODO-correctness needs to handle the case where the
+                     * record already exists and looks similar vs. different
                      */
                     osagactx
                         .datastore()
@@ -122,6 +120,9 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         "instance_ensure",
         "InstanceEnsure",
         new_action_noop_undo(
+            /*
+             * TODO-correctness is this idempotent?
+             */
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
                 let runtime_params = ApiInstanceRuntimeStateRequested {
@@ -135,7 +136,11 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
                         .sled_client(&sled_uuid)
                         .await
                         .map_err(ActionError::action_failed)?;
-                    // XXX Should this be cached from the previous stage?
+                    /*
+                     * TODO-datastore This should be cached from the previous
+                     * stage once we figure out how best to pass this
+                     * information between saga actions.
+                     */
                     let mut instance = osagactx
                         .datastore()
                         .instance_lookup_by_id(&instance_id)

@@ -11,7 +11,11 @@ use crate::SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/* XXX Compare to ControllerServerContext */
+/*
+ * TODO-design Should this be the same thing as ControllerServerContext?  It's
+ * very analogous, but maybe there's utility in having separate views for the
+ * HTTP server and sagas.
+ */
 pub struct OxcSagaContext {
     controller: Arc<OxideController>,
 }
@@ -44,7 +48,7 @@ impl OxcSagaContext {
     }
 
     pub fn datastore(&self) -> &ControlDataStore {
-        &self.controller.datastore
+        self.controller.datastore()
     }
 
     pub async fn sled_client(
