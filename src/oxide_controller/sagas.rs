@@ -56,7 +56,8 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         "server_id",
         "AllocServer",
         // TODO-robustness This still needs an undo action, and we should really
-        // keep track of resources and reservations, etc.
+        // keep track of resources and reservations, etc.  See the comment on
+        // OxcSagaContext::alloc_server()
         new_action_noop_undo(
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
                 let osagactx = sagactx.context().clone();
@@ -67,11 +68,10 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
                         .project_lookup(&params.project_name)
                         .await
                         .map_err(ActionError::action_failed)?;
-                    let sa = osagactx
+                    osagactx
                         .alloc_server(&project, &params.create_params)
                         .await
-                        .map_err(ActionError::action_failed)?;
-                    Ok(sa.id)
+                        .map_err(ActionError::action_failed)
                 }
             },
         ),

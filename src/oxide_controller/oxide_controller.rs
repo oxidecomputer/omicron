@@ -100,8 +100,7 @@ pub struct OxideController {
      * how we discover them, both when they initially show up and when we come
      * up.
      */
-    // XXX not pub
-    pub sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
+    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 }
 
 /*
@@ -377,17 +376,21 @@ impl OxideController {
      * Instances
      */
 
-    // XXX should not be pub
-    pub async fn sled_allocate_instance<'se, 'params>(
-        &'se self,
-        sleds: &'se BTreeMap<Uuid, Arc<SledAgentClient>>,
-        _project: &ApiProject,
-        _params: &'params ApiInstanceCreateParams,
-    ) -> Result<&'se Arc<SledAgentClient>, ApiError> {
+    /*
+     * TODO-design This interface should not exist.  See
+     * OxcSagaContext::alloc_server().
+     */
+    pub async fn sled_allocate(&self) -> Result<Uuid, ApiError> {
+        let sleds = self.sled_agents.lock().await;
+
         /* TODO replace this with a real allocation policy. */
-        sleds.values().next().ok_or_else(|| ApiError::ServiceUnavailable {
-            message: String::from("no sleds available for new Instance"),
-        })
+        sleds
+            .values()
+            .next()
+            .ok_or_else(|| ApiError::ServiceUnavailable {
+                message: String::from("no sleds available for new Instance"),
+            })
+            .map(|s| s.id)
     }
 
     pub async fn project_list_instances(

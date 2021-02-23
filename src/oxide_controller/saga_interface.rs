@@ -21,18 +21,26 @@ impl OxcSagaContext {
         OxcSagaContext { controller }
     }
 
-    /* XXX These interfaces need work, but they're a rough start. */
+    /*
+     * TODO-design This interface should not exist.  Instead, sleds should be
+     * represented in the database.  Reservations will wind up writing to the
+     * database.  Allocating a server will thus be a saga action, complete with
+     * an undo action.  The only thing needed at this layer is a way to read and
+     * write to the database, which we already have.
+     *
+     * For now, sleds aren't in the database.  We rely on the fact that the
+     * controller knows what sleds exist.
+     *
+     * Note: the parameters appear here (unused) to make sure callers make sure
+     * to have them available.  They're not used now, but they will be in a real
+     * implementation.
+     */
     pub async fn alloc_server(
         &self,
-        project: &ApiProject,
-        params: &ApiInstanceCreateParams,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
-        let sleds = self.controller.sled_agents.lock().await;
-        let arc = self
-            .controller
-            .sled_allocate_instance(&sleds, project, params)
-            .await?;
-        Ok(Arc::clone(arc))
+        _project: &ApiProject,
+        _params: &ApiInstanceCreateParams,
+    ) -> Result<Uuid, ApiError> {
+        self.controller.sled_allocate().await
     }
 
     pub fn datastore(&self) -> &ControlDataStore {
