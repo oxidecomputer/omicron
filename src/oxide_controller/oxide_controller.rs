@@ -148,7 +148,7 @@ impl OxideController {
     }
 
     pub fn datastore(&self) -> &ControlDataStore {
-        self.datastore
+        &self.datastore
     }
 
     /**

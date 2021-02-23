@@ -5,7 +5,6 @@ authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1"
 async-trait = "0.1.24"
 futures = "0.3.1"
 http = "0.2.0"

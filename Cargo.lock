@@ -652,7 +652,6 @@ dependencies = [
 name = "oxide-api-prototype"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "api_identity",
  "async-trait",
  "backoff",
