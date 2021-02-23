@@ -46,6 +46,9 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::SagaExecutor;
 use steno::SagaId;
+use steno::SagaResultOk;
+use steno::SagaTemplate;
+use steno::SagaType;
 use uuid::Uuid;
 
 /**
@@ -144,6 +147,48 @@ impl OxideController {
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
+    }
+
+    /**
+     * Given a saga template and parameters, create a new saga and execute it.
+     */
+    /*
+     * TODO-debugging It would be nice to keep a list of the outstanding sagas
+     * and maybe even provide APIs to report their status.
+     * Maybe steno could even have an interface for keeping track of a bunch of
+     * sagas, maybe as part of a SagaExecCoordinator or something.
+     */
+    async fn execute_saga<P, S>(
+        self: &Arc<Self>,
+        saga_template: SagaTemplate<S>,
+        saga_params: P,
+    ) -> Result<SagaResultOk, ApiError>
+    where
+        S: SagaType<
+            ExecContextType = Arc<OxcSagaContext>,
+            SagaParamsType = Arc<P>,
+        >,
+    {
+        let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
+        let saga_id = SagaId(Uuid::new_v4());
+        let saga_exec = SagaExecutor::new(
+            &saga_id,
+            Arc::new(saga_template),
+            &self.id.to_string(),
+            Arc::new(saga_context),
+            Arc::new(saga_params),
+        )
+        .map_err(|e| {
+            /* TODO-error more context would be useful */
+            ApiError::InternalError { message: e.to_string() }
+        })?;
+        saga_exec.run().await;
+        saga_exec.result().kind.map_err(|saga_error| {
+            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
+                /* TODO-error more context would be useful */
+                ApiError::InternalError { message: e.to_string() }
+            })
+        })
     }
 
     /*
@@ -359,29 +404,14 @@ impl OxideController {
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
         let saga_template = sagas::saga_instance_create();
-        let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
         let saga_params = sagas::ParamsInstanceCreate {
             project_name: project_name.clone(),
             create_params: params.clone(),
         };
-        // XXX helper function that handles errors, fills in creator, generates
-        // id, etc.
-        let saga_id = SagaId(Uuid::new_v4());
-        let saga_exec = SagaExecutor::new(
-            &saga_id,
-            Arc::new(saga_template),
-            "tmp",
-            Arc::new(saga_context),
-            Arc::new(saga_params),
-        )
-        .unwrap();
-        saga_exec.run().await;
-        let saga_outputs = saga_exec.result().kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
-                ApiError::InternalError { message: e.to_string() }
-            })
-        })?;
-        /* TODO-error chain */
+
+        let saga_outputs =
+            self.execute_saga(saga_template, saga_params).await?;
+        /* TODO-error more context would be useful  */
         let instance_id = saga_outputs
             .lookup_output::<Uuid>("instance_id")
             .map_err(|e| ApiError::InternalError { message: e.to_string() })?;

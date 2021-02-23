@@ -9,12 +9,6 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
-/*
- * XXX thoughts for steno:
- * - may want a cache of in-memory-only data?  Not sure (e.g., for storing
- *   SledAgentClient)
- */
-
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
@@ -173,12 +167,6 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
             },
         ),
     );
-
-    /*
-     * XXX what does the interface back to the controller look like for:
-     * - accessing a server agent
-     * - accessing the data store
-     */
 
     template_builder.build()
 }
