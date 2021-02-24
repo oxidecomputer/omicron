@@ -1086,6 +1086,7 @@ dependencies = [
 [[package]]
 name = "steno"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#7e2c345236cba2719d76cb76290ee1ad88e85957"
 dependencies = [
  "anyhow",
  "async-trait",

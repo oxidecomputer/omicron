@@ -57,7 +57,7 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         // OxcSagaContext::alloc_server()
         new_action_noop_undo(
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
-                let osagactx = sagactx.context().clone();
+                let osagactx = sagactx.user_data().clone();
                 let params = sagactx.saga_params().clone();
                 async move {
                     let project = osagactx
@@ -79,7 +79,7 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         "CreateInstanceRecord",
         new_action_noop_undo(
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
-                let osagactx = sagactx.context().clone();
+                let osagactx = sagactx.user_data().clone();
                 let params = sagactx.saga_params().clone();
                 let sled_uuid = sagactx.lookup::<Uuid>("server_id");
                 let instance_id = sagactx.lookup::<Uuid>("instance_id");
@@ -124,7 +124,7 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
              * TODO-correctness is this idempotent?
              */
             move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
-                let osagactx = sagactx.context().clone();
+                let osagactx = sagactx.user_data().clone();
                 let runtime_params = ApiInstanceRuntimeStateRequested {
                     run_state: ApiInstanceState::Running,
                     reboot_wanted: false,
