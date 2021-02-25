@@ -31,6 +31,8 @@ use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
+use crate::oxide_controller::saga_interface::OxcSagaContext;
+use crate::oxide_controller::sagas;
 use crate::SledAgentClient;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -42,6 +44,11 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use steno::SagaExecutor;
+use steno::SagaId;
+use steno::SagaResultOk;
+use steno::SagaTemplate;
+use steno::SagaType;
 use uuid::Uuid;
 
 /**
@@ -124,7 +131,7 @@ impl OxideController {
                     time_modified: Utc::now(),
                 },
             }),
-            datastore: ControlDataStore::new(),
+            datastore: ControlDataStore::new_empty(),
             sled_agents: Mutex::new(BTreeMap::new()),
         }
     }
@@ -138,6 +145,52 @@ impl OxideController {
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
+    }
+
+    pub fn datastore(&self) -> &ControlDataStore {
+        &self.datastore
+    }
+
+    /**
+     * Given a saga template and parameters, create a new saga and execute it.
+     */
+    /*
+     * TODO-debugging It would be nice to keep a list of the outstanding sagas
+     * and maybe even provide APIs to report their status.
+     * Maybe steno could even have an interface for keeping track of a bunch of
+     * sagas, maybe as part of a SagaExecCoordinator or something.
+     */
+    async fn execute_saga<P, S>(
+        self: &Arc<Self>,
+        saga_template: SagaTemplate<S>,
+        saga_params: P,
+    ) -> Result<SagaResultOk, ApiError>
+    where
+        S: SagaType<
+            ExecContextType = Arc<OxcSagaContext>,
+            SagaParamsType = Arc<P>,
+        >,
+    {
+        let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
+        let saga_id = SagaId(Uuid::new_v4());
+        let saga_exec = SagaExecutor::new(
+            &saga_id,
+            Arc::new(saga_template),
+            &self.id.to_string(),
+            Arc::new(saga_context),
+            Arc::new(saga_params),
+        )
+        .map_err(|e| {
+            /* TODO-error more context would be useful */
+            ApiError::InternalError { message: e.to_string() }
+        })?;
+        saga_exec.run().await;
+        saga_exec.result().kind.map_err(|saga_error| {
+            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
+                /* TODO-error more context would be useful */
+                ApiError::InternalError { message: e.to_string() }
+            })
+        })
     }
 
     /*
@@ -326,16 +379,21 @@ impl OxideController {
      * Instances
      */
 
-    async fn sled_allocate_instance<'se, 'params>(
-        &'se self,
-        sleds: &'se BTreeMap<Uuid, Arc<SledAgentClient>>,
-        _project: Arc<ApiProject>,
-        _params: &'params ApiInstanceCreateParams,
-    ) -> Result<&'se Arc<SledAgentClient>, ApiError> {
+    /*
+     * TODO-design This interface should not exist.  See
+     * OxcSagaContext::alloc_server().
+     */
+    pub async fn sled_allocate(&self) -> Result<Uuid, ApiError> {
+        let sleds = self.sled_agents.lock().await;
+
         /* TODO replace this with a real allocation policy. */
-        sleds.values().next().ok_or_else(|| ApiError::ServiceUnavailable {
-            message: String::from("no sleds available for new Instance"),
-        })
+        sleds
+            .values()
+            .next()
+            .ok_or_else(|| ApiError::ServiceUnavailable {
+                message: String::from("no sleds available for new Instance"),
+            })
+            .map(|s| s.id)
     }
 
     pub async fn project_list_instances(
@@ -347,82 +405,59 @@ impl OxideController {
     }
 
     pub async fn project_create_instance(
-        &self,
+        self: &Arc<Self>,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
-        let project = self.project_lookup(project_name).await?;
-
-        /*
-         * Allocate a sled and retrieve our handle to its SA.
-         */
-        let sa = {
-            let sleds = self.sled_agents.lock().await;
-            let arc =
-                self.sled_allocate_instance(&sleds, project, params).await?;
-            Arc::clone(arc)
+        let saga_template = sagas::saga_instance_create();
+        let saga_params = sagas::ParamsInstanceCreate {
+            project_name: project_name.clone(),
+            create_params: params.clone(),
         };
 
+        let saga_outputs =
+            self.execute_saga(saga_template, saga_params).await?;
+        /* TODO-error more context would be useful  */
+        let instance_id = saga_outputs
+            .lookup_output::<Uuid>("instance_id")
+            .map_err(|e| ApiError::InternalError { message: e.to_string() })?;
         /*
-         * The order of operations here is slightly subtle:
+         * TODO-correctness TODO-robustness TODO-design It's not quite correct
+         * to take this instance id and look it up again.  It's possible that
+         * it's been modified or even deleted since the saga executed.  In that
+         * case, we might return a different state of the Instance than the one
+         * that the user created or even fail with a 404!  Both of those are
+         * wrong behavior -- we should be returning the very instance that the
+         * user created.
          *
-         * 1. We want to record the new instance in the database before telling
-         *    the SA about it.  This record will have state "Creating" to
-         *    distinguish it from other runtime states.  If we crash after this
-         *    point, there will be a record in the database for the instance,
-         *    but it won't be running, since no SA knows about it.
-         *    TODO-robustness How do we want to handle a crash at this point?
-         *    One approach would be to say that while an Instance exists in the
-         *    "Creating" state, it's not logically present yet.  Thus, if
-         *    we crash and leave a record here, there's a small resource leak of
-         *    sorts, but there's no problem from the user's perspective.  What
-         *    about use of the "name", which is user-controlled and unique?  We
-         *    could have the creation process look for an existing instance with
-         *    the same name in state "Creating", decide if it appears to be
-         *    abandoned by the control plane instance that was working on it,
-         *    and then simply delete it and proceed.  We might need to do this
-         *    in the Instance rename case as well.  Reliably deciding whether
-         *    the record is abandoned seems hard, though.  We would also
-         *    probably want something that proactively looks for these abandoned
-         *    records and removes them to eliminate the leakage.  A case to
-         *    consider is two concurrent attempts to create an Instance with the
-         *    same name.  Exactly one should win every time and we shouldn't
-         *    wind up with two Instances running at any point.
+         * How can we fix this?  Right now we have internal representations like
+         * ApiInstance and analaogous end-user-facing representations like
+         * ApiInstanceView.  The former is not even serializable.  The saga
+         * _could_ emit the View version, but that's not great for two (related)
+         * reasons: (1) other sagas might want to provision instances and get
+         * back the internal representation to do other things with the
+         * newly-created instance, and (2) even within a saga, it would be
+         * useful to pass a single ApiInstance representation along the saga,
+         * but they probably would want the internal representation, not the
+         * view.
          *
-         * 2. We want to tell the SA about this Instance and have the SA start
-         *    it up.  The SA should reply immediately that it's starting the
-         *    instance, and we immediately record this into the database, now
-         *    with state "Starting".
+         * The saga could emit an ApiInstance directly.  Today, ApiInstance
+         * etc. aren't supposed to even be serializable -- we wanted to be able
+         * to have other datastore state there if needed.  We could have a third
+         * ApiInstanceInternalView...but that's starting to feel pedantic.  We
+         * could just make ApiInstance serializable, store that, and call it a
+         * day.  Does it matter that we might have many copies of the same
+         * objects in memory?
          *
-         * 3. Some time later (after this function has completed), the SA will
-         *    notify us that the Instance has changed states to "Running".
-         *    We'll record this into the database.
+         * If we make these serializable, it would be nice if we could leverage
+         * the type system to ensure that we never accidentally send them out a
+         * dropshot endpoint.  (On the other hand, maybe we _do_ want to do
+         * that, for internal interfaces!  Can we do this on a
+         * per-dropshot-server-basis?)
          */
-        let runtime = ApiInstanceRuntimeState {
-            run_state: ApiInstanceState::Creating,
-            reboot_in_progress: false,
-            sled_uuid: sa.id,
-            gen: 1,
-            time_updated: Utc::now(),
-        };
-
-        /*
-         * Store the first revision of the Instance into the database.  This
-         * will have state "Creating".
-         */
-        let instance_created = self
-            .datastore
-            .project_create_instance(project_name, params, &runtime)
-            .await?;
-        self.instance_set_runtime(
-            instance_created,
-            sa,
-            ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
-                reboot_wanted: false,
-            },
-        )
-        .await
+        let instance =
+            self.datastore.instance_lookup_by_id(&instance_id).await?;
+        Ok(instance)
     }
 
     /*
@@ -515,6 +550,18 @@ impl OxideController {
         }
     }
 
+    pub async fn sled_client(
+        &self,
+        sled_uuid: &Uuid,
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
+        let sled_agents = self.sled_agents.lock().await;
+        Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
+            let message =
+                format!("no sled agent for sled_uuid \"{}\"", sled_uuid);
+            ApiError::ServiceUnavailable { message }
+        })?))
+    }
+
     /**
      * Returns the SledAgentClient for the host where this Instance is running.
      */
@@ -522,12 +569,8 @@ impl OxideController {
         &self,
         instance: &Arc<ApiInstance>,
     ) -> Result<Arc<SledAgentClient>, ApiError> {
-        let sled_agents = self.sled_agents.lock().await;
         let said = &instance.runtime.sled_uuid;
-        Ok(Arc::clone(sled_agents.get(said).ok_or_else(|| {
-            let message = format!("no sled agent for sled_uuid \"{}\"", said);
-            ApiError::ServiceUnavailable { message }
-        })?))
+        self.sled_client(&said).await
     }
 
     /**

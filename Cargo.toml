@@ -39,6 +39,10 @@ features = [ "derive" ]
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
+[dependencies.steno]
+git = "https://github.com/oxidecomputer/steno"
+branch = "main"
+
 [dependencies.tokio]
 version = "1.0"
 features = [ "full" ]
@@ -56,11 +60,14 @@ serde_urlencoded = "0.6.1"
 subprocess = "0.2.4"
 
 #
-# It's common during development to use a local copy of dropshot in the parent
-# directory.  If you want to use that, uncomment this block.
+# It's common during development to use a local copy of dropshot or steno in the
+# parent directory.  If you want to use those, uncomment one of these blocks.
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
+#
+#[patch."https://github.com/oxidecomputer/steno"]
+#steno = { path = "../steno" }
 
 #
 # Disable doc builds by default for our binaries to work around issue
