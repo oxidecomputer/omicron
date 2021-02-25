@@ -62,7 +62,7 @@
  */
 #![allow(clippy::field_reassign_with_default)]
 /*
- * TODO(#38): Remove this exception once resolved.
+ * TODO(#40): Remove this exception once resolved.
  */
 #![allow(clippy::unnecessary_wraps)]
 
