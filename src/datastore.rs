@@ -300,7 +300,7 @@ impl ControlDataStore {
 
         let instance = Arc::new(ApiInstance {
             identity: ApiIdentityMetadata {
-                id: instance_id.clone(),
+                id: *instance_id,
                 name: params.identity.name.clone(),
                 description: params.identity.description.clone(),
                 time_created: now,
