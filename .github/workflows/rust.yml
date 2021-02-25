@@ -11,6 +11,10 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - name: Report cargo version
+      run: cargo --version
+    - name: Report rustfmt version
+      run: cargo fmt -- --version
     - name: Check style
       run: cargo fmt -- --check
 
@@ -19,6 +23,10 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - name: Report cargo version
+      run: cargo --version
+    - name: Report Clippy version
+      run: cargo clippy -- --version
     - name: Run Clippy Lints
       run: cargo clippy -- -D warnings
 
@@ -30,6 +38,8 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - name: Report cargo version
+      run: cargo --version
     - name: Build
       run: cargo build --tests --verbose
     - name: Run tests
