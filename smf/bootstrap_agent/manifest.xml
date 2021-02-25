@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='bootstrap_agent'>
+
+<service name='system/illumos/bootstrap_agent' type='service' version='1'>
+  <create_default_instance enabled='true' />
+  <single_instance />
+
+  <!-- File systems should all be mounted before we begin: -->
+  <dependency name='fs-root' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/system/filesystem/root' />
+  </dependency>
+  <dependency name='fs-minimal' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/system/filesystem/minimal' />
+  </dependency>
+
+  <!-- The bootstrap agent uses the network to communicate with
+    other servers on the rack. -->
+  <dependency name='loopback' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/network' />
+  </dependency>
+  <!-- Run after initial device configuration has completed. -->
+  <dependency name='devices' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/milestone/devices' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+    exec='/opt/oxide/oxcp/bootstrap_agent/smf/bootstrap_agent/starter.sh'
+    timeout_seconds='5' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='5' />
+  <exec_method type='method' name='cleanup' exec=':kill' timeout_seconds='5' />
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Oxide Bootstrap Agent</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Supports bootstrapping Oxide servers</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

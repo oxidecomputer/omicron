@@ -8,6 +8,7 @@ use crate::api_model::ApiName;
 use crate::api_model::ApiResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
+use thiserror::Error;
 use uuid::Uuid;
 
 /**
@@ -23,22 +24,28 @@ use uuid::Uuid;
  * to reuse existing variants rather than inventing new ones to distinguish
  * cases that no programmatic consumer needs to distinguish.
  */
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum ApiError {
     /** An object needed as part of this operation was not found. */
+    #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
     ObjectNotFound { type_name: ApiResourceType, lookup_type: LookupType },
     /** An object already exists with the specified name or identifier. */
+    #[error("Object (of type {type_name:?}) already exists: {object_name}")]
     ObjectAlreadyExists { type_name: ApiResourceType, object_name: String },
     /**
      * The request was well-formed, but the operation cannot be completed given
      * the current state of the system.
      */
+    #[error("Invalid Request: {message}")]
     InvalidRequest { message: String },
     /** The specified input field is not valid. */
+    #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
     /** The system encountered an unhandled operational error. */
+    #[error("Internal Error: {message}")]
     InternalError { message: String },
     /** The system (or part of it) is unavailable. */
+    #[error("Service Unavailable: {message}")]
     ServiceUnavailable { message: String },
 }
 

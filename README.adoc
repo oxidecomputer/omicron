@@ -46,6 +46,7 @@ The code here is still rough, but the following are implemented:
 * architecture:
 ** oxide controller (OXC): manages a fleet of Oxide racks
 ** sled agent: manages a single compute sled in an Oxide fleet
+** bootstrap agent: Launches sled agent and OXC.
 * basic server infrastructure: configuration, logging
 * test coverage for most of the above
 
@@ -302,6 +303,60 @@ date: Wed, 27 May 2020 00:46:11 GMT
 }
 ----
 
+== Running on Helios
+
+Prerequisites: Have a machine already running Helios. An easy way to
+do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
+
+The control plane repository contains a packaging tool which bundles binaries
+and SMF manifests. After building the expected binaries, they can be packaged
+in a format which lets them be transferred to a Helios machine.
+
+[source,text]
+----
+$ cargo build
+$ cargo run --bin=package
+...
+# Your ./out directory should now be populated.
+----
+
+The manifests are currently hardcoded to expect installation within the
+`/opt/oxide/oxcp` directory. We can copy them to their expected location with
+the following:
+
+[source,text]
+----
+$ mkdir -p /opt/oxide/oxcp
+$ cp -r ./out/* /opt/oxide/oxcp
+----
+
+[NOTE]
+====
+Running some commands on Helios may require privileged access.  If any
+subsequent commands result in "access denied", try the same command, but
+prefixed with `pfexec`.
+
+For Linux users, this is the Helios equivalent of `sudo`.
+====
+
+Once this is complete, we can unpack and initialize the bootstrap agent.
+This should unpack and initialize all other services.
+
+[source,text]
+----
+$ tar -xvzf /opt/oxide/oxcp/bootstrap_agent.tar -C /opt/oxide/oxcp/bootstrap_agent
+$ svccfg import -V /opt/oxide/oxcp/bootstrap_agent/smf/bootstrap_agent/manifest.xml
+----
+
+You can verify which services are running with the following commands:
+
+[source,text]
+----
+# List all services:
+$ svcs
+# View logs for a service:
+$ tail -f $(svcs -L oxide_controller)
+----
 
 == Configuration reference
 

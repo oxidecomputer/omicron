@@ -69,11 +69,13 @@
 mod api_error;
 pub mod api_model;
 mod backoff;
+pub mod bootstrap_agent;
 mod cmd;
 mod datastore;
 mod http_client;
 mod http_pagination;
 mod oxide_controller;
+pub mod packaging;
 mod sled_agent;
 mod test_util;
 

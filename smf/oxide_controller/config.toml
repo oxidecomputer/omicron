@@ -1,0 +1,9 @@
+[dropshot_external]
+bind_address = "127.0.0.1:12220"
+
+[dropshot_internal]
+bind_address = "127.0.0.1:12221"
+
+[log]
+level = "info"
+mode = "stderr-terminal"

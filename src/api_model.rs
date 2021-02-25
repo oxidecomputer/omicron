@@ -1039,6 +1039,28 @@ pub struct DiskEnsureBody {
     pub target: ApiDiskStateRequested,
 }
 
+/*
+ * Bootstrap Agent objects
+ */
+
+/**
+ * Identity signed by local RoT and Oxide certificate chain.
+ */
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct BootstrapAgentShareRequest {
+    // TODO-completeness: format TBD; currently opaque.
+    pub identity: Vec<u8>,
+}
+
+/**
+ * Sent between bootstrap agents to establish trust quorum.
+ */
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct BootstrapAgentShareResponse {
+    // TODO-completeness: format TBD; currently opaque.
+    pub shared_secret: Vec<u8>,
+}
+
 #[cfg(test)]
 mod test {
     use super::ApiByteCount;
