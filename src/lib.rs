@@ -61,6 +61,10 @@
  * TODO(#32): Remove this exception once resolved.
  */
 #![allow(clippy::field_reassign_with_default)]
+/*
+ * TODO(#40): Remove this exception once resolved.
+ */
+#![allow(clippy::unnecessary_wraps)]
 
 mod api_error;
 pub mod api_model;
