@@ -85,7 +85,7 @@ struct CdsData {
  * serializable, and the database can't store its own state there.
  */
 impl ControlDataStore {
-    pub fn new() -> ControlDataStore {
+    pub fn new_empty() -> ControlDataStore {
         ControlDataStore {
             data: Mutex::new(CdsData {
                 projects_by_id: BTreeMap::new(),

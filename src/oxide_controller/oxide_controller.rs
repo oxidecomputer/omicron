@@ -131,7 +131,7 @@ impl OxideController {
                     time_modified: Utc::now(),
                 },
             }),
-            datastore: ControlDataStore::new(),
+            datastore: ControlDataStore::new_empty(),
             sled_agents: Mutex::new(BTreeMap::new()),
         }
     }
