@@ -19,6 +19,11 @@ https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?
 * general maintenance and cleanup
+** replace &Arc<T> with &T, and some instances of Arc<T> as well
+** all identifiers could be newtypes, with a prefix for the type (like AWS
+   "i-123" for instances)
+** rethinking ApiError a bit -- should it use thiserror, or at least impl
+   std::error::Error?
 ** scope out switching to sync (see RFD 79)
 ** proper config + logging for sled agent
 * settle on an approach for modification of resources and implement it once

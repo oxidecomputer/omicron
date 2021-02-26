@@ -77,9 +77,15 @@ struct CdsData {
  * by name (and project *id*, for instances and disks), and after that, you
  * always have to operate using the whole object (instead of its name).
  * Really, this should resemble what we expect to get from the real database.
+ *
+ * On the other hand: sagas create a use case where we want to be able to
+ * do the lookup early in the saga and get back a token that can be used in
+ * later steps.  That could be the id, but that might result in lots of extra
+ * lookups.  That could be the object itself, but then that thing needs to be
+ * serializable, and the database can't store its own state there.
  */
 impl ControlDataStore {
-    pub fn new() -> ControlDataStore {
+    pub fn new_empty() -> ControlDataStore {
         ControlDataStore {
             data: Mutex::new(CdsData {
                 projects_by_id: BTreeMap::new(),
@@ -263,6 +269,7 @@ impl ControlDataStore {
 
     pub async fn project_create_instance(
         &self,
+        instance_id: &Uuid,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
@@ -293,7 +300,7 @@ impl ControlDataStore {
 
         let instance = Arc::new(ApiInstance {
             identity: ApiIdentityMetadata {
-                id: Uuid::new_v4(),
+                id: *instance_id,
                 name: params.identity.name.clone(),
                 description: params.identity.description.clone(),
                 time_created: now,

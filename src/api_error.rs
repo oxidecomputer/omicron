@@ -9,6 +9,8 @@ use crate::api_model::ApiResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use thiserror::Error;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 /**
@@ -24,7 +26,7 @@ use uuid::Uuid;
  * to reuse existing variants rather than inventing new ones to distinguish
  * cases that no programmatic consumer needs to distinguish.
  */
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Deserialize, Error, PartialEq, Serialize)]
 pub enum ApiError {
     /** An object needed as part of this operation was not found. */
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -50,7 +52,7 @@ pub enum ApiError {
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum LookupType {
     /** a specific name was requested */
     ByName(String),

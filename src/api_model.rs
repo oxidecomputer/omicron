@@ -308,7 +308,7 @@ impl ApiByteCount {
 /**
  * Identifies a type of API resource
  */
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum ApiResourceType {
     Project,
     Disk,
