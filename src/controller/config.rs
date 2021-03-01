@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
  * Configuration for an OXC server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ConfigController {
+pub struct Config {
     /** Dropshot configuration for external API server */
     pub dropshot_external: ConfigDropshot,
     /** Dropshot configuration for internal API server */
@@ -71,20 +71,20 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
     }
 }
 
-impl ConfigController {
+impl Config {
     /**
-     * Load a `ConfigController` from the given TOML file
+     * Load a `Config` from the given TOML file
      *
      * This config object can then be used to create a new `OxideController`.
      * The format is described in the README.
      */
     pub fn from_file<P: AsRef<Path>>(
         path: P,
-    ) -> Result<ConfigController, LoadError> {
+    ) -> Result<Config, LoadError> {
         let path = path.as_ref();
         let file_contents = std::fs::read_to_string(path)
             .map_err(|e| (path.to_path_buf(), e))?;
-        let config_parsed: ConfigController = toml::from_str(&file_contents)
+        let config_parsed: Config = toml::from_str(&file_contents)
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
@@ -92,7 +92,7 @@ impl ConfigController {
 
 #[cfg(test)]
 mod test {
-    use super::ConfigController;
+    use super::Config;
     use super::{LoadError, LoadErrorKind};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -121,7 +121,7 @@ mod test {
     }
 
     /**
-     * Load a ConfigController with the given string `contents`.  To exercise
+     * Load a Config with the given string `contents`.  To exercise
      * the full path, this function writes the contents to a file first, then
      * loads the config from that file, then removes the file.  `label` is used
      * as a unique string for the filename and error messages.  It should be
@@ -130,13 +130,13 @@ mod test {
     fn read_config(
         label: &str,
         contents: &str,
-    ) -> Result<ConfigController, LoadError> {
+    ) -> Result<Config, LoadError> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path.display());
         fs::write(path, contents).expect("write to tempfile failed");
 
-        let result = ConfigController::from_file(path);
+        let result = Config::from_file(path);
         fs::remove_file(path).expect("failed to remove temporary file");
         eprintln!("{:?}", result);
         result
@@ -148,7 +148,7 @@ mod test {
 
     #[test]
     fn test_config_nonexistent() {
-        let error = ConfigController::from_file(Path::new("/nonexistent"))
+        let error = Config::from_file(Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
         let expected = std::io::Error::from_raw_os_error(libc::ENOENT);
         assert_eq!(error, expected);
@@ -219,7 +219,7 @@ mod test {
 
         assert_eq!(
             config,
-            ConfigController {
+            Config {
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()

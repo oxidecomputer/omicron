@@ -2,12 +2,12 @@
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
 
-use super::ControllerServerContext;
+use super::ServerContext;
 
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiSledAgentStartupInfo;
-use crate::SledAgentClient;
+use crate::sled_agent;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-type ControllerApiDescription = ApiDescription<Arc<ControllerServerContext>>;
+type ControllerApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /**
  * Returns a description of the internal OXC API
@@ -58,7 +58,7 @@ struct SledAgentPathParam {
      path = "/sled_agents/{sled_id}",
  }]
 async fn cpapi_sled_agents_post(
-    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<ApiSledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -70,7 +70,7 @@ async fn cpapi_sled_agents_post(
     let client_log =
         apictx.log.new(o!("SledAgent" => sled_id.clone().to_string()));
     let client =
-        Arc::new(SledAgentClient::new(&sled_id, si.sa_address, client_log));
+        Arc::new(sled_agent::Client::new(&sled_id, si.sa_address, client_log));
     controller.upsert_sled_agent(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -91,7 +91,7 @@ struct InstancePathParam {
      path = "/instances/{instance_id}",
  }]
 async fn cpapi_instances_put(
-    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     new_runtime_state: TypedBody<ApiInstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -119,7 +119,7 @@ struct DiskPathParam {
      path = "/disks/{disk_id}",
  }]
 async fn cpapi_disks_put(
-    rqctx: Arc<RequestContext<Arc<ControllerServerContext>>>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
     new_runtime_state: TypedBody<ApiDiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

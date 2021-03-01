@@ -2,14 +2,14 @@
  * Sled agent implementation
  */
 
-use super::ControllerClient;
-use super::SimMode;
+use super::config::SimMode;
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
+use crate::controller;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ impl SledAgent {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: Arc<ControllerClient>,
+        ctlsc: Arc<controller::Client>,
     ) -> SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 

@@ -2,13 +2,12 @@
  * Simulated sled agent implementation
  */
 
-use super::ControllerClient;
-
 use crate::api_error::ApiError;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::sled_agent::sim::simulatable::Simulatable;
+use crate::controller;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
@@ -219,7 +218,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        csc: &Arc<ControllerClient>,
+        csc: &Arc<controller::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

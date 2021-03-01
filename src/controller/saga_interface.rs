@@ -6,13 +6,13 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiProject;
 use crate::datastore::ControlDataStore;
-use crate::oxide_controller::OxideController;
-use crate::SledAgentClient;
+use crate::controller::OxideController;
+use crate::sled_agent;
 use std::sync::Arc;
 use uuid::Uuid;
 
 /*
- * TODO-design Should this be the same thing as ControllerServerContext?  It's
+ * TODO-design Should this be the same thing as ServerContext?  It's
  * very analogous, but maybe there's utility in having separate views for the
  * HTTP server and sagas.
  */
@@ -54,7 +54,7 @@ impl OxcSagaContext {
     pub async fn sled_client(
         &self,
         sled_id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         self.controller.sled_client(sled_id).await
     }
 }

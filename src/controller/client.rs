@@ -18,18 +18,18 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 /** Client for an OXC instance */
-pub struct ControllerClient {
+pub struct Client {
     /** underlying HTTP client */
     client: HttpClient,
 }
 
-impl ControllerClient {
+impl Client {
     /**
      * Create a new OXC client to make requests to the OXC instance at
      * `server_addr`.
      */
-    pub fn new(server_addr: SocketAddr, log: Logger) -> ControllerClient {
-        ControllerClient {
+    pub fn new(server_addr: SocketAddr, log: Logger) -> Client {
+        Client {
             client: HttpClient::new("controller", server_addr, log),
         }
     }

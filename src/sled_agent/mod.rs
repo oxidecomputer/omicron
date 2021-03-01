@@ -2,21 +2,21 @@
 * Library interface to the sled agent
  */
 
+mod client;
 mod config;
 mod http_entrypoints;
 mod sim;
 #[allow(clippy::module_inception)]
 mod sled_agent;
-mod sled_agent_client;
 
-pub use config::ConfigSledAgent;
+pub use client::Client;
+pub use client::TestInterfaces;
+pub use config::Config;
 pub use config::SimMode;
-pub use sled_agent_client::SledAgentClient;
-pub use sled_agent_client::SledAgentTestInterfaces;
 
 use crate::api_model::ApiSledAgentStartupInfo;
 use crate::backoff::{internal_service_policy, retry_notify, BackoffError};
-use crate::ControllerClient;
+use crate::controller;
 use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
@@ -25,25 +25,25 @@ use std::sync::Arc;
  * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
  * server wired up to the sled agent
  */
-pub struct SledAgentServer {
+pub struct Server {
     /** underlying sled agent */
     pub sled_agent: Arc<SledAgent>,
     /** dropshot server for the API */
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
 }
 
-impl SledAgentServer {
+impl Server {
     /**
      * Start a SledAgent server
      */
     pub async fn start(
-        config: &ConfigSledAgent,
+        config: &Config,
         log: &Logger,
-    ) -> Result<SledAgentServer, String> {
+    ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
-        let client_log = log.new(o!("component" => "ControllerClient"));
-        let controller_client = Arc::new(ControllerClient::new(
+        let client_log = log.new(o!("component" => "controller::Client"));
+        let controller_client = Arc::new(controller::Client::new(
             config.controller_address,
             client_log,
         ));
@@ -63,7 +63,7 @@ impl SledAgentServer {
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
-            http_entrypoints::sa_api(),
+            http_entrypoints::api(),
             sa,
             &dropshot_log,
         )
@@ -102,7 +102,7 @@ impl SledAgentServer {
         .expect(
             "Expected an infinite retry loop contacting the Oxide controller",
         );
-        Ok(SledAgentServer { sled_agent, http_server })
+        Ok(Server { sled_agent, http_server })
     }
 
     /**
@@ -118,14 +118,14 @@ impl SledAgentServer {
 }
 
 /**
- * Run an instance of the `SledAgentServer`
+ * Run an instance of the `Server`
  */
-pub async fn sa_run_server(config: &ConfigSledAgent) -> Result<(), String> {
+pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config
         .log
         .to_logger("sled-agent")
         .map_err(|message| format!("initializing logger: {}", message))?;
 
-    let server = SledAgentServer::start(config, &log).await?;
+    let server = Server::start(config, &log).await?;
     server.wait_for_finish().await
 }

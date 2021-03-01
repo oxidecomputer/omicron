@@ -14,16 +14,16 @@
  *
  * There are two major components here with parallel sets of interfaces:
  *
- * * [`oxide_controller`] (also called OXC) is the heart of the control plane.
+ * * [`controller`] (also called OXC) is the heart of the control plane.
  *   It provides the user-facing external API as well as an internal-facing API
  *   for use by other control plane components.
- *   * [`controller_run_server`] is used by the executable binary that you can
+ *   * [`run_server`] is used by the executable binary that you can
  *     use to run an OXC instance.
- *   * [`controller_run_openapi_external`] is used by the same binary to
+ *   * [`run_openapi_external`] is used by the same binary to
  *     generate an OpenAPI spec for the external API.
  *   * [`ConfigController`] represents the configuration of an OXC instance.
  *   * [`ControllerClient`] provides a client interface to the internal OXC API.
- *   * [`OxideControllerServer`] provides an interface for starting an OXC
+ *   * [`Server`] provides an interface for starting an OXC
  *     instance.
  *   While this component is a prototype, the intent is to evolve this into the
  *   final production service.
@@ -32,7 +32,7 @@
  *   compute server (sled).  This agent provides interfaces used by OXC to
  *   manage resources on the sled.  The implementation here is completely
  *   simulated.
- *   * [`sa_run_server`] is used by the executable binary that you can use to
+ *   * [`run_server`] is used by the executable binary that you can use to
  *     run a simulated `SledAgent`.
  *   * [`ConfigSledAgent`] represents the configuration of a sled agent.
  *   * [`SledAgentClient`] provides a client interface to the sled agent's API
@@ -69,32 +69,13 @@
 mod api_error;
 pub mod api_model;
 mod backoff;
-mod cmd;
+pub mod cmd;
 mod datastore;
 mod http_client;
 mod http_pagination;
-mod oxide_controller;
-mod sled_agent;
+pub mod controller;
+pub mod sled_agent;
 mod test_util;
-
-pub use oxide_controller::controller_run_openapi_external;
-pub use oxide_controller::controller_run_server;
-pub use oxide_controller::ConfigController;
-pub use oxide_controller::ControllerClient;
-pub use oxide_controller::ControllerServerContext;
-pub use oxide_controller::OxideController;
-pub use oxide_controller::OxideControllerServer;
-pub use oxide_controller::OxideControllerTestInterfaces;
-
-pub use sled_agent::sa_run_server;
-pub use sled_agent::ConfigSledAgent;
-pub use sled_agent::SimMode;
-pub use sled_agent::SledAgentClient;
-pub use sled_agent::SledAgentServer;
-pub use sled_agent::SledAgentTestInterfaces;
-
-pub use cmd::fatal;
-pub use cmd::CmdError;
 
 #[macro_use]
 extern crate slog;

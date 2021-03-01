@@ -13,11 +13,11 @@
  *   timeout)
  */
 
-use oxide_api_prototype::controller_run_openapi_external;
-use oxide_api_prototype::controller_run_server;
-use oxide_api_prototype::fatal;
-use oxide_api_prototype::CmdError;
-use oxide_api_prototype::ConfigController;
+use oxide_api_prototype::cmd::fatal;
+use oxide_api_prototype::cmd::CmdError;
+use oxide_api_prototype::controller::run_openapi_external;
+use oxide_api_prototype::controller::run_server;
+use oxide_api_prototype::controller::Config;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -50,12 +50,12 @@ async fn do_run() -> Result<(), CmdError> {
         CmdError::Usage(format!("parsing arguments: {}", err.message))
     })?;
 
-    let config = ConfigController::from_file(args.config_file_path)
+    let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
     if args.openapi {
-        controller_run_openapi_external().map_err(CmdError::Failure)
+        run_openapi_external().map_err(CmdError::Failure)
     } else {
-        controller_run_server(&config).await.map_err(CmdError::Failure)
+        run_server(&config).await.map_err(CmdError::Failure)
     }
 }

@@ -8,11 +8,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
-use oxide_api_prototype::ConfigController;
-use oxide_api_prototype::ConfigSledAgent;
-use oxide_api_prototype::OxideControllerServer;
-use oxide_api_prototype::SimMode;
-use oxide_api_prototype::SledAgentServer;
+use oxide_api_prototype::sled_agent;
+use oxide_api_prototype::controller;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -24,9 +21,9 @@ const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub server: OxideControllerServer,
+    pub server: controller::Server,
     pub logctx: LogContext,
-    sled_agent: SledAgentServer,
+    sled_agent: sled_agent::Server,
 }
 
 impl ControlPlaneTestContext {
@@ -50,12 +47,12 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * usefully configured (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = ConfigController::from_file(config_file_path)
+    let config = controller::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let server = OxideControllerServer::start(&config, &rack_id, &logctx.log)
+    let server = controller::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();
     let testctx_external = ClientTestContext::new(
@@ -71,7 +68,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sa = start_sled_agent(
         logctx.log.new(o!(
-            "component" => "SledAgentServer",
+            "component" => "sled_agent::Server",
             "sled_id" => sa_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
@@ -93,10 +90,10 @@ pub async fn start_sled_agent(
     log: Logger,
     controller_address: SocketAddr,
     id: Uuid,
-) -> Result<SledAgentServer, String> {
-    let config = ConfigSledAgent {
+) -> Result<sled_agent::Server, String> {
+    let config = sled_agent::Config {
         id,
-        sim_mode: SimMode::Explicit,
+        sim_mode: sled_agent::SimMode::Explicit,
         controller_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
@@ -106,7 +103,7 @@ pub async fn start_sled_agent(
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
     };
 
-    SledAgentServer::start(&config, &log).await
+    sled_agent::Server::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

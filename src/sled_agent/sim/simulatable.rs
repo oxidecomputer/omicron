@@ -1,6 +1,5 @@
-use super::ControllerClient;
-
 use crate::api_error::ApiError;
+use crate::controller;
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
@@ -137,7 +136,7 @@ pub trait Simulatable: fmt::Debug {
      * object identified by `id`.
      */
     async fn notify(
-        csc: &Arc<ControllerClient>,
+        csc: &Arc<controller::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;

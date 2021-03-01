@@ -2,21 +2,21 @@
  * Library interface to the Oxide Controller (OXC)
  */
 
+mod client;
 mod config;
 mod context;
-mod controller_client;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 #[allow(clippy::module_inception)]
-mod oxide_controller;
+mod controller;
 mod saga_interface;
 mod sagas;
 
-pub use config::ConfigController;
-pub use context::ControllerServerContext;
-pub use controller_client::ControllerClient;
-pub use oxide_controller::OxideController;
-pub use oxide_controller::OxideControllerTestInterfaces;
+pub use config::Config;
+pub use context::ServerContext;
+pub use client::Client;
+pub use controller::OxideController;
+pub use controller::TestInterfaces;
 
 use http_entrypoints_external::controller_external_api;
 use http_entrypoints_internal::controller_internal_api;
@@ -29,7 +29,7 @@ use uuid::Uuid;
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec
  * to stdout.
  */
-pub fn controller_run_openapi_external() -> Result<(), String> {
+pub fn run_openapi_external() -> Result<(), String> {
     controller_external_api()
         .openapi("Oxide Region API", "0.0.1")
         .description("API for interacting with the Oxide control plane")
@@ -43,30 +43,30 @@ pub fn controller_run_openapi_external() -> Result<(), String> {
  * Packages up an [`OxideController`], running both external and internal HTTP
  * API servers wired up to the controller
  */
-pub struct OxideControllerServer {
+pub struct Server {
     /** shared state used by API request handlers */
-    pub apictx: Arc<ControllerServerContext>,
+    pub apictx: Arc<ServerContext>,
     /** dropshot server for external API */
     pub http_server_external:
-        dropshot::HttpServer<Arc<ControllerServerContext>>,
+        dropshot::HttpServer<Arc<ServerContext>>,
     /** dropshot server for internal API */
     pub http_server_internal:
-        dropshot::HttpServer<Arc<ControllerServerContext>>,
+        dropshot::HttpServer<Arc<ServerContext>>,
 }
 
-impl OxideControllerServer {
+impl Server {
     /**
      * Start an OxideController server.
      */
     pub async fn start(
-        config: &ConfigController,
+        config: &Config,
         rack_id: &Uuid,
         log: &Logger,
-    ) -> Result<OxideControllerServer, String> {
+    ) -> Result<Server, String> {
         info!(log, "setting up controller server");
 
-        let ctxlog = log.new(o!("component" => "ControllerServerContext"));
-        let apictx = ControllerServerContext::new(rack_id, ctxlog);
+        let ctxlog = log.new(o!("component" => "ServerContext"));
+        let apictx = ServerContext::new(rack_id, ctxlog);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(
@@ -89,7 +89,7 @@ impl OxideControllerServer {
         let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
 
-        Ok(OxideControllerServer {
+        Ok(Server {
             apictx,
             http_server_external,
             http_server_internal,
@@ -125,16 +125,16 @@ impl OxideControllerServer {
 }
 
 /**
- * Run an instance of the `OxideControllerServer`.
+ * Run an instance of the `Server`.
  */
-pub async fn controller_run_server(
-    config: &ConfigController,
+pub async fn run_server(
+    config: &Config,
 ) -> Result<(), String> {
     let log = config
         .log
         .to_logger("oxide-controller")
         .map_err(|message| format!("initializing logger: {}", message))?;
     let rack_id = Uuid::new_v4();
-    let server = OxideControllerServer::start(config, &rack_id, &log).await?;
+    let server = Server::start(config, &rack_id, &log).await?;
     server.wait_for_finish().await
 }

@@ -31,15 +31,15 @@ use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::datastore::collection_page;
 use crate::datastore::ControlDataStore;
-use crate::oxide_controller::saga_interface::OxcSagaContext;
-use crate::oxide_controller::sagas;
-use crate::SledAgentClient;
+use crate::controller::saga_interface::OxcSagaContext;
+use crate::controller::sagas;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
 use futures::future::TryFutureExt;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
+use crate::sled_agent;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -55,24 +55,24 @@ use uuid::Uuid;
  * Exposes additional [`OxideController`] interfaces for use by the test suite
  */
 #[async_trait]
-pub trait OxideControllerTestInterfaces {
+pub trait TestInterfaces {
     /**
-     * Returns the SledAgentClient for an Instance from its id.  We may also
+     * Returns the sled_agent::Client for an Instance from its id.  We may also
      * want to split this up into instance_lookup_by_id() and instance_sled(),
      * but after all it's a test suite special to begin with.
      */
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<sled_agent::Client>, ApiError>;
 
     /**
-     * Returns the SledAgentClient for a Disk from its id.
+     * Returns the sled_agent::Client for a Disk from its id.
      */
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<sled_agent::Client>, ApiError>;
 }
 
 /**
@@ -99,7 +99,7 @@ pub struct OxideController {
      * how we discover them, both when they initially show up and when we come
      * up.
      */
-    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
+    sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
 }
 
 /*
@@ -140,7 +140,7 @@ impl OxideController {
      * TODO-robustness we should have a limit on how many sled agents there can
      * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
+    pub async fn upsert_sled_agent(&self, sa: Arc<sled_agent::Client>) {
         let mut scs = self.sled_agents.lock().await;
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
@@ -553,7 +553,7 @@ impl OxideController {
     pub async fn sled_client(
         &self,
         sled_uuid: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let sled_agents = self.sled_agents.lock().await;
         Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
             let message =
@@ -563,12 +563,12 @@ impl OxideController {
     }
 
     /**
-     * Returns the SledAgentClient for the host where this Instance is running.
+     * Returns the sled_agent::Client for the host where this Instance is running.
      */
     async fn instance_sled(
         &self,
         instance: &Arc<ApiInstance>,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
     }
@@ -668,7 +668,7 @@ impl OxideController {
     async fn instance_set_runtime(
         &self,
         mut instance: Arc<ApiInstance>,
-        sa: Arc<SledAgentClient>,
+        sa: Arc<sled_agent::Client>,
         runtime_params: ApiInstanceRuntimeStateRequested,
     ) -> UpdateResult<ApiInstance> {
         /*
@@ -949,7 +949,7 @@ impl OxideController {
     async fn disk_set_runtime(
         &self,
         mut disk: Arc<ApiDisk>,
-        sa: Arc<SledAgentClient>,
+        sa: Arc<sled_agent::Client>,
         requested: ApiDiskStateRequested,
     ) -> UpdateResult<ApiDisk> {
         /*
@@ -998,7 +998,7 @@ impl OxideController {
      * Sleds.
      * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiSled for each SledAgentClient that
+     * them, etc.  For now, we expose an ApiSled for each sled_agent::Client that
      * we've got.
      */
     pub async fn sleds_list(
@@ -1166,11 +1166,11 @@ impl OxideController {
 }
 
 #[async_trait]
-impl OxideControllerTestInterfaces for OxideController {
+impl TestInterfaces for OxideController {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let instance = self.datastore.instance_lookup_by_id(id).await?;
         self.instance_sled(&instance).await
     }
@@ -1178,7 +1178,7 @@ impl OxideControllerTestInterfaces for OxideController {
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();

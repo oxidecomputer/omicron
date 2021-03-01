@@ -5,7 +5,7 @@
  */
 
 /*
- * TODO-coverage: test success cases of oxide_controller and sled_agent
+ * TODO-coverage: test success cases of controller and sled_agent
  */
 
 use expectorate::assert_contents;
@@ -23,8 +23,8 @@ use subprocess::ExitStatus;
 use subprocess::NullFile;
 use subprocess::Redirection;
 
-/** name of the "oxide_controller" executable */
-const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_oxide_controller");
+/** name of the "controller" executable */
+const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_controller");
 /** name of the "sled_agent" executable */
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
 /**
@@ -195,7 +195,7 @@ fn test_controller_bad_config() {
     assert_eq!(
         stderr_text,
         format!(
-            "oxide_controller: read \"nonexistent\": {}\n",
+            "controller: read \"nonexistent\": {}\n",
             error_for_enoent()
         )
     );
@@ -215,7 +215,7 @@ fn test_controller_invalid_config() {
     assert_eq!(
         stderr_text,
         format!(
-            "oxide_controller: parse \"{}\": missing field \
+            "controller: parse \"{}\": missing field \
              `dropshot_external`\n",
             config_path.display()
         ),

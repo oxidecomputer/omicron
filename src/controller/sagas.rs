@@ -14,7 +14,7 @@ use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
-use crate::oxide_controller::saga_interface::OxcSagaContext;
+use crate::controller::saga_interface::OxcSagaContext;
 use chrono::Utc;
 use core::future::ready;
 use serde::Deserialize;

@@ -8,7 +8,7 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
-use crate::ControllerClient;
+use crate::controller;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
@@ -223,7 +223,7 @@ impl Simulatable for SimInstance {
     }
 
     async fn notify(
-        csc: &Arc<ControllerClient>,
+        csc: &Arc<controller::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

@@ -6,10 +6,10 @@ mod disk;
 mod instance;
 mod simulatable;
 
-use super::SimMode;
+use super::config::SimMode;
 
 use crate::api_error::ApiError;
-use crate::ControllerClient;
+use crate::controller;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
@@ -222,7 +222,7 @@ impl<S: Simulatable> SimObject<S> {
  */
 pub struct SimCollection<S: Simulatable> {
     /** handle to the controller API, used to notify about async transitions */
-    ctlsc: Arc<ControllerClient>,
+    ctlsc: Arc<controller::Client>,
     /** logger for this collection */
     log: Logger,
     /** simulation mode: automatic (timer-based) or explicit (using an API) */
@@ -234,7 +234,7 @@ pub struct SimCollection<S: Simulatable> {
 impl<S: Simulatable + 'static> SimCollection<S> {
     /** Returns a new collection of simulated objects. */
     pub fn new(
-        ctlsc: Arc<ControllerClient>,
+        ctlsc: Arc<controller::Client>,
         log: Logger,
         sim_mode: SimMode,
     ) -> SimCollection<S> {
@@ -330,7 +330,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      * For example, if an Instance is "stopped", and the requested state is
      * "running", the returned state will be "starting".  Subsequent
      * asynchronous state transitions are reported via the notify() functions on
-     * the `ControllerClient` object.
+     * the `controller::Client` object.
      */
     pub async fn sim_ensure(
         self: &Arc<Self>,

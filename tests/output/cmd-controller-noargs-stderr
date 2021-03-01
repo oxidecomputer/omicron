@@ -1,7 +1,7 @@
-oxide_controller: parsing arguments: error: The following required arguments were not provided:
+controller: parsing arguments: error: The following required arguments were not provided:
     <CONFIG_FILE_PATH>
 
 USAGE:
-    oxide_controller [FLAGS] <CONFIG_FILE_PATH>
+    controller [FLAGS] <CONFIG_FILE_PATH>
 
 For more information try --help
