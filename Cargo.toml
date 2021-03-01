@@ -80,13 +80,13 @@ subprocess = "0.2.4"
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 #
 [[bin]]
+name = "bootstrap_agent"
+doc = false
+[[bin]]
 name = "oxide_controller"
 doc = false
 [[bin]]
 name = "sled_agent"
-doc = false
-[[bin]]
-name = "bootstrap_agent"
 doc = false
 
 [profile.dev]

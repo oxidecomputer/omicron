@@ -3,6 +3,8 @@ use crate::bootstrap_agent::http_entrypoints;
 use crate::bootstrap_agent::Config;
 use std::sync::Arc;
 
+/// Wraps a [BootstrapAgent] object, and provides helper methods for exposing it
+/// via an HTTP interface.
 pub struct Server {
     bootstrap_agent: Arc<BootstrapAgent>,
     http_server: dropshot::HttpServer<Arc<BootstrapAgent>>,

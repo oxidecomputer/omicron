@@ -305,7 +305,7 @@ date: Wed, 27 May 2020 00:46:11 GMT
 
 == Running on Helios
 
-Prerequisites: Have a machine already running Helios. An easy way to
+Prerequisite: Have a machine already running Helios. An easy way to
 do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
 
 The control plane repository contains a packaging tool which bundles binaries
@@ -315,7 +315,7 @@ in a format which lets them be transferred to a Helios machine.
 [source,text]
 ----
 $ cargo build
-$ cargo run --bin=package
+$ cargo run --bin=oxcp_package
 ...
 # Your ./out directory should now be populated.
 ----

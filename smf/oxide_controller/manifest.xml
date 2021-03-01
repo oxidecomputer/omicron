@@ -7,20 +7,10 @@
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='sled_agent' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/system/illumos/sled_agent' />
-  </dependency>
-  <dependency name='bootstrap_agent' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/system/illumos/bootstrap_agent' />
-  </dependency>
-
   <exec_method type='method' name='start'
     exec='/opt/oxide/oxcp/oxide_controller/smf/oxide_controller/starter.sh'
-    timeout_seconds='5' />
-  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='5' />
-  <exec_method type='method' name='cleanup' exec=':kill' timeout_seconds='5' />
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />

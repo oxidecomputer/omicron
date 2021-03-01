@@ -138,6 +138,12 @@ impl BootstrapAgent {
                 service
             ))
         })?;
+
+        // TODO: The tarfile could hypothetically be modified between
+        // calculating the digest and extracting the archive.
+        // Do we care? Is this a plausible threat, and would it be
+        // worthwhile to load the files into memory to attempt to
+        // isolate write access?
         let digest_actual = sha256_digest(&tar_path)?;
         if digest_expected.as_slice() != digest_actual.as_ref() {
             return Err(BootstrapError::UnexpectedDigest(service.into()));
