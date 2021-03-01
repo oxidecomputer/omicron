@@ -6,6 +6,7 @@ use crate::packaging::sha256_digest;
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
@@ -20,13 +21,13 @@ pub enum BootstrapError {
     #[error("Unexpected digest for service {0}")]
     UnexpectedDigest(String),
 
-    #[error("Error accessing filesystem")]
+    #[error("Error accessing filesystem: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Error configuring SMF")]
+    #[error("Error configuring SMF: {0}")]
     SMFConfig(#[from] smf::ConfigError),
 
-    #[error("Error modifying SMF service")]
+    #[error("Error modifying SMF service: {0}")]
     SMFAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
@@ -60,7 +61,7 @@ impl BootstrapAgent {
 
     /// Performs device initialization:
     ///
-    /// - TODO: Communicates with other bootstrap servicees to establish
+    /// - TODO: Communicates with other bootstrap services to establish
     /// a trust quorum.
     /// - Verifies, unpacks, and launches the sled agent and oxide controller.
     pub async fn initialize(
@@ -144,35 +145,27 @@ impl BootstrapAgent {
         // Do we care? Is this a plausible threat, and would it be
         // worthwhile to load the files into memory to attempt to
         // isolate write access?
-        let digest_actual = sha256_digest(&tar_path)?;
+        let mut tar_file = File::open(&tar_path)?;
+        let digest_actual = sha256_digest(&mut tar_file)?;
         if digest_expected.as_slice() != digest_actual.as_ref() {
             return Err(BootstrapError::UnexpectedDigest(service.into()));
         }
 
         info!(&self.log, "Verified {} Service", service);
-        self.extract_archive(
-            tar_source.join(tar_name),
-            destination.join(service),
-        )?;
+        self.extract_archive(&mut tar_file, destination.join(service))?;
         self.enable_service(service)
     }
 
     // Given a verified archive file, unpack it to a location.
-    fn extract_archive<P1, P2>(
+    fn extract_archive<P>(
         &self,
-        archive: P1,
-        destination: P2,
+        file: &mut File,
+        destination: P,
     ) -> Result<(), BootstrapError>
     where
-        P1: AsRef<Path>,
-        P2: AsRef<Path>,
+        P: AsRef<Path>,
     {
-        info!(
-            &self.log,
-            "Extracting archive: {}",
-            archive.as_ref().to_string_lossy()
-        );
-        let file = File::open(archive.as_ref())?;
+        file.seek(SeekFrom::Start(0))?;
 
         // Clear the destination directory.
         //

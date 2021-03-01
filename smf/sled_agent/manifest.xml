@@ -8,9 +8,14 @@
   <single_instance />
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/oxcp/sled_agent/smf/sled_agent/starter.sh'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oxcp/sled_agent/sled_agent %{svc:/system/illumos/bootstrap_agent:default/:properties/config/server_id} %{config/server_addr} %{config/controller_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
+    <propval name='controller_addr' type='astring' value='127.0.0.1:12221' />
+  </property_group>
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />

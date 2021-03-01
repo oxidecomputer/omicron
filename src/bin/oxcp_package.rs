@@ -102,13 +102,13 @@ fn main() -> Result<()> {
                 anyhow!("Cannot append file to tarfile: {}", err)
             })?;
         }
-        archive
-            .finish()
+        let mut file = archive
+            .into_inner()
             .map_err(|err| anyhow!("Failed to finalize archive: {}", err))?;
 
         // Once we've created the archive, acquire a digest which can
         // later be used for verification.
-        let digest = sha256_digest(&tarfile)?;
+        let digest = sha256_digest(&mut file)?;
         digests.insert(package.name().into(), digest.as_ref().into());
     }
 

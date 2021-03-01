@@ -8,7 +8,7 @@
   <single_instance />
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/oxcp/oxide_controller/smf/oxide_controller/starter.sh'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oxcp/oxide_controller/oxide_controller /opt/oxide/oxcp/oxide_controller/smf/oxide_controller/config.toml &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
