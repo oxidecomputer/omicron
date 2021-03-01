@@ -194,7 +194,10 @@ fn test_controller_bad_config() {
     );
     assert_eq!(
         stderr_text,
-        format!("oxide_controller: read \"nonexistent\": {}\n", error_for_enoent())
+        format!(
+            "oxide_controller: read \"nonexistent\": {}\n",
+            error_for_enoent()
+        )
     );
 }
 
