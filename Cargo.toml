@@ -74,7 +74,8 @@ subprocess = "0.2.4"
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 #
 [[bin]]
-name = "controller"
+name = "oxide_controller"
+path = "src/bin/controller.rs"
 doc = false
 [[bin]]
 name = "sled_agent"

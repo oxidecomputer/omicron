@@ -1,7 +1,7 @@
 /*!
  * Shared state used by API request handlers
  */
-use super::OxideController;
+use super::Controller;
 
 use slog::Logger;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use uuid::Uuid;
  */
 pub struct ServerContext {
     /** reference to the underlying OXC */
-    pub controller: Arc<OxideController>,
+    pub controller: Arc<Controller>,
     /** debug log */
     pub log: Logger,
 }
@@ -24,7 +24,7 @@ impl ServerContext {
      */
     pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ServerContext> {
         Arc::new(ServerContext {
-            controller: Arc::new(OxideController::new_with_id(
+            controller: Arc::new(Controller::new_with_id(
                 rack_id,
                 log.new(o!("component" => "controller")),
             )),

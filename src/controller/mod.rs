@@ -15,7 +15,7 @@ mod sagas;
 pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
-pub use controller::OxideController;
+pub use controller::Controller;
 pub use controller::TestInterfaces;
 
 use http_entrypoints_external::controller_external_api;
@@ -40,7 +40,7 @@ pub fn run_openapi_external() -> Result<(), String> {
 }
 
 /**
- * Packages up an [`OxideController`], running both external and internal HTTP
+ * Packages up an [`Controller`], running both external and internal HTTP
  * API servers wired up to the controller
  */
 pub struct Server {
@@ -54,7 +54,7 @@ pub struct Server {
 
 impl Server {
     /**
-     * Start an OxideController server.
+     * Start an Controller server.
      */
     pub async fn start(
         config: &Config,
@@ -119,7 +119,7 @@ impl Server {
 }
 
 /**
- * Run an instance of the `Server`.
+ * Run an instance of the [Server].
  */
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config

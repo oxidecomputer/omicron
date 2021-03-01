@@ -5,7 +5,7 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiProject;
-use crate::controller::OxideController;
+use crate::controller::Controller;
 use crate::datastore::ControlDataStore;
 use crate::sled_agent;
 use std::sync::Arc;
@@ -17,11 +17,11 @@ use uuid::Uuid;
  * HTTP server and sagas.
  */
 pub struct OxcSagaContext {
-    controller: Arc<OxideController>,
+    controller: Arc<Controller>,
 }
 
 impl OxcSagaContext {
-    pub fn new(controller: Arc<OxideController>) -> OxcSagaContext {
+    pub fn new(controller: Arc<Controller>) -> OxcSagaContext {
         OxcSagaContext { controller }
     }
 

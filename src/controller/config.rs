@@ -75,7 +75,7 @@ impl Config {
     /**
      * Load a `Config` from the given TOML file
      *
-     * This config object can then be used to create a new `OxideController`.
+     * This config object can then be used to create a new `Controller`.
      * The format is described in the README.
      */
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {

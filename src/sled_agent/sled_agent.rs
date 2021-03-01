@@ -37,7 +37,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /*
-     * TODO-cleanup should this instantiate the ControllerClient it needs?
+     * TODO-cleanup should this instantiate the controller::Client it needs?
      * Should it take a Config object instead of separate id, sim_mode, etc?
      */
     /** Constructs a simulated SledAgent with the given uuid. */

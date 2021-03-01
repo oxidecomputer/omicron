@@ -52,7 +52,7 @@ use steno::SagaType;
 use uuid::Uuid;
 
 /**
- * Exposes additional [`OxideController`] interfaces for use by the test suite
+ * Exposes additional [`Controller`] interfaces for use by the test suite
  */
 #[async_trait]
 pub trait TestInterfaces {
@@ -78,7 +78,7 @@ pub trait TestInterfaces {
 /**
  * (OXC) Manages an Oxide fleet -- the heart of the control plane
  */
-pub struct OxideController {
+pub struct Controller {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
@@ -110,7 +110,7 @@ pub struct OxideController {
  * TODO update and delete need to accommodate both with-etag and don't-care
  * TODO audit logging ought to be part of this structure and its functions
  */
-impl OxideController {
+impl Controller {
     /**
      * Create a new OXC instance for the given rack id `id`
      *
@@ -118,8 +118,8 @@ impl OxideController {
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
-        OxideController {
+    pub fn new_with_id(id: &Uuid, log: Logger) -> Controller {
+        Controller {
             id: *id,
             log,
             api_rack: Arc::new(ApiRack {
@@ -1166,7 +1166,7 @@ impl OxideController {
 }
 
 #[async_trait]
-impl TestInterfaces for OxideController {
+impl TestInterfaces for Controller {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,

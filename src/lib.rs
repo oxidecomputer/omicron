@@ -17,13 +17,13 @@
  * * [`controller`] (also called OXC) is the heart of the control plane.
  *   It provides the user-facing external API as well as an internal-facing API
  *   for use by other control plane components.
- *   * [`run_server`] is used by the executable binary that you can
+ *   * [`controller::run_server`] is used by the executable binary that you can
  *     use to run an OXC instance.
- *   * [`run_openapi_external`] is used by the same binary to
+ *   * [`controller::run_openapi_external`] is used by the same binary to
  *     generate an OpenAPI spec for the external API.
- *   * [`ConfigController`] represents the configuration of an OXC instance.
- *   * [`ControllerClient`] provides a client interface to the internal OXC API.
- *   * [`Server`] provides an interface for starting an OXC
+ *   * [`controller::Config`] represents the configuration of an OXC instance.
+ *   * [`controller::Client`] provides a client interface to the internal OXC API.
+ *   * [`controller::Server`] provides an interface for starting an OXC
  *     instance.
  *   While this component is a prototype, the intent is to evolve this into the
  *   final production service.
@@ -32,11 +32,11 @@
  *   compute server (sled).  This agent provides interfaces used by OXC to
  *   manage resources on the sled.  The implementation here is completely
  *   simulated.
- *   * [`run_server`] is used by the executable binary that you can use to
+ *   * [`sled_agent::run_server`] is used by the executable binary that you can use to
  *     run a simulated `SledAgent`.
- *   * [`ConfigSledAgent`] represents the configuration of a sled agent.
- *   * [`SledAgentClient`] provides a client interface to the sled agent's API
- *   * [`SledAgentServer`] provides an interface for starting an OXC
+ *   * [`sled_agent::Config`] represents the configuration of a sled agent.
+ *   * [`sled_agent::Client`] provides a client interface to the sled agent's API
+ *   * [`sled_agent::Server`] provides an interface for starting an OXC
  *     instance.
  *   This implementation will not wind up as part of a production Oxide system,
  *   but the intent is to make it available to developers to test their own
