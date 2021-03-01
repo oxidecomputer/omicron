@@ -15,7 +15,7 @@ https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment
 * rename sled agent back to serveragent? Ugh.
 * dropshot: allow consumers to provide error codes for dropshot errors
 * deferred cleanup / polish up for more help
-** clarify use of OXC / OXCP / Controller / controller
+** clarify use of OXC / OXCP / OxideController / controller
 * decide on a code name for the whole control plane and rename the repo
 ** oxide controller -> Oxc?  Or something using the new code name?
 * general maintenance and cleanup

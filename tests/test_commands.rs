@@ -24,7 +24,7 @@ use subprocess::NullFile;
 use subprocess::Redirection;
 
 /** name of the "controller" executable */
-const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_controller");
+const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_oxide_controller");
 /** name of the "sled_agent" executable */
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
 /**
@@ -194,7 +194,7 @@ fn test_controller_bad_config() {
     );
     assert_eq!(
         stderr_text,
-        format!("controller: read \"nonexistent\": {}\n", error_for_enoent())
+        format!("oxide_controller: read \"nonexistent\": {}\n", error_for_enoent())
     );
 }
 
@@ -212,7 +212,7 @@ fn test_controller_invalid_config() {
     assert_eq!(
         stderr_text,
         format!(
-            "controller: parse \"{}\": missing field \
+            "oxide_controller: parse \"{}\": missing field \
              `dropshot_external`\n",
             config_path.display()
         ),
