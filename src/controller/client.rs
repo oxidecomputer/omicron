@@ -29,9 +29,7 @@ impl Client {
      * `server_addr`.
      */
     pub fn new(server_addr: SocketAddr, log: Logger) -> Client {
-        Client {
-            client: HttpClient::new("controller", server_addr, log),
-        }
+        Client { client: HttpClient::new("controller", server_addr, log) }
     }
 
     /**

@@ -5,16 +5,16 @@
 mod client;
 mod config;
 mod context;
-mod http_entrypoints_external;
-mod http_entrypoints_internal;
 #[allow(clippy::module_inception)]
 mod controller;
+mod http_entrypoints_external;
+mod http_entrypoints_internal;
 mod saga_interface;
 mod sagas;
 
+pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
-pub use client::Client;
 pub use controller::OxideController;
 pub use controller::TestInterfaces;
 
@@ -47,11 +47,9 @@ pub struct Server {
     /** shared state used by API request handlers */
     pub apictx: Arc<ServerContext>,
     /** dropshot server for external API */
-    pub http_server_external:
-        dropshot::HttpServer<Arc<ServerContext>>,
+    pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /** dropshot server for internal API */
-    pub http_server_internal:
-        dropshot::HttpServer<Arc<ServerContext>>,
+    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
 impl Server {
@@ -89,11 +87,7 @@ impl Server {
         let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
 
-        Ok(Server {
-            apictx,
-            http_server_external,
-            http_server_internal,
-        })
+        Ok(Server { apictx, http_server_external, http_server_internal })
     }
 
     /**
@@ -127,9 +121,7 @@ impl Server {
 /**
  * Run an instance of the `Server`.
  */
-pub async fn run_server(
-    config: &Config,
-) -> Result<(), String> {
+pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config
         .log
         .to_logger("oxide-controller")

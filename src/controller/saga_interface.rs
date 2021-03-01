@@ -5,8 +5,8 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiProject;
-use crate::datastore::ControlDataStore;
 use crate::controller::OxideController;
+use crate::datastore::ControlDataStore;
 use crate::sled_agent;
 use std::sync::Arc;
 use uuid::Uuid;

@@ -39,11 +39,7 @@ impl Client {
      * Create a new sled agent client to make requests to the sled agent running
      * at `server_addr`.
      */
-    pub fn new(
-        id: &Uuid,
-        server_addr: SocketAddr,
-        log: Logger,
-    ) -> Client {
+    pub fn new(id: &Uuid, server_addr: SocketAddr, log: Logger) -> Client {
         Client {
             id: *id,
             service_address: server_addr,

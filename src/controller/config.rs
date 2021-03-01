@@ -78,9 +78,7 @@ impl Config {
      * This config object can then be used to create a new `OxideController`.
      * The format is described in the README.
      */
-    pub fn from_file<P: AsRef<Path>>(
-        path: P,
-    ) -> Result<Config, LoadError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
         let path = path.as_ref();
         let file_contents = std::fs::read_to_string(path)
             .map_err(|e| (path.to_path_buf(), e))?;
@@ -127,10 +125,7 @@ mod test {
      * as a unique string for the filename and error messages.  It should be
      * unique for each test.
      */
-    fn read_config(
-        label: &str,
-        contents: &str,
-    ) -> Result<Config, LoadError> {
+    fn read_config(label: &str, contents: &str) -> Result<Config, LoadError> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path.display());

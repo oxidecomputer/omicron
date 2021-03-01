@@ -70,10 +70,10 @@ mod api_error;
 pub mod api_model;
 mod backoff;
 pub mod cmd;
+pub mod controller;
 mod datastore;
 mod http_client;
 mod http_pagination;
-pub mod controller;
 pub mod sled_agent;
 mod test_util;
 
