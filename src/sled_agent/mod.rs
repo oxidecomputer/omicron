@@ -97,7 +97,7 @@ impl Server {
             log_notification_failure,
         )
         .await
-        .expect("Expected an infinite retry loop contacting the Oxide nexus");
+        .expect("Expected an infinite retry loop contacting Nexus");
         Ok(Server { sled_agent, http_server })
     }
 

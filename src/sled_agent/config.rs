@@ -38,7 +38,7 @@ pub struct Config {
     pub id: Uuid,
     /** how to simulate asynchronous Instance and Disk transitions */
     pub sim_mode: SimMode,
-    /** IP address and TCP port for the nexus instance to register with */
+    /** IP address and TCP port for Nexus instance to register with */
     pub nexus_address: SocketAddr,
     /** configuration for the sled agent dropshot server */
     pub dropshot: ConfigDropshot,

@@ -1,5 +1,5 @@
 /*!
- * Saga actions, undo actions, and saga constructors used in the nexus.
+ * Saga actions, undo actions, and saga constructors used in Nexus.
  */
 
 /*

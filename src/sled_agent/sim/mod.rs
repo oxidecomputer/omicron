@@ -221,7 +221,7 @@ impl<S: Simulatable> SimObject<S> {
  * instances and disks.
  */
 pub struct SimCollection<S: Simulatable> {
-    /** handle to the nexus API, used to notify about async transitions */
+    /** handle to the Nexus API, used to notify about async transitions */
     ctlsc: Arc<nexus::Client>,
     /** logger for this collection */
     log: Logger,
@@ -294,7 +294,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         };
 
         /*
-         * Notify the nexus that the object's state has changed.
+         * Notify Nexus that the object's state has changed.
          * TODO-robustness: If this fails, we need to put it on some list of
          * updates to retry later.
          */

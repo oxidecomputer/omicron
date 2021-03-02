@@ -18,24 +18,24 @@
  *   It provides the user-facing external API as well as an internal-facing API
  *   for use by other control plane components.
  *   * [`nexus::run_server`] is used by the executable binary that you can
- *     use to run a nexus instance.
+ *     use to run a Nexus instance.
  *   * [`nexus::run_openapi_external`] is used by the same binary to
  *     generate an OpenAPI spec for the external API.
- *   * [`nexus::Config`] represents the configuration of a nexus instance.
- *   * [`nexus::Client`] provides a client interface to the internal nexus API.
- *   * [`nexus::Server`] provides an interface for starting a nexus instance.
+ *   * [`nexus::Config`] represents the configuration of a Nexus instance.
+ *   * [`nexus::Client`] provides a client interface to the internal Nexus API.
+ *   * [`nexus::Server`] provides an interface for starting a Nexus instance.
  *   While this component is a prototype, the intent is to evolve this into the
  *   final production service.
  *
  * * [`sled_agent`] is the part of the control plane residing on each individual
- *   compute server (sled).  This agent provides interfaces used by the nexus to
+ *   compute server (sled).  This agent provides interfaces used by Nexus to
  *   manage resources on the sled.  The implementation here is completely
  *   simulated.
  *   * [`sled_agent::run_server`] is used by the executable binary that you can use to
  *     run a simulated `SledAgent`.
  *   * [`sled_agent::Config`] represents the configuration of a sled agent.
  *   * [`sled_agent::Client`] provides a client interface to the sled agent's API
- *   * [`sled_agent::Server`] provides an interface for starting a nexus
+ *   * [`sled_agent::Server`] provides an interface for starting a Nexus
  *     instance.
  *   This implementation will not wind up as part of a production Oxide system,
  *   but the intent is to make it available to developers to test their own

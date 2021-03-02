@@ -1,5 +1,5 @@
 /*!
- * Executable program to run the Oxide Nexus.
+ * Executable program to run Nexus, the heart of the control plane
  */
 
 /*

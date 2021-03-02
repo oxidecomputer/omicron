@@ -25,7 +25,7 @@ pub struct Client {
 
 impl Client {
     /**
-     * Create a new nexus client to make requests to the nexus instance at
+     * Create a new nexus client to make requests to the Nexus instance at
      * `server_addr`.
      */
     pub fn new(server_addr: SocketAddr, log: Logger) -> Client {

@@ -33,7 +33,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /**
- * Data storage interface exposed to the rest of the nexus
+ * Data storage interface exposed to the rest of Nexus
  *
  * All the data is stored in the `data` field, protected by one big lock.
  */
@@ -633,7 +633,7 @@ impl DataStore {
  */
 /*
  * TODO-cleanup this is only public because we haven't built Servers into the
- * datastore yet so the nexus needs this interface.
+ * datastore yet so Nexus needs this interface.
  */
 pub fn collection_page<KeyType, ValueType>(
     search_tree: &BTreeMap<KeyType, Arc<ValueType>>,

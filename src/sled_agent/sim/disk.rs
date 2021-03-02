@@ -98,9 +98,8 @@ impl Simulatable for SimDisk {
              * If we're currently attaching, it's only legal to try to attach to
              * the same thing (in which case it's a noop).
              * TODO-cleanup would it be more consistent with our intended
-             * interface (which is to let the nexus just say what it wants
-             * and have us do the work) to have this work and go through
-             * detaching first?
+             * interface (which is to let Nexus just say what it wants and have
+             * us do the work) to have this work and go through detaching first?
              */
             (
                 ApiDiskState::Attaching(id1),

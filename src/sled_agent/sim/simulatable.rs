@@ -132,8 +132,8 @@ pub trait Simulatable: fmt::Debug {
     fn ready_to_destroy(current: &Self::CurrentState) -> bool;
 
     /**
-     * Notifies the nexus (via `csc`) about a new state (`current`) for the
-     * object identified by `id`.
+     * Notifies Nexus (via `csc`) about a new state (`current`) for the object
+     * identified by `id`.
      */
     async fn notify(
         csc: &Arc<nexus::Client>,

@@ -1,5 +1,5 @@
 /*!
- * The Oxide Nexus, which operates much of the control plane in an Oxide fleet
+ * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
 use crate::api_error::ApiError;

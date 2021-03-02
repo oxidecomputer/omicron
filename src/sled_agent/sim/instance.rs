@@ -228,10 +228,10 @@ impl Simulatable for SimInstance {
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {
         /*
-         * Notify the nexus that the instance state has changed.  The
-         * sled agent is authoritative for the runtime state, and we use a
-         * generation number here so that calls processed out of order do not
-         * settle on the wrong value.
+         * Notify Nexus that the instance state has changed.  The sled agent is
+         * authoritative for the runtime state, and we use a generation number
+         * here so that calls processed out of order do not settle on the wrong
+         * value.
          */
         csc.notify_instance_updated(id, &current).await
     }

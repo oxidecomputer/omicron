@@ -5,7 +5,7 @@
  */
 
 /*
- * TODO-coverage: test success cases of the nexus and sled_agent
+ * TODO-coverage: test success cases of nexus and sled_agent
  */
 
 use expectorate::assert_contents;

@@ -1,5 +1,5 @@
 /*!
- * Library interface to the Oxide Nexus.
+ * Library interface to the Nexus, the heart of the control plane
  */
 
 mod client;
@@ -41,8 +41,8 @@ pub fn run_openapi_external() -> Result<(), String> {
 }
 
 /**
- * Packages up a [`Nexus`], running both external and internal HTTP
- * API servers wired up to the nexus
+ * Packages up a [`Nexus`], running both external and internal HTTP API servers
+ * wired up to Nexus
  */
 pub struct Server {
     /** shared state used by API request handlers */
