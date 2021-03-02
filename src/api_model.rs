@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
- * types for functions in the `controller::Controller` and `ControlDataStore`.  The
+ * types for functions in the `controller::Controller` and `controller::DataStore`.  The
  * type argument `T` generally implements `ApiObject`.
  */
 

@@ -48,8 +48,6 @@
  *   components
  * * [`api_model`], which contains types used in both the external and internal
  *   APIs
- * * [`datastore`], an in-memory store for control plane data.  This is
- *   instantiated (from scratch) with each OXC instance.
  */
 
 /*
@@ -71,7 +69,6 @@ pub mod api_model;
 mod backoff;
 pub mod cmd;
 pub mod controller;
-mod datastore;
 mod http_client;
 mod http_pagination;
 pub mod sled_agent;

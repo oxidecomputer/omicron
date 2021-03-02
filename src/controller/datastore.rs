@@ -37,7 +37,7 @@ use uuid::Uuid;
  *
  * All the data is stored in the `data` field, protected by one big lock.
  */
-pub struct ControlDataStore {
+pub struct DataStore {
     data: Mutex<CdsData>,
 }
 
@@ -84,9 +84,9 @@ struct CdsData {
  * lookups.  That could be the object itself, but then that thing needs to be
  * serializable, and the database can't store its own state there.
  */
-impl ControlDataStore {
-    pub fn new_empty() -> ControlDataStore {
-        ControlDataStore {
+impl DataStore {
+    pub fn new_empty() -> DataStore {
+        DataStore {
             data: Mutex::new(CdsData {
                 projects_by_id: BTreeMap::new(),
                 projects_by_name: BTreeMap::new(),

@@ -7,6 +7,7 @@ mod config;
 mod context;
 #[allow(clippy::module_inception)]
 mod controller;
+mod datastore;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 mod saga_interface;
@@ -18,8 +19,8 @@ pub use context::ServerContext;
 pub use controller::Controller;
 pub use controller::TestInterfaces;
 
-use http_entrypoints_external::controller_external_api;
-use http_entrypoints_internal::controller_internal_api;
+use http_entrypoints_external::external_api;
+use http_entrypoints_internal::internal_api;
 
 use slog::Logger;
 use std::sync::Arc;
@@ -30,7 +31,7 @@ use uuid::Uuid;
  * to stdout.
  */
 pub fn run_openapi_external() -> Result<(), String> {
-    controller_external_api()
+    external_api()
         .openapi("Oxide Region API", "0.0.1")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
@@ -69,7 +70,7 @@ impl Server {
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.dropshot_external,
-            controller_external_api(),
+            external_api(),
             c1,
             &log.new(o!("component" => "dropshot_external")),
         )
@@ -78,7 +79,7 @@ impl Server {
         let c2 = Arc::clone(&apictx);
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.dropshot_internal,
-            controller_internal_api(),
+            internal_api(),
             c2,
             &log.new(o!("component" => "dropshot_internal")),
         )

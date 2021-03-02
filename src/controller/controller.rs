@@ -29,10 +29,10 @@ use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
+use crate::controller::datastore::collection_page;
+use crate::controller::datastore::DataStore;
 use crate::controller::saga_interface::OxcSagaContext;
 use crate::controller::sagas;
-use crate::datastore::collection_page;
-use crate::datastore::ControlDataStore;
 use crate::sled_agent;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -89,7 +89,7 @@ pub struct Controller {
     api_rack: Arc<ApiRack>,
 
     /** persistent storage for resources in the control plane */
-    datastore: ControlDataStore,
+    datastore: DataStore,
 
     /**
      * List of sled agents known by this controller.
@@ -131,7 +131,7 @@ impl Controller {
                     time_modified: Utc::now(),
                 },
             }),
-            datastore: ControlDataStore::new_empty(),
+            datastore: DataStore::new_empty(),
             sled_agents: Mutex::new(BTreeMap::new()),
         }
     }
@@ -147,7 +147,7 @@ impl Controller {
         scs.insert(sa.id, sa);
     }
 
-    pub fn datastore(&self) -> &ControlDataStore {
+    pub fn datastore(&self) -> &DataStore {
         &self.datastore
     }
 

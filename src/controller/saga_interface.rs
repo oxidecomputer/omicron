@@ -5,8 +5,8 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiProject;
+use crate::controller::datastore::DataStore;
 use crate::controller::Controller;
-use crate::datastore::ControlDataStore;
 use crate::sled_agent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -47,7 +47,7 @@ impl OxcSagaContext {
         self.controller.sled_allocate().await
     }
 
-    pub fn datastore(&self) -> &ControlDataStore {
+    pub fn datastore(&self) -> &DataStore {
         self.controller.datastore()
     }
 

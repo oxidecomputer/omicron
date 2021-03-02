@@ -25,7 +25,7 @@ type ControllerApiDescription = ApiDescription<Arc<ServerContext>>;
 /**
  * Returns a description of the internal OXC API
  */
-pub fn controller_internal_api() -> ControllerApiDescription {
+pub fn internal_api() -> ControllerApiDescription {
     fn register_endpoints(
         api: &mut ControllerApiDescription,
     ) -> Result<(), String> {
