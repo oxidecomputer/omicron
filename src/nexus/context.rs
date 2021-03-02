@@ -11,7 +11,7 @@ use uuid::Uuid;
  * Shared state available to all API request handlers
  */
 pub struct ServerContext {
-    /** reference to the underlying OXC */
+    /** reference to the underlying nexus */
     pub nexus: Arc<Nexus>,
     /** debug log */
     pub log: Logger,
@@ -20,7 +20,7 @@ pub struct ServerContext {
 impl ServerContext {
     /**
      * Create a new context with the given rack id and log.  This creates the
-     * underlying OXC as well.
+     * underlying nexus as well.
      */
     pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ServerContext> {
         Arc::new(ServerContext {

@@ -55,7 +55,7 @@ pub struct Server {
 
 impl Server {
     /**
-     * Start an Nexus server.
+     * Start a nexus server.
      */
     pub async fn start(
         config: &Config,

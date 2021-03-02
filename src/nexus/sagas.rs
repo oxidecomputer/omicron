@@ -14,7 +14,7 @@ use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
-use crate::nexus::saga_interface::OxcSagaContext;
+use crate::nexus::saga_interface::SagaContext;
 use chrono::Utc;
 use core::future::ready;
 use serde::Deserialize;
@@ -34,13 +34,13 @@ pub struct ParamsInstanceCreate {
     pub create_params: ApiInstanceCreateParams,
 }
 
-pub struct OxcSagaInstanceCreate;
-impl SagaType for OxcSagaInstanceCreate {
+pub struct SagaInstanceCreate;
+impl SagaType for SagaInstanceCreate {
     type SagaParamsType = Arc<ParamsInstanceCreate>;
-    type ExecContextType = Arc<OxcSagaContext>;
+    type ExecContextType = Arc<SagaContext>;
 }
 
-pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
+pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
@@ -54,9 +54,9 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         "AllocServer",
         // TODO-robustness This still needs an undo action, and we should really
         // keep track of resources and reservations, etc.  See the comment on
-        // OxcSagaContext::alloc_server()
+        // SagaContext::alloc_server()
         new_action_noop_undo(
-            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
+            move |sagactx: ActionContext<SagaInstanceCreate>| {
                 let osagactx = sagactx.user_data().clone();
                 let params = sagactx.saga_params().clone();
                 async move {
@@ -78,7 +78,7 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
         "create_instance_record",
         "CreateInstanceRecord",
         new_action_noop_undo(
-            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
+            move |sagactx: ActionContext<SagaInstanceCreate>| {
                 let osagactx = sagactx.user_data().clone();
                 let params = sagactx.saga_params().clone();
                 let sled_uuid = sagactx.lookup::<Uuid>("server_id");
@@ -123,7 +123,7 @@ pub fn saga_instance_create() -> SagaTemplate<OxcSagaInstanceCreate> {
             /*
              * TODO-correctness is this idempotent?
              */
-            move |sagactx: ActionContext<OxcSagaInstanceCreate>| {
+            move |sagactx: ActionContext<SagaInstanceCreate>| {
                 let osagactx = sagactx.user_data().clone();
                 let runtime_params = ApiInstanceRuntimeStateRequested {
                     run_state: ApiInstanceState::Running,

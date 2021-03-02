@@ -1,5 +1,5 @@
 /*!
- * Interface for making API requests to the Oxide control plane at large (OXC)
+ * Interface for making API requests to the Oxide control plane at large
  * from within the control plane
  *
  * This should be replaced with a client generated from the OpenAPI spec
@@ -17,7 +17,7 @@ use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-/** Client for an OXC instance */
+/** Client for a nexus instance */
 pub struct Client {
     /** underlying HTTP client */
     client: HttpClient,
@@ -25,7 +25,7 @@ pub struct Client {
 
 impl Client {
     /**
-     * Create a new OXC client to make requests to the OXC instance at
+     * Create a new nexus client to make requests to the nexus instance at
      * `server_addr`.
      */
     pub fn new(server_addr: SocketAddr, log: Logger) -> Client {

@@ -23,7 +23,7 @@ use uuid::Uuid;
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /**
- * Returns a description of the internal OXC API
+ * Returns a description of the internal nexus API
  */
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {

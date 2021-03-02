@@ -1,5 +1,5 @@
 /*!
- * Interfaces for parsing configuration files and working with OXC server
+ * Interfaces for parsing configuration files and working with nexus server
  * configuration
  */
 
@@ -11,7 +11,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 /**
- * Configuration for an OXC server
+ * Configuration for a nexus server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {

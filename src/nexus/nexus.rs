@@ -30,7 +30,7 @@ use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::nexus::datastore::collection_page;
 use crate::nexus::datastore::DataStore;
-use crate::nexus::saga_interface::OxcSagaContext;
+use crate::nexus::saga_interface::SagaContext;
 use crate::nexus::sagas;
 use crate::sled_agent;
 use async_trait::async_trait;
@@ -166,11 +166,11 @@ impl Nexus {
     ) -> Result<SagaResultOk, ApiError>
     where
         S: SagaType<
-            ExecContextType = Arc<OxcSagaContext>,
+            ExecContextType = Arc<SagaContext>,
             SagaParamsType = Arc<P>,
         >,
     {
-        let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
+        let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
         let saga_exec = SagaExecutor::new(
             &saga_id,
@@ -380,7 +380,7 @@ impl Nexus {
 
     /*
      * TODO-design This interface should not exist.  See
-     * OxcSagaContext::alloc_server().
+     * SagaContext::alloc_server().
      */
     pub async fn sled_allocate(&self) -> Result<Uuid, ApiError> {
         let sleds = self.sled_agents.lock().await;

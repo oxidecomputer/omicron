@@ -16,13 +16,13 @@ use uuid::Uuid;
  * very analogous, but maybe there's utility in having separate views for the
  * HTTP server and sagas.
  */
-pub struct OxcSagaContext {
+pub struct SagaContext {
     nexus: Arc<Nexus>,
 }
 
-impl OxcSagaContext {
-    pub fn new(nexus: Arc<Nexus>) -> OxcSagaContext {
-        OxcSagaContext { nexus }
+impl SagaContext {
+    pub fn new(nexus: Arc<Nexus>) -> SagaContext {
+        SagaContext { nexus }
     }
 
     /*
