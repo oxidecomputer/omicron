@@ -3,7 +3,7 @@
  */
 
 /*
- * TODO see the TODO for oxide-nexus.
+ * TODO see the TODO for nexus.
  */
 
 use dropshot::ConfigDropshot;

@@ -125,7 +125,7 @@ impl Server {
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config
         .log
-        .to_logger("oxide-nexus")
+        .to_logger("nexus")
         .map_err(|message| format!("initializing logger: {}", message))?;
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;

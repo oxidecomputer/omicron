@@ -23,7 +23,7 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "oxide-nexus",
+    name = "nexus",
     about = "See README.adoc for more information"
 )]
 struct Args {
