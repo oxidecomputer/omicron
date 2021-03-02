@@ -22,10 +22,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-#[structopt(
-    name = "nexus",
-    about = "See README.adoc for more information"
-)]
+#[structopt(name = "nexus", about = "See README.adoc for more information")]
 struct Args {
     #[structopt(
         short = "O",

@@ -1003,7 +1003,7 @@ pub struct ApiSledView {
  */
 
 /**
- * Sent by a sled agent on startup to nexus to request further instruction
+ * Sent by a sled agent on startup to the nexus to request further instruction
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ApiSledAgentStartupInfo {
@@ -1017,8 +1017,8 @@ pub struct ApiSledAgentStartupInfo {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /**
-     * Last runtime state of the Instance known to nexus (used if the agent has
-     * never seen this Instance before).
+     * Last runtime state of the Instance known to the nexus (used if the agent
+     * has never seen this Instance before).
      */
     pub initial_runtime: ApiInstanceRuntimeState,
     /** requested runtime state of the Instance */
@@ -1026,13 +1026,13 @@ pub struct InstanceEnsureBody {
 }
 
 /**
- * Sent from nexus to a sled agent to establish the runtime state of a Disk
+ * Sent from the nexus to a sled agent to establish the runtime state of a Disk
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskEnsureBody {
     /**
-     * Last runtime state of the Disk known to nexus (used if the agent has never
-     * seen this Disk before).
+     * Last runtime state of the Disk known to the nexus (used if the agent has
+     * never seen this Disk before).
      */
     pub initial_runtime: ApiDiskRuntimeState,
     /** requested runtime state of the Disk */

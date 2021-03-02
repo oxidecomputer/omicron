@@ -1,5 +1,5 @@
 /*!
- * Interfaces for parsing configuration files and working with nexus server
+ * Interfaces for parsing configuration files and working with a nexus server
  * configuration
  */
 

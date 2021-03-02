@@ -33,7 +33,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /**
- * Data storage interface exposed to the rest of nexus
+ * Data storage interface exposed to the rest of the nexus
  *
  * All the data is stored in the `data` field, protected by one big lock.
  */
