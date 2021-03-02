@@ -5,8 +5,8 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiProject;
-use crate::controller::datastore::DataStore;
-use crate::controller::Controller;
+use crate::nexus::datastore::DataStore;
+use crate::nexus::Nexus;
 use crate::sled_agent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -17,12 +17,12 @@ use uuid::Uuid;
  * HTTP server and sagas.
  */
 pub struct OxcSagaContext {
-    controller: Arc<Controller>,
+    nexus: Arc<Nexus>,
 }
 
 impl OxcSagaContext {
-    pub fn new(controller: Arc<Controller>) -> OxcSagaContext {
-        OxcSagaContext { controller }
+    pub fn new(nexus: Arc<Nexus>) -> OxcSagaContext {
+        OxcSagaContext { nexus }
     }
 
     /*
@@ -33,7 +33,7 @@ impl OxcSagaContext {
      * write to the database, which we already have.
      *
      * For now, sleds aren't in the database.  We rely on the fact that the
-     * controller knows what sleds exist.
+     * nexus knows what sleds exist.
      *
      * Note: the parameters appear here (unused) to make sure callers make sure
      * to have them available.  They're not used now, but they will be in a real
@@ -44,17 +44,17 @@ impl OxcSagaContext {
         _project: &ApiProject,
         _params: &ApiInstanceCreateParams,
     ) -> Result<Uuid, ApiError> {
-        self.controller.sled_allocate().await
+        self.nexus.sled_allocate().await
     }
 
     pub fn datastore(&self) -> &DataStore {
-        self.controller.datastore()
+        self.nexus.datastore()
     }
 
     pub async fn sled_client(
         &self,
         sled_id: &Uuid,
     ) -> Result<Arc<sled_agent::Client>, ApiError> {
-        self.controller.sled_client(sled_id).await
+        self.nexus.sled_client(sled_id).await
     }
 }

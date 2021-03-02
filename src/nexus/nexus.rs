@@ -1,6 +1,5 @@
 /*!
- * Heart of OXC, the Oxide Controller, which operates much of the control plane
- * in an Oxide fleet
+ * The Oxide Nexus, which operates much of the control plane in an Oxide fleet
  */
 
 use crate::api_error::ApiError;
@@ -29,10 +28,10 @@ use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
-use crate::controller::datastore::collection_page;
-use crate::controller::datastore::DataStore;
-use crate::controller::saga_interface::OxcSagaContext;
-use crate::controller::sagas;
+use crate::nexus::datastore::collection_page;
+use crate::nexus::datastore::DataStore;
+use crate::nexus::saga_interface::OxcSagaContext;
+use crate::nexus::sagas;
 use crate::sled_agent;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -52,7 +51,7 @@ use steno::SagaType;
 use uuid::Uuid;
 
 /**
- * Exposes additional [`Controller`] interfaces for use by the test suite
+ * Exposes additional [`Nexus`] interfaces for use by the test suite
  */
 #[async_trait]
 pub trait TestInterfaces {
@@ -76,9 +75,9 @@ pub trait TestInterfaces {
 }
 
 /**
- * (OXC) Manages an Oxide fleet -- the heart of the control plane
+ * Manages an Oxide fleet -- the heart of the control plane
  */
-pub struct Controller {
+pub struct Nexus {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
@@ -92,7 +91,7 @@ pub struct Controller {
     datastore: DataStore,
 
     /**
-     * List of sled agents known by this controller.
+     * List of sled agents known by this nexus.
      * TODO This ought to have some representation in the data store as well so
      * that we don't simply forget about sleds that aren't currently up.  We'll
      * need to think about the interface between this program and the sleds and
@@ -110,16 +109,16 @@ pub struct Controller {
  * TODO update and delete need to accommodate both with-etag and don't-care
  * TODO audit logging ought to be part of this structure and its functions
  */
-impl Controller {
+impl Nexus {
     /**
-     * Create a new OXC instance for the given rack id `id`
+     * Create a new Nexus instance for the given rack id `id`
      *
      * The state of the system is maintained in memory, so we always start from
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger) -> Controller {
-        Controller {
+    pub fn new_with_id(id: &Uuid, log: Logger) -> Nexus {
+        Nexus {
             id: *id,
             log,
             api_rack: Arc::new(ApiRack {
@@ -1029,8 +1028,8 @@ impl Controller {
     }
 
     pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
-        let controllers = self.sled_agents.lock().await;
-        let sa = controllers.get(sled_id).ok_or_else(|| {
+        let nexuses = self.sled_agents.lock().await;
+        let sa = nexuses.get(sled_id).ok_or_else(|| {
             ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)
         })?;
 
@@ -1166,7 +1165,7 @@ impl Controller {
 }
 
 #[async_trait]
-impl TestInterfaces for Controller {
+impl TestInterfaces for Nexus {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,

@@ -1,7 +1,7 @@
 /*!
  * Shared state used by API request handlers
  */
-use super::Controller;
+use super::Nexus;
 
 use slog::Logger;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use uuid::Uuid;
  */
 pub struct ServerContext {
     /** reference to the underlying OXC */
-    pub controller: Arc<Controller>,
+    pub nexus: Arc<Nexus>,
     /** debug log */
     pub log: Logger,
 }
@@ -24,9 +24,9 @@ impl ServerContext {
      */
     pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ServerContext> {
         Arc::new(ServerContext {
-            controller: Arc::new(Controller::new_with_id(
+            nexus: Arc::new(Nexus::new_with_id(
                 rack_id,
-                log.new(o!("component" => "controller")),
+                log.new(o!("component" => "nexus")),
             )),
             log,
         })

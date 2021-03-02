@@ -39,7 +39,7 @@ pub struct Config {
     /** how to simulate asynchronous Instance and Disk transitions */
     pub sim_mode: SimMode,
     /** IP address and TCP port for the OXC instance to register with */
-    pub controller_address: SocketAddr,
+    pub nexus_address: SocketAddr,
     /** configuration for the sled agent dropshot server */
     pub dropshot: ConfigDropshot,
     /** configuration for the sled agent debug log */

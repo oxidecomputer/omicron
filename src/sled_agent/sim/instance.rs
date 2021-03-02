@@ -8,7 +8,7 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
-use crate::controller;
+use crate::nexus;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
@@ -223,12 +223,12 @@ impl Simulatable for SimInstance {
     }
 
     async fn notify(
-        csc: &Arc<controller::Client>,
+        csc: &Arc<nexus::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {
         /*
-         * Notify the controller that the instance state has changed.  The
+         * Notify the nexus that the instance state has changed.  The
          * sled agent is authoritative for the runtime state, and we use a
          * generation number here so that calls processed out of order do not
          * settle on the wrong value.

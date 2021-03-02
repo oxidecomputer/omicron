@@ -6,7 +6,7 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
-use crate::controller;
+use crate::nexus;
 use crate::sled_agent::sim::simulatable::Simulatable;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -98,7 +98,7 @@ impl Simulatable for SimDisk {
              * If we're currently attaching, it's only legal to try to attach to
              * the same thing (in which case it's a noop).
              * TODO-cleanup would it be more consistent with our intended
-             * interface (which is to let the controller just say what it wants
+             * interface (which is to let the nexus just say what it wants
              * and have us do the work) to have this work and go through
              * detaching first?
              */
@@ -218,7 +218,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        csc: &Arc<controller::Client>,
+        csc: &Arc<nexus::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

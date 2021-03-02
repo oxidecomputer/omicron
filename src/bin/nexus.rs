@@ -1,5 +1,5 @@
 /*!
- * Executable program to run the Oxide Controller (OXC)
+ * Executable program to run the Oxide Nexus.
  */
 
 /*
@@ -15,15 +15,15 @@
 
 use oxide_api_prototype::cmd::fatal;
 use oxide_api_prototype::cmd::CmdError;
-use oxide_api_prototype::controller::run_openapi_external;
-use oxide_api_prototype::controller::run_server;
-use oxide_api_prototype::controller::Config;
+use oxide_api_prototype::nexus::run_openapi_external;
+use oxide_api_prototype::nexus::run_server;
+use oxide_api_prototype::nexus::Config;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "oxide-controller",
+    name = "oxide-nexus",
     about = "See README.adoc for more information"
 )]
 struct Args {

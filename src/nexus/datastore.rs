@@ -633,7 +633,7 @@ impl DataStore {
  */
 /*
  * TODO-cleanup this is only public because we haven't built Servers into the
- * datastore yet so the controller needs this interface.
+ * datastore yet so the nexus needs this interface.
  */
 pub fn collection_page<KeyType, ValueType>(
     search_tree: &BTreeMap<KeyType, Arc<ValueType>>,

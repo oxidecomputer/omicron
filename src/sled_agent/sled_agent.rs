@@ -9,7 +9,7 @@ use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskStateRequested;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
-use crate::controller;
+use crate::nexus;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,7 +37,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /*
-     * TODO-cleanup should this instantiate the controller::Client it needs?
+     * TODO-cleanup should this instantiate the nexus::Client it needs?
      * Should it take a Config object instead of separate id, sim_mode, etc?
      */
     /** Constructs a simulated SledAgent with the given uuid. */
@@ -45,7 +45,7 @@ impl SledAgent {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: Arc<controller::Client>,
+        ctlsc: Arc<nexus::Client>,
     ) -> SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 

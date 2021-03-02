@@ -8,7 +8,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use oxide_api_prototype::api_model::ApiIdentityMetadata;
-use oxide_api_prototype::controller;
+use oxide_api_prototype::nexus;
 use oxide_api_prototype::sled_agent;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -21,7 +21,7 @@ const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub server: controller::Server,
+    pub server: nexus::Server,
     pub logctx: LogContext,
     sled_agent: sled_agent::Server,
 }
@@ -47,14 +47,13 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * usefully configured (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = controller::Config::from_file(config_file_path)
+    let config = nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let server = controller::Server::start(&config, &rack_id, &logctx.log)
-        .await
-        .unwrap();
+    let server =
+        nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),
         logctx.log.new(o!("component" => "external client test context")),
@@ -88,13 +87,13 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
 
 pub async fn start_sled_agent(
     log: Logger,
-    controller_address: SocketAddr,
+    nexus_address: SocketAddr,
     id: Uuid,
 ) -> Result<sled_agent::Server, String> {
     let config = sled_agent::Config {
         id,
         sim_mode: sled_agent::SimMode::Explicit,
-        controller_address,
+        nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
             ..Default::default()

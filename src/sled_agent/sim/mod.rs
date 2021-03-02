@@ -9,7 +9,7 @@ mod simulatable;
 use super::config::SimMode;
 
 use crate::api_error::ApiError;
-use crate::controller;
+use crate::nexus;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
@@ -221,8 +221,8 @@ impl<S: Simulatable> SimObject<S> {
  * instances and disks.
  */
 pub struct SimCollection<S: Simulatable> {
-    /** handle to the controller API, used to notify about async transitions */
-    ctlsc: Arc<controller::Client>,
+    /** handle to the nexus API, used to notify about async transitions */
+    ctlsc: Arc<nexus::Client>,
     /** logger for this collection */
     log: Logger,
     /** simulation mode: automatic (timer-based) or explicit (using an API) */
@@ -234,7 +234,7 @@ pub struct SimCollection<S: Simulatable> {
 impl<S: Simulatable + 'static> SimCollection<S> {
     /** Returns a new collection of simulated objects. */
     pub fn new(
-        ctlsc: Arc<controller::Client>,
+        ctlsc: Arc<nexus::Client>,
         log: Logger,
         sim_mode: SimMode,
     ) -> SimCollection<S> {
@@ -277,7 +277,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
              *
              * We do as little as possible with the lock held.  In particular,
              * we want to finish this work before calling out to notify the
-             * controller.
+             * nexus.
              */
             let mut objects = self.objects.lock().await;
             let mut object = objects.remove(&id).unwrap();
@@ -294,7 +294,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         };
 
         /*
-         * Notify the controller that the object's state has changed.
+         * Notify the nexus that the object's state has changed.
          * TODO-robustness: If this fails, we need to put it on some list of
          * updates to retry later.
          */
@@ -330,7 +330,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
      * For example, if an Instance is "stopped", and the requested state is
      * "running", the returned state will be "starting".  Subsequent
      * asynchronous state transitions are reported via the notify() functions on
-     * the `controller::Client` object.
+     * the `nexus::Client` object.
      */
     pub async fn sim_ensure(
         self: &Arc<Self>,

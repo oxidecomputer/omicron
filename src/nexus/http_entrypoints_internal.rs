@@ -20,22 +20,20 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-type ControllerApiDescription = ApiDescription<Arc<ServerContext>>;
+type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /**
  * Returns a description of the internal OXC API
  */
-pub fn internal_api() -> ControllerApiDescription {
-    fn register_endpoints(
-        api: &mut ControllerApiDescription,
-    ) -> Result<(), String> {
+pub fn internal_api() -> NexusApiDescription {
+    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         Ok(())
     }
 
-    let mut api = ControllerApiDescription::new();
+    let mut api = NexusApiDescription::new();
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
@@ -63,7 +61,7 @@ async fn cpapi_sled_agents_post(
     sled_info: TypedBody<ApiSledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let controller = &apictx.controller;
+    let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let si = sled_info.into_inner();
     let sled_id = &path.sled_id;
@@ -71,7 +69,7 @@ async fn cpapi_sled_agents_post(
         apictx.log.new(o!("SledAgent" => sled_id.clone().to_string()));
     let client =
         Arc::new(sled_agent::Client::new(&sled_id, si.sa_address, client_log));
-    controller.upsert_sled_agent(client).await;
+    nexus.upsert_sled_agent(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -96,10 +94,10 @@ async fn cpapi_instances_put(
     new_runtime_state: TypedBody<ApiInstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let controller = &apictx.controller;
+    let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    controller.notify_instance_updated(&path.instance_id, &new_state).await?;
+    nexus.notify_instance_updated(&path.instance_id, &new_state).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -124,9 +122,9 @@ async fn cpapi_disks_put(
     new_runtime_state: TypedBody<ApiDiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let controller = &apictx.controller;
+    let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    controller.notify_disk_updated(&path.disk_id, &new_state).await?;
+    nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
     Ok(HttpResponseUpdatedNoContent())
 }

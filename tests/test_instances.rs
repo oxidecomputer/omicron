@@ -13,8 +13,8 @@ use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
-use oxide_api_prototype::controller::Controller;
-use oxide_api_prototype::controller::TestInterfaces as _;
+use oxide_api_prototype::nexus::Nexus;
+use oxide_api_prototype::nexus::TestInterfaces as _;
 use oxide_api_prototype::sled_agent::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -38,7 +38,7 @@ async fn test_instances() {
     let cptestctx = test_setup("test_instances").await;
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
-    let controller = &apictx.controller;
+    let nexus = &apictx.nexus;
 
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
@@ -128,7 +128,7 @@ async fn test_instances() {
     /*
      * Now, simulate completion of instance boot and check the state reported.
      */
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
@@ -161,7 +161,7 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
@@ -170,7 +170,7 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
@@ -191,7 +191,7 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
@@ -245,7 +245,7 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
     assert!(
@@ -254,7 +254,7 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
     assert!(
@@ -285,7 +285,7 @@ async fn test_instances() {
         .await;
     assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
-    instance_simulate(controller, &instance.identity.id).await;
+    instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
     assert!(
@@ -475,7 +475,7 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
  * instance, and then tell it to finish simulating whatever async transition is
  * going on.
  */
-async fn instance_simulate(controller: &Arc<Controller>, id: &Uuid) {
-    let sa = controller.instance_sled_by_id(id).await.unwrap();
+async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+    let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(id.clone()).await;
 }

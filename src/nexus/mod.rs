@@ -1,23 +1,23 @@
 /*!
- * Library interface to the Oxide Controller (OXC)
+ * Library interface to the Oxide Nexus.
  */
 
 mod client;
 mod config;
 mod context;
-#[allow(clippy::module_inception)]
-mod controller;
 mod datastore;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
+#[allow(clippy::module_inception)]
+mod nexus;
 mod saga_interface;
 mod sagas;
 
 pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
-pub use controller::Controller;
-pub use controller::TestInterfaces;
+pub use nexus::Nexus;
+pub use nexus::TestInterfaces;
 
 use http_entrypoints_external::external_api;
 use http_entrypoints_internal::internal_api;
@@ -41,8 +41,8 @@ pub fn run_openapi_external() -> Result<(), String> {
 }
 
 /**
- * Packages up an [`Controller`], running both external and internal HTTP
- * API servers wired up to the controller
+ * Packages up a [`Nexus`], running both external and internal HTTP
+ * API servers wired up to the nexus
  */
 pub struct Server {
     /** shared state used by API request handlers */
@@ -55,14 +55,14 @@ pub struct Server {
 
 impl Server {
     /**
-     * Start an Controller server.
+     * Start an Nexus server.
      */
     pub async fn start(
         config: &Config,
         rack_id: &Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
-        info!(log, "setting up controller server");
+        info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let apictx = ServerContext::new(rack_id, ctxlog);
@@ -125,7 +125,7 @@ impl Server {
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config
         .log
-        .to_logger("oxide-controller")
+        .to_logger("oxide-nexus")
         .map_err(|message| format!("initializing logger: {}", message))?;
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;

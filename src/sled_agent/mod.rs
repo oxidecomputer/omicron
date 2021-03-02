@@ -16,7 +16,7 @@ pub use config::SimMode;
 
 use crate::api_model::ApiSledAgentStartupInfo;
 use crate::backoff::{internal_service_policy, retry_notify, BackoffError};
-use crate::controller;
+use crate::nexus;
 use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
@@ -42,11 +42,9 @@ impl Server {
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
-        let client_log = log.new(o!("component" => "controller::Client"));
-        let controller_client = Arc::new(controller::Client::new(
-            config.controller_address,
-            client_log,
-        ));
+        let client_log = log.new(o!("component" => "nexus::Client"));
+        let nexus_client =
+            Arc::new(nexus::Client::new(config.nexus_address, client_log));
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
@@ -56,7 +54,7 @@ impl Server {
             &config.id,
             config.sim_mode,
             sa_log,
-            Arc::clone(&controller_client),
+            Arc::clone(&nexus_client),
         ));
 
         let sa = Arc::clone(&sled_agent);
@@ -76,12 +74,12 @@ impl Server {
          * backoff.
          *
          * TODO-robustness if this returns a 400 error, we probably want to
-         * return a permanent error from the `notify_controller` closure.
+         * return a permanent error from the `notify_nexus` closure.
          */
         let sa_address = http_server.local_addr();
-        let notify_controller = || async {
-            debug!(log, "contacting server controller");
-            controller_client
+        let notify_nexus = || async {
+            debug!(log, "contacting server nexus");
+            nexus_client
                 .notify_sled_agent_online(
                     config.id,
                     ApiSledAgentStartupInfo { sa_address },
@@ -90,18 +88,16 @@ impl Server {
                 .map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {
-            warn!(log, "failed to contact controller, will retry in {:?}", delay;
+            warn!(log, "failed to contact nexus, will retry in {:?}", delay;
                 "error" => ?error);
         };
         retry_notify(
             internal_service_policy(),
-            notify_controller,
+            notify_nexus,
             log_notification_failure,
         )
         .await
-        .expect(
-            "Expected an infinite retry loop contacting the Oxide controller",
-        );
+        .expect("Expected an infinite retry loop contacting the Oxide nexus");
         Ok(Server { sled_agent, http_server })
     }
 
