@@ -63,7 +63,7 @@ impl BootstrapAgent {
     ///
     /// - TODO: Communicates with other bootstrap services to establish
     /// a trust quorum.
-    /// - Verifies, unpacks, and launches the sled agent and oxide controller.
+    /// - Verifies, unpacks, and launches the sled agent and Nexus.
     pub async fn initialize(
         &self,
         other_agents: Vec<SocketAddr>,
@@ -92,8 +92,8 @@ impl BootstrapAgent {
             agent.request_share(vec![]).await?;
         }
 
-        let tar_source = Path::new("/opt/oxide/oxcp");
-        let destination = Path::new("/opt/oxide/oxcp");
+        let tar_source = Path::new("/opt/oxide");
+        let destination = Path::new("/opt/oxide");
 
         // TODO-correctness: Validation should come from ROT, not local file.
         let digests: HashMap<String, Vec<u8>> = toml::from_str(
@@ -102,14 +102,14 @@ impl BootstrapAgent {
 
         self.launch(&digests, &tar_source, &destination, "sled_agent")?;
 
-        // TODO-correctness: The Oxide Controller may not be enabled on all racks.
+        // TODO-correctness: Nexus may not be enabled on all racks.
         // Some decision-making logic should be used here to make this
         // conditional.
         //
-        // Presumably, we'd try to contact an OXCP instance elsewhere
+        // Presumably, we'd try to contact a Nexus elsewhere
         // on the rack, or use the unlocked local storage to remember
         // a decision from the previous boot.
-        self.launch(&digests, &tar_source, &destination, "oxide_controller")
+        self.launch(&digests, &tar_source, &destination, "nexus")
     }
 
     // Verify, unpack, and enable a service.
@@ -188,7 +188,7 @@ impl BootstrapAgent {
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "Enabling service: {}", service.as_ref());
         let manifest = format!(
-            "/opt/oxide/oxcp/{}/smf/{}/manifest.xml",
+            "/opt/oxide/{}/smf/{}/manifest.xml",
             service.as_ref(),
             service.as_ref()
         );

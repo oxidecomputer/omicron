@@ -315,19 +315,19 @@ in a format which lets them be transferred to a Helios machine.
 [source,text]
 ----
 $ cargo build
-$ cargo run --bin=oxcp_package
+$ cargo run --bin=omicron_package
 ...
 # Your ./out directory should now be populated.
 ----
 
 The manifests are currently hardcoded to expect installation within the
-`/opt/oxide/oxcp` directory. We can copy them to their expected location with
+`/opt/oxide` directory. We can copy them to their expected location with
 the following:
 
 [source,text]
 ----
-$ mkdir -p /opt/oxide/oxcp
-$ cp -r ./out/* /opt/oxide/oxcp
+$ mkdir -p /opt/oxide
+$ cp -r ./out/* /opt/oxide
 ----
 
 [NOTE]
@@ -344,8 +344,8 @@ This should unpack and initialize all other services.
 
 [source,text]
 ----
-$ tar -xvzf /opt/oxide/oxcp/bootstrap_agent.tar -C /opt/oxide/oxcp/bootstrap_agent
-$ svccfg import -V /opt/oxide/oxcp/bootstrap_agent/smf/bootstrap_agent/manifest.xml
+$ tar -xvzf /opt/oxide/bootstrap_agent.tar -C /opt/oxide/bootstrap_agent
+$ svccfg import -V /opt/oxide/bootstrap_agent/smf/bootstrap_agent/manifest.xml
 ----
 
 You can verify which services are running with the following commands:

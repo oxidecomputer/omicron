@@ -54,7 +54,7 @@ fn main() -> Result<()> {
 
     let packages = &[
         &Package::new("bootstrap_agent"),
-        &Package::new("oxide_controller"),
+        &Package::new("nexus"),
         &Package::new("sled_agent"),
     ];
 

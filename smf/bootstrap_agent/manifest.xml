@@ -30,7 +30,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/oxcp/bootstrap_agent/bootstrap_agent %{config/server_id} %{config/server_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/bootstrap_agent/bootstrap_agent %{config/server_id} %{config/server_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
