@@ -83,7 +83,7 @@ subprocess = "0.2.4"
 name = "bootstrap_agent"
 doc = false
 [[bin]]
-name = "oxide_controller"
+name = "nexus"
 doc = false
 [[bin]]
 name = "sled_agent"

@@ -44,7 +44,7 @@ The code here is still rough, but the following are implemented:
 ** racks: list + get
 ** sleds: list + get
 * architecture:
-** oxide controller (OXC): manages a fleet of Oxide racks
+** nexus: manages a fleet of Oxide racks
 ** sled agent: manages a single compute sled in an Oxide fleet
 ** bootstrap agent: Launches sled agent and OXC.
 * basic server infrastructure: configuration, logging
@@ -64,24 +64,24 @@ The https://github.com/rust-lang/rust-clippy[Clippy Linter] is used to help
 keep the codebase efficient and idiomatic, and can be executed with
 `cargo clippy`.
 
-To **run the system:** there are two executables: the `oxide_controller` (which
+To **run the system:** there are two executables: the `nexus` (which
 is a real prototype backed by an in-memory store; this component manages an
 Oxide fleet), and the `sled_agent` (which is a simulation of the component that
 will manage a single sled).
 
-`oxide_controller` requires a configuration file to run.  You can use
+`nexus` requires a configuration file to run.  You can use
 `examples/config.toml` to start with.  Build and run it like this:
 
 [source,text]
 ----
-$ cargo run --bin=oxide_controller -- examples/config.toml
+$ cargo run --bin=nexus -- examples/config.toml
 ...
 listening: http://127.0.0.1:12220
 ----
 
 `sled_agent` only takes configuration on the command line.  Run it with a uuid
 identifying itself (this would be a uuid for the sled it's managing), an
-IP:port for itself, and the IP:port of `oxide_controller`'s _internal_
+IP:port for itself, and the IP:port of `nexus`'s _internal_
 interface.  Using default config, this might look like this:
 
 [source,text]
@@ -360,7 +360,7 @@ $ tail -f $(svcs -L oxide_controller)
 
 == Configuration reference
 
-`oxide_controller` requires a TOML configuration file.  There's an example in
+`nexus` requires a TOML configuration file.  There's an example in
 `examples/config.toml`:
 
 [source,toml]

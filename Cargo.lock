@@ -182,7 +182,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.4.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#346d0a8efab561b2639f73596f29e9bc2cfdf123"
+source = "git+https://github.com/oxidecomputer/dropshot#fa94fc5ce44abaf1d377c42c037c44d80f88da62"
 dependencies = [
  "async-trait",
  "base64",
@@ -213,7 +213,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.4.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#346d0a8efab561b2639f73596f29e9bc2cfdf123"
+source = "git+https://github.com/oxidecomputer/dropshot#fa94fc5ce44abaf1d377c42c037c44d80f88da62"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -546,9 +546,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.86"
+version = "0.2.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7282d924be3275cec7f6756ff4121987bc6481325397dde6ba3e7802b1a8b1c"
+checksum = "265d751d31d6780a3f956bb5b8022feba2d94eeee5a84ba64f4212eedca42213"
 
 [[package]]
 name = "linked-hash-map"
@@ -661,15 +661,15 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.7.0"
+version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10acf907b94fc1b1a152d08ef97e7759650268cf986bf127f387e602b02c7e5a"
+checksum = "af8b08b04175473088b46763e51ee54da5f9a164bc162f615b91bc179dbf15a3"
 
 [[package]]
 name = "openapiv3"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee9a17eebdd923c4cf74145cd31b2b1d3aa019262c9e8669a843b1d629a9a3c"
+checksum = "e2a8bc246418d720aed4b4361e1df544736d781fd0df3e4e4d1c552510c99633"
 dependencies = [
  "indexmap",
  "serde",
@@ -781,9 +781,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "439697af366c49a6d0a010c56a0d97685bc140ce0d377b13a2ea2aa42d64a827"
+checksum = "0cf491442e4b033ed1c722cb9f0df5fcfcf4de682466c46469c36bc47dc5548a"
 
 [[package]]
 name = "pin-utils"
@@ -1011,9 +1011,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.63"
+version = "1.0.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43535db9747a4ba938c0ce0a98cc631a46ebf943c9e1d604e091df6007620bf6"
+checksum = "799e97dc9fdae36a5c8b8f2cae9ce2ee9fdce2058c57a93e6099d919fd982f79"
 dependencies = [
  "itoa",
  "ryu",

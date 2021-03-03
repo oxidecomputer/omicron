@@ -22,9 +22,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /** Client for a sled agent */
-pub struct SledAgentClient {
+pub struct Client {
     /**
-     * sled agent's unique id (used by callers to track `SledAgentClient`
+     * sled agent's unique id (used by callers to track `Client`
      * objects)
      */
     pub id: Uuid,
@@ -34,17 +34,13 @@ pub struct SledAgentClient {
     client: HttpClient,
 }
 
-impl SledAgentClient {
+impl Client {
     /**
      * Create a new sled agent client to make requests to the sled agent running
      * at `server_addr`.
      */
-    pub fn new(
-        id: &Uuid,
-        server_addr: SocketAddr,
-        log: Logger,
-    ) -> SledAgentClient {
-        SledAgentClient {
+    pub fn new(id: &Uuid, server_addr: SocketAddr, log: Logger) -> Client {
+        Client {
             id: *id,
             service_address: server_addr,
             client: HttpClient::new("sled agent", server_addr, log),
@@ -114,16 +110,16 @@ impl SledAgentClient {
 }
 
 /**
- * Exposes additional [`SledAgentClient`] interfaces for use by the test suite
+ * Exposes additional [`Client`] interfaces for use by the test suite
  */
 #[async_trait]
-pub trait SledAgentTestInterfaces {
+pub trait TestInterfaces {
     async fn instance_finish_transition(&self, id: Uuid);
     async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
-impl SledAgentTestInterfaces for SledAgentClient {
+impl TestInterfaces for Client {
     async fn instance_finish_transition(&self, id: Uuid) {
         let path = format!("/instances/{}/poke", id);
         let body = Body::empty();

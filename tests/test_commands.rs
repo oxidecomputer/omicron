@@ -5,7 +5,7 @@
  */
 
 /*
- * TODO-coverage: test success cases of oxide_controller and sled_agent
+ * TODO-coverage: test success cases of nexus and sled_agent
  */
 
 use expectorate::assert_contents;
@@ -23,8 +23,8 @@ use subprocess::ExitStatus;
 use subprocess::NullFile;
 use subprocess::Redirection;
 
-/** name of the "oxide_controller" executable */
-const CMD_CONTROLLER: &str = env!("CARGO_BIN_EXE_oxide_controller");
+/** name of the "nexus" executable */
+const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
 /** name of the "sled_agent" executable */
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
 /**
@@ -35,8 +35,8 @@ const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
  */
 const TIMEOUT: Duration = Duration::from_millis(10000);
 
-fn path_to_controller() -> PathBuf {
-    path_to_executable(CMD_CONTROLLER)
+fn path_to_nexus() -> PathBuf {
+    path_to_executable(CMD_NEXUS)
 }
 
 fn path_to_sled_agent() -> PathBuf {
@@ -166,12 +166,12 @@ const EXIT_USAGE: u32 = 2;
  */
 
 #[test]
-fn test_controller_no_args() {
-    let exec = Exec::cmd(path_to_controller());
+fn test_nexus_no_args() {
+    let exec = Exec::cmd(path_to_nexus());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_contents("tests/output/cmd-controller-noargs-stdout", &stdout_text);
-    assert_contents("tests/output/cmd-controller-noargs-stderr", &stderr_text);
+    assert_contents("tests/output/cmd-nexus-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-nexus-noargs-stderr", &stderr_text);
 }
 
 #[test]
@@ -184,38 +184,32 @@ fn test_sled_agent_no_args() {
 }
 
 #[test]
-fn test_controller_bad_config() {
-    let exec = Exec::cmd(path_to_controller()).arg("nonexistent");
+fn test_nexus_bad_config() {
+    let exec = Exec::cmd(path_to_nexus()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE);
-    assert_contents(
-        "tests/output/cmd-controller-badconfig-stdout",
-        &stdout_text,
-    );
+    assert_contents("tests/output/cmd-nexus-badconfig-stdout", &stdout_text);
     assert_eq!(
         stderr_text,
-        format!(
-            "oxide_controller: read \"nonexistent\": {}\n",
-            error_for_enoent()
-        )
+        format!("nexus: read \"nonexistent\": {}\n", error_for_enoent())
     );
 }
 
 #[test]
-fn test_controller_invalid_config() {
+fn test_nexus_invalid_config() {
     let config_path = write_config("");
-    let exec = Exec::cmd(path_to_controller()).arg(&config_path);
+    let exec = Exec::cmd(path_to_nexus()).arg(&config_path);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_FAILURE);
     assert_contents(
-        "tests/output/cmd-controller-invalidconfig-stdout",
+        "tests/output/cmd-nexus-invalidconfig-stdout",
         &stdout_text,
     );
     assert_eq!(
         stderr_text,
         format!(
-            "oxide_controller: parse \"{}\": missing field \
+            "nexus: parse \"{}\": missing field \
              `dropshot_external`\n",
             config_path.display()
         ),
@@ -223,7 +217,7 @@ fn test_controller_invalid_config() {
 }
 
 #[test]
-fn test_controller_openapi() {
+fn test_nexus_openapi() {
     /*
      * This is a little goofy: we need a config file for the program.
      * (Arguably, --openapi shouldn't require a config file, but it's
@@ -235,12 +229,11 @@ fn test_controller_openapi() {
      */
     let config = include_str!("../examples/config.toml");
     let config_path = write_config(config);
-    let exec =
-        Exec::cmd(path_to_controller()).arg(&config_path).arg("--openapi");
+    let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg("--openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_contents("tests/output/cmd-controller-openapi-stderr", &stderr_text);
+    assert_contents("tests/output/cmd-nexus-openapi-stderr", &stderr_text);
 
     /*
      * Make sure the result parses as a valid OpenAPI spec and sanity-check a

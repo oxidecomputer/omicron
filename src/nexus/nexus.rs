@@ -1,6 +1,5 @@
 /*!
- * Heart of OXC, the Oxide Controller, which operates much of the control plane
- * in an Oxide fleet
+ * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
 use crate::api_error::ApiError;
@@ -29,11 +28,11 @@ use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
-use crate::datastore::collection_page;
-use crate::datastore::ControlDataStore;
-use crate::oxide_controller::saga_interface::OxcSagaContext;
-use crate::oxide_controller::sagas;
-use crate::SledAgentClient;
+use crate::nexus::datastore::collection_page;
+use crate::nexus::datastore::DataStore;
+use crate::nexus::saga_interface::SagaContext;
+use crate::nexus::sagas;
+use crate::sled_agent;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
@@ -52,33 +51,33 @@ use steno::SagaType;
 use uuid::Uuid;
 
 /**
- * Exposes additional [`OxideController`] interfaces for use by the test suite
+ * Exposes additional [`Nexus`] interfaces for use by the test suite
  */
 #[async_trait]
-pub trait OxideControllerTestInterfaces {
+pub trait TestInterfaces {
     /**
-     * Returns the SledAgentClient for an Instance from its id.  We may also
+     * Returns the sled_agent::Client for an Instance from its id.  We may also
      * want to split this up into instance_lookup_by_id() and instance_sled(),
      * but after all it's a test suite special to begin with.
      */
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<sled_agent::Client>, ApiError>;
 
     /**
-     * Returns the SledAgentClient for a Disk from its id.
+     * Returns the sled_agent::Client for a Disk from its id.
      */
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<sled_agent::Client>, ApiError>;
 }
 
 /**
- * (OXC) Manages an Oxide fleet -- the heart of the control plane
+ * Manages an Oxide fleet -- the heart of the control plane
  */
-pub struct OxideController {
+pub struct Nexus {
     /** uuid for this rack (TODO should also be in persistent storage) */
     id: Uuid,
 
@@ -89,17 +88,17 @@ pub struct OxideController {
     api_rack: Arc<ApiRack>,
 
     /** persistent storage for resources in the control plane */
-    datastore: ControlDataStore,
+    datastore: DataStore,
 
     /**
-     * List of sled agents known by this controller.
+     * List of sled agents known by this nexus.
      * TODO This ought to have some representation in the data store as well so
      * that we don't simply forget about sleds that aren't currently up.  We'll
      * need to think about the interface between this program and the sleds and
      * how we discover them, both when they initially show up and when we come
      * up.
      */
-    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
+    sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
 }
 
 /*
@@ -110,16 +109,16 @@ pub struct OxideController {
  * TODO update and delete need to accommodate both with-etag and don't-care
  * TODO audit logging ought to be part of this structure and its functions
  */
-impl OxideController {
+impl Nexus {
     /**
-     * Create a new OXC instance for the given rack id `id`
+     * Create a new Nexus instance for the given rack id `id`
      *
      * The state of the system is maintained in memory, so we always start from
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger) -> OxideController {
-        OxideController {
+    pub fn new_with_id(id: &Uuid, log: Logger) -> Nexus {
+        Nexus {
             id: *id,
             log,
             api_rack: Arc::new(ApiRack {
@@ -131,7 +130,7 @@ impl OxideController {
                     time_modified: Utc::now(),
                 },
             }),
-            datastore: ControlDataStore::new_empty(),
+            datastore: DataStore::new_empty(),
             sled_agents: Mutex::new(BTreeMap::new()),
         }
     }
@@ -140,14 +139,14 @@ impl OxideController {
      * TODO-robustness we should have a limit on how many sled agents there can
      * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
+    pub async fn upsert_sled_agent(&self, sa: Arc<sled_agent::Client>) {
         let mut scs = self.sled_agents.lock().await;
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
     }
 
-    pub fn datastore(&self) -> &ControlDataStore {
+    pub fn datastore(&self) -> &DataStore {
         &self.datastore
     }
 
@@ -167,11 +166,11 @@ impl OxideController {
     ) -> Result<SagaResultOk, ApiError>
     where
         S: SagaType<
-            ExecContextType = Arc<OxcSagaContext>,
+            ExecContextType = Arc<SagaContext>,
             SagaParamsType = Arc<P>,
         >,
     {
-        let saga_context = Arc::new(OxcSagaContext::new(Arc::clone(self)));
+        let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
         let saga_exec = SagaExecutor::new(
             &saga_id,
@@ -381,7 +380,7 @@ impl OxideController {
 
     /*
      * TODO-design This interface should not exist.  See
-     * OxcSagaContext::alloc_server().
+     * SagaContext::alloc_server().
      */
     pub async fn sled_allocate(&self) -> Result<Uuid, ApiError> {
         let sleds = self.sled_agents.lock().await;
@@ -553,7 +552,7 @@ impl OxideController {
     pub async fn sled_client(
         &self,
         sled_uuid: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let sled_agents = self.sled_agents.lock().await;
         Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
             let message =
@@ -563,12 +562,12 @@ impl OxideController {
     }
 
     /**
-     * Returns the SledAgentClient for the host where this Instance is running.
+     * Returns the sled_agent::Client for the host where this Instance is running.
      */
     async fn instance_sled(
         &self,
         instance: &Arc<ApiInstance>,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
     }
@@ -668,7 +667,7 @@ impl OxideController {
     async fn instance_set_runtime(
         &self,
         mut instance: Arc<ApiInstance>,
-        sa: Arc<SledAgentClient>,
+        sa: Arc<sled_agent::Client>,
         runtime_params: ApiInstanceRuntimeStateRequested,
     ) -> UpdateResult<ApiInstance> {
         /*
@@ -949,7 +948,7 @@ impl OxideController {
     async fn disk_set_runtime(
         &self,
         mut disk: Arc<ApiDisk>,
-        sa: Arc<SledAgentClient>,
+        sa: Arc<sled_agent::Client>,
         requested: ApiDiskStateRequested,
     ) -> UpdateResult<ApiDisk> {
         /*
@@ -998,7 +997,7 @@ impl OxideController {
      * Sleds.
      * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiSled for each SledAgentClient that
+     * them, etc.  For now, we expose an ApiSled for each sled_agent::Client that
      * we've got.
      */
     pub async fn sleds_list(
@@ -1029,8 +1028,8 @@ impl OxideController {
     }
 
     pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
-        let controllers = self.sled_agents.lock().await;
-        let sa = controllers.get(sled_id).ok_or_else(|| {
+        let nexuses = self.sled_agents.lock().await;
+        let sa = nexuses.get(sled_id).ok_or_else(|| {
             ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)
         })?;
 
@@ -1166,11 +1165,11 @@ impl OxideController {
 }
 
 #[async_trait]
-impl OxideControllerTestInterfaces for OxideController {
+impl TestInterfaces for Nexus {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let instance = self.datastore.instance_lookup_by_id(id).await?;
         self.instance_sled(&instance).await
     }
@@ -1178,7 +1177,7 @@ impl OxideControllerTestInterfaces for OxideController {
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();

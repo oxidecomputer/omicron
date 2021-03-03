@@ -1,6 +1,5 @@
-use super::ControllerClient;
-
 use crate::api_error::ApiError;
+use crate::nexus;
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
@@ -133,11 +132,11 @@ pub trait Simulatable: fmt::Debug {
     fn ready_to_destroy(current: &Self::CurrentState) -> bool;
 
     /**
-     * Notifies the controller (via `csc`) about a new state (`current`) for the
-     * object identified by `id`.
+     * Notifies Nexus (via `csc`) about a new state (`current`) for the object
+     * identified by `id`.
      */
     async fn notify(
-        csc: &Arc<ControllerClient>,
+        csc: &Arc<nexus::Client>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;
