@@ -16,9 +16,9 @@ use oxide_api_prototype::api_model::ApiInstanceView;
 use oxide_api_prototype::api_model::ApiName;
 use oxide_api_prototype::api_model::ApiProjectCreateParams;
 use oxide_api_prototype::api_model::ApiProjectView;
-use oxide_api_prototype::OxideController;
-use oxide_api_prototype::OxideControllerTestInterfaces;
-use oxide_api_prototype::SledAgentTestInterfaces;
+use oxide_api_prototype::nexus::Nexus;
+use oxide_api_prototype::nexus::TestInterfaces as _;
+use oxide_api_prototype::sled_agent::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ async fn test_disks() {
     let cptestctx = test_setup("test_disks").await;
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
-    let controller = &apictx.controller;
+    let nexus = &apictx.nexus;
 
     /* Create a project for testing. */
     let project_name = "springfield-squidport-disks";
@@ -215,7 +215,7 @@ async fn test_disks() {
      * Finish simulation of the attachment and verify the new state, both on the
      * attachment and the disk itself.
      */
-    disk_simulate(controller, &disk.identity.id).await;
+    disk_simulate(nexus, &disk.identity.id).await;
     let attachment: ApiDiskAttachment =
         object_get(&client, &url_instance_disk).await;
     assert_eq!(attachment.instance_name, instance.identity.name);
@@ -362,7 +362,7 @@ async fn test_disks() {
     assert_eq!(disk.state, ApiDiskState::Detaching(instance_id.clone()));
 
     /* Finish the detachment. */
-    disk_simulate(controller, &disk.identity.id).await;
+    disk_simulate(nexus, &disk.identity.id).await;
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detached);
     let error = client
@@ -479,7 +479,7 @@ async fn test_disks() {
     assert_eq!(error.message, "disk is attached");
 
     /* Finish detachment. */
-    disk_simulate(controller, &disk.identity.id).await;
+    disk_simulate(nexus, &disk.identity.id).await;
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, ApiDiskState::Detached);
 
@@ -548,7 +548,7 @@ fn disks_eq(disk1: &ApiDiskView, disk2: &ApiDiskView) {
 /**
  * Simulate completion of an ongoing disk state transition.
  */
-async fn disk_simulate(controller: &Arc<OxideController>, id: &Uuid) {
-    let sa = controller.disk_sled_by_id(id).await.unwrap();
+async fn disk_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+    let sa = nexus.disk_sled_by_id(id).await.unwrap();
     sa.disk_finish_transition(id.clone()).await;
 }

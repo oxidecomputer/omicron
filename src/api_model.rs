@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
- * types for functions in the `OxideController` and `ControlDataStore`.  The
+ * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
  * type argument `T` generally implements `ApiObject`.
  */
 
@@ -1003,7 +1003,7 @@ pub struct ApiSledView {
  */
 
 /**
- * Sent by a sled agent on startup to OXC request further instruction
+ * Sent by a sled agent on startup to Nexus to request further instruction
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ApiSledAgentStartupInfo {
@@ -1012,13 +1012,13 @@ pub struct ApiSledAgentStartupInfo {
 }
 
 /**
- * Sent from OXC to a sled agent to establish the runtime state of an Instance
+ * Sent from Nexus to a sled agent to establish the runtime state of an Instance
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /**
-     * Last runtime state of the Instance known to OXC (used if the agent has
-     * never seen this Instance before).
+     * Last runtime state of the Instance known to Nexus (used if the agent
+     * has never seen this Instance before).
      */
     pub initial_runtime: ApiInstanceRuntimeState,
     /** requested runtime state of the Instance */
@@ -1026,13 +1026,13 @@ pub struct InstanceEnsureBody {
 }
 
 /**
- * Sent from OXC to a sled agent to establish the runtime state of a Disk
+ * Sent from Nexus to a sled agent to establish the runtime state of a Disk
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskEnsureBody {
     /**
-     * Last runtime state of the Disk known to OXC (used if the agent has never
-     * seen this Disk before).
+     * Last runtime state of the Disk known to Nexus (used if the agent has
+     * never seen this Disk before).
      */
     pub initial_runtime: ApiDiskRuntimeState,
     /** requested runtime state of the Disk */

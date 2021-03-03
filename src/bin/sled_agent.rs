@@ -3,17 +3,17 @@
  */
 
 /*
- * TODO see the TODO for oxide-controller.
+ * TODO see the TODO for nexus.
  */
 
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use oxide_api_prototype::fatal;
-use oxide_api_prototype::sa_run_server;
-use oxide_api_prototype::CmdError;
-use oxide_api_prototype::ConfigSledAgent;
-use oxide_api_prototype::SimMode;
+use oxide_api_prototype::cmd::fatal;
+use oxide_api_prototype::cmd::CmdError;
+use oxide_api_prototype::sled_agent::run_server;
+use oxide_api_prototype::sled_agent::Config;
+use oxide_api_prototype::sled_agent::SimMode;
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
@@ -46,8 +46,8 @@ struct Args {
     #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
     sled_agent_addr: SocketAddr,
 
-    #[structopt(name = "CONTROLLER_IP:PORT", parse(try_from_str))]
-    controller_addr: SocketAddr,
+    #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
+    nexus_addr: SocketAddr,
 }
 
 #[tokio::main]
@@ -62,10 +62,10 @@ async fn do_run() -> Result<(), CmdError> {
         CmdError::Usage(format!("parsing arguments: {}", err.message))
     })?;
 
-    let config = ConfigSledAgent {
+    let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
-        controller_address: args.controller_addr,
+        nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr,
             ..Default::default()
@@ -73,5 +73,5 @@ async fn do_run() -> Result<(), CmdError> {
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
     };
 
-    sa_run_server(&config).await.map_err(CmdError::Failure)
+    run_server(&config).await.map_err(CmdError::Failure)
 }

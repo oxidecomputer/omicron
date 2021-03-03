@@ -26,12 +26,12 @@ type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 /**
  * Returns a description of the sled agent API
  */
-pub fn sa_api() -> SledApiDescription {
+pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
-        api.register(scapi_instance_put)?;
-        api.register(scapi_instance_poke_post)?;
-        api.register(scapi_disk_put)?;
-        api.register(scapi_disk_poke_post)?;
+        api.register(instance_put)?;
+        api.register(instance_poke_post)?;
+        api.register(disk_put)?;
+        api.register(disk_poke_post)?;
         Ok(())
     }
 
@@ -54,7 +54,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn scapi_instance_put(
+async fn instance_put(
     rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
@@ -76,7 +76,7 @@ async fn scapi_instance_put(
     method = POST,
     path = "/instances/{instance_id}/poke",
 }]
-async fn scapi_instance_poke_post(
+async fn instance_poke_post(
     rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -98,7 +98,7 @@ struct DiskPathParam {
     method = PUT,
     path = "/disks/{disk_id}",
 }]
-async fn scapi_disk_put(
+async fn disk_put(
     rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
@@ -120,7 +120,7 @@ async fn scapi_disk_put(
     method = POST,
     path = "/disks/{disk_id}/poke",
 }]
-async fn scapi_disk_poke_post(
+async fn disk_poke_post(
     rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
