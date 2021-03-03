@@ -32,14 +32,20 @@
  *   manage resources on the sled.  The implementation here is completely
  *   simulated.
  *   * [`sled_agent::run_server`] is used by the executable binary that you can use to
- *     run a simulated `SledAgent`.
+ *     run a simulated sled agent.
  *   * [`sled_agent::Config`] represents the configuration of a sled agent.
  *   * [`sled_agent::Client`] provides a client interface to the sled agent's API
- *   * [`sled_agent::Server`] provides an interface for starting a Nexus
+ *   * [`sled_agent::Server`] provides an interface for starting a sled_agent
  *     instance.
  *   This implementation will not wind up as part of a production Oxide system,
  *   but the intent is to make it available to developers to test their own
  *   software or to get a feel for working with an Oxide system.
+ * * [`bootstrap_agent`] is the part of the control plane bundled with the
+ *   base OS, responsible for establishing a trust quorum and launching
+ *   the oither parts of the control plane (sled_agent and Nexus).
+ *   * [`bootstrap_agent::Config`] represents the configuration of a bootstrap agent.
+ *   * [`bootstrap_agent::Server`] provides an interface for starting a bootstrap
+ *     instance.
  *
  * There's other common code at the top level, with the most important being:
  *
@@ -66,10 +72,12 @@
 mod api_error;
 pub mod api_model;
 mod backoff;
+pub mod bootstrap_agent;
 pub mod cmd;
 mod http_client;
 mod http_pagination;
 pub mod nexus;
+pub mod packaging;
 pub mod sled_agent;
 mod test_util;
 

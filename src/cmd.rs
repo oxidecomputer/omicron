@@ -6,6 +6,7 @@ use std::env::current_exe;
 use std::process::exit;
 
 /** represents a fatal error in a command-line program */
+#[derive(Debug)]
 pub enum CmdError {
     /** incorrect command-line arguments */
     Usage(String),
