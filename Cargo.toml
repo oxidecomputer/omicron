@@ -86,6 +86,9 @@ doc = false
 name = "nexus"
 doc = false
 [[bin]]
+name = "omicron_package"
+doc = false
+[[bin]]
 name = "sled_agent"
 doc = false
 

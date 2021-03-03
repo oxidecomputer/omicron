@@ -1,5 +1,5 @@
 /*!
- * Utilities for packaging and unpackaging OXCP services.
+ * Utilities for packaging and unpackaging control plane services.
  */
 
 use ring::digest::{Context, Digest, SHA256};

@@ -46,7 +46,7 @@ The code here is still rough, but the following are implemented:
 * architecture:
 ** nexus: manages a fleet of Oxide racks
 ** sled agent: manages a single compute sled in an Oxide fleet
-** bootstrap agent: Launches sled agent and OXC.
+** bootstrap agent: Launches sled agent and Nexus.
 * basic server infrastructure: configuration, logging
 * test coverage for most of the above
 
