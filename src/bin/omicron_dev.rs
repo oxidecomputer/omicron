@@ -83,6 +83,10 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
         "omicron_dev: will run this to start CockroachDB:\n{}",
         db_starter.cmdline()
     );
+    println!(
+        "omicron_dev: temporary directory: {}",
+        db_starter.temp_dir().display()
+    );
 
     let mut db_instance = db_starter.start().await?;
     println!("\nomicron_dev: Child process: pid {}", db_instance.pid());

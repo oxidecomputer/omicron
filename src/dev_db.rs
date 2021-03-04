@@ -163,6 +163,13 @@ impl CockroachStarter {
     }
 
     /**
+     * Returns the path to the temporary directory created for this execution
+     */
+    pub fn temp_dir(&self) -> &Path {
+        self.temp_dir.path()
+    }
+
+    /**
      * Spawns a new process to run the configured command
      *
      * This function waits up to a fixed timeout for CockroachDB to report its
@@ -216,12 +223,19 @@ impl CockroachStarter {
                 // Wait for the entire URL to be written out.
                 Ok(s) if !s.contains('\n') => continue,
                 Ok(listen_url) => {
+                    let listen_url = listen_url.trim_end();
+                    let pg_config: tokio_postgres::config::Config =
+                        listen_url.parse().with_context(|| {
+                            format!("parsing listen URL \"{}\"", listen_url)
+                        })?;
                     return Ok(CockroachInstance {
                         pid,
-                        listen_url,
+                        listen_url: listen_url.to_string(),
+                        pg_config,
+                        temp_dir_path: self.temp_dir.path().to_owned(),
                         temp_dir: Some(self.temp_dir),
                         child_process: Some(child_process),
-                    })
+                    });
                 }
             }
         }
@@ -234,33 +248,19 @@ impl CockroachStarter {
  * You are **required** to invoke [`CockroachInstance::wait_for_shutdown()`] or
  * [`CockroachInstance::cleanup()`] before this object is dropped.
  */
-/*
- * XXX TODO-coverage This was manually tested, but we should add automated test
- * cases for: cockroach explicitly fails to start (i.e., exits while we're
- * waiting for the listen file to be created), we time out waiting for the
- * listen file to be created, and cockroach is killed in the background.  These
- * should verify that the child process is gone and the temporary directory is
- * cleaned up, except for the timeout case.  It would be nice to have an
- * integration test for "omicron_dev db-run" that sends SIGINT to the session
- * and verifies that it exits the way we expect, the database shuts down, and
- * the temporary directory is removed.
- *
- * We should also test that you can run this twice concurrently and get two
- * different databases.
- *
- * It would also be good to have a test that creates a starter but does not
- * start the instance.  That should create the temporary directory, but then
- * remove it.
- */
 pub struct CockroachInstance {
     /// child process id
     pid: u32,
-    /// PostgreSQL URL string to use to connect to CockroachDB as a SQL client
-    listen_url: String, // XXX parse as URL
+    /// Raw listen URL provided by CockroachDB
+    listen_url: String,
+    /// PostgreSQL config to use to connect to CockroachDB as a SQL client
+    pg_config: tokio_postgres::config::Config,
     /// handle to child process, if it hasn't been cleaned up already
     child_process: Option<tokio::process::Child>,
     /// handle to temporary directory, if it hasn't been cleaned up already
     temp_dir: Option<TempDir>,
+    /// path to temporary directory
+    temp_dir_path: PathBuf,
 }
 
 impl CockroachInstance {
@@ -270,11 +270,30 @@ impl CockroachInstance {
     }
 
     /**
-     * Returns the PostgreSQL URL string to use to connect to CockroachDB as a
-     * SQL client
+     * Returns a printable form of the PostgreSQL config provided by
+     * CockroachDB
+     *
+     * This is intended only for printing out.  To actually connect to
+     * PostgreSQL, use [`CockroachInstance::pg_config()`].  (Ideally, that
+     * object would impl a to_url() or the like, but it does not appear to.)
      */
-    pub fn listen_url(&self) -> &String {
+    pub fn listen_url(&self) -> impl fmt::Display + '_ {
         &self.listen_url
+    }
+
+    /**
+     * Returns PostgreSQL client configuration suitable for connecting to the
+     * CockroachDB database
+     */
+    pub fn pg_config(&self) -> &tokio_postgres::config::Config {
+        &self.pg_config
+    }
+
+    /**
+     * Returns the path to the temporary directory created for this execution
+     */
+    pub fn temp_dir(&self) -> &Path {
+        &self.temp_dir_path
     }
 
     /**
@@ -333,15 +352,26 @@ impl Drop for CockroachInstance {
          * kill the child process, wait for it to exit, and then clean up the
          * temporary directory.  However, we don't have an executor here with
          * which to run async/await code.  We could create one here, but it's
-         * not clear how safe or sketchy that would be.  Instead, we require
-         * that the caller has done the cleanup already.
+         * not clear how safe or sketchy that would be.  Instead, we expect that
+         * the caller has done the cleanup already.  This won't always happen,
+         * particularly for ungraceful failures.
          */
         if self.child_process.is_some() || self.temp_dir.is_some() {
-            panic!(
-                "dropped CockroachInstance without cleaning it up first \
+            eprintln!(
+                "WARN: dropped CockroachInstance without cleaning it up first \
                 (there may still be a child process running and a \
                 temporary directory leaked)"
             );
+
+            /* Still, make a best effort. */
+            #[allow(unused_must_use)]
+            if let Some(child_process) = self.child_process.as_mut() {
+                child_process.start_kill();
+            }
+            #[allow(unused_must_use)]
+            if let Some(temp_dir) = self.temp_dir.take() {
+                temp_dir.close();
+            }
         }
     }
 }
@@ -363,4 +393,101 @@ impl Drop for CockroachInstance {
  */
 fn process_exited(child_process: &mut tokio::process::Child) -> bool {
     child_process.try_wait().unwrap().is_some()
+}
+
+/*
+ * These are more integration tests than unit tests.
+ */
+/*
+ * XXX TODO-coverage This was manually tested, but we should add automated test
+ * cases for:
+ * - cockroach explicitly fails to start (i.e., exits while we're waiting for
+ *   the listen file to be created),
+ * - we time out waiting for the listen file to be created, and cockroach is
+ *   killed in the background.
+ * - you can run this twice concurrently and get two different databases.
+ * - create a starter but does not start the instance.  That should create the
+ *   temporary directory, but then remove it.
+ *
+ * These should verify that the child process is gone and the temporary
+ * directory is cleaned up, except for the timeout case.
+ *
+ * It would be nice to have an integration test for "omicron_dev db-run" that
+ * sends SIGINT to the session and verifies that it exits the way we expect, the
+ * database shuts down, and the temporary directory is removed.
+ */
+#[cfg(test)]
+mod test {
+    use super::CockroachStarterBuilder;
+    use tokio::fs;
+
+    #[tokio::test]
+    async fn test_setup_database() {
+        /* Start a database using the default temporary store directory */
+        let builder = CockroachStarterBuilder::new();
+        let starter = builder.build().unwrap();
+        eprintln!("will run: {}", starter.cmdline());
+        let mut database =
+            starter.start().await.expect("failed to start database");
+        let pid = database.pid();
+        eprintln!(
+            "database pid {} listening at: {}",
+            pid,
+            database.listen_url()
+        );
+
+        /*
+         * Just to be clear, the database process should be running and the
+         * temporary directory should exist with the Cockroach "data" directory
+         * in it.
+         */
+        assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, 0) });
+        assert!(fs::metadata(database.temp_dir().join("data"))
+            .await
+            .expect("CockroachDB data directory is missing")
+            .is_dir());
+
+        /* Try to connect to it and run a query. */
+        let conn_task = {
+            let (client, connection) = database
+                .pg_config()
+                .connect(tokio_postgres::NoTls)
+                .await
+                .expect("failed to connect to newly-started database");
+
+            let conn_task = tokio::spawn(async move { connection.await });
+
+            let row = client
+                .query_one("SELECT 12345", &[])
+                .await
+                .expect("basic query failed");
+            assert_eq!(row.len(), 1);
+            assert_eq!(row.get::<'_, _, i64>(0), 12345);
+
+            conn_task
+        };
+
+        /*
+         * With the client dropped, the connection should be shut down.  Wait
+         * for the task we spawned.  Then clean up the server.
+         */
+        conn_task
+            .await
+            .expect("failed to wait for conn task")
+            .expect("connection unexpectedly failed");
+        database.cleanup().await.expect("failed to clean up database");
+
+        /* Check that the database process is no longer running. */
+        assert_eq!(-1, unsafe { libc::kill(pid as libc::pid_t, 0) });
+
+        /* Check that the temporary directory we used has been cleaned up. */
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(database.temp_dir())
+                .await
+                .expect_err("temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
 }
