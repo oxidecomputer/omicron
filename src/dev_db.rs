@@ -401,13 +401,13 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 /*
  * XXX TODO-coverage This was manually tested, but we should add automated test
  * cases for:
+ * - just like the happy-path test, but with an explicitly-provided store
+ *   directory
  * - cockroach explicitly fails to start (i.e., exits while we're waiting for
  *   the listen file to be created),
  * - we time out waiting for the listen file to be created, and cockroach is
  *   killed in the background.
  * - you can run this twice concurrently and get two different databases.
- * - create a starter but does not start the instance.  That should create the
- *   temporary directory, but then remove it.
  *
  * These should verify that the child process is gone and the temporary
  * directory is cleaned up, except for the timeout case.
@@ -484,6 +484,32 @@ mod test {
         assert_eq!(
             libc::ENOENT,
             fs::metadata(database.temp_dir())
+                .await
+                .expect_err("temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_starter_tmpdir() {
+        /*
+         * This test checks that we clean up the temporary directory correctly
+         * when the starter goes out of scope.  This is important to avoid
+         * leaking the directory if there's an error starting the instance, for
+         * example.
+         */
+        let builder = CockroachStarterBuilder::new();
+        let starter = builder.build().unwrap();
+        let directory = starter.temp_dir().to_owned();
+        assert!(fs::metadata(&directory)
+            .await
+            .expect("temporary directory is missing")
+            .is_dir());
+        drop(starter);
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(&directory)
                 .await
                 .expect_err("temporary directory still exists")
                 .raw_os_error()
