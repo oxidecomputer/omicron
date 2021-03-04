@@ -10,12 +10,15 @@ async-trait = "0.1.24"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
-serde_json = "1.0"
 ring = "0.16"
+serde_json = "1.0"
+signal-hook = "0.3"
 smf = "0.1"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.0"
 thiserror = "1.0"
+tokio-postgres = "0.7"
 toml = "0.5.6"
 walkdir = "2.3"
 
@@ -40,6 +43,10 @@ features = [ "chrono", "uuid" ]
 [dependencies.serde]
 version = "1.0"
 features = [ "derive" ]
+
+[dependencies.signal-hook-tokio]
+version = "0.3"
+features = [ "futures-v0_3" ]
 
 [dependencies.slog]
 version = "2.5"
@@ -84,6 +91,9 @@ name = "bootstrap_agent"
 doc = false
 [[bin]]
 name = "nexus"
+doc = false
+[[bin]]
+name = "omicron_dev"
 doc = false
 [[bin]]
 name = "omicron_package"

@@ -28,7 +28,12 @@ jobs:
     - name: Report Clippy version
       run: cargo clippy -- --version
     - name: Run Clippy Lints
-      run: cargo clippy -- -D warnings
+      #
+      # Clippy's style nits are useful, but not worth keeping in CI.  This
+      # override belongs in src/lib.rs, and it is there, but that doesn't
+      # reliably work due to rust-lang/rust-clippy#6610.
+      #
+      run: cargo clippy -- -D warnings -A clippy::style
 
   build-and-test:
     runs-on: ${{ matrix.os }}

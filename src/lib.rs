@@ -60,25 +60,25 @@
  * it's expected that we'll have links to private items in the docs.
  */
 #![allow(private_intra_doc_links)]
-/*
- * TODO(#32): Remove this exception once resolved.
- */
+/* TODO(#32): Remove this exception once resolved. */
 #![allow(clippy::field_reassign_with_default)]
-/*
- * TODO(#40): Remove this exception once resolved.
- */
+/* TODO(#40): Remove this exception once resolved. */
 #![allow(clippy::unnecessary_wraps)]
+/* Clippy's style lints are useful, but not worth running automatically. */
+#![allow(clippy::style)]
 
-mod api_error;
 pub mod api_model;
-mod backoff;
 pub mod bootstrap_agent;
 pub mod cmd;
-mod http_client;
-mod http_pagination;
+pub mod dev_db;
 pub mod nexus;
 pub mod packaging;
 pub mod sled_agent;
+
+mod api_error;
+mod backoff;
+mod http_client;
+mod http_pagination;
 mod test_util;
 
 #[macro_use]
