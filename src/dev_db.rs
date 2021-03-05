@@ -25,6 +25,7 @@ use tempfile::TempDir;
  * implementations for `CockroachStarter` and `CockroachInstance` will ensure
  * that this directory gets cleaned up as long as this program exits normally.
  */
+#[derive(Debug)]
 pub struct CockroachStarterBuilder {
     /// optional value for the --store-dir option
     store_dir: Option<PathBuf>,
@@ -36,10 +37,14 @@ pub struct CockroachStarterBuilder {
 
 impl CockroachStarterBuilder {
     pub fn new() -> CockroachStarterBuilder {
+        CockroachStarterBuilder::new_with_cmd("cockroach")
+    }
+
+    fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder {
             store_dir: None,
-            args: vec![String::from("cockroach")],
-            cmd_builder: tokio::process::Command::new("cockroach"),
+            args: vec![String::from(cmd)],
+            cmd_builder: tokio::process::Command::new(cmd),
         };
 
         /*
@@ -145,6 +150,7 @@ impl CockroachStarterBuilder {
  *
  * To use this, see [`CockroachStarterBuilder`].
  */
+#[derive(Debug)]
 pub struct CockroachStarter {
     /// temporary directory used for URL file and potentially data storage
     temp_dir: TempDir,
@@ -178,7 +184,13 @@ impl CockroachStarter {
      */
     pub async fn start(mut self) -> Result<CockroachInstance, anyhow::Error> {
         let mut child_process =
-            self.cmd_builder.spawn().context("running \"cockroach\"")?;
+            self.cmd_builder.spawn().with_context(|| {
+                format!(
+                    "running \"{}\" (is the binary installed \
+                        and on your PATH?)",
+                    self.args[0]
+                )
+            })?;
         let pid = child_process.id().unwrap();
         let poll_interval = Duration::from_millis(10);
         let poll_start = Instant::now();
@@ -248,6 +260,7 @@ impl CockroachStarter {
  * You are **required** to invoke [`CockroachInstance::wait_for_shutdown()`] or
  * [`CockroachInstance::cleanup()`] before this object is dropped.
  */
+#[derive(Debug)]
 pub struct CockroachInstance {
     /// child process id
     pid: u32,
@@ -403,8 +416,6 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
  * cases for:
  * - just like the happy-path test, but with an explicitly-provided store
  *   directory
- * - cockroach explicitly fails to start (i.e., exits while we're waiting for
- *   the listen file to be created),
  * - we time out waiting for the listen file to be created, and cockroach is
  *   killed in the background.
  * - you can run this twice concurrently and get two different databases.
@@ -421,6 +432,10 @@ mod test {
     use super::CockroachStarterBuilder;
     use tokio::fs;
 
+    /*
+     * Test the happy path: start the database, run a query against the URL we
+     * found, and then shut it down cleanly.
+     */
     #[tokio::test]
     async fn test_setup_database() {
         /* Start a database using the default temporary store directory */
@@ -437,9 +452,8 @@ mod test {
         );
 
         /*
-         * Just to be clear, the database process should be running and the
-         * temporary directory should exist with the Cockroach "data" directory
-         * in it.
+         * The database process should be running and the temporary directory
+         * should exist with the Cockroach "data" directory in it.
          */
         assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, 0) });
         assert!(fs::metadata(database.temp_dir().join("data"))
@@ -491,14 +505,55 @@ mod test {
         );
     }
 
+    /*
+     * Tests what happens if the "cockroach" command cannot be found.
+     */
+    #[tokio::test]
+    async fn test_bad_cmd() {
+        let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
+        test_database_start_failure(builder).await;
+    }
+
+    /*
+     * Tests what happens if the "cockroach" command exits before writing the
+     * listening-url file.  This looks the same to the caller (us), but
+     * internally requires different code paths.
+     */
+    #[tokio::test]
+    async fn test_cmd_fails() {
+        let mut builder = CockroachStarterBuilder::new();
+        builder.arg("not-a-valid-argument");
+        test_database_start_failure(builder).await;
+    }
+
+    /*
+     * Helper function for testing cases where the database fails to start.
+     */
+    async fn test_database_start_failure(builder: CockroachStarterBuilder) {
+        let starter = builder.build().unwrap();
+        let temp_dir = starter.temp_dir().to_owned();
+        eprintln!("will run: {}", starter.cmdline());
+        let error =
+            starter.start().await.expect_err("unexpectedly started database");
+        eprintln!("error: {:?}", error);
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(temp_dir)
+                .await
+                .expect_err("temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
+
+    /*
+     * Tests that we clean up the temporary directory correctly when the starter
+     * goes out of scope, even if we never started the instance.  This is
+     * important to avoid leaking the directory if there's an error starting the
+     * instance, for example.
+     */
     #[tokio::test]
     async fn test_starter_tmpdir() {
-        /*
-         * This test checks that we clean up the temporary directory correctly
-         * when the starter goes out of scope.  This is important to avoid
-         * leaking the directory if there's an error starting the instance, for
-         * example.
-         */
         let builder = CockroachStarterBuilder::new();
         let starter = builder.build().unwrap();
         let directory = starter.temp_dir().to_owned();
