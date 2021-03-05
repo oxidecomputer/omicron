@@ -6,7 +6,7 @@
 
 This repo houses a prototype for the Oxide Rack control plane.
 
-image::https://github.com/oxidecomputer/oxide-api-prototype/workflows/Rust/badge.svg[]
+image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
 == Documentation
 
@@ -22,8 +22,8 @@ For documentation on the control plane architecture, see
 https://61.rfd.oxide.computer[RFD 61].
 
 For design and API docs, see the
-https://rust.docs.corp.oxide.computer/oxide_api_prototype/[generated
-documentation].  You can generate this yourself with:
+https://rust.docs.corp.oxide.computer/omicron/[generated documentation].  You
+can generate this yourself with:
 
 [source,text]
 ----

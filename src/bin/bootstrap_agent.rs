@@ -5,10 +5,10 @@
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use oxide_api_prototype::bootstrap_agent::Config;
-use oxide_api_prototype::bootstrap_agent::Server;
-use oxide_api_prototype::cmd::fatal;
-use oxide_api_prototype::cmd::CmdError;
+use omicron::bootstrap_agent::Config;
+use omicron::bootstrap_agent::Server;
+use omicron::cmd::fatal;
+use omicron::cmd::CmdError;
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
