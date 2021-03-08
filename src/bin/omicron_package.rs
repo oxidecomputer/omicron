@@ -2,7 +2,7 @@
  * Utility for bundling target binaries as tarfiles.
  */
 
-use oxide_api_prototype::packaging::sha256_digest;
+use omicron::packaging::sha256_digest;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
