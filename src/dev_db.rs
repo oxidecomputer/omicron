@@ -11,6 +11,7 @@ use std::time::Instant;
 use tempfile::tempdir;
 use tempfile::TempDir;
 use thiserror::Error;
+use crate::backoff::poll;
 
 /// Default for how long to wait for CockroachDB to report its listening URL
 const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -209,6 +210,12 @@ impl CockroachStarter {
                 )
             })?;
         let pid = child_process.id().unwrap();
+
+        poll::wait_for_condition(|| async {
+        }
+
+
+
         let poll_interval = Duration::from_millis(10);
         let poll_start = Instant::now();
         let poll_max = &self.start_timeout;
@@ -465,8 +472,9 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 mod test {
     use super::CockroachStartError;
     use super::CockroachStarterBuilder;
+    use crate::backoff::poll;
+    use std::env;
     use std::time::Duration;
-    use std::time::Instant;
     use tokio::fs;
 
     /*
@@ -651,32 +659,45 @@ mod test {
          * Wait for the process to exit so that we can reliably clean up the
          * temporary directory.  We don't have a great way to avoid polling
          * here.
-         * XXX This should be commonized with the backoff stuff and with the
-         * other use of polling above.  We should have a test suite
-         * configuration that makes clear from the name that it should not be
-         * used in production.  It should be pretty aggressive so that the test
-         * suite doesn't sleep for long periods at a time or take a lot longer
-         * than it needs to.
          */
-        let poll_interval = Duration::from_millis(25);
-        let poll_start = Instant::now();
-        let poll_max = Duration::from_secs(10);
-        while process_running(pid) {
-            let duration = Instant::now().duration_since(poll_start);
-            if duration > poll_max {
-                panic!(
-                    "timed out waiting for pid {} to exit \
+        poll::wait_for_condition::<(), _, _>(
+            || async {
+                if process_running(pid) {
+                    poll::CondCheckResult::NotYet
+                } else {
+                    poll::CondCheckResult::Ready
+                }
+            },
+            &Duration::from_millis(25),
+            &Duration::from_secs(10),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "timed out waiting for pid {} to exit \
                     (leaving temporary directory {})",
-                    pid,
-                    directory.display()
-                );
-            }
+                pid,
+                directory.display()
+            );
+        });
 
-            tokio::time::sleep(poll_interval).await;
+        /*
+         * The temporary directory is normally cleaned up automatically.  In
+         * this case, it's deliberately left around.  We need to clean it up
+         * here.  Now, the directory is created with tempfile::TempDir, which
+         * puts it under std::env::temp_dir().  We assert that here as an
+         * ultra-conservative safety.  We don't want to accidentally try to blow
+         * away some large directory tree if somebody modifies the code to use
+         * some other directory for the temporary directory.
+         */
+        if !directory.starts_with(env::temp_dir()) {
+            panic!(
+                "refusing to remove temporary directory not under
+                std::env::temp_dir(): {}",
+                directory.display()
+            )
         }
 
-        assert!(!process_running(pid));
-        /* XXX add a safety here */
         fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
             panic!(
                 "failed to remove temporary directory {}: {:?}",
