@@ -1,6 +1,6 @@
 //! Facilities for managing a local database for development
 
-use anyhow::bail;
+use anyhow::anyhow;
 use anyhow::Context;
 use std::ffi::OsStr;
 use std::fmt;
@@ -10,6 +10,10 @@ use std::time::Duration;
 use std::time::Instant;
 use tempfile::tempdir;
 use tempfile::TempDir;
+use thiserror::Error;
+
+/// Default for how long to wait for CockroachDB to report its listening URL
+const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 
 /**
  * Builder for [`CockroachStarter`] that supports setting some command-line
@@ -33,6 +37,8 @@ pub struct CockroachStarterBuilder {
     args: Vec<String>,
     /// describes the command line that we're going to execute
     cmd_builder: tokio::process::Command,
+    /// how long to wait for CockroachDB to report itself listening
+    start_timeout: Duration,
 }
 
 impl CockroachStarterBuilder {
@@ -45,6 +51,7 @@ impl CockroachStarterBuilder {
             store_dir: None,
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
+            start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
         };
 
         /*
@@ -64,6 +71,11 @@ impl CockroachStarterBuilder {
             .arg("--insecure")
             .arg("--listen-addr=127.0.0.1");
         builder
+    }
+
+    pub fn start_timeout(&mut self, duration: &Duration) -> &mut Self {
+        self.start_timeout = *duration;
+        self
     }
 
     /**
@@ -120,6 +132,7 @@ impl CockroachStarterBuilder {
             listen_url_file,
             args: self.args,
             cmd_builder: self.cmd_builder,
+            start_timeout: self.start_timeout,
         })
     }
 
@@ -160,6 +173,8 @@ pub struct CockroachStarter {
     args: Vec<String>,
     /// the command line that we're going to execute
     cmd_builder: tokio::process::Command,
+    /// how long to wait for the listen URL to be written
+    start_timeout: Duration,
 }
 
 impl CockroachStarter {
@@ -182,7 +197,9 @@ impl CockroachStarter {
      * listening URL.  This function fails if the child process exits before
      * that happens or if the timeout expires.
      */
-    pub async fn start(mut self) -> Result<CockroachInstance, anyhow::Error> {
+    pub async fn start(
+        mut self,
+    ) -> Result<CockroachInstance, CockroachStartError> {
         let mut child_process =
             self.cmd_builder.spawn().with_context(|| {
                 format!(
@@ -194,7 +211,7 @@ impl CockroachStarter {
         let pid = child_process.id().unwrap();
         let poll_interval = Duration::from_millis(10);
         let poll_start = Instant::now();
-        let poll_max = Duration::from_secs(30);
+        let poll_max = &self.start_timeout;
 
         /*
          * Wait for CockroachDB to write out its URL information.  There's not a
@@ -202,27 +219,24 @@ impl CockroachStarter {
          * we just poll for it up to some maximum timeout.
          */
         loop {
-            tokio::time::sleep(poll_interval).await;
-
             let duration = Instant::now().duration_since(poll_start);
-            if duration.gt(&poll_max) {
+            if duration.gt(poll_max) {
                 /*
                  * Skip cleanup of the temporary directory so that Cockroach
                  * doesn't trip over its files being gone and so the user can
                  * debug what happened.
                  */
                 self.temp_dir.into_path();
-                bail!(
-                    "cockroach did not report listen URL after {:?} \
-                    (may be still running as pid {} and temporary \
-                    directory still exists)",
-                    duration,
-                    pid
-                );
+                return Err(CockroachStartError::TimedOut {
+                    pid,
+                    time_waited: duration,
+                });
             }
 
             if process_exited(&mut child_process) {
-                bail!("cockroach failed to start (see error output above)")
+                return Err(CockroachStartError::from(anyhow!(
+                    "cockroach failed to start (see error output above)"
+                )));
             }
 
             /*
@@ -231,10 +245,11 @@ impl CockroachStarter {
              * that this couldn't, say, use up all of memory.
              */
             match tokio::fs::read_to_string(&self.listen_url_file).await {
-                Err(_) => continue,
-                // Wait for the entire URL to be written out.
-                Ok(s) if !s.contains('\n') => continue,
-                Ok(listen_url) => {
+                /*
+                 * Wait for the entire URL to be written out.  This includes a
+                 * trailing newline.
+                 */
+                Ok(listen_url) if listen_url.contains('\n') => {
                     let listen_url = listen_url.trim_end();
                     let pg_config: tokio_postgres::config::Config =
                         listen_url.parse().with_context(|| {
@@ -249,9 +264,29 @@ impl CockroachStarter {
                         child_process: Some(child_process),
                     });
                 }
+
+                _ => {
+                    tokio::time::sleep(poll_interval).await;
+                }
             }
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum CockroachStartError {
+    #[error(
+        "cockroach did not report listen URL after {time_waited:?} \
+        (may still be running as pid {pid} and temporary directory \
+        may still exist)"
+    )]
+    TimedOut { pid: u32, time_waited: Duration },
+
+    #[error("cockroach failed to start")]
+    Failed {
+        #[from]
+        source: anyhow::Error,
+    },
 }
 
 /**
@@ -416,8 +451,7 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
  * cases for:
  * - just like the happy-path test, but with an explicitly-provided store
  *   directory
- * - we time out waiting for the listen file to be created, and cockroach is
- *   killed in the background.
+ * - cockroach is killed in the background.
  * - you can run this twice concurrently and get two different databases.
  *
  * These should verify that the child process is gone and the temporary
@@ -429,7 +463,10 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
  */
 #[cfg(test)]
 mod test {
+    use super::CockroachStartError;
     use super::CockroachStarterBuilder;
+    use std::time::Duration;
+    use std::time::Instant;
     use tokio::fs;
 
     /*
@@ -455,7 +492,7 @@ mod test {
          * The database process should be running and the temporary directory
          * should exist with the Cockroach "data" directory in it.
          */
-        assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, 0) });
+        assert!(process_running(pid));
         assert!(fs::metadata(database.temp_dir().join("data"))
             .await
             .expect("CockroachDB data directory is missing")
@@ -492,7 +529,7 @@ mod test {
         database.cleanup().await.expect("failed to clean up database");
 
         /* Check that the database process is no longer running. */
-        assert_eq!(-1, unsafe { libc::kill(pid as libc::pid_t, 0) });
+        assert!(!process_running(pid));
 
         /* Check that the temporary directory we used has been cleaned up. */
         assert_eq!(
@@ -570,5 +607,90 @@ mod test {
                 .raw_os_error()
                 .unwrap()
         );
+    }
+
+    /*
+     * Tests when CockroachDB hangs on startup by setting the start timeout
+     * absurdly short.  This unfortunately doesn't cover all cases.  By choosing
+     * a zero timeout, we're not letting the database get very far in its
+     * startup.  But we at least ensure that the test suite does not hang or
+     * timeout at some very long value.
+     */
+    #[tokio::test]
+    async fn test_database_start_hang() {
+        let mut builder = CockroachStarterBuilder::new();
+        builder.start_timeout(&Duration::from_millis(0));
+        let starter = builder.build().expect("failed to build starter");
+        let directory = starter.temp_dir().to_owned();
+        eprintln!("temporary directory: {}", directory.display());
+        let error =
+            starter.start().await.expect_err("unexpectedly started database");
+        eprintln!("(expected) error starting database: {:?}", error);
+        let pid = match error {
+            CockroachStartError::TimedOut { pid, time_waited } => {
+                /* We ought to fire a 0-second timeout within 5 seconds. */
+                assert!(time_waited < Duration::from_secs(5));
+                pid
+            }
+            other_error => panic!(
+                "expected timeout error, but got some other error: {:?}",
+                other_error
+            ),
+        };
+        /* The child process should still be running. */
+        assert!(process_running(pid));
+        /* The temporary directory should still exist. */
+        assert!(fs::metadata(&directory)
+            .await
+            .expect("temporary directory is missing")
+            .is_dir());
+        /* Kill the child process (to clean up after ourselves). */
+        assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) });
+
+        /*
+         * Wait for the process to exit so that we can reliably clean up the
+         * temporary directory.  We don't have a great way to avoid polling
+         * here.
+         * XXX This should be commonized with the backoff stuff and with the
+         * other use of polling above.  We should have a test suite
+         * configuration that makes clear from the name that it should not be
+         * used in production.  It should be pretty aggressive so that the test
+         * suite doesn't sleep for long periods at a time or take a lot longer
+         * than it needs to.
+         */
+        let poll_interval = Duration::from_millis(25);
+        let poll_start = Instant::now();
+        let poll_max = Duration::from_secs(10);
+        while process_running(pid) {
+            let duration = Instant::now().duration_since(poll_start);
+            if duration > poll_max {
+                panic!(
+                    "timed out waiting for pid {} to exit \
+                    (leaving temporary directory {})",
+                    pid,
+                    directory.display()
+                );
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        assert!(!process_running(pid));
+        /* XXX add a safety here */
+        fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
+            panic!(
+                "failed to remove temporary directory {}: {:?}",
+                directory.display(),
+                e
+            )
+        });
+    }
+
+    fn process_running(pid: u32) -> bool {
+        /*
+         * It should be safe to invoke this syscall with these arguments.  This
+         * only checks whether the process is running.
+         */
+        0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
     }
 }
