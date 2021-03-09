@@ -29,24 +29,27 @@ pub mod poll {
     use core::future::Future;
     use std::time::Duration;
     use std::time::Instant;
+    use thiserror::Error;
 
     /**
      * Result of one attempt to check a condition (see [`wait_for_condition()`])
      */
-    pub enum CondCheckResult<E> {
-        /** the condition we're waiting for is true */
-        Ready,
+    #[derive(Debug, Error)]
+    pub enum CondCheckError<E: std::error::Error + 'static> {
         /** the condition we're waiting for is not true */
+        #[error("poll condition not yet ready")]
         NotYet,
-        /** stop polling because we've encountered a non-retryable error */
-        Failed(E),
+        #[error("non-retryable error while polling on condition")]
+        Failed(#[from] E),
     }
 
     /** Result of [`wait_for_condition()`] */
-    pub enum Error<E> {
+    #[derive(Debug, Error)]
+    pub enum Error<E: std::error::Error + 'static> {
         /** operation timed out before succeeding or failing permanently */
+        #[error("timed out after {0:?}")]
         TimedOut(Duration),
-        /** operation failed with a permanent error before timing out */
+        #[error("non-retryable error while polling on condition")]
         PermanentError(E),
     }
 
@@ -68,24 +71,25 @@ pub mod poll {
      *    Timeouts, timeouts: always wrong!
      *    Some too short and some too long.
      *
-     * In fact, trying to balance shorter test execution time against spurious
-     * timeouts, people often choose a timeout value that is both too long _and_
-     * too short, resulting in both long test runs and spurious failures.  A
-     * better pattern is provided here: check the condition relatively
-     * frequently with a much longer maximum timeout -- long enough that timeout
-     * expiration essentially reflects incorrect behavior.
+     * In fact, in trying to balance shorter test execution time against
+     * spurious timeouts, people often choose a timeout value that is both too
+     * long _and_ too short, resulting in both long test runs and spurious
+     * failures.  A better pattern is provided here: check the condition
+     * relatively frequently with a much longer maximum timeout -- long enough
+     * that timeout expiration essentially reflects incorrect behavior.
      *
      * But again: this mechanism is a last resort when no mechanism exists to
      * wait directly for the condition.
      */
-    pub async fn wait_for_condition<E, Func, Fut>(
-        cond: Func,
+    pub async fn wait_for_condition<O, E, Func, Fut>(
+        mut cond: Func,
         poll_interval: &Duration,
         poll_max: &Duration,
-    ) -> Result<(), Error<E>>
+    ) -> Result<O, Error<E>>
     where
-        Func: Fn() -> Fut,
-        Fut: Future<Output = CondCheckResult<E>>,
+        Func: FnMut() -> Fut,
+        Fut: Future<Output = Result<O, CondCheckError<E>>>,
+        E: std::error::Error + 'static,
     {
         let poll_start = Instant::now();
         loop {
@@ -95,11 +99,11 @@ pub mod poll {
             }
 
             let check = cond().await;
-            if let CondCheckResult::Ready = check {
-                return Ok(());
+            if let Ok(output) = check {
+                return Ok(output);
             }
 
-            if let CondCheckResult::Failed(e) = check {
+            if let Err(CondCheckError::Failed(e)) = check {
                 return Err(Error::PermanentError(e));
             }
 

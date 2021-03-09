@@ -1,17 +1,15 @@
 //! Facilities for managing a local database for development
 
-use anyhow::anyhow;
+use crate::backoff::poll;
 use anyhow::Context;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::time::Instant;
 use tempfile::tempdir;
 use tempfile::TempDir;
 use thiserror::Error;
-use crate::backoff::poll;
 
 /// Default for how long to wait for CockroachDB to report its listening URL
 const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -201,80 +199,92 @@ impl CockroachStarter {
     pub async fn start(
         mut self,
     ) -> Result<CockroachInstance, CockroachStartError> {
-        let mut child_process =
-            self.cmd_builder.spawn().with_context(|| {
-                format!(
-                    "running \"{}\" (is the binary installed \
-                        and on your PATH?)",
-                    self.args[0]
-                )
-            })?;
+        let mut child_process = self.cmd_builder.spawn().map_err(|source| {
+            CockroachStartError::BadCmd { cmd: self.args[0].clone(), source }
+        })?;
         let pid = child_process.id().unwrap();
-
-        poll::wait_for_condition(|| async {
-        }
-
-
-
-        let poll_interval = Duration::from_millis(10);
-        let poll_start = Instant::now();
-        let poll_max = &self.start_timeout;
 
         /*
          * Wait for CockroachDB to write out its URL information.  There's not a
          * great way for us to know when this has happened, unfortunately.  So
          * we just poll for it up to some maximum timeout.
          */
-        loop {
-            let duration = Instant::now().duration_since(poll_start);
-            if duration.gt(poll_max) {
+        let wait_result = poll::wait_for_condition(
+            || {
                 /*
-                 * Skip cleanup of the temporary directory so that Cockroach
-                 * doesn't trip over its files being gone and so the user can
-                 * debug what happened.
+                 * If CockroachDB is not running at any point in this process,
+                 * stop waiting for the file to become available.
+                 * TODO-cleanup This nastiness is because we cannot allow the
+                 * mutable reference to "child_process" to be part of the async
+                 * block.  However, we need the return value to be part of the
+                 * async block.  So we do the process_exited() bit outside the
+                 * async block.  We need to move "exited" into the async block,
+                 * which means anything we reference gets moved into that block,
+                 * which means we need a clone of listen_url_file to avoid
+                 * referencing "self".
+                 */
+                let exited = process_exited(&mut child_process);
+                let listen_url_file = self.listen_url_file.clone();
+                async move {
+                    if exited {
+                        return Err(poll::CondCheckError::Failed(
+                            CockroachStartError::Exited,
+                        ));
+                    }
+
+                    /*
+                     * When ready, CockroachDB will write the URL on which it's
+                     * listening to the specified file.  Try to read this file.
+                     * Note that its write is not necessarily atomic, so we wait
+                     * for a newline before assuming that it's complete.
+                     * TODO-robustness It would be nice if there were a version
+                     * of tokio::fs::read_to_string() that accepted a maximum
+                     * byte count so that this couldn't, say, use up all of
+                     * memory.
+                     */
+                    match tokio::fs::read_to_string(&listen_url_file).await {
+                        Ok(listen_url) if listen_url.contains('\n') => {
+                            let listen_url = listen_url.trim_end();
+                            let pg_config: tokio_postgres::config::Config =
+                                listen_url.parse().map_err(|source| {
+                                    poll::CondCheckError::Failed(
+                                        CockroachStartError::BadListenUrl {
+                                            listen_url: listen_url.to_string(),
+                                            source,
+                                        },
+                                    )
+                                })?;
+                            Ok((listen_url.to_string(), pg_config))
+                        }
+
+                        _ => Err(poll::CondCheckError::NotYet),
+                    }
+                }
+            },
+            &Duration::from_millis(10),
+            &self.start_timeout,
+        )
+        .await;
+
+        match wait_result {
+            Ok((listen_url, pg_config)) => Ok(CockroachInstance {
+                pid,
+                listen_url,
+                pg_config,
+                temp_dir_path: self.temp_dir.path().to_owned(),
+                temp_dir: Some(self.temp_dir),
+                child_process: Some(child_process),
+            }),
+            Err(poll::Error::PermanentError(e)) => Err(e),
+            Err(poll::Error::TimedOut(time_waited)) => {
+                /*
+                 * Abort and tell the user.  We'll leave CockroachDB running so
+                 * the user can debug if they want.  We'll skip cleanup of the
+                 * temporary directory for the same reason and also so that
+                 * CockroachDB doesn't trip over its files being gone.
                  */
                 self.temp_dir.into_path();
-                return Err(CockroachStartError::TimedOut {
-                    pid,
-                    time_waited: duration,
-                });
-            }
-
-            if process_exited(&mut child_process) {
-                return Err(CockroachStartError::from(anyhow!(
-                    "cockroach failed to start (see error output above)"
-                )));
-            }
-
-            /*
-             * TODO-robustness It would be nice if there were a version of
-             * tokio::fs::read_to_string() that accepted a maximum byte count so
-             * that this couldn't, say, use up all of memory.
-             */
-            match tokio::fs::read_to_string(&self.listen_url_file).await {
-                /*
-                 * Wait for the entire URL to be written out.  This includes a
-                 * trailing newline.
-                 */
-                Ok(listen_url) if listen_url.contains('\n') => {
-                    let listen_url = listen_url.trim_end();
-                    let pg_config: tokio_postgres::config::Config =
-                        listen_url.parse().with_context(|| {
-                            format!("parsing listen URL \"{}\"", listen_url)
-                        })?;
-                    return Ok(CockroachInstance {
-                        pid,
-                        listen_url: listen_url.to_string(),
-                        pg_config,
-                        temp_dir_path: self.temp_dir.path().to_owned(),
-                        temp_dir: Some(self.temp_dir),
-                        child_process: Some(child_process),
-                    });
-                }
-
-                _ => {
-                    tokio::time::sleep(poll_interval).await;
-                }
+                Err(CockroachStartError::TimedOut { pid, time_waited })
             }
         }
     }
@@ -282,18 +292,29 @@ impl CockroachStarter {
 
 #[derive(Debug, Error)]
 pub enum CockroachStartError {
+    #[error("running {cmd:?} (is the binary installed and on your PATH?)")]
+    BadCmd {
+        cmd: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("cockroach failed to start (see error output above)")]
+    Exited,
+
+    #[error("error parsing listen URL {listen_url:?}")]
+    BadListenUrl {
+        listen_url: String,
+        #[source]
+        source: tokio_postgres::Error,
+    },
+
     #[error(
         "cockroach did not report listen URL after {time_waited:?} \
         (may still be running as pid {pid} and temporary directory \
         may still exist)"
     )]
     TimedOut { pid: u32, time_waited: Duration },
-
-    #[error("cockroach failed to start")]
-    Failed {
-        #[from]
-        source: anyhow::Error,
-    },
 }
 
 /**
@@ -660,12 +681,12 @@ mod test {
          * temporary directory.  We don't have a great way to avoid polling
          * here.
          */
-        poll::wait_for_condition::<(), _, _>(
+        poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
             || async {
                 if process_running(pid) {
-                    poll::CondCheckResult::NotYet
+                    Err(poll::CondCheckError::NotYet)
                 } else {
-                    poll::CondCheckResult::Ready
+                    Ok(())
                 }
             },
             &Duration::from_millis(25),
@@ -680,6 +701,7 @@ mod test {
                 directory.display()
             );
         });
+        assert!(!process_running(pid));
 
         /*
          * The temporary directory is normally cleaned up automatically.  In
