@@ -477,8 +477,6 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 /*
  * XXX TODO-coverage This was manually tested, but we should add automated test
  * cases for:
- * - just like the happy-path test, but with an explicitly-provided store
- *   directory
  * - cockroach is killed in the background.
  * - you can run this twice concurrently and get two different databases.
  *
@@ -492,25 +490,92 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 #[cfg(test)]
 mod test {
     use super::CockroachStartError;
+    use super::CockroachStarter;
     use super::CockroachStarterBuilder;
     use crate::backoff::poll;
     use std::env;
+    use std::path::Path;
     use std::time::Duration;
+    use tempfile::tempdir;
     use tokio::fs;
+
+    /*
+     * Test the happy path using the default store directory.
+     */
+    #[tokio::test]
+    async fn test_setup_database_default_dir() {
+        let starter = CockroachStarterBuilder::new().build().unwrap();
+
+        /*
+         * In this configuration, the database directory should exist within the
+         * starter's temporary directory.
+         */
+        let data_dir = starter.temp_dir().join("data");
+
+        /*
+         * This common function will verify that the entire temporary directory
+         * is cleaned up.  We do not need to check that again here.
+         */
+        test_setup_database(starter, &data_dir).await;
+    }
+
+    /*
+     * Test the happy path using an overridden store directory.
+     */
+    #[tokio::test]
+    async fn test_setup_database_overridden_dir() {
+        let extra_temp_dir =
+            tempdir().expect("failed to create temporary directory");
+        let data_dir = extra_temp_dir.path().join("custom_data");
+        let starter = CockroachStarterBuilder::new()
+            .store_dir(&data_dir)
+            .build()
+            .unwrap();
+
+        /*
+         * This common function will verify that the entire temporary directory
+         * is cleaned up.  We do not need to check that again here.
+         */
+        test_setup_database(starter, &data_dir).await;
+
+        /*
+         * At this point, our extra temporary directory should still exist.
+         * This is important -- the library should not clean up a data directory
+         * that was specified by the user.
+         */
+        assert!(fs::metadata(&data_dir)
+            .await
+            .expect("CockroachDB data directory is missing")
+            .is_dir());
+        /* Clean it up. */
+        let extra_temp_dir_path = extra_temp_dir.path().to_owned();
+        extra_temp_dir
+            .close()
+            .expect("failed to remove extra temporary directory");
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(&extra_temp_dir_path)
+                .await
+                .expect_err("extra temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
 
     /*
      * Test the happy path: start the database, run a query against the URL we
      * found, and then shut it down cleanly.
      */
-    #[tokio::test]
-    async fn test_setup_database() {
-        /* Start a database using the default temporary store directory */
-        let builder = CockroachStarterBuilder::new();
-        let starter = builder.build().unwrap();
+    async fn test_setup_database<P: AsRef<Path>>(
+        starter: CockroachStarter,
+        data_dir: P,
+    ) {
+        /* Start the database. */
         eprintln!("will run: {}", starter.cmdline());
         let mut database =
             starter.start().await.expect("failed to start database");
         let pid = database.pid();
+        let temp_dir = database.temp_dir().to_owned();
         eprintln!(
             "database pid {} listening at: {}",
             pid,
@@ -518,16 +583,17 @@ mod test {
         );
 
         /*
-         * The database process should be running and the temporary directory
-         * should exist with the Cockroach "data" directory in it.
+         * The database process should be running and the database's store
+         * directory should exist.
          */
         assert!(process_running(pid));
-        assert!(fs::metadata(database.temp_dir().join("data"))
+        assert!(fs::metadata(data_dir.as_ref())
             .await
             .expect("CockroachDB data directory is missing")
             .is_dir());
 
         /* Try to connect to it and run a query. */
+        eprintln!("connecting to database");
         let conn_task = {
             let (client, connection) = database
                 .pg_config()
@@ -549,7 +615,7 @@ mod test {
 
         /*
          * With the client dropped, the connection should be shut down.  Wait
-         * for the task we spawned.  Then clean up the server.
+         * for the task that we spawned to finish.  Then clean up the server.
          */
         conn_task
             .await
@@ -560,15 +626,20 @@ mod test {
         /* Check that the database process is no longer running. */
         assert!(!process_running(pid));
 
-        /* Check that the temporary directory we used has been cleaned up. */
+        /*
+         * Check that the temporary directory used by the starter has been
+         * cleaned up.
+         */
         assert_eq!(
             libc::ENOENT,
-            fs::metadata(database.temp_dir())
+            fs::metadata(&temp_dir)
                 .await
                 .expect_err("temporary directory still exists")
                 .raw_os_error()
                 .unwrap()
         );
+
+        eprintln!("cleaned up database and temporary directory");
     }
 
     /*
