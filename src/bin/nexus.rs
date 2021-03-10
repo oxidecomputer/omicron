@@ -13,11 +13,11 @@
  *   timeout)
  */
 
-use oxide_api_prototype::cmd::fatal;
-use oxide_api_prototype::cmd::CmdError;
-use oxide_api_prototype::nexus::run_openapi_external;
-use oxide_api_prototype::nexus::run_server;
-use oxide_api_prototype::nexus::Config;
+use omicron::cmd::fatal;
+use omicron::cmd::CmdError;
+use omicron::nexus::run_openapi_external;
+use omicron::nexus::run_server;
+use omicron::nexus::Config;
 use std::path::PathBuf;
 use structopt::StructOpt;
 

@@ -9,11 +9,11 @@
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use oxide_api_prototype::cmd::fatal;
-use oxide_api_prototype::cmd::CmdError;
-use oxide_api_prototype::sled_agent::run_server;
-use oxide_api_prototype::sled_agent::Config;
-use oxide_api_prototype::sled_agent::SimMode;
+use omicron::cmd::fatal;
+use omicron::cmd::CmdError;
+use omicron::sled_agent::run_server;
+use omicron::sled_agent::Config;
+use omicron::sled_agent::SimMode;
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
