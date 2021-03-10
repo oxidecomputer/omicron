@@ -28,3 +28,11 @@ pub async fn test_setup_log(test_name: &str) -> LogContext {
 
     LogContext::new(test_name, &log_config)
 }
+
+pub fn process_running(pid: u32) -> bool {
+    /*
+     * It should be okay to invoke this syscall with these arguments.  This
+     * only checks whether the process is running.
+     */
+    0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
+}

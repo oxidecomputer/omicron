@@ -74,12 +74,12 @@ pub mod dev_db;
 pub mod nexus;
 pub mod packaging;
 pub mod sled_agent;
+pub mod test_util;
 
 mod api_error;
 mod backoff;
 mod http_client;
 mod http_pagination;
-mod test_util;
 
 #[macro_use]
 extern crate slog;

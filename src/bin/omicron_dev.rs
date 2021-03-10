@@ -65,6 +65,11 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
      */
     let mut db_arg_builder = dev_db::CockroachStarterBuilder::new();
 
+    /*
+     * NOTE: The stdout strings here are not intended to be stable, but they are
+     * used by the test suite.
+     */
+
     if let Some(store_dir) = &args.store_dir {
         println!(
             "omicron_dev: using user-provided path for database store: {}",
@@ -89,7 +94,7 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
     );
 
     let mut db_instance = db_starter.start().await?;
-    println!("\nomicron_dev: Child process: pid {}", db_instance.pid());
+    println!("\nomicron_dev: child process: pid {}", db_instance.pid());
     println!(
         "omicron_dev: CockroachDB listening at: {}",
         db_instance.listen_url()

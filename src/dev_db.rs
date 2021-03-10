@@ -524,6 +524,7 @@ mod test {
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
     use crate::backoff::poll;
+    use crate::test_util::process_running;
     use std::env;
     use std::path::Path;
     use std::time::Duration;
@@ -877,13 +878,5 @@ mod test {
             .await
             .expect("failed to wait for second task")
             .expect("second connection closed ungracefully");
-    }
-
-    fn process_running(pid: u32) -> bool {
-        /*
-         * It should be safe to invoke this syscall with these arguments.  This
-         * only checks whether the process is running.
-         */
-        0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
     }
 }
