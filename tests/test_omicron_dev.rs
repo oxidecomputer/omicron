@@ -154,9 +154,13 @@ async fn test_db_run() {
      * terminated and temporary directories will be leaked.  However, the test
      * would pass because in the test case omicron_dev would never have gotten
      * the SIGINT.
+     *
+     * We also redirect stderr to stdout just so that it doesn't get dumped to
+     * the user's terminal during regular `cargo test` runs.
      */
     let cmdstr = format!("( set -o monitor; {} db-run )", CMD_OMICRON_DEV);
-    let exec = Exec::cmd("bash").arg("-c").arg(cmdstr);
+    let exec =
+        Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
     let dbrun = run_db_run(exec);
     let (client, connection) = dbrun
         .listen_config
@@ -195,8 +199,28 @@ async fn test_db_run() {
     eprintln!("sending SIGINT to process group {}", pgid);
     assert_eq!(0, unsafe { libc::kill(-pgid, libc::SIGINT) });
 
-    assert!(matches!(
-        verify_graceful_exit(dbrun),
-        subprocess::ExitStatus::Exited(0)
-    ));
+    let wait = verify_graceful_exit(dbrun);
+    eprintln!("wait result: {:?}", wait);
+    assert!(matches!(wait, subprocess::ExitStatus::Exited(0),));
+}
+
+/*
+ * Exercises the unusual case of `omicron_dev db-run` where the database shuts
+ * down unexpectedly.
+ */
+#[tokio::test]
+async fn test_db_killed() {
+    /*
+     * Redirect stderr to stdout just so that it doesn't get dumped to the
+     * user's terminal during regular `cargo test` runs.
+     */
+    let exec =
+        Exec::cmd(CMD_OMICRON_DEV).arg("db-run").stderr(Redirection::Merge);
+    let dbrun = run_db_run(exec);
+    assert_eq!(0, unsafe {
+        libc::kill(dbrun.db_pid as libc::pid_t, libc::SIGKILL)
+    });
+    let wait = verify_graceful_exit(dbrun);
+    eprintln!("wait result: {:?}", wait);
+    assert!(matches!(wait, subprocess::ExitStatus::Exited(1),));
 }

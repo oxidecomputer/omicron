@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::Duration;
 use tempfile::tempdir;
 use tempfile::TempDir;
@@ -38,6 +39,8 @@ pub struct CockroachStarterBuilder {
     cmd_builder: tokio::process::Command,
     /// how long to wait for CockroachDB to report itself listening
     start_timeout: Duration,
+    /// redirect stdout and stderr to files
+    redirect_stdio: bool,
 }
 
 impl CockroachStarterBuilder {
@@ -51,6 +54,7 @@ impl CockroachStarterBuilder {
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
+            redirect_stdio: false,
         };
 
         /*
@@ -73,6 +77,11 @@ impl CockroachStarterBuilder {
         builder
     }
 
+    pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
+        self.redirect_stdio = true;
+        self
+    }
+
     pub fn start_timeout(&mut self, duration: &Duration) -> &mut Self {
         self.start_timeout = *duration;
         self
@@ -89,6 +98,19 @@ impl CockroachStarterBuilder {
     pub fn store_dir<P: AsRef<Path>>(mut self, store_dir: P) -> Self {
         self.store_dir.replace(store_dir.as_ref().to_owned());
         self
+    }
+
+    fn redirect_file(
+        &self,
+        temp_dir_path: &Path,
+        label: &str,
+    ) -> Result<std::fs::File, anyhow::Error> {
+        let out_path = temp_dir_path.join(label);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out_path)
+            .with_context(|| format!("open \"{}\"", out_path.display()))
     }
 
     /**
@@ -127,6 +149,17 @@ impl CockroachStarterBuilder {
             .arg(store_dir)
             .arg("--listening-url-file")
             .arg(listen_url_file.as_os_str().to_owned());
+
+        if self.redirect_stdio {
+            let temp_dir_path = temp_dir.path();
+            self.cmd_builder.stdout(Stdio::from(
+                self.redirect_file(temp_dir_path, "cockroachdb_stdout")?,
+            ));
+            self.cmd_builder.stderr(Stdio::from(
+                self.redirect_file(temp_dir_path, "cockroachdb_stderr")?,
+            ));
+        }
+
         Ok(CockroachStarter {
             temp_dir,
             listen_url_file,
@@ -509,15 +542,6 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 /*
  * These are more integration tests than unit tests.
  */
-/*
- * XXX TODO-coverage This was manually tested, but we should add automated test
- * cases for:
- * - cockroach is killed in the background.
- *
- * It would be nice to have an integration test for "omicron_dev db-run" that
- * sends SIGINT to the session and verifies that it exits the way we expect, the
- * database shuts down, and the temporary directory is removed.
- */
 #[cfg(test)]
 mod test {
     use super::CockroachStartError;
@@ -531,6 +555,17 @@ mod test {
     use tempfile::tempdir;
     use tokio::fs;
 
+    fn new_builder() -> CockroachStarterBuilder {
+        /*
+         * We redirect stdout and stderr to files within the temporary directory
+         * so that people don't get reams of irrelevant output when running
+         * `cargo test`.  This will be cleaned up as usual on success.
+         */
+        let mut builder = CockroachStarterBuilder::new();
+        builder.redirect_stdio_to_files();
+        builder
+    }
+
     /*
      * Tests that we clean up the temporary directory correctly when the starter
      * goes out of scope, even if we never started the instance.  This is
@@ -539,7 +574,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_starter_tmpdir() {
-        let builder = CockroachStarterBuilder::new();
+        let builder = new_builder();
         let starter = builder.build().unwrap();
         let directory = starter.temp_dir().to_owned();
         assert!(fs::metadata(&directory)
@@ -573,7 +608,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_cmd_fails() {
-        let mut builder = CockroachStarterBuilder::new();
+        let mut builder = new_builder();
         builder.arg("not-a-valid-argument");
         test_database_start_failure(builder).await;
     }
@@ -607,7 +642,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_database_start_hang() {
-        let mut builder = CockroachStarterBuilder::new();
+        let mut builder = new_builder();
         builder.start_timeout(&Duration::from_millis(0));
         let starter = builder.build().expect("failed to build starter");
         let directory = starter.temp_dir().to_owned();
@@ -694,7 +729,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_setup_database_default_dir() {
-        let starter = CockroachStarterBuilder::new().build().unwrap();
+        let starter = new_builder().build().unwrap();
 
         /*
          * In this configuration, the database directory should exist within the
@@ -717,10 +752,7 @@ mod test {
         let extra_temp_dir =
             tempdir().expect("failed to create temporary directory");
         let data_dir = extra_temp_dir.path().join("custom_data");
-        let starter = CockroachStarterBuilder::new()
-            .store_dir(&data_dir)
-            .build()
-            .unwrap();
+        let starter = new_builder().store_dir(&data_dir).build().unwrap();
 
         /*
          * This common function will verify that the entire temporary directory
@@ -835,13 +867,13 @@ mod test {
      */
     #[tokio::test]
     async fn test_database_concurrent() {
-        let db1 = CockroachStarterBuilder::new()
+        let db1 = new_builder()
             .build()
             .expect("failed to create starter for the first database")
             .start()
             .await
             .expect("failed to start first database");
-        let db2 = CockroachStarterBuilder::new()
+        let db2 = new_builder()
             .build()
             .expect("failed to create starter for the second database")
             .start()
