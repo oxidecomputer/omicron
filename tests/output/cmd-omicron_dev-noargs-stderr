@@ -1,4 +1,4 @@
-omicron_dev: parsing arguments: oxide-api-prototype 0.1.0
+omicron_dev: parsing arguments: omicron 0.1.0
 Manage a local CockroachDB database for Omicron development
 
 USAGE:
