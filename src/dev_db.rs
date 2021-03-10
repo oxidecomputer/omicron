@@ -19,7 +19,7 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
  * arguments for the `cockroach start-single-node` command
  *
  * Without customizations, this will run `cockroach start-single-node --insecure
- * --listen-addr=127.0.0.1`.
+ * --listen-addr=127.0.0.1:0 --http-addr=:0`.
  *
  * It's useful to support running this concurrently (as in the test suite).  To
  * support this, we allow CockroachDB to choose its listening ports.  To figure
@@ -68,7 +68,8 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--listen-addr=127.0.0.1");
+            .arg("--listen-addr=127.0.0.1:0")
+            .arg("--http-addr=:0");
         builder
     }
 
@@ -512,11 +513,6 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
  * XXX TODO-coverage This was manually tested, but we should add automated test
  * cases for:
  * - cockroach is killed in the background.
- * - you can run this twice concurrently and get two different databases.
- *   XXX this already doesn't work and tests fail if --test-threads != 1
- *
- * These should verify that the child process is gone and the temporary
- * directory is cleaned up, except for the timeout case.
  *
  * It would be nice to have an integration test for "omicron_dev db-run" that
  * sends SIGINT to the session and verifies that it exits the way we expect, the
@@ -830,6 +826,57 @@ mod test {
         );
 
         eprintln!("cleaned up database and temporary directory");
+    }
+
+    /*
+     * Test that you can run the database twice concurrently (and have different
+     * databases!).
+     */
+    #[tokio::test]
+    async fn test_database_concurrent() {
+        let db1 = CockroachStarterBuilder::new()
+            .build()
+            .expect("failed to create starter for the first database")
+            .start()
+            .await
+            .expect("failed to start first database");
+        let db2 = CockroachStarterBuilder::new()
+            .build()
+            .expect("failed to create starter for the second database")
+            .start()
+            .await
+            .expect("failed to start second database");
+        let (client1, task1) =
+            db1.connect().await.expect("failed to connect to first database");
+        let (client2, task2) =
+            db2.connect().await.expect("failed to connect to first database");
+
+        client1
+            .execute("CREATE TABLE foo (v int)", &[])
+            .await
+            .expect("create (1)");
+        client2
+            .execute("CREATE TABLE foo (v int)", &[])
+            .await
+            .expect("create (2)");
+        client1
+            .execute("INSERT INTO foo VALUES (5)", &[])
+            .await
+            .expect("insert");
+        drop(client1);
+        task1
+            .await
+            .expect("failed to wait for first task")
+            .expect("first connection closed ungracefully");
+
+        let rows =
+            client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
+        assert_eq!(rows.len(), 0);
+        drop(client2);
+        task2
+            .await
+            .expect("failed to wait for second task")
+            .expect("second connection closed ungracefully");
     }
 
     fn process_running(pid: u32) -> bool {
