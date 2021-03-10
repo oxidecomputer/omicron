@@ -373,6 +373,40 @@ impl CockroachInstance {
     }
 
     /**
+     * Returns a connection to the underlying database
+     *
+     * tokio_postgres's `connect()` function returns a tuple `(client,
+     * connection)`, where the caller is expected to spawn a new task to `await`
+     * the connection in order to perform all the I/O on the connection.
+     * There's little else one can do with the `connection` object.  So for
+     * convenience, this function spawns the task to operate the connectiona nd
+     * returns `(client, connection_task)`.
+     */
+    /*
+     * TODO-design It might be nice to return a single object here that works
+     * like "client", but has a cleanup() method that drops the client and waits
+     * for the connection task.  (In practice, it seems likely that most
+     * tokio_postgres consumers do not bother saving the JoinHandle or wait for
+     * that task to complete.  Maybe that's fine?)
+     */
+    pub async fn connect(
+        &self,
+    ) -> Result<
+        (
+            tokio_postgres::Client,
+            tokio::task::JoinHandle<Result<(), tokio_postgres::Error>>,
+        ),
+        tokio_postgres::Error,
+    > {
+        let (client, connection) =
+            self.pg_config().connect(tokio_postgres::NoTls).await?;
+
+        let conn_task = tokio::spawn(async move { connection.await });
+
+        Ok((client, conn_task))
+    }
+
+    /**
      * Waits for the child process to exit
      *
      * Note that CockroachDB will normally run forever unless the caller
@@ -479,6 +513,7 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
  * cases for:
  * - cockroach is killed in the background.
  * - you can run this twice concurrently and get two different databases.
+ *   XXX this already doesn't work and tests fail if --test-threads != 1
  *
  * These should verify that the child process is gone and the temporary
  * directory is cleaned up, except for the timeout case.
@@ -595,13 +630,10 @@ mod test {
         /* Try to connect to it and run a query. */
         eprintln!("connecting to database");
         let conn_task = {
-            let (client, connection) = database
-                .pg_config()
-                .connect(tokio_postgres::NoTls)
+            let (client, conn_task) = database
+                .connect()
                 .await
                 .expect("failed to connect to newly-started database");
-
-            let conn_task = tokio::spawn(async move { connection.await });
 
             let row = client
                 .query_one("SELECT 12345", &[])
