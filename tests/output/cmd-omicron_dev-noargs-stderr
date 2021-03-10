@@ -1,0 +1,13 @@
+omicron_dev: parsing arguments: oxide-api-prototype 0.1.0
+Manage a local CockroachDB database for Omicron development
+
+USAGE:
+    omicron_dev <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    db-run    Start a CockroachDB cluster using a temporary directory for storage
+    help      Prints this message or the help of the given subcommand(s)

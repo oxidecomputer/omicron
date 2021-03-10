@@ -1,6 +1,5 @@
 /*!
  * Smoke tests for the omicron_dev command-line tool
- * XXX TODO-coverage add smoke tests in test_commands, too
  */
 
 use oxide_api_prototype::test_util::process_running;
@@ -33,7 +32,7 @@ struct DbRun {
  * Starts the "omicron_dev db-run" command and runs it for long enough to parse
  * the child pid, listen URL, and temporary directory.  Returns these, along
  * with a handle to the child process.
- * XXX It would be great to put a timeout on this.
+ * TODO-robustness It would be great to put a timeout on this.
  */
 fn run_db_run(exec: Exec) -> DbRun {
     let cmdline = exec.to_cmdline_lossy();

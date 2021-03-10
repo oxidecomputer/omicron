@@ -5,6 +5,8 @@
 use anyhow::bail;
 use anyhow::Context;
 use futures::stream::StreamExt;
+use oxide_api_prototype::cmd::fatal;
+use oxide_api_prototype::cmd::CmdError;
 use oxide_api_prototype::dev_db;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
@@ -13,11 +15,11 @@ use structopt::StructOpt;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let subcmd = OmicronDb::from_args();
+    let subcmd = OmicronDb::from_args_safe().unwrap_or_else(|err| {
+        fatal(CmdError::Usage(format!("parsing arguments: {}", err.message)))
+    });
     match subcmd {
         OmicronDb::DbRun { ref args } => cmd_db_run(args).await,
-        OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
-        OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
     }
 }
 
@@ -28,18 +30,6 @@ enum OmicronDb {
     DbRun {
         #[structopt(flatten)]
         args: DbRunArgs,
-    },
-
-    /// Populate an existing CockroachDB cluster with a schema for Omicron
-    DbPopulate {
-        #[structopt(flatten)]
-        args: DbPopulateArgs,
-    },
-
-    /// Wipe Omicron's database from an existing CockroachDB cluster
-    DbWipe {
-        #[structopt(flatten)]
-        args: DbWipeArgs,
     },
 }
 
@@ -133,16 +123,4 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
-}
-
-#[derive(Debug, StructOpt)]
-struct DbPopulateArgs {}
-async fn cmd_db_populate(_: &DbPopulateArgs) -> Result<(), anyhow::Error> {
-    todo!(); // XXX
-}
-
-#[derive(Debug, StructOpt)]
-struct DbWipeArgs {}
-async fn cmd_db_wipe(_: &DbWipeArgs) -> Result<(), anyhow::Error> {
-    todo!(); // XXX
 }
