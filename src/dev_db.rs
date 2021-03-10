@@ -535,6 +535,164 @@ mod test {
     use tokio::fs;
 
     /*
+     * Tests that we clean up the temporary directory correctly when the starter
+     * goes out of scope, even if we never started the instance.  This is
+     * important to avoid leaking the directory if there's an error starting the
+     * instance, for example.
+     */
+    #[tokio::test]
+    async fn test_starter_tmpdir() {
+        let builder = CockroachStarterBuilder::new();
+        let starter = builder.build().unwrap();
+        let directory = starter.temp_dir().to_owned();
+        assert!(fs::metadata(&directory)
+            .await
+            .expect("temporary directory is missing")
+            .is_dir());
+        drop(starter);
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(&directory)
+                .await
+                .expect_err("temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
+
+    /*
+     * Tests what happens if the "cockroach" command cannot be found.
+     */
+    #[tokio::test]
+    async fn test_bad_cmd() {
+        let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
+        test_database_start_failure(builder).await;
+    }
+
+    /*
+     * Tests what happens if the "cockroach" command exits before writing the
+     * listening-url file.  This looks the same to the caller (us), but
+     * internally requires different code paths.
+     */
+    #[tokio::test]
+    async fn test_cmd_fails() {
+        let mut builder = CockroachStarterBuilder::new();
+        builder.arg("not-a-valid-argument");
+        test_database_start_failure(builder).await;
+    }
+
+    /*
+     * Helper function for testing cases where the database fails to start.
+     */
+    async fn test_database_start_failure(builder: CockroachStarterBuilder) {
+        let starter = builder.build().unwrap();
+        let temp_dir = starter.temp_dir().to_owned();
+        eprintln!("will run: {}", starter.cmdline());
+        let error =
+            starter.start().await.expect_err("unexpectedly started database");
+        eprintln!("error: {:?}", error);
+        assert_eq!(
+            libc::ENOENT,
+            fs::metadata(temp_dir)
+                .await
+                .expect_err("temporary directory still exists")
+                .raw_os_error()
+                .unwrap()
+        );
+    }
+
+    /*
+     * Tests when CockroachDB hangs on startup by setting the start timeout
+     * absurdly short.  This unfortunately doesn't cover all cases.  By choosing
+     * a zero timeout, we're not letting the database get very far in its
+     * startup.  But we at least ensure that the test suite does not hang or
+     * timeout at some very long value.
+     */
+    #[tokio::test]
+    async fn test_database_start_hang() {
+        let mut builder = CockroachStarterBuilder::new();
+        builder.start_timeout(&Duration::from_millis(0));
+        let starter = builder.build().expect("failed to build starter");
+        let directory = starter.temp_dir().to_owned();
+        eprintln!("temporary directory: {}", directory.display());
+        let error =
+            starter.start().await.expect_err("unexpectedly started database");
+        eprintln!("(expected) error starting database: {:?}", error);
+        let pid = match error {
+            CockroachStartError::TimedOut { pid, time_waited } => {
+                /* We ought to fire a 0-second timeout within 5 seconds. */
+                assert!(time_waited < Duration::from_secs(5));
+                pid
+            }
+            other_error => panic!(
+                "expected timeout error, but got some other error: {:?}",
+                other_error
+            ),
+        };
+        /* The child process should still be running. */
+        assert!(process_running(pid));
+        /* The temporary directory should still exist. */
+        assert!(fs::metadata(&directory)
+            .await
+            .expect("temporary directory is missing")
+            .is_dir());
+        /* Kill the child process (to clean up after ourselves). */
+        assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) });
+
+        /*
+         * Wait for the process to exit so that we can reliably clean up the
+         * temporary directory.  We don't have a great way to avoid polling
+         * here.
+         */
+        poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
+            || async {
+                if process_running(pid) {
+                    Err(poll::CondCheckError::NotYet)
+                } else {
+                    Ok(())
+                }
+            },
+            &Duration::from_millis(25),
+            &Duration::from_secs(10),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "timed out waiting for pid {} to exit \
+                    (leaving temporary directory {})",
+                pid,
+                directory.display()
+            );
+        });
+        assert!(!process_running(pid));
+
+        /*
+         * The temporary directory is normally cleaned up automatically.  In
+         * this case, it's deliberately left around.  We need to clean it up
+         * here.  Now, the directory is created with tempfile::TempDir, which
+         * puts it under std::env::temp_dir().  We assert that here as an
+         * ultra-conservative safety.  We don't want to accidentally try to blow
+         * away some large directory tree if somebody modifies the code to use
+         * some other directory for the temporary directory.
+         */
+        if !directory.starts_with(env::temp_dir()) {
+            panic!(
+                "refusing to remove temporary directory not under
+                std::env::temp_dir(): {}",
+                directory.display()
+            )
+        }
+
+        fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
+            panic!(
+                "failed to remove temporary directory {}: {:?}",
+                directory.display(),
+                e
+            )
+        });
+    }
+
+    /*
      * Test the happy path using the default store directory.
      */
     #[tokio::test]
@@ -672,164 +830,6 @@ mod test {
         );
 
         eprintln!("cleaned up database and temporary directory");
-    }
-
-    /*
-     * Tests what happens if the "cockroach" command cannot be found.
-     */
-    #[tokio::test]
-    async fn test_bad_cmd() {
-        let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
-        test_database_start_failure(builder).await;
-    }
-
-    /*
-     * Tests what happens if the "cockroach" command exits before writing the
-     * listening-url file.  This looks the same to the caller (us), but
-     * internally requires different code paths.
-     */
-    #[tokio::test]
-    async fn test_cmd_fails() {
-        let mut builder = CockroachStarterBuilder::new();
-        builder.arg("not-a-valid-argument");
-        test_database_start_failure(builder).await;
-    }
-
-    /*
-     * Helper function for testing cases where the database fails to start.
-     */
-    async fn test_database_start_failure(builder: CockroachStarterBuilder) {
-        let starter = builder.build().unwrap();
-        let temp_dir = starter.temp_dir().to_owned();
-        eprintln!("will run: {}", starter.cmdline());
-        let error =
-            starter.start().await.expect_err("unexpectedly started database");
-        eprintln!("error: {:?}", error);
-        assert_eq!(
-            libc::ENOENT,
-            fs::metadata(temp_dir)
-                .await
-                .expect_err("temporary directory still exists")
-                .raw_os_error()
-                .unwrap()
-        );
-    }
-
-    /*
-     * Tests that we clean up the temporary directory correctly when the starter
-     * goes out of scope, even if we never started the instance.  This is
-     * important to avoid leaking the directory if there's an error starting the
-     * instance, for example.
-     */
-    #[tokio::test]
-    async fn test_starter_tmpdir() {
-        let builder = CockroachStarterBuilder::new();
-        let starter = builder.build().unwrap();
-        let directory = starter.temp_dir().to_owned();
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
-        drop(starter);
-        assert_eq!(
-            libc::ENOENT,
-            fs::metadata(&directory)
-                .await
-                .expect_err("temporary directory still exists")
-                .raw_os_error()
-                .unwrap()
-        );
-    }
-
-    /*
-     * Tests when CockroachDB hangs on startup by setting the start timeout
-     * absurdly short.  This unfortunately doesn't cover all cases.  By choosing
-     * a zero timeout, we're not letting the database get very far in its
-     * startup.  But we at least ensure that the test suite does not hang or
-     * timeout at some very long value.
-     */
-    #[tokio::test]
-    async fn test_database_start_hang() {
-        let mut builder = CockroachStarterBuilder::new();
-        builder.start_timeout(&Duration::from_millis(0));
-        let starter = builder.build().expect("failed to build starter");
-        let directory = starter.temp_dir().to_owned();
-        eprintln!("temporary directory: {}", directory.display());
-        let error =
-            starter.start().await.expect_err("unexpectedly started database");
-        eprintln!("(expected) error starting database: {:?}", error);
-        let pid = match error {
-            CockroachStartError::TimedOut { pid, time_waited } => {
-                /* We ought to fire a 0-second timeout within 5 seconds. */
-                assert!(time_waited < Duration::from_secs(5));
-                pid
-            }
-            other_error => panic!(
-                "expected timeout error, but got some other error: {:?}",
-                other_error
-            ),
-        };
-        /* The child process should still be running. */
-        assert!(process_running(pid));
-        /* The temporary directory should still exist. */
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
-        /* Kill the child process (to clean up after ourselves). */
-        assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) });
-
-        /*
-         * Wait for the process to exit so that we can reliably clean up the
-         * temporary directory.  We don't have a great way to avoid polling
-         * here.
-         */
-        poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
-            || async {
-                if process_running(pid) {
-                    Err(poll::CondCheckError::NotYet)
-                } else {
-                    Ok(())
-                }
-            },
-            &Duration::from_millis(25),
-            &Duration::from_secs(10),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "timed out waiting for pid {} to exit \
-                    (leaving temporary directory {})",
-                pid,
-                directory.display()
-            );
-        });
-        assert!(!process_running(pid));
-
-        /*
-         * The temporary directory is normally cleaned up automatically.  In
-         * this case, it's deliberately left around.  We need to clean it up
-         * here.  Now, the directory is created with tempfile::TempDir, which
-         * puts it under std::env::temp_dir().  We assert that here as an
-         * ultra-conservative safety.  We don't want to accidentally try to blow
-         * away some large directory tree if somebody modifies the code to use
-         * some other directory for the temporary directory.
-         */
-        if !directory.starts_with(env::temp_dir()) {
-            panic!(
-                "refusing to remove temporary directory not under
-                std::env::temp_dir(): {}",
-                directory.display()
-            )
-        }
-
-        fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
-            panic!(
-                "failed to remove temporary directory {}: {:?}",
-                directory.display(),
-                e
-            )
-        });
     }
 
     fn process_running(pid: u32) -> bool {
