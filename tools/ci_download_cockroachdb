@@ -113,7 +113,7 @@ function do_download_curl
 
 function do_download_windows
 {
-	Invoke-WebRequest -Uri "$1" -OutFile "$2"
+	pwsh -Command "{Invoke-WebRequest -Uri "\$1" -OutFile "\$2"}"
 }
 
 function do_md5
@@ -138,7 +138,7 @@ function do_untar
 
 function do_unzip
 {
-	Expand-Archive "$1" "."
+	pwsh -Command "{Expand-Archive \"$1\" \".\"}"
 }
 
 main "$@"
