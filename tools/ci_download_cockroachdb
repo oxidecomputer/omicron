@@ -113,7 +113,7 @@ function do_download_curl
 
 function do_download_windows
 {
-	pwsh -Command "{Invoke-WebRequest -Uri "\$1" -OutFile "\$2"}"
+	pwsh -Command "& {Invoke-WebRequest -Uri \"$1\" -OutFile \"$2\"}"
 }
 
 function do_md5
@@ -128,7 +128,7 @@ function do_md5sum
 
 function do_md5_windows
 {
-	pwsh -Command "{Get-FileHash \"$1\" -Algorithm MD5}"
+	pwsh -Command "& {Get-FileHash \"$1\" -Algorithm MD5}"
 }
 
 function do_untar
@@ -138,7 +138,7 @@ function do_untar
 
 function do_unzip
 {
-	pwsh -Command "{Expand-Archive \"$1\" \".\"}"
+	pwsh -Command "& {Expand-Archive \"$1\" \".\"}"
 }
 
 main "$@"
