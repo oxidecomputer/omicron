@@ -38,6 +38,7 @@ jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-10.15 ]
     steps:
