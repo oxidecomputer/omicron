@@ -128,7 +128,7 @@ function do_md5sum
 
 function do_md5_windows
 {
-	pwsh -Command "{Get-FileHash -Path \"$1\" -Algorithm MD5}"
+	pwsh -Command "{Get-FileHash \"$1\" -Algorithm MD5}"
 }
 
 function do_untar
