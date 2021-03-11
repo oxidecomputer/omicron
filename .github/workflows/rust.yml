@@ -43,7 +43,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: test ci_download_cockroachdb
-      run: ./tools/ci_download_cockroachdb
+      run: bash ./tools/ci_download_cockroachdb
 #  build-and-test:
 #    runs-on: ${{ matrix.os }}
 #    strategy:
