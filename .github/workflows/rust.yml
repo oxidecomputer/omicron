@@ -56,7 +56,7 @@ jobs:
     - name: Build
       run: cargo build --all-targets --verbose
     - name: Download CockroachDB binary
-      if: steps.cache-cockroachdb.cache-hit != 'true'
+      if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       run: PATH="$PATH:." cargo test --verbose
