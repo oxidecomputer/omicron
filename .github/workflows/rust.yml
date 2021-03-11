@@ -46,9 +46,17 @@ jobs:
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Report cargo version
       run: cargo --version
+    - name: Configure GitHub cache for CockroachDB binaries
+      id: cache-cockroachdb
+      # actions/cache@v2.1.4
+      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
+      with:
+        key: ${{ runner.os }}-cockroach-binary
+        path: [ "cockroach" ]
     - name: Build
       run: cargo build --all-targets --verbose
-    - name: test ci_download_cockroachdb
+    - name: Download CockroachDB binary
+      if: steps.cache-cockroachdb.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       run: PATH="$PATH:." cargo test --verbose
