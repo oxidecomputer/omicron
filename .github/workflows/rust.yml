@@ -46,6 +46,8 @@ jobs:
     - name: Report cargo version
       run: cargo --version
     - name: Build
-      run: cargo build --tests --verbose
+      run: cargo build --all-targets --verbose
+    - name: test ci_download_cockroachdb
+      run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
-      run: cargo test --verbose
+      run: PATH="$PATH:." cargo test --verbose
