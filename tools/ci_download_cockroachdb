@@ -128,7 +128,8 @@ function do_md5sum
 
 function do_md5_windows
 {
-	pwsh -Command "& {Get-FileHash \"$1\" -Algorithm MD5 | Format-List -Property Hash}"
+	pwsh -Command "& {Get-FileHash \"$1\" -Algorithm MD5 | Format-List -Property Hash}" | \
+	    awk '$1 == "Hash"{ print $NF }'
 }
 
 function do_untar
