@@ -6,36 +6,35 @@ name: Rust
 on: [ push, pull_request ]
 
 jobs:
-  check-style:
-    runs-on: ubuntu-18.04
-    steps:
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - name: Report cargo version
-      run: cargo --version
-    - name: Report rustfmt version
-      run: cargo fmt -- --version
-    - name: Check style
-      run: cargo fmt -- --check
-
-  clippy-lint:
-    runs-on: ubuntu-18.04
-    steps:
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - name: Report cargo version
-      run: cargo --version
-    - name: Report Clippy version
-      run: cargo clippy -- --version
-    - name: Run Clippy Lints
-      #
-      # Clippy's style nits are useful, but not worth keeping in CI.  This
-      # override belongs in src/lib.rs, and it is there, but that doesn't
-      # reliably work due to rust-lang/rust-clippy#6610.
-      #
-      run: cargo clippy -- -D warnings -A clippy::style
-
-  build-and-test:
+#  check-style:
+#    runs-on: ubuntu-18.04
+#    steps:
+#    # actions/checkout@v2
+#    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+#    - name: Report cargo version
+#      run: cargo --version
+#    - name: Report rustfmt version
+#      run: cargo fmt -- --version
+#    - name: Check style
+#      run: cargo fmt -- --check
+#
+#  clippy-lint:
+#    runs-on: ubuntu-18.04
+#    steps:
+#    # actions/checkout@v2
+#    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+#    - name: Report cargo version
+#      run: cargo --version
+#    - name: Report Clippy version
+#      run: cargo clippy -- --version
+#    - name: Run Clippy Lints
+#      #
+#      # Clippy's style nits are useful, but not worth keeping in CI.  This
+#      # override belongs in src/lib.rs, and it is there, but that doesn't
+#      # reliably work due to rust-lang/rust-clippy#6610.
+#      #
+#      run: cargo clippy -- -D warnings -A clippy::style
+  test-ci-download-cockroachdb:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -43,9 +42,19 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - name: Report cargo version
-      run: cargo --version
-    - name: Build
-      run: cargo build --tests --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - name: test ci_download_cockroachdb
+      run: ./tools/ci_download_cockroachdb
+#  build-and-test:
+#    runs-on: ${{ matrix.os }}
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-18.04, windows-2019, macos-10.15 ]
+#    steps:
+#    # actions/checkout@v2
+#    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+#    - name: Report cargo version
+#      run: cargo --version
+#    - name: Build
+#      run: cargo build --tests --verbose
+#    - name: Run tests
+#      run: cargo test --verbose
