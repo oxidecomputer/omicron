@@ -15,7 +15,6 @@ ARG0="$(basename ${BASH_SOURCE[0]})"
 CIDL_VERSION="v20.2.5"
 CIDL_MD5_DARWIN="4c4b84861c313884a4ef5fbbe57cb543"
 CIDL_MD5_LINUX="8fe4f47413e2c6570da0e661af716f9a"
-CIDL_MD5_WINDOWS="3617e25afd6660116d59d7556ff99c6e"
 
 function main
 {
@@ -73,7 +72,7 @@ function fail
 function configure_os
 {
 	echo "current directory: $PWD"
-	echo "configuring based on OS: \"$OSTYPE\""
+	echo "configuring based on OS: \"$1\""
 	case "$1" in
 		darwin*)
 			CIDL_BUILD="darwin-10.9-amd64"
@@ -92,13 +91,7 @@ function configure_os
 			CIDL_UNPACK="do_untar"
 			;;
 		*)
-			echo "assuming Windows"
-			CIDL_BUILD="windows-6.2-amd64"
-			CIDL_SUFFIX="zip"
-			CIDL_MD5="$CIDL_MD5_WINDOWS"
-			CIDL_MD5FUNC="do_md5_windows"
-			CIDL_DOWNLOAD="do_download_windows"
-			CIDL_UNPACK="do_unzip"
+			fail "unsupported OS: $1"
 			;;
 	esac
 
@@ -111,11 +104,6 @@ function do_download_curl
 	curl --silent --show-error --fail --location --output "$2" "$1"
 }
 
-function do_download_windows
-{
-	pwsh -Command "& {Invoke-WebRequest -Uri \"$1\" -OutFile \"$2\"}"
-}
-
 function do_md5
 {
 	md5 < "$1"
@@ -126,21 +114,9 @@ function do_md5sum
 	md5sum < "$1" | awk '{print $1}'
 }
 
-function do_md5_windows
-{
-	pwsh -Command "& {Get-FileHash \"$1\" -Algorithm MD5 | Format-List -Property Hash}" | \
-	    awk '$1 == "Hash"{ print $NF }' |
-	    tr '[A-Z]' '[a-z]'
-}
-
 function do_untar
 {
 	tar xzf "$1"
-}
-
-function do_unzip
-{
-	pwsh -Command "& {Expand-Archive \"$1\" \".\"}"
 }
 
 main "$@"
