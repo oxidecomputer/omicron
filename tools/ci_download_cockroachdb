@@ -128,7 +128,7 @@ function do_md5sum
 
 function do_md5_windows
 {
-	CertUtil -hashfile "$1" MD5
+	pwsh -Command "{Get-FileHash -Path \"$1\" -Algorithm MD5}"
 }
 
 function do_untar
