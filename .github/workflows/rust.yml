@@ -59,4 +59,5 @@ jobs:
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
+      # We modify PATH to put "./cockroach" on the PATH for the test suite.
       run: PATH="$PATH:." cargo test --verbose
