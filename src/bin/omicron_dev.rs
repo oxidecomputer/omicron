@@ -29,7 +29,7 @@ async fn main() -> Result<(), anyhow::Error> {
 /// Manage a local CockroachDB database for Omicron development
 #[derive(Debug, StructOpt)]
 enum OmicronDb {
-    /// Start a CockroachDB cluster using a temporary directory for storage
+    /// Start a CockroachDB cluster for development
     DbRun {
         #[structopt(flatten)]
         args: DbRunArgs,
@@ -51,6 +51,7 @@ enum OmicronDb {
 
 #[derive(Debug, StructOpt)]
 struct DbRunArgs {
+    /// Path to store database data (default: temp dir cleaned up on exit)
     #[structopt(long, parse(from_os_str))]
     store_dir: Option<PathBuf>,
 
@@ -161,9 +162,11 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
 
 #[derive(Debug, StructOpt)]
 struct DbPopulateArgs {
+    /// URL for connecting to the database (postgresql:///...)
     #[structopt(long)]
     database_url: String,
 
+    /// Wipe any existing schema (and data!) before populating
     #[structopt(long)]
     wipe: bool,
 }
@@ -191,6 +194,7 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
 
 #[derive(Debug, StructOpt)]
 struct DbWipeArgs {
+    /// URL for connecting to the database (postgresql:///...)
     #[structopt(long)]
     database_url: String,
 }
