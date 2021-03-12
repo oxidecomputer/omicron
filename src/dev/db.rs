@@ -1,6 +1,6 @@
 //! Facilities for managing a local database for development
 
-use crate::backoff::poll;
+use crate::dev::poll;
 use anyhow::Context;
 use std::ffi::OsStr;
 use std::fmt;
@@ -547,8 +547,8 @@ mod test {
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
-    use crate::backoff::poll;
-    use crate::test_util::process_running;
+    use crate::dev::poll;
+    use crate::dev::process_running;
     use std::env;
     use std::path::Path;
     use std::time::Duration;

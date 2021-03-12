@@ -383,7 +383,7 @@ mod test {
     use crate::api_model::ApiInstanceRuntimeState;
     use crate::api_model::ApiInstanceRuntimeStateRequested;
     use crate::api_model::ApiInstanceState;
-    use crate::test_util::test_setup_log;
+    use crate::dev::test_setup_log;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;

@@ -6,7 +6,7 @@ use anyhow::bail;
 use anyhow::Context;
 use omicron::cmd::fatal;
 use omicron::cmd::CmdError;
-use omicron::dev_db;
+use omicron::dev;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -53,7 +53,7 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
      * builder, then create starter, then start it) because we want to be able
      * to print what's happening before we do it.
      */
-    let mut db_arg_builder = dev_db::CockroachStarterBuilder::new();
+    let mut db_arg_builder = dev::db::CockroachStarterBuilder::new();
 
     /*
      * NOTE: The stdout strings here are not intended to be stable, but they are

@@ -2,7 +2,7 @@
  * Smoke tests for the omicron_dev command-line tool
  */
 
-use omicron::test_util::process_running;
+use omicron::dev::process_running;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
