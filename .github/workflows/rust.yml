@@ -51,7 +51,7 @@ jobs:
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
-        key: ${{ runner.os }}-cockroach-binary
+        key: ${{ runner.os }}-cockroach-binary-v1
         path: "cockroach"
     - name: Build
       run: cargo build --all-targets --verbose

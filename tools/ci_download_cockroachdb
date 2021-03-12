@@ -56,8 +56,8 @@ function main
 	# Unpack the tarball
 	$CIDL_UNPACK "$CIDL_FILE"
 
-	# Symlink the "cockroach" binary to the right spot.
-	ln -fs "$CIDL_DIR/cockroach" "cockroach"
+	# Copy the "cockroach" binary to the right spot.
+	cp "$CIDL_DIR/cockroach" "cockroach"
 
 	# Attempt to run it as a sanity-check
 	./cockroach version
