@@ -2,6 +2,7 @@
 
 use crate::dev::poll;
 use anyhow::Context;
+use core::ops::Deref;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
@@ -406,68 +407,23 @@ impl CockroachInstance {
         &self.temp_dir_path
     }
 
-    /**
-     * Returns a connection to the underlying database
-     *
-     * tokio_postgres's `connect()` function returns a tuple `(client,
-     * connection)`, where the caller is expected to spawn a new task to `await`
-     * the connection in order to perform all the I/O on the connection.
-     * There's little else one can do with the `connection` object.  So for
-     * convenience, this function spawns the task to operate the connectiona nd
-     * returns `(client, connection_task)`.
-     */
-    /*
-     * TODO-design It might be nice to return a single object here that works
-     * like "client", but has a cleanup() method that drops the client and waits
-     * for the connection task.  (In practice, it seems likely that most
-     * tokio_postgres consumers do not bother saving the JoinHandle or wait for
-     * that task to complete.  Maybe that's fine?)
-     */
-    pub async fn connect(
-        &self,
-    ) -> Result<
-        (
-            tokio_postgres::Client,
-            tokio::task::JoinHandle<Result<(), tokio_postgres::Error>>,
-        ),
-        tokio_postgres::Error,
-    > {
-        let (client, connection) =
-            self.pg_config().connect(tokio_postgres::NoTls).await?;
-
-        let conn_task = tokio::spawn(async move { connection.await });
-
-        Ok((client, conn_task))
+    /** Returns a connection to the underlying database */
+    pub async fn connect(&self) -> Result<Client, tokio_postgres::Error> {
+        Client::connect(self.pg_config(), tokio_postgres::NoTls).await
     }
 
     /** Wrapper around [`wipe()`] using a connection to this database. */
     pub async fn wipe(&self) -> Result<(), anyhow::Error> {
-        let (client, conn_task) = self
-            .connect()
-            .await
-            .context("populate(): failed to connect to database")?;
-        wipe(&client).await?;
-        drop(client);
-        conn_task
-            .await
-            .expect("failed to join conn task")
-            .expect("connection closed ungracefully");
-        Ok(())
+        let client = self.connect().await.context("connect")?;
+        wipe(&client).await.context("wipe")?;
+        client.cleanup().await.context("cleaning up after wipe")
     }
 
     /** Wrapper around [`populate()`] using a connection to this database. */
     pub async fn populate(&self) -> Result<(), anyhow::Error> {
-        let (client, conn_task) = self
-            .connect()
-            .await
-            .context("populate(): failed to connect to database")?;
-        populate(&client).await?;
-        drop(client);
-        conn_task
-            .await
-            .expect("failed to join conn task")
-            .expect("connection closed ungracefully");
-        Ok(())
+        let client = self.connect().await.context("connect")?;
+        populate(&client).await.context("populate")?;
+        client.cleanup().await.context("cleaning up after wipe")
     }
 
     /**
@@ -592,6 +548,78 @@ pub async fn wipe(
 ) -> Result<(), anyhow::Error> {
     let sql = include_str!("../sql/dbwipe.sql");
     client.batch_execute(sql).await.context("wiping Omicron database")
+}
+
+/**
+ * Wraps a PostgreSQL connection and client as provided by
+ * `tokio_postgres::Config::connect()`
+ *
+ * Typically, callers of [`tokio_postgres::Config::connect()`] get back both a
+ * Client and a Connection.  You must spawn a separate task to `await` on the
+ * connection in order for any database operations to happen.  When the Client
+ * is dropped, the Connection is gracefully terminated, its Future completes,
+ * and the task should be cleaned up.  This is awkward to use, particularly if
+ * you care to be sure that the task finished.
+ *
+ * This structure combines the Connection and Client.  You can create one from a
+ * [`tokio_postgres::Config`] or from an existing ([`tokio_postgres::Client`],
+ * [`tokio_postgrs::Connection`]) pair.  You can use it just like a
+ * `tokio_postgres::Client`.  When finished, you can call `cleanup()` to drop
+ * the Client and wait for the Connection's task.
+ *
+ * If you do not call `cleanup()`, then the underlying `tokio_postgres::Client`
+ * will be dropped when this object is dropped.  If there has been no connection
+ * error, then the connection will be closed gracefully, but nothing will check
+ * for any error from the connection.
+ */
+pub struct Client {
+    client: tokio_postgres::Client,
+    conn_task: tokio::task::JoinHandle<Result<(), tokio_postgres::Error>>,
+}
+
+type ClientConnPair<S, T> =
+    (tokio_postgres::Client, tokio_postgres::Connection<S, T>);
+impl<S, T> From<ClientConnPair<S, T>> for Client
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    fn from((client, connection): ClientConnPair<S, T>) -> Self {
+        let join_handle = tokio::spawn(async move { connection.await });
+        Client { client, conn_task: join_handle }
+    }
+}
+
+impl Deref for Client {
+    type Target = tokio_postgres::Client;
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl Client {
+    /**
+     * Invokes `config.connect(tls)` and wraps the result in a `Client`.
+     */
+    pub async fn connect<T>(
+        config: &tokio_postgres::config::Config,
+        tls: T,
+    ) -> Result<Client, tokio_postgres::Error>
+    where
+        T: tokio_postgres::tls::MakeTlsConnect<tokio_postgres::Socket>,
+        T::Stream: Send + 'static,
+    {
+        Ok(Client::from(config.connect(tls).await?))
+    }
+
+    /**
+     * Closes the connection, waits for it to be cleaned up gracefully, and
+     * returns any error status.
+     */
+    pub async fn cleanup(self) -> Result<(), tokio_postgres::Error> {
+        drop(self.client);
+        self.conn_task.await.expect("failed to join on connection task")
+    }
 }
 
 /*
@@ -871,30 +899,19 @@ mod test {
 
         /* Try to connect to it and run a query. */
         eprintln!("connecting to database");
-        let conn_task = {
-            let (client, conn_task) = database
-                .connect()
-                .await
-                .expect("failed to connect to newly-started database");
-
-            let row = client
-                .query_one("SELECT 12345", &[])
-                .await
-                .expect("basic query failed");
-            assert_eq!(row.len(), 1);
-            assert_eq!(row.get::<'_, _, i64>(0), 12345);
-
-            conn_task
-        };
-
-        /*
-         * With the client dropped, the connection should be shut down.  Wait
-         * for the task that we spawned to finish.  Then clean up the server.
-         */
-        conn_task
+        let client = database
+            .connect()
             .await
-            .expect("failed to wait for conn task")
-            .expect("connection unexpectedly failed");
+            .expect("failed to connect to newly-started database");
+
+        let row = client
+            .query_one("SELECT 12345", &[])
+            .await
+            .expect("basic query failed");
+        assert_eq!(row.len(), 1);
+        assert_eq!(row.get::<'_, _, i64>(0), 12345);
+
+        client.cleanup().await.expect("connection unexpectedly failed");
         database.cleanup().await.expect("failed to clean up database");
 
         /* Check that the database process is no longer running. */
@@ -934,10 +951,10 @@ mod test {
             .start()
             .await
             .expect("failed to start second database");
-        let (client1, task1) =
+        let client1 =
             db1.connect().await.expect("failed to connect to first database");
-        let (client2, task2) =
-            db2.connect().await.expect("failed to connect to first database");
+        let client2 =
+            db2.connect().await.expect("failed to connect to second database");
 
         client1
             .execute("CREATE TABLE foo (v int)", &[])
@@ -951,19 +968,11 @@ mod test {
             .execute("INSERT INTO foo VALUES (5)", &[])
             .await
             .expect("insert");
-        drop(client1);
-        task1
-            .await
-            .expect("failed to wait for first task")
-            .expect("first connection closed ungracefully");
+        client1.cleanup().await.expect("first connection closed ungracefully");
 
         let rows =
             client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
         assert_eq!(rows.len(), 0);
-        drop(client2);
-        task2
-            .await
-            .expect("failed to wait for second task")
-            .expect("second connection closed ungracefully");
+        client2.cleanup().await.expect("second connection closed ungracefully");
     }
 }

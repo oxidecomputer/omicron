@@ -173,11 +173,9 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
         args.database_url.parse::<tokio_postgres::Config>().with_context(
             || format!("parsing database URL {:?}", args.database_url),
         )?;
-    let (client, connection) = config
-        .connect(tokio_postgres::NoTls)
+    let client = dev::db::Client::connect(&config, tokio_postgres::NoTls)
         .await
         .with_context(|| format!("connecting to {:?}", args.database_url))?;
-    let conn_task = tokio::spawn(async move { connection.await });
 
     if args.wipe {
         println!("omicron_dev: wiping any existing database");
@@ -187,11 +185,7 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
     println!("omicron_dev: populating database");
     dev::db::populate(&client).await?;
     println!("omicron_dev: populated database");
-    drop(client);
-    conn_task
-        .await
-        .expect("failed to wait for conn task")
-        .expect("connection terminated ungracefully");
+    client.cleanup().await.expect("connection failed");
     Ok(())
 }
 
@@ -206,20 +200,13 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
         args.database_url.parse::<tokio_postgres::Config>().with_context(
             || format!("parsing database URL {:?}", args.database_url),
         )?;
-    let (client, connection) = config
-        .connect(tokio_postgres::NoTls)
+    let client = dev::db::Client::connect(&config, tokio_postgres::NoTls)
         .await
         .with_context(|| format!("connecting to {:?}", args.database_url))?;
-    let conn_task = tokio::spawn(async move { connection.await });
 
     println!("omicron_dev: wiping any existing database");
     dev::db::wipe(&client).await?;
-    println!("omicron_dev: done");
-
-    drop(client);
-    conn_task
-        .await
-        .expect("failed to wait for conn task")
-        .expect("connection terminated ungracefully");
+    println!("omicron_dev: wiped");
+    client.cleanup().await.expect("connection failed");
     Ok(())
 }
