@@ -440,6 +440,36 @@ impl CockroachInstance {
         Ok((client, conn_task))
     }
 
+    /** Wrapper around [`wipe()`] using a connection to this database. */
+    pub async fn wipe(&self) -> Result<(), anyhow::Error> {
+        let (client, conn_task) = self
+            .connect()
+            .await
+            .context("populate(): failed to connect to database")?;
+        wipe(&client).await?;
+        drop(client);
+        conn_task
+            .await
+            .expect("failed to join conn task")
+            .expect("connection closed ungracefully");
+        Ok(())
+    }
+
+    /** Wrapper around [`populate()`] using a connection to this database. */
+    pub async fn populate(&self) -> Result<(), anyhow::Error> {
+        let (client, conn_task) = self
+            .connect()
+            .await
+            .context("populate(): failed to connect to database")?;
+        populate(&client).await?;
+        drop(client);
+        conn_task
+            .await
+            .expect("failed to join conn task")
+            .expect("connection closed ungracefully");
+        Ok(())
+    }
+
     /**
      * Waits for the child process to exit
      *
@@ -537,6 +567,31 @@ impl Drop for CockroachInstance {
  */
 fn process_exited(child_process: &mut tokio::process::Child) -> bool {
     child_process.try_wait().unwrap().is_some()
+}
+
+/**
+ * Populate a database with the Omicron schema and any initial objects
+ *
+ * This is not idempotent.  It will fail if the database or other objects
+ * already exist.
+ */
+pub async fn populate(
+    client: &tokio_postgres::Client,
+) -> Result<(), anyhow::Error> {
+    let sql = include_str!("../sql/dbinit.sql");
+    client.batch_execute(sql).await.context("populating Omicron database")
+}
+
+/**
+ * Wipe an Omicron database from the remote database
+ *
+ * This is dangerous!  Use carefully.
+ */
+pub async fn wipe(
+    client: &tokio_postgres::Client,
+) -> Result<(), anyhow::Error> {
+    let sql = include_str!("../sql/dbwipe.sql");
+    client.batch_execute(sql).await.context("wiping Omicron database")
 }
 
 /*
