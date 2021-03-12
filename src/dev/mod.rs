@@ -1,11 +1,15 @@
 /*!
- * Shared automated testing facilities used by unit tests
+ * Facilities intended for development tools and the test suite.  These should
+ * generally not be used in production code.
  */
 
 /*
  * Dead code warnings are not meaningful here unless we're building for tests.
  */
 #![cfg_attr(not(test), allow(dead_code))]
+
+pub mod db;
+pub mod poll;
 
 use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
@@ -27,4 +31,15 @@ pub async fn test_setup_log(test_name: &str) -> LogContext {
     };
 
     LogContext::new(test_name, &log_config)
+}
+
+/**
+ * Returns whether the given process is currently running
+ */
+pub fn process_running(pid: u32) -> bool {
+    /*
+     * It should be okay to invoke this syscall with these arguments.  This
+     * only checks whether the process is running.
+     */
+    0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
 }

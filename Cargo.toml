@@ -7,15 +7,19 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.24"
+ctrlc = "3.1"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
-serde_json = "1.0"
+libc = "0.2.71"
 ring = "0.16"
+serde_json = "1.0"
 smf = "0.1"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.0"
 thiserror = "1.0"
+tokio-postgres = "0.7"
 toml = "0.5.6"
 walkdir = "2.3"
 
@@ -59,7 +63,6 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 expectorate = "1.0.1"
-libc = "0.2.71"
 newline-converter = "0.1.0"
 openapiv3 = "0.3.0"
 serde_urlencoded = "0.6.1"
@@ -84,6 +87,9 @@ name = "bootstrap_agent"
 doc = false
 [[bin]]
 name = "nexus"
+doc = false
+[[bin]]
+name = "omicron_dev"
 doc = false
 [[bin]]
 name = "omicron_package"

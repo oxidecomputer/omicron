@@ -1,0 +1,122 @@
+#!/bin/bash
+
+#
+# ci_download_cockroachdb: fetches the appropriate CockroachDB binary tarball
+# based on the currently running operating system, unpacks it, and creates a
+# symlink called "cockroach", all in the current directory.
+#
+
+set -o pipefail
+set -o xtrace
+set -o errexit
+
+# If you change this, you must also update the md5sums below
+ARG0="$(basename ${BASH_SOURCE[0]})"
+CIDL_VERSION="v20.2.5"
+CIDL_MD5_DARWIN="4c4b84861c313884a4ef5fbbe57cb543"
+CIDL_MD5_LINUX="8fe4f47413e2c6570da0e661af716f9a"
+
+function main
+{
+	#
+	# Process command-line arguments.  We generally don't expect any, but
+	# we allow callers to specify a value to override OSTYPE, just for
+	# testing.
+	#
+	if [[ $# != 0 ]]; then
+		CIDL_OS="$1"
+		shift
+	else
+		CIDL_OS="$OSTYPE"
+	fi
+
+	if [[ $# != 0 ]]; then
+		echo "unexpected arguments" >&2
+		exit 2
+	fi
+
+	# Configure this program
+	configure_os "$CIDL_OS"
+	CIDL_URL="https://binaries.cockroachdb.com/$CIDL_FILE"
+
+	# Download the file.
+	echo "URL: $CIDL_URL"
+	echo "Local file: $CIDL_FILE"
+	$CIDL_DOWNLOAD "$CIDL_URL" "$CIDL_FILE" || \
+	    fail "failed to download file"
+
+	# Verify the md5sum.
+	calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
+	    fail "failed to calculate md5sum"
+	if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
+		fail "md5sum mismatch \
+		    (expected $CIDL_MD5, found $calculated_md5)"
+	fi
+
+	# Unpack the tarball
+	$CIDL_UNPACK "$CIDL_FILE"
+
+	# Copy the "cockroach" binary to the right spot.
+	cp "$CIDL_DIR/cockroach" "cockroach"
+
+	# Attempt to run it as a sanity-check
+	./cockroach version
+}
+
+function fail
+{
+	echo "$ARG0: $@" >&2
+	exit 1
+}
+
+function configure_os
+{
+	echo "current directory: $PWD"
+	echo "configuring based on OS: \"$1\""
+	case "$1" in
+		darwin*)
+			CIDL_BUILD="darwin-10.9-amd64"
+			CIDL_SUFFIX="tgz"
+			CIDL_MD5="$CIDL_MD5_DARWIN"
+			CIDL_MD5FUNC="do_md5"
+			CIDL_DOWNLOAD="do_download_curl"
+			CIDL_UNPACK="do_untar"
+			;;
+		linux-gnu*) 
+			CIDL_BUILD="linux-amd64"
+			CIDL_SUFFIX="tgz"
+			CIDL_MD5="$CIDL_MD5_LINUX"
+			CIDL_MD5FUNC="do_md5sum"
+			CIDL_DOWNLOAD="do_download_curl"
+			CIDL_UNPACK="do_untar"
+			;;
+		*)
+			fail "unsupported OS: $1"
+			;;
+	esac
+
+	CIDL_DIR="cockroach-$CIDL_VERSION.$CIDL_BUILD"
+	CIDL_FILE="$CIDL_DIR.$CIDL_SUFFIX"
+}
+
+function do_download_curl
+{
+	curl --silent --show-error --fail --location --output "$2" "$1"
+}
+
+function do_md5
+{
+	md5 < "$1"
+}
+
+function do_md5sum
+{
+	md5sum < "$1" | awk '{print $1}'
+}
+
+function do_untar
+{
+	tar xzf "$1"
+}
+
+main "$@"

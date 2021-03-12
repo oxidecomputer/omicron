@@ -27,6 +27,9 @@ use subprocess::Redirection;
 const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
 /** name of the "sled_agent" executable */
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
+/** name of the "omicron_dev" executable */
+const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron_dev");
+
 /**
  * maximum time to wait for any command
  *
@@ -41,6 +44,10 @@ fn path_to_nexus() -> PathBuf {
 
 fn path_to_sled_agent() -> PathBuf {
     path_to_executable(CMD_SLED_AGENT)
+}
+
+fn path_to_omicron_dev() -> PathBuf {
+    path_to_executable(CMD_OMICRON_DEV)
 }
 
 fn path_to_executable(cmd_name: &str) -> PathBuf {
@@ -184,6 +191,15 @@ fn test_sled_agent_no_args() {
 }
 
 #[test]
+fn test_omicron_dev_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev());
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents("tests/output/cmd-omicron_dev-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-omicron_dev-noargs-stderr", &stderr_text);
+}
+
+#[test]
 fn test_nexus_bad_config() {
     let exec = Exec::cmd(path_to_nexus()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
@@ -213,6 +229,21 @@ fn test_nexus_invalid_config() {
              `dropshot_external`\n",
             config_path.display()
         ),
+    );
+}
+
+#[test]
+fn test_omicron_dev_bad_cmd() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("bogus-command");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron_dev-bad-cmd-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron_dev-bad-cmd-stderr",
+        &stderr_text,
     );
 }
 

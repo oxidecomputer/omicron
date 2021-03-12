@@ -31,10 +31,10 @@
  *   compute server (sled).  This agent provides interfaces used by Nexus to
  *   manage resources on the sled.  The implementation here is completely
  *   simulated.
- *   * [`sled_agent::run_server`] is used by the executable binary that you can use to
- *     run a simulated sled agent.
+ *   * [`sled_agent::run_server`] is used by the executable binary that you can
+ *     use to run a simulated sled agent.
  *   * [`sled_agent::Config`] represents the configuration of a sled agent.
- *   * [`sled_agent::Client`] provides a client interface to the sled agent's API
+ *   * [`sled_agent::Client`] provides a client interface to the sled agent API
  *   * [`sled_agent::Server`] provides an interface for starting a sled_agent
  *     instance.
  *   This implementation will not wind up as part of a production Oxide system,
@@ -43,9 +43,10 @@
  * * [`bootstrap_agent`] is the part of the control plane bundled with the
  *   base OS, responsible for establishing a trust quorum and launching
  *   the oither parts of the control plane (sled_agent and Nexus).
- *   * [`bootstrap_agent::Config`] represents the configuration of a bootstrap agent.
- *   * [`bootstrap_agent::Server`] provides an interface for starting a bootstrap
- *     instance.
+ *   * [`bootstrap_agent::Config`] represents the configuration of a bootstrap
+ *     agent.
+ *   * [`bootstrap_agent::Server`] provides an interface for starting a
+ *     bootstrap instance.
  *
  * There's other common code at the top level, with the most important being:
  *
@@ -60,26 +61,25 @@
  * it's expected that we'll have links to private items in the docs.
  */
 #![allow(private_intra_doc_links)]
-/*
- * TODO(#32): Remove this exception once resolved.
- */
+/* TODO(#32): Remove this exception once resolved. */
 #![allow(clippy::field_reassign_with_default)]
-/*
- * TODO(#40): Remove this exception once resolved.
- */
+/* TODO(#40): Remove this exception once resolved. */
 #![allow(clippy::unnecessary_wraps)]
+/* Clippy's style lints are useful, but not worth running automatically. */
+#![allow(clippy::style)]
 
-mod api_error;
 pub mod api_model;
-mod backoff;
 pub mod bootstrap_agent;
 pub mod cmd;
-mod http_client;
-mod http_pagination;
+pub mod dev;
 pub mod nexus;
 pub mod packaging;
 pub mod sled_agent;
-mod test_util;
+
+mod api_error;
+mod backoff;
+mod http_client;
+mod http_pagination;
 
 #[macro_use]
 extern crate slog;

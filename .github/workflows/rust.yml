@@ -28,19 +28,36 @@ jobs:
     - name: Report Clippy version
       run: cargo clippy -- --version
     - name: Run Clippy Lints
-      run: cargo clippy -- -D warnings
+      #
+      # Clippy's style nits are useful, but not worth keeping in CI.  This
+      # override belongs in src/lib.rs, and it is there, but that doesn't
+      # reliably work due to rust-lang/rust-clippy#6610.
+      #
+      run: cargo clippy -- -D warnings -A clippy::style
 
   build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ ubuntu-18.04, windows-2019, macos-10.15 ]
+        os: [ ubuntu-18.04, macos-10.15 ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Report cargo version
       run: cargo --version
+    - name: Configure GitHub cache for CockroachDB binaries
+      id: cache-cockroachdb
+      # actions/cache@v2.1.4
+      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
+      with:
+        key: ${{ runner.os }}-cockroach-binary-v1
+        path: "cockroach"
     - name: Build
-      run: cargo build --tests --verbose
+      run: cargo build --all-targets --verbose
+    - name: Download CockroachDB binary
+      if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
+      run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
-      run: cargo test --verbose
+      # We modify PATH to put "./cockroach" on the PATH for the test suite.
+      run: PATH="$PATH:." cargo test --verbose

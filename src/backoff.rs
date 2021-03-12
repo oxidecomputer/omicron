@@ -9,7 +9,8 @@ pub use ::backoff::Error as BackoffError;
 pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
 
 /**
- * Return a backoff policy appropriate for retrying internal services indefinitely.
+ * Return a backoff policy appropriate for retrying internal services
+ * indefinitely.
  */
 pub fn internal_service_policy() -> ::backoff::ExponentialBackoff {
     const INITIAL_INTERVAL: Duration = Duration::from_millis(250);
