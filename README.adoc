@@ -57,9 +57,9 @@ With `cockroach` on your PATH, you can **build and run the whole test suite** wi
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy -- -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
-To **run Omicron:** there are two executables: the `nexus` (which is a real prototype backed by an in-memory store; this component manages an Oxide fleet), and the `sled_agent` (which is a simulation of the component that will manage a single sled).
+To **run Omicron:** there are two executables: `nexus` (which is a real prototype backed by an in-memory store; this component manages an Oxide fleet), and the `sled_agent` (which is a simulation of the component that will manage a single sled).
 
 `nexus` requires a configuration file to run.  You can use `examples/config.toml` to start with.  Build and run it like this:
 
