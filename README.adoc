@@ -2,9 +2,9 @@
 :toc: left
 :icons: font
 
-= Oxide Control Plane Prototype
+= Oxide Control Plane
 
-This repo houses a prototype for the Oxide Rack control plane.
+This repo houses the Oxide Rack control plane prototype.
 
 image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
@@ -12,26 +12,21 @@ image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
 Several Oxide RFDs are relevant:
 
-* https://4.rfd.oxide.computer[RFD 4 User Facing API Design]
-* https://10.rfd.oxide.computer[RFD 10 API Prototype and Simulated
-  Implementation]
 * https://48.rfd.oxide.computer[RFD 48 Control Plane Requirements]
 * https://61.rfd.oxide.computer[RFD 61 Control Plane Architecture and Design]
+* https://4.rfd.oxide.computer[RFD 4 User Facing API Design]
+* https://10.rfd.oxide.computer[RFD 10 API Prototype and Simulated Implementation]
 
-For documentation on the control plane architecture, see
-https://61.rfd.oxide.computer[RFD 61].
+For documentation on the control plane architecture, see https://61.rfd.oxide.computer[RFD 61].
 
-For design and API docs, see the
-https://rust.docs.corp.oxide.computer/omicron/[generated documentation].  You
-can generate this yourself with:
+For design and API docs, see the https://rust.docs.corp.oxide.computer/omicron/[generated documentation].  You can generate this yourself with:
 
 [source,text]
 ----
 $ cargo doc --document-private-items
 ----
 
-Note that `--document-private-items` is configured by default, so you can
-actually just use `cargo doc`.
+Note that `--document-private-items` is configured by default, so you can actually just use `cargo doc`.
 
 == Status
 
@@ -39,38 +34,34 @@ The code here is still rough, but the following are implemented:
 
 * actual API:
 ** projects: CRUD
-** instances: CRUD + boot/halt/reboot
-** disks: CRD + attach/detach
+** instances: CRUD + boot/halt/reboot (simulated)
+** disks: CRD + attach/detach (simulated)
 ** racks: list + get
 ** sleds: list + get
 * architecture:
 ** nexus: manages a fleet of Oxide racks
 ** sled agent: manages a single compute sled in an Oxide fleet
-** bootstrap agent: Launches sled agent and Nexus.
+** bootstrap agent: launches sled agent and Nexus.
 * basic server infrastructure: configuration, logging
 * test coverage for most of the above
+
+All of this is based on an in-memory datastore.  Resources like Instances and Disks are simulated in the sled agent.
 
 See TODO.adoc for more info.
 
 == Build and run
 
-You can **build and run the whole test suite** with `cargo test`.  The test
-suite runs cleanly and should remain clean.
+**Prerequisite:** CockroachDB v20.2.5.  The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.  On MacOS and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary into the current working directory.  Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].  CockroachDB is currently only used by the test suite, but it's expected to be required for Nexus in the near future.  
 
-You can **format the code** using `cargo fmt`.  Make sure to run this before
-pushing changes.  The CI checks that the code is correctly formatted.
+With `cockroach` on your PATH, you can **build and run the whole test suite** with `cargo test`.  The test suite runs cleanly and should remain clean.
 
-The https://github.com/rust-lang/rust-clippy[Clippy Linter] is used to help
-keep the codebase efficient and idiomatic, and can be executed with
-`cargo clippy`.
+You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
-To **run the system:** there are two executables: the `nexus` (which
-is a real prototype backed by an in-memory store; this component manages an
-Oxide fleet), and the `sled_agent` (which is a simulation of the component that
-will manage a single sled).
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy -- -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
-`nexus` requires a configuration file to run.  You can use
-`examples/config.toml` to start with.  Build and run it like this:
+To **run Omicron:** there are two executables: the `nexus` (which is a real prototype backed by an in-memory store; this component manages an Oxide fleet), and the `sled_agent` (which is a simulation of the component that will manage a single sled).
+
+`nexus` requires a configuration file to run.  You can use `examples/config.toml` to start with.  Build and run it like this:
 
 [source,text]
 ----
@@ -79,10 +70,7 @@ $ cargo run --bin=nexus -- examples/config.toml
 listening: http://127.0.0.1:12220
 ----
 
-`sled_agent` only takes configuration on the command line.  Run it with a uuid
-identifying itself (this would be a uuid for the sled it's managing), an
-IP:port for itself, and the IP:port of `nexus`'s _internal_
-interface.  Using default config, this might look like this:
+`sled_agent` only takes configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 
 [source,text]
 ----
@@ -91,14 +79,11 @@ $ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
 
-You can use `curl` directly to hit either of these servers, but it's easier to
-use the `oxapi_demo` wrapper (see below).
+You can use `curl` directly to hit either of these servers, but it's easier to use the `oxapi_demo` wrapper (see below).
 
 == Quick demo
 
-There's a small demo tool called `./tools/oxapi_demo` that provides a slightly
-friendlier interface than `curl`, with the same output format.  Here's a small
-demo that creates a project, creates an instance, and attaches a disk to it:
+There's a small demo tool called `./tools/oxapi_demo` that provides a slightly friendlier interface than `curl`, with the same output format.  Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
 
 [source,text]
 ----
@@ -332,15 +317,12 @@ $ cp -r ./out/* /opt/oxide
 
 [NOTE]
 ====
-Running some commands on Helios may require privileged access.  If any
-subsequent commands result in "access denied", try the same command, but
-prefixed with `pfexec`.
+Running some commands on Helios may require privileged access.  If any subsequent commands result in "access denied", try the same command, but prefixed with `pfexec`.
 
 For Linux users, this is the Helios equivalent of `sudo`.
 ====
 
-Once this is complete, we can unpack and initialize the bootstrap agent.
-This should unpack and initialize all other services.
+Once this is complete, we can unpack and initialize the bootstrap agent.  This should unpack and initialize all other services.
 
 [source,text]
 ----
@@ -380,17 +362,12 @@ Supported config properties include:
 |`dropshot_external`
 |
 |Yes
-|Dropshot configuration for the external server (i.e., the one that operators
-and developers using the Oxide rack will use).  Specific properties are
-documented below, but see the Dropshot README for details.
+|Dropshot configuration for the external server (i.e., the one that operators and developers using the Oxide rack will use).  Specific properties are documented below, but see the Dropshot README for details.
 
 |`dropshot_external.bind_address`
 |`"127.0.0.1:12220"`
 |Yes
-|Specifies that the server should bind to the given IP address and TCP port for
-the **external** API (i.e., the one that operators and developers using the
-Oxide rack will use).  In general, servers can bind to more than one IP address
-and port, but this is not (yet?) supported.
+|Specifies that the server should bind to the given IP address and TCP port for the **external** API (i.e., the one that operators and developers using the Oxide rack will use).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
 
 |`dropshot_external.request_body_max_bytes`
 |`1000`
@@ -400,17 +377,12 @@ and port, but this is not (yet?) supported.
 |`dropshot_internal`
 |
 |Yes
-|Dropshot configuration for the internal server (i.e., the one used by the sled
-agent).  Specific properties are documented below, but see the Dropshot README
-for details.
+|Dropshot configuration for the internal server (i.e., the one used by the sled agent).  Specific properties are documented below, but see the Dropshot README for details.
 
 |`dropshot_internal.bind_address`
 |`"127.0.0.1:12220"`
 |Yes
-|Specifies that the server should bind to the given IP address and TCP port for
-the **internal** API (i.e., the one used by the sled agent).  In general,
-servers can bind to more than one IP address and port, but this is not (yet?)
-supported.
+|Specifies that the server should bind to the given IP address and TCP port for the **internal** API (i.e., the one used by the sled agent).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
 
 |`dropshot_internal.request_body_max_bytes`
 |`1000`
@@ -420,26 +392,17 @@ supported.
 |`log`
 |
 |Yes
-|Logging configuration.  Specific properties are documented below, but see the
-Dropshot README for details.
+|Logging configuration.  Specific properties are documented below, but see the Dropshot README for details.
 
 |`log.mode`
 |`"file"`
 |Yes
-|Controls where server logging will go.  Valid modes are `"stderr-terminal"` and
-`"file".  If the mode is `"stderr-terminal"`, human-readable output, with colors
-and other terminal formatting if possible, will be sent to stderr.  If the mode
-is `"file"`, Bunyan-format output will be sent to the filesystem path given by
-`log.path`.  See also `log.if_exists`, which controls the behavior if the
-destination path already exists.
+|Controls where server logging will go.  Valid modes are `"stderr-terminal"` and `"file".  If the mode is `"stderr-terminal"`, human-readable output, with colors and other terminal formatting if possible, will be sent to stderr.  If the mode is `"file"`, Bunyan-format output will be sent to the filesystem path given by `log.path`.  See also `log.if_exists`, which controls the behavior if the destination path already exists.
 
 |`log.level`
 |`"info"`
 |Yes
-|Specifies what severity of log messages should be included in the log.  Valid
-values include `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, and
-`"critical"`, which are increasing order of severity.  Log messages at the
-specified level and more severe levels will be included in the log.
+|Specifies what severity of log messages should be included in the log.  Valid values include `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, and `"critical"`, which are increasing order of severity.  Log messages at the specified level and more severe levels will be included in the log.
 
 |`log.path`
 |`"logs/server.log"`
@@ -450,10 +413,6 @@ See also `log.if_exists`.
 |`log.if_exists`
 |`"append"`
 |Only if `log.mode = "file"`
-|If `log.mode` is `"file"`, this property specifies what to do if the
-destination log file already exists.  Valid values include `"append"` (which
-appends to the existing file), `"truncate"` (which truncates the existing file
-and then uses it as though it had just been created), and `"fail"` (which causes
-the server to exit immediately with an error).
+|If `log.mode` is `"file"`, this property specifies what to do if the destination log file already exists.  Valid values include `"append"` (which appends to the existing file), `"truncate"` (which truncates the existing file and then uses it as though it had just been created), and `"fail"` (which causes the server to exit immediately with an error).
 
 |===
