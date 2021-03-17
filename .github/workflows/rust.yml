@@ -51,13 +51,13 @@ jobs:
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
-        key: ${{ runner.os }}-cockroach-binary-v1
-        path: "cockroach"
+        key: ${{ runner.os }}-cockroach-binary-v2
+        path: "cockroachdb"
     - name: Build
       run: cargo build --all-targets --verbose
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
-      # We modify PATH to put "./cockroach" on the PATH for the test suite.
-      run: PATH="$PATH:." cargo test --verbose
+      # Put "./cockroachdb/bin" on the PATH for the test suite.
+      run: PATH="$PATH:$PWD/cockroachdb/bin" cargo test --verbose
