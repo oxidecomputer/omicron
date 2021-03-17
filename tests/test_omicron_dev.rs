@@ -2,11 +2,13 @@
  * Smoke tests for the omicron_dev command-line tool
  */
 
+use omicron::dev::db::has_omicron_schema;
 use omicron::dev::process_running;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
 use subprocess::Exec;
+use subprocess::ExitStatus;
 use subprocess::Redirection;
 
 /** name of the "omicron_dev" executable */
@@ -24,6 +26,7 @@ struct DbRun {
     subproc: subprocess::Popen,
     cmd_pid: u32,
     db_pid: u32,
+    listen_config_url: String,
     listen_config: tokio_postgres::Config,
     temp_dir: PathBuf,
 }
@@ -34,7 +37,7 @@ struct DbRun {
  * with a handle to the child process.
  * TODO-robustness It would be great to put a timeout on this.
  */
-fn run_db_run(exec: Exec) -> DbRun {
+fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
     let cmdline = exec.to_cmdline_lossy();
     eprintln!("will run: {}", cmdline);
 
@@ -45,10 +48,15 @@ fn run_db_run(exec: Exec) -> DbRun {
     let mut subproc_out =
         std::io::BufReader::new(subproc.stdout.as_ref().unwrap());
     let cmd_pid = subproc.pid().unwrap();
-    let (mut db_pid, mut listen_config, mut temp_dir) = (None, None, None);
+    let (mut db_pid, mut listen_config_url, mut temp_dir) = (None, None, None);
+    let mut populated = false;
 
     eprintln!("waiting for stdout from child process");
-    while db_pid.is_none() || listen_config.is_none() || temp_dir.is_none() {
+    while db_pid.is_none()
+        || listen_config_url.is_none()
+        || temp_dir.is_none()
+        || (wait_for_populate && !populated)
+    {
         let mut buf = String::with_capacity(80);
         match subproc_out.read_line(&mut buf) {
             Ok(0) => {
@@ -79,11 +87,13 @@ fn run_db_run(exec: Exec) -> DbRun {
             buf.strip_prefix("omicron_dev: CockroachDB listening at: ")
         {
             eprint!("found postgres listen URL: {}", s);
-            listen_config = Some(
-                s.trim_end()
-                    .parse::<tokio_postgres::Config>()
-                    .expect("invalid PostgreSQL URL"),
-            );
+            listen_config_url = Some(s.trim_end().to_string());
+            continue;
+        }
+
+        if buf.contains("omicron_dev: populated database") {
+            eprintln!("found database populated");
+            populated = true;
             continue;
         }
     }
@@ -91,11 +101,18 @@ fn run_db_run(exec: Exec) -> DbRun {
     assert!(process_running(cmd_pid));
     assert!(process_running(db_pid.unwrap()));
 
+    let listen_config = listen_config_url
+        .as_ref()
+        .unwrap()
+        .parse::<tokio_postgres::Config>()
+        .expect("invalid PostgreSQL URL");
+
     DbRun {
         subproc,
         cmd_pid,
         db_pid: db_pid.unwrap(),
-        listen_config: listen_config.unwrap(),
+        listen_config_url: listen_config_url.unwrap(),
+        listen_config,
         temp_dir: temp_dir.unwrap(),
     }
 }
@@ -160,7 +177,7 @@ async fn test_db_run() {
     let cmdstr = format!("( set -o monitor; {} db-run )", CMD_OMICRON_DEV);
     let exec =
         Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
-    let dbrun = run_db_run(exec);
+    let dbrun = run_db_run(exec, true);
     let (client, connection) = dbrun
         .listen_config
         .connect(tokio_postgres::NoTls)
@@ -168,13 +185,56 @@ async fn test_db_run() {
         .expect("failed to connect to newly setup database");
     let conn_task = tokio::spawn(async { connection.await });
 
-    let row = client
-        .query_one("SELECT 54321", &[])
-        .await
-        .expect("failed to query database");
-    assert_eq!(row.len(), 1);
-    assert_eq!(row.get::<'_, _, i64>(0), 54321);
-    eprintln!("successfully ran query");
+    assert!(has_omicron_schema(&client).await);
+
+    /*
+     * Now run db-populate.  It should fail because the database is already
+     * populated.
+     */
+    eprintln!("running db-populate");
+    let populate_result = Exec::cmd(CMD_OMICRON_DEV)
+        .arg("db-populate")
+        .arg("--database-url")
+        .arg(&dbrun.listen_config_url)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Pipe)
+        .capture()
+        .expect("failed to run db-populate");
+    eprintln!("exit status: {:?}", populate_result.exit_status);
+    eprintln!("stdout: {:?}", populate_result.stdout_str());
+    eprintln!("stdout: {:?}", populate_result.stderr_str());
+    assert!(matches!(populate_result.exit_status, ExitStatus::Exited(1)));
+    assert!(populate_result
+        .stderr_str()
+        .contains("database \"omicron\" already exists"));
+    assert!(has_omicron_schema(&client).await);
+
+    /* Try again, but with the --wipe flag. */
+    eprintln!("running db-populate --wipe");
+    let populate_result = Exec::cmd(CMD_OMICRON_DEV)
+        .arg("db-populate")
+        .arg("--wipe")
+        .arg("--database-url")
+        .arg(&dbrun.listen_config_url)
+        .capture()
+        .expect("failed to run db-populate");
+    assert!(matches!(populate_result.exit_status, ExitStatus::Exited(0)));
+    assert!(has_omicron_schema(&client).await);
+
+    /* Now run db-wipe.  This should work. */
+    eprintln!("running db-wipe");
+    let wipe_result = Exec::cmd(CMD_OMICRON_DEV)
+        .arg("db-wipe")
+        .arg("--database-url")
+        .arg(&dbrun.listen_config_url)
+        .capture()
+        .expect("failed to run db-wipe");
+    assert!(matches!(wipe_result.exit_status, ExitStatus::Exited(0)));
+    assert!(!has_omicron_schema(&client).await);
+
+    /*
+     * The rest of the populate()/wipe() behavior is tested elsewhere.
+     */
 
     drop(client);
     conn_task
@@ -200,7 +260,7 @@ async fn test_db_run() {
 
     let wait = verify_graceful_exit(dbrun);
     eprintln!("wait result: {:?}", wait);
-    assert!(matches!(wait, subprocess::ExitStatus::Exited(0),));
+    assert!(matches!(wait, subprocess::ExitStatus::Exited(0)));
 }
 
 /*
@@ -215,7 +275,7 @@ async fn test_db_killed() {
      */
     let exec =
         Exec::cmd(CMD_OMICRON_DEV).arg("db-run").stderr(Redirection::Merge);
-    let dbrun = run_db_run(exec);
+    let dbrun = run_db_run(exec, false);
     assert_eq!(0, unsafe {
         libc::kill(dbrun.db_pid as libc::pid_t, libc::SIGKILL)
     });

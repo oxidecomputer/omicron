@@ -51,7 +51,7 @@ See TODO.adoc for more info.
 
 == Build and run
 
-**Prerequisite:** CockroachDB v20.2.5.  The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.  On MacOS and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary into the current working directory.  Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].  CockroachDB is currently only used by the test suite, but it's expected to be required for Nexus in the near future.  
+**Prerequisite:** CockroachDB v20.2.5.  The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.  On MacOS and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary into the current working directory.  Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].  CockroachDB is currently only used by the test suite, but it's expected to be required for Nexus in the near future.
 
 With `cockroach` on your PATH, you can **build and run the whole test suite** with `cargo test`.  The test suite runs cleanly and should remain clean.
 

@@ -2,6 +2,7 @@
 
 use crate::dev::poll;
 use anyhow::Context;
+use core::ops::Deref;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
@@ -406,38 +407,23 @@ impl CockroachInstance {
         &self.temp_dir_path
     }
 
-    /**
-     * Returns a connection to the underlying database
-     *
-     * tokio_postgres's `connect()` function returns a tuple `(client,
-     * connection)`, where the caller is expected to spawn a new task to `await`
-     * the connection in order to perform all the I/O on the connection.
-     * There's little else one can do with the `connection` object.  So for
-     * convenience, this function spawns the task to operate the connectiona nd
-     * returns `(client, connection_task)`.
-     */
-    /*
-     * TODO-design It might be nice to return a single object here that works
-     * like "client", but has a cleanup() method that drops the client and waits
-     * for the connection task.  (In practice, it seems likely that most
-     * tokio_postgres consumers do not bother saving the JoinHandle or wait for
-     * that task to complete.  Maybe that's fine?)
-     */
-    pub async fn connect(
-        &self,
-    ) -> Result<
-        (
-            tokio_postgres::Client,
-            tokio::task::JoinHandle<Result<(), tokio_postgres::Error>>,
-        ),
-        tokio_postgres::Error,
-    > {
-        let (client, connection) =
-            self.pg_config().connect(tokio_postgres::NoTls).await?;
+    /** Returns a connection to the underlying database */
+    pub async fn connect(&self) -> Result<Client, tokio_postgres::Error> {
+        Client::connect(self.pg_config(), tokio_postgres::NoTls).await
+    }
 
-        let conn_task = tokio::spawn(async move { connection.await });
+    /** Wrapper around [`wipe()`] using a connection to this database. */
+    pub async fn wipe(&self) -> Result<(), anyhow::Error> {
+        let client = self.connect().await.context("connect")?;
+        wipe(&client).await.context("wipe")?;
+        client.cleanup().await.context("cleaning up after wipe")
+    }
 
-        Ok((client, conn_task))
+    /** Wrapper around [`populate()`] using a connection to this database. */
+    pub async fn populate(&self) -> Result<(), anyhow::Error> {
+        let client = self.connect().await.context("connect")?;
+        populate(&client).await.context("populate")?;
+        client.cleanup().await.context("cleaning up after wipe")
     }
 
     /**
@@ -539,11 +525,134 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
     child_process.try_wait().unwrap().is_some()
 }
 
+/**
+ * Populate a database with the Omicron schema and any initial objects
+ *
+ * This is not idempotent.  It will fail if the database or other objects
+ * already exist.
+ */
+pub async fn populate(
+    client: &tokio_postgres::Client,
+) -> Result<(), anyhow::Error> {
+    let sql = include_str!("../sql/dbinit.sql");
+    client.batch_execute(sql).await.context("populating Omicron database")
+}
+
+/**
+ * Wipe an Omicron database from the remote database
+ *
+ * This is dangerous!  Use carefully.
+ */
+pub async fn wipe(
+    client: &tokio_postgres::Client,
+) -> Result<(), anyhow::Error> {
+    let sql = include_str!("../sql/dbwipe.sql");
+    client.batch_execute(sql).await.context("wiping Omicron database")
+}
+
+/**
+ * Returns true if the database that this client is connected to contains
+ * the Omicron schema
+ *
+ * Note that this will change the currently-selected database if the Omicron
+ * one exists.
+ *
+ * Panics if the attempt to run a query fails for any reason other than the
+ * schema not existing.  (This is intended to be run from the test suite.)
+ */
+pub async fn has_omicron_schema(client: &tokio_postgres::Client) -> bool {
+    match client.batch_execute("USE omicron; SELECT id FROM Project").await {
+        Ok(_) => true,
+        Err(e) => {
+            let sql_error =
+                e.code().expect("got non-SQL error checking for schema");
+            assert_eq!(
+                *sql_error,
+                tokio_postgres::error::SqlState::UNDEFINED_DATABASE
+            );
+            false
+        }
+    }
+}
+
+/**
+ * Wraps a PostgreSQL connection and client as provided by
+ * `tokio_postgres::Config::connect()`
+ *
+ * Typically, callers of [`tokio_postgres::Config::connect()`] get back both a
+ * Client and a Connection.  You must spawn a separate task to `await` on the
+ * connection in order for any database operations to happen.  When the Client
+ * is dropped, the Connection is gracefully terminated, its Future completes,
+ * and the task should be cleaned up.  This is awkward to use, particularly if
+ * you care to be sure that the task finished.
+ *
+ * This structure combines the Connection and Client.  You can create one from a
+ * [`tokio_postgres::Config`] or from an existing ([`tokio_postgres::Client`],
+ * [`tokio_postgres::Connection`]) pair.  You can use it just like a
+ * `tokio_postgres::Client`.  When finished, you can call `cleanup()` to drop
+ * the Client and wait for the Connection's task.
+ *
+ * If you do not call `cleanup()`, then the underlying `tokio_postgres::Client`
+ * will be dropped when this object is dropped.  If there has been no connection
+ * error, then the connection will be closed gracefully, but nothing will check
+ * for any error from the connection.
+ */
+pub struct Client {
+    client: tokio_postgres::Client,
+    conn_task: tokio::task::JoinHandle<Result<(), tokio_postgres::Error>>,
+}
+
+type ClientConnPair<S, T> =
+    (tokio_postgres::Client, tokio_postgres::Connection<S, T>);
+impl<S, T> From<ClientConnPair<S, T>> for Client
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    fn from((client, connection): ClientConnPair<S, T>) -> Self {
+        let join_handle = tokio::spawn(async move { connection.await });
+        Client { client, conn_task: join_handle }
+    }
+}
+
+impl Deref for Client {
+    type Target = tokio_postgres::Client;
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl Client {
+    /**
+     * Invokes `config.connect(tls)` and wraps the result in a `Client`.
+     */
+    pub async fn connect<T>(
+        config: &tokio_postgres::config::Config,
+        tls: T,
+    ) -> Result<Client, tokio_postgres::Error>
+    where
+        T: tokio_postgres::tls::MakeTlsConnect<tokio_postgres::Socket>,
+        T::Stream: Send + 'static,
+    {
+        Ok(Client::from(config.connect(tls).await?))
+    }
+
+    /**
+     * Closes the connection, waits for it to be cleaned up gracefully, and
+     * returns any error status.
+     */
+    pub async fn cleanup(self) -> Result<(), tokio_postgres::Error> {
+        drop(self.client);
+        self.conn_task.await.expect("failed to join on connection task")
+    }
+}
+
 /*
  * These are more integration tests than unit tests.
  */
 #[cfg(test)]
 mod test {
+    use super::has_omicron_schema;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
@@ -741,7 +850,7 @@ mod test {
          * This common function will verify that the entire temporary directory
          * is cleaned up.  We do not need to check that again here.
          */
-        test_setup_database(starter, &data_dir).await;
+        test_setup_database(starter, &data_dir, true).await;
     }
 
     /*
@@ -758,7 +867,7 @@ mod test {
          * This common function will verify that the entire temporary directory
          * is cleaned up.  We do not need to check that again here.
          */
-        test_setup_database(starter, &data_dir).await;
+        test_setup_database(starter, &data_dir, false).await;
 
         /*
          * At this point, our extra temporary directory should still exist.
@@ -791,6 +900,7 @@ mod test {
     async fn test_setup_database<P: AsRef<Path>>(
         starter: CockroachStarter,
         data_dir: P,
+        test_populate: bool,
     ) {
         /* Start the database. */
         eprintln!("will run: {}", starter.cmdline());
@@ -816,30 +926,45 @@ mod test {
 
         /* Try to connect to it and run a query. */
         eprintln!("connecting to database");
-        let conn_task = {
-            let (client, conn_task) = database
-                .connect()
-                .await
-                .expect("failed to connect to newly-started database");
+        let client = database
+            .connect()
+            .await
+            .expect("failed to connect to newly-started database");
 
-            let row = client
-                .query_one("SELECT 12345", &[])
-                .await
-                .expect("basic query failed");
-            assert_eq!(row.len(), 1);
-            assert_eq!(row.get::<'_, _, i64>(0), 12345);
-
-            conn_task
-        };
+        let row = client
+            .query_one("SELECT 12345", &[])
+            .await
+            .expect("basic query failed");
+        assert_eq!(row.len(), 1);
+        assert_eq!(row.get::<'_, _, i64>(0), 12345);
 
         /*
-         * With the client dropped, the connection should be shut down.  Wait
-         * for the task that we spawned to finish.  Then clean up the server.
+         * Run some tests using populate() and wipe().
          */
-        conn_task
-            .await
-            .expect("failed to wait for conn task")
-            .expect("connection unexpectedly failed");
+        if test_populate {
+            assert!(!has_omicron_schema(&client).await);
+            eprintln!("populating database (1)");
+            database.populate().await.expect("populating database (1)");
+            assert!(has_omicron_schema(&client).await);
+            /*
+             * populate() fails if the database is already populated.  We don't
+             * want to accidentally destroy data by wiping it first
+             * automatically.
+             */
+            database.populate().await.expect_err("populated database twice");
+            eprintln!("wiping database (1)");
+            database.wipe().await.expect("wiping database (1)");
+            assert!(!has_omicron_schema(&client).await);
+            /* On the other hand, wipe() is idempotent. */
+            database.wipe().await.expect("wiping database (2)");
+            assert!(!has_omicron_schema(&client).await);
+            /* populate() should work again after a wipe(). */
+            eprintln!("populating database (2)");
+            database.populate().await.expect("populating database (2)");
+            assert!(has_omicron_schema(&client).await);
+        }
+
+        client.cleanup().await.expect("connection unexpectedly failed");
         database.cleanup().await.expect("failed to clean up database");
 
         /* Check that the database process is no longer running. */
@@ -879,10 +1004,10 @@ mod test {
             .start()
             .await
             .expect("failed to start second database");
-        let (client1, task1) =
+        let client1 =
             db1.connect().await.expect("failed to connect to first database");
-        let (client2, task2) =
-            db2.connect().await.expect("failed to connect to first database");
+        let client2 =
+            db2.connect().await.expect("failed to connect to second database");
 
         client1
             .execute("CREATE TABLE foo (v int)", &[])
@@ -896,19 +1021,11 @@ mod test {
             .execute("INSERT INTO foo VALUES (5)", &[])
             .await
             .expect("insert");
-        drop(client1);
-        task1
-            .await
-            .expect("failed to wait for first task")
-            .expect("first connection closed ungracefully");
+        client1.cleanup().await.expect("first connection closed ungracefully");
 
         let rows =
             client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
         assert_eq!(rows.len(), 0);
-        drop(client2);
-        task2
-            .await
-            .expect("failed to wait for second task")
-            .expect("second connection closed ungracefully");
+        client2.cleanup().await.expect("second connection closed ungracefully");
     }
 }

@@ -1,0 +1,7 @@
+omicron_dev: parsing arguments: error: The following required arguments were not provided:
+    --database-url <database-url>
+
+USAGE:
+    omicron_dev db-wipe --database-url <database-url>
+
+For more information try --help
