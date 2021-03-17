@@ -4,9 +4,12 @@
 
 use anyhow::bail;
 use anyhow::Context;
+use futures::stream::StreamExt;
 use omicron::cmd::fatal;
 use omicron::cmd::CmdError;
 use omicron::dev;
+use signal_hook::consts::signal::SIGINT;
+use signal_hook_tokio::Signals;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -70,11 +73,8 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
      * before we've created resources that we want to have cleaned up on SIGINT
      * (e.g., the temporary directory created by the database starter).
      */
-    let (tx, mut rx) = tokio::sync::watch::channel(());
-    ctrlc::set_handler(move || {
-        tx.send(()).expect("internal error: failed to send CTRL-C message");
-    })
-    .expect("failed to wait for SIGINT");
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
 
     /*
      * Now start CockroachDB.  This process looks bureaucratic (create arg
@@ -139,7 +139,9 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
                 (see error output above)"
             );
         }
-        _ = rx.changed() => {
+        caught_signal = signal_stream.next() => {
+            assert_eq!(caught_signal.unwrap(), SIGINT);
+
             /*
              * We don't have to do anything to trigger shutdown because the
              * shell will have delivered the same SIGINT that we got to the
