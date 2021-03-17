@@ -200,6 +200,36 @@ fn test_omicron_dev_no_args() {
 }
 
 #[test]
+fn test_omicron_dev_db_populate_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("db-populate");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron_dev-db-populate-noargs-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron_dev-db-populate-noargs-stderr",
+        &stderr_text,
+    );
+}
+
+#[test]
+fn test_omicron_dev_db_wipe_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("db-wipe");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron_dev-db-wipe-noargs-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron_dev-db-wipe-noargs-stderr",
+        &stderr_text,
+    );
+}
+
+#[test]
 fn test_nexus_bad_config() {
     let exec = Exec::cmd(path_to_nexus()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);

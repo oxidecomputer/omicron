@@ -551,6 +551,31 @@ pub async fn wipe(
 }
 
 /**
+ * Returns true if the database that this client is connected to contains
+ * the Omicron schema
+ *
+ * Note that this will change the currently-selected database if the Omicron
+ * one exists.
+ *
+ * Panics if the attempt to run a query fails for any reason other than the
+ * schema not existing.  (This is intended to be run from the test suite.)
+ */
+pub async fn has_omicron_schema(client: &tokio_postgres::Client) -> bool {
+    match client.batch_execute("USE omicron; SELECT id FROM Project").await {
+        Ok(_) => true,
+        Err(e) => {
+            let sql_error =
+                e.code().expect("got non-SQL error checking for schema");
+            assert_eq!(
+                *sql_error,
+                tokio_postgres::error::SqlState::UNDEFINED_DATABASE
+            );
+            false
+        }
+    }
+}
+
+/**
  * Wraps a PostgreSQL connection and client as provided by
  * `tokio_postgres::Config::connect()`
  *
@@ -563,7 +588,7 @@ pub async fn wipe(
  *
  * This structure combines the Connection and Client.  You can create one from a
  * [`tokio_postgres::Config`] or from an existing ([`tokio_postgres::Client`],
- * [`tokio_postgrs::Connection`]) pair.  You can use it just like a
+ * [`tokio_postgres::Connection`]) pair.  You can use it just like a
  * `tokio_postgres::Client`.  When finished, you can call `cleanup()` to drop
  * the Client and wait for the Connection's task.
  *
@@ -627,6 +652,7 @@ impl Client {
  */
 #[cfg(test)]
 mod test {
+    use super::has_omicron_schema;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
@@ -824,7 +850,7 @@ mod test {
          * This common function will verify that the entire temporary directory
          * is cleaned up.  We do not need to check that again here.
          */
-        test_setup_database(starter, &data_dir).await;
+        test_setup_database(starter, &data_dir, true).await;
     }
 
     /*
@@ -841,7 +867,7 @@ mod test {
          * This common function will verify that the entire temporary directory
          * is cleaned up.  We do not need to check that again here.
          */
-        test_setup_database(starter, &data_dir).await;
+        test_setup_database(starter, &data_dir, false).await;
 
         /*
          * At this point, our extra temporary directory should still exist.
@@ -874,6 +900,7 @@ mod test {
     async fn test_setup_database<P: AsRef<Path>>(
         starter: CockroachStarter,
         data_dir: P,
+        test_populate: bool,
     ) {
         /* Start the database. */
         eprintln!("will run: {}", starter.cmdline());
@@ -910,6 +937,32 @@ mod test {
             .expect("basic query failed");
         assert_eq!(row.len(), 1);
         assert_eq!(row.get::<'_, _, i64>(0), 12345);
+
+        /*
+         * Run some tests using populate() and wipe().
+         */
+        if test_populate {
+            assert!(!has_omicron_schema(&client).await);
+            eprintln!("populating database (1)");
+            database.populate().await.expect("populating database (1)");
+            assert!(has_omicron_schema(&client).await);
+            /*
+             * populate() fails if the database is already populated.  We don't
+             * want to accidentally destroy data by wiping it first
+             * automatically.
+             */
+            database.populate().await.expect_err("populated database twice");
+            eprintln!("wiping database (1)");
+            database.wipe().await.expect("wiping database (1)");
+            assert!(!has_omicron_schema(&client).await);
+            /* On the other hand, wipe() is idempotent. */
+            database.wipe().await.expect("wiping database (2)");
+            assert!(!has_omicron_schema(&client).await);
+            /* populate() should work again after a wipe(). */
+            eprintln!("populating database (2)");
+            database.populate().await.expect("populating database (2)");
+            assert!(has_omicron_schema(&client).await);
+        }
 
         client.cleanup().await.expect("connection unexpectedly failed");
         database.cleanup().await.expect("failed to clean up database");

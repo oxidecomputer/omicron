@@ -32,15 +32,15 @@
  * inadvertently clobber what's there.  If they might exist, the user has to
  * clear this first.
  */
-CREATE DATABASE oxcp;
-CREATE USER oxcp;
-GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE oxcp to oxcp;
+CREATE DATABASE omicron;
+CREATE USER omicron;
+GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 
 /*
  * Projects
  */
 
-CREATE TABLE oxcp.public.Project (
+CREATE TABLE omicron.public.Project (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE oxcp.public.Project (
  * "name" is unique within the org.  For now, we just make the name unique among
  * non-deleted projects.
  */
-CREATE UNIQUE INDEX ON oxcp.public.Project (
+CREATE UNIQUE INDEX ON omicron.public.Project (
     name
 ) WHERE
     time_deleted IS NOT NULL;
@@ -65,7 +65,7 @@ CREATE UNIQUE INDEX ON oxcp.public.Project (
  * Instances
  */
 
-CREATE TYPE oxcp.public.InstanceState AS ENUM (
+CREATE TYPE omicron.public.InstanceState AS ENUM (
     'creating',
     'starting',
     'running',
@@ -81,7 +81,7 @@ CREATE TYPE oxcp.public.InstanceState AS ENUM (
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
  * like.  Or changing # of CPUs or memory size.
  */
-CREATE TABLE oxcp.public.Instance (
+CREATE TABLE omicron.public.Instance (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE oxcp.public.Instance (
      * table?
      */
     /* Runtime state */
-    instance_state oxcp.public.InstanceState NOT NULL,
+    instance_state omicron.public.InstanceState NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -118,7 +118,7 @@ CREATE TABLE oxcp.public.Instance (
     hostname STRING(63) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON oxcp.public.Instance (
+CREATE UNIQUE INDEX ON omicron.public.Instance (
     project_id,
     name
 ) WHERE
@@ -129,7 +129,7 @@ CREATE UNIQUE INDEX ON oxcp.public.Instance (
  * Disks
  */
 
-CREATE TYPE oxcp.public.DiskState AS ENUM (
+CREATE TYPE omicron.public.DiskState AS ENUM (
     'creating',
     'detached',
     'attaching',
@@ -139,7 +139,7 @@ CREATE TYPE oxcp.public.DiskState AS ENUM (
     'faulted'
 );
 
-CREATE TABLE oxcp.public.Disk (
+CREATE TABLE omicron.public.Disk (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -158,7 +158,7 @@ CREATE TABLE oxcp.public.Disk (
      * table?
      */
     /* Runtime state */
-    disk_state oxcp.public.DiskState NOT NULL,
+    disk_state omicron.public.DiskState NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -172,7 +172,7 @@ CREATE TABLE oxcp.public.Disk (
     origin_snapshot UUID
 );
 
-CREATE UNIQUE INDEX ON oxcp.public.Disk (
+CREATE UNIQUE INDEX ON omicron.public.Disk (
     project_id,
     name
 ) WHERE
@@ -183,7 +183,7 @@ CREATE UNIQUE INDEX ON oxcp.public.Disk (
  * Sleds
  */
 
-CREATE TABLE oxcp.public.Sled (
+CREATE TABLE omicron.public.Sled (
     /* Identity metadata -- abbreviated for sleds */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,

@@ -4,5 +4,5 @@
  * Obviously, this script is dangerous!  Use carefully.
  */
 
-DROP DATABASE IF EXISTS oxcp;
-DROP USER IF EXISTS oxcp;
+DROP DATABASE IF EXISTS omicron;
+DROP USER IF EXISTS omicron;
