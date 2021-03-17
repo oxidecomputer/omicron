@@ -275,7 +275,17 @@ async fn test_db_killed() {
      */
     let exec =
         Exec::cmd(CMD_OMICRON_DEV).arg("db-run").stderr(Redirection::Merge);
-    let dbrun = run_db_run(exec, false);
+    /*
+     * Although it doesn't seem necessary, we wait for "db-run" to finish
+     * populating the database before we kill CockroachDB.  The main reason is
+     * that we're trying to verify that if CockroachDB exits under normal
+     * conditions, then db-run notices.  If we don't wait for populate() to
+     * finish, then we might fail during populate(), and that's a different
+     * failure path.  In particular, that path does _not_ necessarily wait for
+     * CockroachDB to exit.  It arguably should, but this is considerably more
+     * of an edge case than we're testing here.
+     */
+    let dbrun = run_db_run(exec, true);
     assert_eq!(0, unsafe {
         libc::kill(dbrun.db_pid as libc::pid_t, libc::SIGKILL)
     });
