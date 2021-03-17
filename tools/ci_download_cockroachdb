@@ -3,18 +3,26 @@
 #
 # ci_download_cockroachdb: fetches the appropriate CockroachDB binary tarball
 # based on the currently running operating system, unpacks it, and creates a
-# symlink called "cockroach", all in the current directory.
+# copy called "cockroach", all in the current directory.
 #
 
 set -o pipefail
 set -o xtrace
 set -o errexit
 
-# If you change this, you must also update the md5sums below
 ARG0="$(basename ${BASH_SOURCE[0]})"
+
+# If you change this, you must also update the md5sums below
 CIDL_VERSION="v20.2.5"
 CIDL_MD5_DARWIN="4c4b84861c313884a4ef5fbbe57cb543"
 CIDL_MD5_LINUX="8fe4f47413e2c6570da0e661af716f9a"
+CIDL_MD5_ILLUMOS="2ee900af3bef860f627e4f8946dc6ba3"
+
+CIDL_ASSEMBLE_DIR="./cockroachdb"
+
+# Official (or unofficial) download sites
+CIDL_URL_COCKROACH="https://binaries.cockroachdb.com"
+CIDL_URL_ILLUMOS="https://illumos.org/downloads"
 
 function main
 {
@@ -37,12 +45,12 @@ function main
 
 	# Configure this program
 	configure_os "$CIDL_OS"
-	CIDL_URL="https://binaries.cockroachdb.com/$CIDL_FILE"
+	CIDL_URL="$CIDL_URL_BASE/$CIDL_FILE"
 
 	# Download the file.
 	echo "URL: $CIDL_URL"
 	echo "Local file: $CIDL_FILE"
-	$CIDL_DOWNLOAD "$CIDL_URL" "$CIDL_FILE" || \
+	do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
 	    fail "failed to download file"
 
 	# Verify the md5sum.
@@ -53,14 +61,14 @@ function main
 		    (expected $CIDL_MD5, found $calculated_md5)"
 	fi
 
-	# Unpack the tarball
-	$CIDL_UNPACK "$CIDL_FILE"
+	# Unpack the tarball.
+	do_untar "$CIDL_FILE"
 
 	# Copy the "cockroach" binary to the right spot.
-	cp "$CIDL_DIR/cockroach" "cockroach"
+	$CIDL_ASSEMBLE "$CIDL_DIR"
 
-	# Attempt to run it as a sanity-check
-	./cockroach version
+	# Run the binary as a sanity-check.
+	"$CIDL_ASSEMBLE_DIR/bin/cockroach" version
 }
 
 function fail
@@ -79,16 +87,24 @@ function configure_os
 			CIDL_SUFFIX="tgz"
 			CIDL_MD5="$CIDL_MD5_DARWIN"
 			CIDL_MD5FUNC="do_md5"
-			CIDL_DOWNLOAD="do_download_curl"
-			CIDL_UNPACK="do_untar"
+			CIDL_URL_BASE="$CIDL_URL_COCKROACH"
+			CIDL_ASSEMBLE="do_assemble_official"
 			;;
 		linux-gnu*) 
 			CIDL_BUILD="linux-amd64"
 			CIDL_SUFFIX="tgz"
 			CIDL_MD5="$CIDL_MD5_LINUX"
 			CIDL_MD5FUNC="do_md5sum"
-			CIDL_DOWNLOAD="do_download_curl"
-			CIDL_UNPACK="do_untar"
+			CIDL_URL_BASE="$CIDL_URL_COCKROACH"
+			CIDL_ASSEMBLE="do_assemble_official"
+			;;
+		solaris*)
+			CIDL_BUILD="illumos"
+			CIDL_SUFFIX="tar.gz"
+			CIDL_MD5="$CIDL_MD5_ILLUMOS"
+			CIDL_MD5FUNC="do_md5sum"
+			CIDL_URL_BASE="$CIDL_URL_ILLUMOS"
+			CIDL_ASSEMBLE="do_assemble_illumos"
 			;;
 		*)
 			fail "unsupported OS: $1"
@@ -117,6 +133,26 @@ function do_md5sum
 function do_untar
 {
 	tar xzf "$1"
+}
+
+#
+# "Assembling" here is taking unpacked tarball and putting together a directory
+# structure that's common for all platforms.  This allows consumers (i.e., CI)
+# to assume the same directory structure for all platforms.  This is
+# platform-specific because on illumos, the tarball itself has a different
+# structure than the official release tarballs and the `cockroach` binary has
+# dynamic library dependencies.
+#
+
+function do_assemble_official
+{
+	mkdir -p "$CIDL_ASSEMBLE_DIR/bin"
+	cp "$CIDL_DIR/cockroach" "$CIDL_ASSEMBLE_DIR/bin"
+}
+
+function do_assemble_illumos
+{
+	cp -r "cockroach-$CIDL_VERSION" "$CIDL_ASSEMBLE_DIR"
 }
 
 main "$@"
