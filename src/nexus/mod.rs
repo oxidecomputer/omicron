@@ -66,7 +66,9 @@ impl Server {
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
-        let apictx = ServerContext::new(rack_id, ctxlog);
+        let pool = db::Pool::new(&config.database);
+
+        let apictx = ServerContext::new(rack_id, ctxlog, pool);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

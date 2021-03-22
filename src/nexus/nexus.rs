@@ -30,6 +30,7 @@ use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::nexus::datastore::collection_page;
 use crate::nexus::datastore::DataStore;
+use crate::nexus::db;
 use crate::nexus::saga_interface::SagaContext;
 use crate::nexus::sagas;
 use crate::sled_agent;
@@ -99,6 +100,9 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
+
+    /** database connection pool */
+    pool: db::Pool,
 }
 
 /*
@@ -117,7 +121,7 @@ impl Nexus {
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger) -> Nexus {
+    pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
         Nexus {
             id: *id,
             log,
@@ -132,6 +136,7 @@ impl Nexus {
             }),
             datastore: DataStore::new_empty(),
             sled_agents: Mutex::new(BTreeMap::new()),
+            pool,
         }
     }
 
