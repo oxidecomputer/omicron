@@ -16,6 +16,14 @@ use thiserror::Error;
 /// Default for how long to wait for CockroachDB to report its listening URL
 const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 
+/*
+ * A default listen port of 0 allows the system to choose any available port.
+ * This is appropriate for the test suite and may be useful in some cases for
+ * omicron_dev.  However, omicron_dev by default chooses a specific port so that
+ * we can ship a Nexus configuration that will use the same port.
+ */
+const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
+
 /**
  * Builder for [`CockroachStarter`] that supports setting some command-line
  * arguments for the `cockroach start-single-node` command
@@ -34,6 +42,8 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 pub struct CockroachStarterBuilder {
     /// optional value for the --store-dir option
     store_dir: Option<PathBuf>,
+    /// optional value for the listening port
+    listen_port: u16,
     /// command-line arguments, mirrored here for reporting
     args: Vec<String>,
     /// describes the command line that we're going to execute
@@ -52,6 +62,7 @@ impl CockroachStarterBuilder {
     fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder {
             store_dir: None,
+            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
@@ -73,7 +84,6 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--listen-addr=127.0.0.1:0")
             .arg("--http-addr=:0");
         builder
     }
@@ -98,6 +108,16 @@ impl CockroachStarterBuilder {
      */
     pub fn store_dir<P: AsRef<Path>>(mut self, store_dir: P) -> Self {
         self.store_dir.replace(store_dir.as_ref().to_owned());
+        self
+    }
+
+    /**
+     * Sets the listening port for the PostgreSQL and CockroachDB protocols
+     *
+     * We always listen only on 127.0.0.1.
+     */
+    pub fn listen_port(mut self, listen_port: u16) -> Self {
+        self.listen_port = listen_port;
         self
     }
 
@@ -146,8 +166,11 @@ impl CockroachStarterBuilder {
             });
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
+        let listen_arg = format!("127.0.0.1:{}", self.listen_port);
         self.arg("--store")
             .arg(store_dir)
+            .arg("--listen-addr")
+            .arg(&listen_arg)
             .arg("--listening-url-file")
             .arg(listen_url_file.as_os_str().to_owned());
 

@@ -58,6 +58,16 @@ struct DbRunArgs {
     #[structopt(long, parse(from_os_str))]
     store_dir: Option<PathBuf>,
 
+    /// Database (SQL) listen port.  Use `0` to request any available port.
+    /*
+     * We choose an arbitrary default port that's different from the default
+     * CockroachDB port to avoid conflicting.  We don't use 0 because this port
+     * is specified in a few other places, like the default Nexus config file.
+     * TODO We could load that file at compile time and use the value there.
+     */
+    #[structopt(long, default_value = "32221")]
+    listen_port: u16,
+
     /*
      * This unusual structopt configuration makes "populate" default to true,
      * allowing a --no-populate override on the CLI.
@@ -81,7 +91,8 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
      * builder, then create starter, then start it) because we want to be able
      * to print what's happening before we do it.
      */
-    let mut db_arg_builder = dev::db::CockroachStarterBuilder::new();
+    let mut db_arg_builder =
+        dev::db::CockroachStarterBuilder::new().listen_port(args.listen_port);
 
     /*
      * NOTE: The stdout strings here are not intended to be stable, but they are

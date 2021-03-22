@@ -191,3 +191,21 @@ CREATE TABLE omicron.public.Sled (
 
     sled_agent_ip INET
 );
+
+/*
+ * Metadata for the schema itself.  This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
+
+CREATE TABLE omicron.public.DbMetadata (
+    name  STRING(63) NOT NULL,
+    value STRING(1023) NOT NULL
+);
+
+INSERT INTO omicron.public.DbMetadata (
+    name,
+    value
+) VALUES (
+    'schema_version',
+    '1.0.0'
+);

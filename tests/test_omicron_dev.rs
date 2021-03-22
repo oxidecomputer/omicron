@@ -173,8 +173,14 @@ async fn test_db_run() {
      *
      * We also redirect stderr to stdout just so that it doesn't get dumped to
      * the user's terminal during regular `cargo test` runs.
+     *
+     * Finally, we set listen-port=0 to avoid conflicting with concurrent
+     * invocations.
      */
-    let cmdstr = format!("( set -o monitor; {} db-run )", CMD_OMICRON_DEV);
+    let cmdstr = format!(
+        "( set -o monitor; {} db-run --listen-port 0)",
+        CMD_OMICRON_DEV
+    );
     let exec =
         Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
     let dbrun = run_db_run(exec, true);
@@ -273,8 +279,10 @@ async fn test_db_killed() {
      * Redirect stderr to stdout just so that it doesn't get dumped to the
      * user's terminal during regular `cargo test` runs.
      */
-    let exec =
-        Exec::cmd(CMD_OMICRON_DEV).arg("db-run").stderr(Redirection::Merge);
+    let exec = Exec::cmd(CMD_OMICRON_DEV)
+        .arg("db-run")
+        .arg("--listen-port=0")
+        .stderr(Redirection::Merge);
     /*
      * Although it doesn't seem necessary, we wait for "db-run" to finish
      * populating the database before we kill CockroachDB.  The main reason is
