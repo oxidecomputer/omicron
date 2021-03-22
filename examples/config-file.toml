@@ -10,6 +10,10 @@ bind_address = "127.0.0.1:12220"
 # IP address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
 
+[database]
+# URL for connecting to the database
+url = "postgresql://root@127.0.0.1:26257?sslmode=disable"
+
 [log]
 # Show log messages of this level and more severe
 level = "info"

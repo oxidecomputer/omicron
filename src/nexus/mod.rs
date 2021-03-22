@@ -6,6 +6,7 @@ mod client;
 mod config;
 mod context;
 mod datastore;
+mod db;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 #[allow(clippy::module_inception)]

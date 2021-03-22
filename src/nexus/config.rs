@@ -3,6 +3,7 @@
  * configuration
  */
 
+use crate::nexus::db;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
@@ -21,6 +22,8 @@ pub struct Config {
     pub dropshot_internal: ConfigDropshot,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
+    /** Database parameters */
+    pub database: db::Config,
 }
 
 #[derive(Debug)]
@@ -92,6 +95,7 @@ impl Config {
 mod test {
     use super::Config;
     use super::{LoadError, LoadErrorKind};
+    use crate::nexus::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -203,6 +207,8 @@ mod test {
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
             mode = "file"
             level = "debug"
@@ -231,6 +237,11 @@ mod test {
                     level: ConfigLoggingLevel::Debug,
                     if_exists: ConfigLoggingIfExists::Fail,
                     path: "/nonexistent/path".to_string()
+                },
+                database: db::Config {
+                    url: "postgresql://127.0.0.1?sslmode=disable"
+                        .parse()
+                        .unwrap()
                 }
             }
         );
