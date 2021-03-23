@@ -22,7 +22,6 @@ structopt = "0.3"
 tar = "0.4"
 tempfile = "3.0"
 thiserror = "1.0"
-tokio-postgres = "0.7"
 toml = "0.5.6"
 walkdir = "2.3"
 
@@ -63,6 +62,10 @@ branch = "main"
 [dependencies.tokio]
 version = "1.0"
 features = [ "full" ]
+
+[dependencies.tokio-postgres]
+version = "0.7"
+features = [ "with-chrono-0_4", "with-uuid-0_8" ]
 
 [dependencies.uuid]
 version = "0.8"

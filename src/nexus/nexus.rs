@@ -91,6 +91,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     datastore: DataStore,
 
+    /** persistent storage for resources in the control plane */
+    db_datastore: db::DataStore,
+
     /**
      * List of sled agents known by this nexus.
      * TODO This ought to have some representation in the data store as well so
@@ -102,7 +105,7 @@ pub struct Nexus {
     sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
 
     /** database connection pool */
-    pool: db::Pool,
+    pool: Arc<db::Pool>,
 }
 
 /*
@@ -122,6 +125,8 @@ impl Nexus {
      */
     /* TODO-polish revisit rack metadata */
     pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
+        let pool = Arc::new(pool);
+
         Nexus {
             id: *id,
             log,
@@ -135,6 +140,7 @@ impl Nexus {
                 },
             }),
             datastore: DataStore::new_empty(),
+            db_datastore: db::DataStore::new(Arc::clone(&pool)),
             sled_agents: Mutex::new(BTreeMap::new()),
             pool,
         }
@@ -151,8 +157,8 @@ impl Nexus {
         scs.insert(sa.id, sa);
     }
 
-    pub fn datastore(&self) -> &DataStore {
-        &self.datastore
+    pub fn datastore(&self) -> &db::DataStore {
+        &self.db_datastore
     }
 
     /**
@@ -205,15 +211,8 @@ impl Nexus {
         &self,
         new_project: &ApiProjectCreateParams,
     ) -> CreateResult<ApiProject> {
-        self.datastore.project_create(new_project).await
-    }
-
-    pub async fn project_create_with_id(
-        &self,
-        new_uuid: Uuid,
-        new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
-        self.datastore.project_create_with_id(new_uuid, new_project).await
+        let id = Uuid::new_v4();
+        self.db_datastore.project_create_with_id(&id, new_project).await
     }
 
     pub async fn project_lookup(
@@ -413,9 +412,12 @@ impl Nexus {
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
     ) -> CreateResult<ApiInstance> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+
         let saga_template = sagas::saga_instance_create();
         let saga_params = sagas::ParamsInstanceCreate {
-            project_name: project_name.clone(),
+            project_id,
             create_params: params.clone(),
         };
 

@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
-    pub project_name: ApiName,
+    pub project_id: Uuid,
     pub create_params: ApiInstanceCreateParams,
 }
 
@@ -60,13 +60,8 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
                 let osagactx = sagactx.user_data().clone();
                 let params = sagactx.saga_params().clone();
                 async move {
-                    let project = osagactx
-                        .datastore()
-                        .project_lookup(&params.project_name)
-                        .await
-                        .map_err(ActionError::action_failed)?;
                     osagactx
-                        .alloc_server(&project, &params.create_params)
+                        .alloc_server(&params.create_params)
                         .await
                         .map_err(ActionError::action_failed)
                 }
@@ -100,11 +95,13 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
                      * TODO-correctness needs to handle the case where the
                      * record already exists and looks similar vs. different
                      */
+                    // XXX
+                    todo!();
                     osagactx
                         .datastore()
                         .project_create_instance(
                             &instance_id?,
-                            &params.project_name,
+                            &params.project_id,
                             &params.create_params,
                             &runtime,
                         )
@@ -136,6 +133,8 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
                         .sled_client(&sled_uuid)
                         .await
                         .map_err(ActionError::action_failed)?;
+                    // XXX
+                    todo!();
                     /*
                      * TODO-datastore This should be cached from the previous
                      * stage once we figure out how best to pass this

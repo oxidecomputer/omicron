@@ -12,7 +12,7 @@ bind_address = "127.0.0.1:12221"
 
 [database]
 # URL for connecting to the database
-url = "postgresql://root@127.0.0.1:26257?sslmode=disable"
+url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
 
 [log]
 # Show log messages of this level and more severe

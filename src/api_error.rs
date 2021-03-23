@@ -102,6 +102,18 @@ impl ApiError {
     }
 
     /**
+     * Generates an [`ApiError::InternalError`] error with the specific message
+     *
+     * InternalError should be used for operational conditions that should not
+     * happen but that we cannot reasonably handle at runtime (e.g.,
+     * deserializing a value from the database, or finding two records for
+     * something that is supposed to be unique).
+     */
+    pub fn internal_error(message: &str) -> ApiError {
+        ApiError::InternalError { message: message.to_owned() }
+    }
+
+    /**
      * Given an error returned in an HTTP response, reconstitute an `ApiError`
      * that describes that error.  This is intended for use when returning an
      * error from one control plane service to another while preserving

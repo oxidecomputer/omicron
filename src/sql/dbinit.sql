@@ -59,7 +59,7 @@ CREATE TABLE omicron.public.Project (
 CREATE UNIQUE INDEX ON omicron.public.Project (
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 /*
  * Instances
@@ -122,7 +122,7 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
     project_id,
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 
 /*
@@ -176,7 +176,7 @@ CREATE UNIQUE INDEX ON omicron.public.Disk (
     project_id,
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 
 /*
