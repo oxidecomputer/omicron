@@ -293,6 +293,8 @@ async fn test_instances() {
             > instance.runtime.time_run_state_updated
     );
 
+    /* TODO-coverage add a test to try to delete the project at this point. */
+
     /* Delete the instance. */
     client
         .make_request_no_body(

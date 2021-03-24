@@ -103,9 +103,6 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
-
-    /** database connection pool */
-    pool: Arc<db::Pool>,
 }
 
 /*
@@ -125,8 +122,6 @@ impl Nexus {
      */
     /* TODO-polish revisit rack metadata */
     pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
-        let pool = Arc::new(pool);
-
         Nexus {
             id: *id,
             log,
@@ -140,9 +135,8 @@ impl Nexus {
                 },
             }),
             datastore: DataStore::new_empty(),
-            db_datastore: db::DataStore::new(Arc::clone(&pool)),
+            db_datastore: db::DataStore::new(Arc::new(pool)),
             sled_agents: Mutex::new(BTreeMap::new()),
-            pool,
         }
     }
 
@@ -215,29 +209,29 @@ impl Nexus {
         self.db_datastore.project_create_with_id(&id, new_project).await
     }
 
-    pub async fn project_lookup(
+    pub async fn project_fetch(
         &self,
         name: &ApiName,
     ) -> LookupResult<ApiProject> {
-        self.datastore.project_lookup(name).await
+        self.db_datastore.project_fetch(name).await
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiProject> {
-        self.datastore.projects_list_by_name(pagparams).await
+        self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiProject> {
-        self.datastore.projects_list_by_id(pagparams).await
+        self.db_datastore.projects_list_by_id(pagparams).await
     }
 
     pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
-        self.datastore.project_delete(name).await
+        self.db_datastore.project_delete(name).await
     }
 
     pub async fn project_update(
@@ -245,7 +239,7 @@ impl Nexus {
         name: &ApiName,
         new_params: &ApiProjectUpdateParams,
     ) -> UpdateResult<ApiProject> {
-        self.datastore.project_update(name, new_params).await
+        self.db_datastore.project_update(name, new_params).await
     }
 
     /*
@@ -266,7 +260,7 @@ impl Nexus {
         params: &ApiDiskCreateParams,
     ) -> CreateResult<ApiDisk> {
         let now = Utc::now();
-        let project = self.project_lookup(project_name).await?;
+        let project = self.project_fetch(project_name).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a

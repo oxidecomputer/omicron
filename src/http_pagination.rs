@@ -52,7 +52,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Debug;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -186,7 +186,7 @@ where
  * `RequestContext` just to get the limit.
  */
 fn data_page_params_with_limit<S>(
-    limit: NonZeroUsize,
+    limit: NonZeroU32,
     pag_params: &PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<S::MarkerValue>, HttpError>
 where
@@ -442,7 +442,7 @@ where
 }
 
 fn data_page_params_nameid_name_limit(
-    limit: NonZeroUsize,
+    limit: NonZeroU32,
     pag_params: &ApiPaginatedByNameOrId,
 ) -> Result<DataPageParams<ApiName>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
@@ -475,7 +475,7 @@ where
 }
 
 fn data_page_params_nameid_id_limit(
-    limit: NonZeroUsize,
+    limit: NonZeroU32,
     pag_params: &ApiPaginatedByNameOrId,
 ) -> Result<DataPageParams<Uuid>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
@@ -530,7 +530,7 @@ mod test {
     use serde::Serialize;
     use serde_json::to_string_pretty;
     use std::convert::TryFrom;
-    use std::num::NonZeroUsize;
+    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     /*
@@ -771,7 +771,7 @@ mod test {
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         /* Verify data pages based on the query params. */
-        let limit = NonZeroUsize::new(123).unwrap();
+        let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
@@ -810,7 +810,7 @@ mod test {
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         /* Verify data pages based on the query params. */
-        let limit = NonZeroUsize::new(123).unwrap();
+        let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
@@ -880,7 +880,7 @@ mod test {
         );
 
         /* Verify data pages based on the query params. */
-        let limit = NonZeroUsize::new(123).unwrap();
+        let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_nameid_name_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Descending);
@@ -919,7 +919,7 @@ mod test {
         );
 
         /* Verify data pages based on the query params. */
-        let limit = NonZeroUsize::new(123).unwrap();
+        let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_nameid_id_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);

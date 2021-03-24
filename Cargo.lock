@@ -68,12 +68,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
-
-[[package]]
-name = "base64"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
@@ -287,11 +281,11 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.4.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#fa94fc5ce44abaf1d377c42c037c44d80f88da62"
+version = "0.5.2-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#149c6eb54f414ae2e305d4df99d00e69ab23f8e5"
 dependencies = [
  "async-trait",
- "base64 0.12.3",
+ "base64",
  "bytes",
  "chrono",
  "dropshot_endpoint",
@@ -300,12 +294,12 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3",
+ "openapiv3 0.4.0",
  "paste",
  "schemars",
  "serde",
  "serde_json",
- "serde_urlencoded",
+ "serde_urlencoded 0.7.0",
  "slog",
  "slog-async",
  "slog-bunyan",
@@ -318,8 +312,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.4.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#fa94fc5ce44abaf1d377c42c037c44d80f88da62"
+version = "0.5.2-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#149c6eb54f414ae2e305d4df99d00e69ab23f8e5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -821,12 +815,12 @@ dependencies = [
  "hyper",
  "libc",
  "newline-converter",
- "openapiv3",
+ "openapiv3 0.3.2",
  "ring",
  "schemars",
  "serde",
  "serde_json",
- "serde_urlencoded",
+ "serde_urlencoded 0.6.1",
  "serde_with",
  "signal-hook",
  "signal-hook-tokio",
@@ -862,6 +856,18 @@ name = "openapiv3"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ee9a17eebdd923c4cf74145cd31b2b1d3aa019262c9e8669a843b1d629a9a3c"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "openapiv3"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b3c622a8249a19c1b9730e6b3127cf2b0d42f47fbdf2e5ba43c43cfd48eb5ee"
 dependencies = [
  "indexmap",
  "serde",
@@ -972,7 +978,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e34ad3dc5c56d036b9418185ee97e14b6766d55c8ccf9dc18302ad4e6371d9"
 dependencies = [
- "base64 0.13.0",
+ "base64",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -1256,6 +1262,18 @@ dependencies = [
  "itoa",
  "serde",
  "url",
+]
+
+[[package]]
+name = "serde_urlencoded"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edfa57a7f8d9c1d260a549e7224100f6c43d43f9103e06dd8b4095a9b2b43ce9"
+dependencies = [
+ "form_urlencoded",
+ "itoa",
+ "ryu",
+ "serde",
 ]
 
 [[package]]

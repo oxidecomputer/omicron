@@ -38,6 +38,7 @@ features = [ "serde" ]
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
 
 [dependencies.schemars]
 version = "0.8"

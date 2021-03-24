@@ -11,23 +11,19 @@ use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
-use crate::api_model::ApiProjectCreateParams;
-use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
-use crate::api_model::DataPageParams;
-use crate::api_model::PaginationOrder::Ascending;
-use crate::api_model::PaginationOrder::Descending;
-
 use crate::api_model::CreateResult;
+use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
-use crate::api_model::UpdateResult;
-
+use crate::api_model::PaginationOrder::Ascending;
+use crate::api_model::PaginationOrder::Descending;
 use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::ops::Bound;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -49,8 +45,6 @@ pub struct DataStore {
  * that's ultimately what we expect to put here.
  */
 struct CdsData {
-    /** projects in the system */
-    projects_by_id: BTreeMap<Uuid, Arc<ApiProject>>,
     /** index mapping project name to project id */
     projects_by_name: BTreeMap<ApiName, Uuid>,
     /** project instances, indexed by project name, then by instance name */
@@ -88,7 +82,6 @@ impl DataStore {
     pub fn new_empty() -> DataStore {
         DataStore {
             data: Mutex::new(CdsData {
-                projects_by_id: BTreeMap::new(),
                 projects_by_name: BTreeMap::new(),
                 instances_by_project_id: BTreeMap::new(),
                 instances_by_id: BTreeMap::new(),
@@ -96,152 +89,6 @@ impl DataStore {
                 disks_by_project_id: BTreeMap::new(),
             }),
         }
-    }
-
-    pub async fn project_create(
-        &self,
-        new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
-        self.project_create_with_id(Uuid::new_v4(), new_project).await
-    }
-
-    pub async fn project_create_with_id(
-        &self,
-        new_uuid: Uuid,
-        new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
-        let newname = &new_project.identity.name;
-
-        let mut data = self.data.lock().await;
-        assert!(!data.instances_by_project_id.contains_key(&new_uuid));
-        assert!(!data.disks_by_project_id.contains_key(&new_uuid));
-        assert!(!data.projects_by_id.contains_key(&new_uuid));
-        if data.projects_by_name.contains_key(&newname) {
-            return Err(ApiError::ObjectAlreadyExists {
-                type_name: ApiResourceType::Project,
-                object_name: String::from(new_project.identity.name.clone()),
-            });
-        }
-
-        let now = Utc::now();
-        let project = Arc::new(ApiProject {
-            identity: ApiIdentityMetadata {
-                id: new_uuid,
-                name: newname.clone(),
-                description: new_project.identity.description.clone(),
-                time_created: now,
-                time_modified: now,
-            },
-            generation: 1,
-        });
-
-        let rv = Arc::clone(&project);
-        data.projects_by_id.insert(new_uuid, project);
-        data.projects_by_name.insert(newname.clone(), new_uuid);
-        data.instances_by_project_id.insert(new_uuid, BTreeMap::new());
-        data.disks_by_project_id.insert(new_uuid, BTreeMap::new());
-        Ok(rv)
-    }
-
-    pub async fn project_lookup(
-        &self,
-        name: &ApiName,
-    ) -> LookupResult<ApiProject> {
-        let data = self.data.lock().await;
-        let project = collection_lookup_via_id(
-            &data.projects_by_name,
-            &data.projects_by_id,
-            name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-        Ok(Arc::clone(project))
-    }
-
-    pub async fn projects_list_by_id(
-        &self,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiProject> {
-        let data = self.data.lock().await;
-        collection_page(&data.projects_by_id, pagparams)
-    }
-
-    pub async fn projects_list_by_name(
-        &self,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiProject> {
-        let data = self.data.lock().await;
-        collection_page_via_id(
-            &data.projects_by_name,
-            pagparams,
-            &data.projects_by_id,
-        )
-    }
-
-    pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
-        let mut data = self.data.lock().await;
-        let project_id = *collection_lookup(
-            &data.projects_by_name,
-            name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-        let instances = data.instances_by_project_id.get(&project_id).unwrap();
-
-        if !instances.is_empty() {
-            return Err(ApiError::InvalidRequest {
-                message: String::from("project still has instances"),
-            });
-        }
-
-        data.instances_by_project_id.remove(&project_id).unwrap();
-        data.disks_by_project_id.remove(&project_id).unwrap();
-        data.projects_by_id.remove(&project_id).unwrap();
-        data.projects_by_name.remove(name).unwrap();
-        Ok(())
-    }
-
-    pub async fn project_update(
-        &self,
-        name: &ApiName,
-        new_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject> {
-        let now = Utc::now();
-        let mut data = self.data.lock().await;
-
-        let project_id =
-            data.projects_by_name.remove(name).ok_or_else(|| {
-                ApiError::not_found_by_name(ApiResourceType::Project, name)
-            })?;
-        let oldproject = data.projects_by_id.get(&project_id).unwrap();
-        let newname = &new_params
-            .identity
-            .name
-            .as_ref()
-            .unwrap_or(&oldproject.identity.name);
-        let newdescription = &new_params
-            .identity
-            .description
-            .as_ref()
-            .unwrap_or(&oldproject.identity.description);
-        let newgen = oldproject.generation + 1;
-
-        let newvalue = Arc::new(ApiProject {
-            identity: ApiIdentityMetadata {
-                id: project_id,
-                name: (*newname).clone(),
-                description: (*newdescription).clone(),
-                time_created: oldproject.identity.time_created,
-                time_modified: now,
-            },
-            generation: newgen,
-        });
-
-        let rv = Arc::clone(&newvalue);
-        data.projects_by_name
-            .insert(newvalue.identity.name.clone(), project_id);
-        data.projects_by_id.insert(project_id, newvalue);
-        Ok(rv)
     }
 
     /*
@@ -664,7 +511,11 @@ fn collection_page_as_iter<'a, 'b, KeyType, ValueType>(
 where
     KeyType: std::cmp::Ord,
 {
-    let limit = pagparams.limit.get();
+    /*
+     * Convert the 32-bit limit to a "usize".  This can in principle fail, but
+     * not in any context in which we ever expect this code to run.
+     */
+    let limit = usize::try_from(pagparams.limit.get()).unwrap();
     match (pagparams.direction, &pagparams.marker) {
         (Ascending, None) => Box::new(search_tree.iter().take(limit)),
         (Descending, None) => Box::new(search_tree.iter().rev().take(limit)),

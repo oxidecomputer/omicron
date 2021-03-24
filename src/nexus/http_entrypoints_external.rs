@@ -47,7 +47,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -204,7 +204,7 @@ async fn api_projects_get_project(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project: Arc<ApiProject> = nexus.project_lookup(&project_name).await?;
+    let project: Arc<ApiProject> = nexus.project_fetch(&project_name).await?;
     Ok(HttpResponseOk(project.to_view()))
 }
 
@@ -552,7 +552,7 @@ async fn api_instance_disks_get(
     let fake_query = DataPageParams {
         marker: None,
         direction: PaginationOrder::Ascending,
-        limit: NonZeroUsize::new(std::usize::MAX).unwrap(),
+        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
     };
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)

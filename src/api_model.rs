@@ -23,7 +23,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -91,7 +91,7 @@ pub struct DataPageParams<'a, NameType> {
      * the end of the scan.  Dropshot assumes that if we provide fewer results
      * than this number, then we're done with the scan.
      */
-    pub limit: NonZeroUsize,
+    pub limit: NonZeroU32,
 }
 
 /**
