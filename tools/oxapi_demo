@@ -56,7 +56,7 @@ function main
 	local cmd
 
 	type curl > /dev/null 2>&1 || fail "curl not found in PATH."
-	type json > /dev/null 2>&1 || fail "json not found in PATH."
+	type json > /dev/null 2>&1 || fail "json not found in PATH. Install it with npm i -g json."
 
 	[[ $# -gt 0 ]] || usage "command not specified"
 
