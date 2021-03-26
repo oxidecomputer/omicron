@@ -19,9 +19,11 @@ use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
+use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
 use std::convert::TryFrom;
+use std::future::Future;
 use std::sync::Arc;
 use tokio_postgres::row::Row;
 use tokio_postgres::types::ToSql;
@@ -44,38 +46,21 @@ impl DataStore {
     ) -> CreateResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        // XXX Error handling here needs to explicitly handle case of duplicate
-        // key value (code 23505).
-        let rows = client
-            .query(
-                "INSERT INTO Project \
-            (id, name, description, time_created, time_metadata_updated,
-            time_deleted) VALUES ($1, $2, $3, $4, $5, NULL) \
-            RETURNING \
-            id, name, description, time_created, time_metadata_updated,
-            time_deleted",
-                &[
-                    new_id,
-                    &new_project.identity.name,
-                    &new_project.identity.description,
-                    &now,
-                    &now,
-                ],
-            )
-            .await
-            .map_err(sql_error)?;
-        let row = match rows.len() {
-            1 => &rows[0],
-            len => {
-                return Err(ApiError::internal_error(&format!(
-                    "expected 1 row from INSERT query, but found {}",
-                    len
-                )))
-            }
-        };
-
-        // XXX With this design, do we really want to use Arc?
-        Ok(Arc::new(ApiProject::try_from(row)?))
+        sql_insert_unique(
+            &client,
+            Project,
+            Project::ALL_COLUMNS,
+            &new_project.identity.name.as_str(),
+            &[
+                new_id,
+                &new_project.identity.name,
+                &new_project.identity.description,
+                &now,
+                &now,
+                &(None as Option<DateTime<Utc>>),
+            ],
+        )
+        .await
     }
 
     /// Fetch metadata for a project
@@ -86,9 +71,13 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
-                "SELECT id, name, description, time_created, \
-                time_metadata_updated FROM Project \
-                WHERE time_deleted IS NULL AND name = $1 LIMIT 2",
+                format!(
+                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+                        name = $1 LIMIT 2",
+                    Project::ALL_COLUMNS.join(", "),
+                    Project::TABLE_NAME
+                )
+                .as_str(),
                 &[&project_name],
             )
             .await
@@ -159,10 +148,14 @@ impl DataStore {
         let now = Utc::now();
         let rows = client
             .query(
-                "UPDATE Project SET time_deleted = $1 WHERE \
-                time_deleted IS NULL AND name = $2 LIMIT 2 \
-                RETURNING id, name, description, time_created, \
-                time_metadata_updated",
+                format!(
+                    "UPDATE {} SET time_deleted = $1 WHERE \
+                    time_deleted IS NULL AND name = $2 LIMIT 2 \
+                    RETURNING {}",
+                    Project::TABLE_NAME,
+                    Project::ALL_COLUMNS.join(", ")
+                )
+                .as_str(),
                 &[&now, &project_name],
             )
             .await
@@ -190,8 +183,12 @@ impl DataStore {
 
         let rows = client
             .query(
-                "SELECT id FROM Project WHERE \
-            name = $1 AND time_deleted IS NULL LIMIT 2",
+                format!(
+                    "SELECT id FROM {} WHERE name = $1 AND \
+                        time_deleted IS NULL LIMIT 2",
+                    Project::TABLE_NAME
+                )
+                .as_str(),
                 &[&name],
             )
             .await
@@ -220,11 +217,13 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
-            "SELECT id, name, description, time_created, time_metadata_updated \
-            FROM Project WHERE time_deleted IS NULL",
+            Project,
+            Project::ALL_COLUMNS,
+            "time_deleted IS NULL",
             "id",
             pagparams,
-        ).await?;
+        )
+        .await?;
         let list = rows
             .iter()
             .map(|row| ApiProject::try_from(row).map(Arc::new))
@@ -240,11 +239,13 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
-            "SELECT id, name, description, time_created, time_metadata_updated \
-            FROM Project WHERE time_deleted IS NULL",
+            Project,
+            Project::ALL_COLUMNS,
+            "time_deleted IS NULL",
             "name",
-            pagparams
-        ).await?;
+            pagparams,
+        )
+        .await?;
         let list = rows
             .iter()
             .map(|row| ApiProject::try_from(row).map(Arc::new))
@@ -262,9 +263,9 @@ impl DataStore {
         let now = Utc::now();
 
         // XXX handle name conflict error explicitly
-        let mut sql = String::from(
-            "UPDATE Project \
-            SET time_metadata_updated = $1 ",
+        let mut sql = format!(
+            "UPDATE {} SET time_metadata_updated = $1 ",
+            Project::TABLE_NAME
         );
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now];
 
@@ -279,10 +280,9 @@ impl DataStore {
         }
 
         sql.push_str(&format!(
-            " WHERE name = ${} AND time_deleted IS NULL LIMIT 2 RETURNING \
-            id, name, description, time_created, time_metadata_updated,
-            time_deleted",
-            params.len() + 1
+            " WHERE name = ${} AND time_deleted IS NULL LIMIT 2 RETURNING {}",
+            params.len() + 1,
+            Project::ALL_COLUMNS.join(", ")
         ));
         params.push(project_name);
 
@@ -331,8 +331,6 @@ impl DataStore {
 
 /* XXX Should this be From<>?  May want more context */
 fn sql_error(e: tokio_postgres::Error) -> ApiError {
-    use tokio_postgres::error::SqlState;
-
     match e.code() {
         None => ApiError::InternalError {
             message: format!("unexpected database error: {}", e.to_string()),
@@ -345,6 +343,23 @@ fn sql_error(e: tokio_postgres::Error) -> ApiError {
             ),
         },
     }
+}
+
+fn sql_error_create(
+    rtype: ApiResourceType,
+    unique_value: &str,
+    e: tokio_postgres::Error,
+) -> ApiError {
+    if let Some(code) = e.code() {
+        if *code == tokio_postgres::error::SqlState::UNIQUE_VIOLATION {
+            return ApiError::ObjectAlreadyExists {
+                type_name: rtype,
+                object_name: unique_value.to_owned(),
+            };
+        }
+    }
+
+    sql_error(e)
 }
 
 impl TryFrom<&tokio_postgres::Row> for ApiProject {
@@ -382,32 +397,46 @@ impl TryFrom<&tokio_postgres::Row> for ApiProject {
  * XXX building SQL like this sucks (obviously).  The 'static str here is just
  * to make it less likely we accidentally put a user-provided string here if
  * this sicence experiment escapes the lab.
+ * As below, the explicit desugaring of "async fn" here is due to
+ * rust-lang/rust#63033.
  */
-async fn sql_pagination<'a, T: ToSql + Send + Sync>(
+fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     client: &'a tokio_postgres::Client,
-    base_sql: &'static str,
+    table: T,
+    columns: &[&'static str],
+    base_where: &'static str,
     column_name: &'static str,
-    pagparams: &'a DataPageParams<'a, T>,
-) -> Result<Vec<Row>, ApiError> {
+    pagparams: &'a DataPageParams<'a, K>,
+) -> impl Future<Output = Result<Vec<Row>, ApiError>> + 'a {
     let (operator, order) = match pagparams.direction {
         dropshot::PaginationOrder::Ascending => (">", "ASC"),
         dropshot::PaginationOrder::Descending => ("<", "DESC"),
     };
 
+    let base_sql = format!(
+        "SELECT {} FROM {} WHERE {} ",
+        columns.join(", "),
+        T::TABLE_NAME,
+        base_where
+    );
     let limit = i64::from(pagparams.limit.get());
-    let query_result = if let Some(marker_value) = &pagparams.marker {
-        let sql = format!(
-            "{} AND {} {} $1 ORDER BY {} {} LIMIT $2",
-            base_sql, column_name, operator, column_name, order
-        );
-        client.query(sql.as_str(), &[&marker_value, &limit]).await
-    } else {
-        let sql =
-            format!("{} ORDER BY {} {} LIMIT $1", base_sql, column_name, order);
-        client.query(sql.as_str(), &[&limit]).await
-    };
+    async move {
+        let query_result = if let Some(marker_value) = &pagparams.marker {
+            let sql = format!(
+                "{} AND {} {} $1 ORDER BY {} {} LIMIT $2",
+                base_sql, column_name, operator, column_name, order
+            );
+            client.query(sql.as_str(), &[&marker_value, &limit]).await
+        } else {
+            let sql = format!(
+                "{} ORDER BY {} {} LIMIT $1",
+                base_sql, column_name, order
+            );
+            client.query(sql.as_str(), &[&limit]).await
+        };
 
-    query_result.map_err(sql_error)
+        query_result.map_err(sql_error)
+    }
 }
 
 impl ToSql for ApiName {
@@ -442,4 +471,97 @@ impl ToSql for ApiName {
     > {
         self.as_str().to_sql_checked(ty, out)
     }
+}
+
+/**
+ * Using database connection `client`, insert a row into table `table_name`
+ * having values `values` for the respective columns named `table_fields`.
+ */
+/*
+ * This is not as statically type-safe an API as you might think by looking at
+ * it.  There's nothing that ensures that the types of the values correspond to
+ * the right columns.  It's worth noting, however, that even if we statically
+ * checked this, we would only be checking that the values correspond with some
+ * Rust representation of the database schema that we've built into this
+ * program.  That does not eliminate the runtime possibility that the types do
+ * not, in fact, match the types in the database.
+ *
+ * The use of `'static` lifetimes here is a cheesy sanity check to catch SQL
+ * injection.  (This is not a _good_ way to avoid SQL injection.  This is
+ * intended as a last-ditch sanity check in case this code survives longer than
+ * expected.)  Using the `async fn` syntax here runs afoul of
+ * rust-lang/rust#63033.  So we desugar the `async` explicitly.
+ */
+fn sql_insert_unique<'a, T>(
+    client: &'a tokio_postgres::Client,
+    table: T,
+    table_columns: &'a [&'static str],
+    unique_value: &'a str,
+    values: &'a [&'a (dyn ToSql + Sync)],
+) -> impl Future<Output = Result<Arc<T::ApiModelType>, ApiError>> + 'a
+where
+    T: Table,
+{
+    assert_eq!(table_columns.len(), values.len());
+    // XXX Could assert that the specified columns are a subset of allowed ones
+    let table_field_str = table_columns.join(", ");
+    let all_columns_str = T::ALL_COLUMNS.join(", ");
+    let values_str = (1..=values.len())
+        .map(|i| format!("${}", i))
+        .collect::<Vec<String>>()
+        .as_slice()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+        T::TABLE_NAME,
+        table_field_str,
+        values_str,
+        all_columns_str
+    );
+    async move {
+        let rows = client
+            .query(sql.as_str(), values)
+            .await
+            .map_err(|e| sql_error_create(T::RESOURCE_TYPE, unique_value, e))?;
+        let row = match rows.len() {
+            1 => &rows[0],
+            len => {
+                return Err(ApiError::internal_error(&format!(
+                    "expected 1 row from INSERT query, but found {}",
+                    len
+                )))
+            }
+        };
+
+        // XXX With this design, do we really want to use Arc?
+        Ok(Arc::new(T::ApiModelType::try_from(row)?))
+    }
+}
+
+/*
+ * We want to find a better way to abstract this.  Diesel provides a compelling
+ * model in terms of using it, but it also seems fairly heavyweight, and this
+ * fetch-or-insert all-fields-of-an-object likely _isn't_ our most common use
+ * case, even though we do it a lot for basic CRUD.
+ */
+trait Table {
+    type ApiModelType: for<'a> TryFrom<&'a Row, Error = ApiError>;
+    const RESOURCE_TYPE: ApiResourceType;
+    const TABLE_NAME: &'static str;
+    const ALL_COLUMNS: &'static [&'static str];
+}
+
+struct Project;
+impl Table for Project {
+    type ApiModelType = ApiProject;
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Project;
+    const TABLE_NAME: &'static str = "Project";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_metadata_updated",
+        "time_deleted",
+    ];
 }
