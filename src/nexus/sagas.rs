@@ -105,14 +105,9 @@ async fn sic_create_instance_record(
     };
 
     /*
-     * TODO-correctness We want to have resolved the project
-     * name to an id in an earlier step.  To do that, we need to
-     * fix a bunch of the datastore issues.
      * TODO-correctness needs to handle the case where the
      * record already exists and looks similar vs. different
      */
-    // XXX
-    todo!();
     osagactx
         .datastore()
         .project_create_instance(

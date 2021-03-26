@@ -262,7 +262,6 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        // XXX handle name conflict error explicitly
         let mut sql = format!(
             "UPDATE {} SET time_metadata_updated = $1 ",
             Project::TABLE_NAME
@@ -286,8 +285,9 @@ impl DataStore {
         ));
         params.push(project_name);
 
-        let rows =
-            client.query(sql.as_str(), &params).await.map_err(sql_error)?;
+        let rows = client.query(sql.as_str(), &params).await.map_err(|e| {
+            sql_error_create(Project::RESOURCE_TYPE, project_name.as_str(), e)
+        })?;
         match rows.len() {
             0 => Err(ApiError::not_found_by_name(
                 ApiResourceType::Project,
@@ -308,6 +308,113 @@ impl DataStore {
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
     ) -> CreateResult<ApiInstance> {
+        //
+        // XXX Idempotently insert a record for this instance.  The following
+        // discussion describes our caller, not technically this function, but
+        // we probably want to define this function such that it makes sense for
+        // the caller.
+        //
+        // If we do a simple INSERT, and that succeeds -- great.  That's the
+        // common case and it's easy
+        //
+        // What if we get a conflict error on the instance id?  Since the id is
+        // unique to this saga, we must assume that means that we're being
+        // invoked a second time after a previous one successfully updated the
+        // database.  That means one of two things: (1) a previous database
+        // update succeeded, but something went wrong (e.g., the SEC crashed)
+        // before the saga could persistently record that fact; or (2) a second
+        // instance of the action is concurrently running with this one and
+        // already completed its database update.  ((2) is only possible if,
+        // after evaluating use cases like this, we decide that it's okay to
+        // _allow_ two instances of the same action to run concurrently in the
+        // case of a partition among SECs or the like.  We would only do that if
+        // it's clear that the action implementations can always handle this.)
+        //
+        // How do we want to handle this?  One option would be to ignore the
+        // conflict and then always fetch the corresponding row in the table.
+        // In the common case, we'll find our own row.  In the conflict case,
+        // we'll find the pre-existing row.  In that latter case, we should
+        // certainly verify that it looks the way we expect it to look (same
+        // "name", parameters, generation number, etc.), and it always should.
+        // Having verified that, we can simply act as though we inserted it
+        // ourselves.  In both cases (1) and (2) above, this action will
+        // complete successfully and the saga can proceed.  In (2), the SEC may
+        // have to deal with the fact that the same action completed twice, but
+        // it doesn't have to _do_ anything about it (i.e., invoke an undo
+        // action).  That said, if a second SEC did decide to unwind the saga
+        // and undo this action, things get more complicated.  It sure would be
+        // nice if the framework could guarantee that (2) wasn't the case.
+        //
+        // What if we get a conflict, fetch the corresponding row, and find
+        // none?  What would ever delete an Instance row?  The obvious
+        // candidates would be (A) the undo action for this action, and (B) an
+        // actual instance delete operation.  Presumably we can disallow (B) by
+        // not allowing anything to delete an instance whose create saga never
+        // finished (indicated by some state in the Instance row).  Is there any
+        // implementation of sagas that would allow us to wind up in case (A)?
+        // Again, if SECs went split-brain because one of them got to this point
+        // in the saga, hit the easy case, then became partitioned from the rest
+        // of the world, and then a second SEC picked up the saga and reran this
+        // action, and then the first saga encountered some _other_ failure that
+        // triggered a saga unwind, resulting in the undo action for this step
+        // completing, and then the second SEC winds up in this state.  One way
+        // to avoid this would be to have the undo action, rather than deleting
+        // the instance record, marking the row with a state indicating it is
+        // dead (or maybe never even alive).  Something would need to clean
+        // these up, but something will be needed anyway to clean up deleted
+        // records.
+        //
+        // Finally, there's one optimization we can apply here: since the common
+        // case is so common, we could use the RETURNING clause as long as it's
+        // present, and only do a subsequent SELECT on conflict.  This does
+        // bifurcate the code paths in a way that means we'll almost never wind
+        // up testing the conflict path.  Maybe we can add this optimization
+        // if/when we find that the write + read database accesses here are
+        // really a problem.
+        //
+        // This leaves us with the following proposed approach:
+        //
+        // ACTION:
+        // - INSERT INTO Instance ... ON CONFLICT (id) DO NOTHING.
+        // - SELECT * from Instance WHERE id = ...
+        //
+        // UNDO ACTION:
+        // - UPDATE Instance SET state = deleted AND time_deleted = ... WHERE
+        //   id = ...;
+        //   (this will update 0 or 1 row, and it doesn't matter to us which)
+        //
+        // We're not done!  There are two more considerations:
+        //
+        // (1) Sagas say that the effect of the sequence:
+        //
+        //       start action (1)
+        //       start + finish action (2)
+        //       start + finish undo action
+        //       finish action (1)
+        //
+        //     must be the same as if action (1) had never happened.  This is
+        //     true of the proposed approach.  That is, no matter what parts of
+        //     the "action (1)" happen before or after the undo action finishes,
+        //     the net result on the _database_ will be as if "action (1)" had
+        //     never occurred.
+        //
+        // (2) All of the above describes what happens when there's a conflict
+        //     on "id", which is unique to this saga.  It's also possible that
+        //     there would be a conflict on the unique (project_id, name) index.
+        //     In that case, we just want to fail right away -- the whole saga
+        //     is going to fail with a user error.
+        //
+        // XXX To-be-determined:
+        //
+        // Should the two SQL statements in the ACTION happen in one
+        // transaction?
+        //
+        // Is it going to be a problem that there are two possible conflicts
+        // here?  CockroachDB only supports one "arbiter" -- but I think that
+        // means _for a given constraint_, there can be only one thing imposing
+        // it.  We have two different constraints here.
+        //
+
         // XXX
         todo!();
     }
