@@ -10,7 +10,6 @@ use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiName;
-use crate::api_model::ApiProject;
 use crate::api_model::ApiResourceType;
 use crate::api_model::CreateResult;
 use crate::api_model::DataPageParams;

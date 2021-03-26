@@ -20,7 +20,6 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use chrono::Utc;
-use futures::Future;
 use futures::StreamExt;
 use std::convert::TryFrom;
 use std::sync::Arc;

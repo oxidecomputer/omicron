@@ -4,7 +4,6 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiProject;
 use crate::nexus::db;
 use crate::nexus::Nexus;
 use crate::sled_agent;
