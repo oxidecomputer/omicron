@@ -4,10 +4,13 @@
 
 use super::Pool;
 use crate::api_error::ApiError;
+use crate::api_model::ApiByteCount;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
+use crate::api_model::ApiInstanceCpuCount;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
+use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
@@ -469,37 +472,6 @@ fn sql_error_create(
     sql_error(e)
 }
 
-impl TryFrom<&tokio_postgres::Row> for ApiProject {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX really need some kind of context for these errors
-        let name_str: &str = value.try_get("name").map_err(sql_error)?;
-        let name = ApiName::try_from(name_str).map_err(|e| {
-            ApiError::internal_error(&format!(
-                "database project.name {:?}: {}",
-                name_str, e
-            ))
-        })?;
-        // XXX What to do with non-NULL time_deleted?
-        Ok(ApiProject {
-            generation: 1, // XXX
-            identity: ApiIdentityMetadata {
-                id: value.try_get("id").map_err(sql_error)?,
-                name,
-                description: value.try_get("description").map_err(sql_error)?,
-                time_created: value
-                    .try_get("time_created")
-                    .map_err(sql_error)?,
-                // XXX is it time_updated or time_metadata_updated
-                time_modified: value
-                    .try_get("time_metadata_updated")
-                    .map_err(sql_error)?,
-            },
-        })
-    }
-}
-
 /*
  * XXX building SQL like this sucks (obviously).  The 'static str here is just
  * to make it less likely we accidentally put a user-provided string here if
@@ -671,4 +643,118 @@ impl Table for Project {
         "time_metadata_updated",
         "time_deleted",
     ];
+}
+
+impl TryFrom<&tokio_postgres::Row> for ApiProject {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        // XXX really need some kind of context for these errors
+        let name_str: &str = value.try_get("name").map_err(sql_error)?;
+        let name = ApiName::try_from(name_str).map_err(|e| {
+            ApiError::internal_error(&format!(
+                "database project.name {:?}: {}",
+                name_str, e
+            ))
+        })?;
+        // XXX What to do with non-NULL time_deleted?
+        Ok(ApiProject {
+            generation: 1, // XXX
+            identity: ApiIdentityMetadata {
+                id: value.try_get("id").map_err(sql_error)?,
+                name,
+                description: value.try_get("description").map_err(sql_error)?,
+                time_created: value
+                    .try_get("time_created")
+                    .map_err(sql_error)?,
+                // XXX is it time_updated or time_metadata_updated
+                time_modified: value
+                    .try_get("time_metadata_updated")
+                    .map_err(sql_error)?,
+            },
+        })
+    }
+}
+
+struct Instance;
+impl Table for Instance {
+    type ApiModelType = ApiInstance;
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Instance;
+    const TABLE_NAME: &'static str = "Instance";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_metadata_updated",
+        "time_deleted",
+        "project_id",
+        "instance_state",
+        "state_generation",
+        "active_server_id",
+        "ncpus",
+        "memory_mib",
+        "hostname",
+    ];
+}
+
+impl TryFrom<&tokio_postgres::Row> for ApiInstance {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        // XXX really need some kind of context for these errors
+        let name_str: &str = value.try_get("name").map_err(sql_error)?;
+        let name = ApiName::try_from(name_str).map_err(|e| {
+            ApiError::internal_error(&format!(
+                "database instance.name {:?}: {}",
+                name_str, e
+            ))
+        })?;
+
+        let run_state_str: &str =
+            value.try_get("instance_state").map_err(sql_error)?;
+        // XXX is this serde error conversion right?
+        let run_state: ApiInstanceState = serde_json::from_str(run_state_str)
+            .map_err(|e| {
+            ApiError::internal_error(&format!(
+                "invalid run state: {}",
+                e.to_string()
+            ))
+        })?;
+        let time_updated: chrono::DateTime<chrono::Utc> =
+            value.try_get("time_state_updated").map_err(sql_error)?;
+        let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
+        let sled_uuid: Uuid =
+            value.try_get("active_server_id").map_err(sql_error)?;
+        let memory_mib: i64 = value.try_get("memory_mib").map_err(sql_error)?;
+        let ncpus: i64 = value.try_get("ncpus").map_err(sql_error)?;
+
+        // XXX What to do with non-NULL time_deleted?
+        Ok(ApiInstance {
+            identity: ApiIdentityMetadata {
+                id: value.try_get("id").map_err(sql_error)?,
+                name,
+                description: value.try_get("description").map_err(sql_error)?,
+                time_created: value
+                    .try_get("time_created")
+                    .map_err(sql_error)?,
+                // XXX is it time_updated or time_metadata_updated
+                time_modified: value
+                    .try_get("time_metadata_updated")
+                    .map_err(sql_error)?,
+            },
+            project_id: value.try_get("project_id").map_err(sql_error)?,
+            ncpus: ApiInstanceCpuCount(ncpus as u16),
+            memory: ApiByteCount::from_mebibytes(memory_mib as u64),
+            hostname: value.try_get("hostname").map_err(sql_error)?,
+            runtime: ApiInstanceRuntimeState {
+                run_state,
+                reboot_in_progress: false, // XXX
+                sled_uuid,
+                gen: gen as u64,
+                time_updated,
+            },
+            boot_disk_size: ApiByteCount::from_bytes(0), // XXX
+        })
+    }
 }

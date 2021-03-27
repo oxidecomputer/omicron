@@ -571,7 +571,7 @@ impl ApiInstanceState {
 
 /** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiInstanceCpuCount(pub usize);
+pub struct ApiInstanceCpuCount(pub u16);
 
 /**
  * An Instance (VM) in the external API
