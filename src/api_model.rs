@@ -24,6 +24,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -573,6 +574,26 @@ impl Display for ApiInstanceState {
         };
 
         write!(f, "{}", label)
+    }
+}
+
+impl FromStr for ApiInstanceState {
+    type Err = ApiError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        /*
+         * Round-tripping through serde is a little absurd, but has the benefit
+         * of always staying in sync with the real definition.  (The initial
+         * serialization is necessary to correctly handle any quotes or the like
+         * in the input string.)
+         */
+        let json = serde_json::to_string(s).unwrap();
+        serde_json::from_str(&json).map_err(|e| {
+            ApiError::internal_error(&format!(
+                "invalid run state: {}",
+                e.to_string()
+            ))
+        })
     }
 }
 

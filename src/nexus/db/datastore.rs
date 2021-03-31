@@ -2,6 +2,11 @@
  * Primary control plane interface for database read and write operations
  */
 
+/*
+ * XXX review all queries for use of indexes (may need "time_deleted IS
+ * NOT NULL" conditions)
+ */
+
 use super::Pool;
 use crate::api_error::ApiError;
 use crate::api_model::ApiByteCount;
@@ -632,6 +637,117 @@ impl DataStore {
 
         Ok(nupdated == 1)
     }
+
+    pub async fn project_delete_instance(
+        &self,
+        instance_id: &Uuid,
+    ) -> DeleteResult {
+        /*
+         * This is subject to change, but for now we're going to say that an
+         * instance must be "stopped" or "failed" in order to delete it.  The
+         * delete operation sets "time_deleted" (just like with other objects)
+         * and also sets the state to "destroyed".
+         *
+         * We want to update the instance row to indicate it's being deleted
+         * only if it's in a state where that's possible.  While complicated,
+         * the SQL below allows us to atomically distinguish the cases we're
+         * interested in: successful update, failure because the row was in the
+         * wrong state, failure because the row doesn't exist.
+         *
+         * By virtue of being "stopped", we assume there are no dependencies on
+         * this instance (e.g., disk attachments).  If that changes, we'll want
+         * to check for such dependencies here.
+         *
+         * XXX What's the right abstraction for this?
+         */
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let sql = "WITH \
+            matching_rows AS \
+            (SELECT id, instance_state FROM Instance WHERE time_deleted \
+            IS NULL AND id = $1 LIMIT 2),
+            \
+            deleted_ids AS
+            (UPDATE Instance \
+            SET time_deleted = $2, instance_state = 'destroyed' WHERE \
+            time_deleted IS NULL AND id = $1 AND \
+            instance_state IN ('stopped', 'failed') LIMIT 2 RETURNING id)
+            \
+            SELECT \
+                i.id AS found_id, \
+                i.instance_state AS previous_state, \
+                d.id as deleted_id \
+                FROM matching_rows i \
+                FULL OUTER JOIN deleted_ids d ON i.id = d.id";
+        let rows =
+            client.query(sql, &[instance_id, &now]).await.map_err(sql_error)?;
+
+        /*
+         * There are only three expected cases here:
+         *
+         * (1) The Instance does not exist, which is true iff there were zero
+         *     returned rows.
+         *
+         * (2) There was exactly one Instance, and we updated it.  This is true
+         *     iff there is one row with a non-null "deleted_id".
+         *
+         * (3) There was exactly one Instance, but we did not update it because
+         *     it was not in a valid state for this update.  This is true iff
+         *     there is one row with a null "deleted_id".
+         *
+         * A lot of other things are operationally conceivable (i.e., more than
+         * one returned row), but they should not happen.  We treat these as
+         * internal errors.
+         */
+        if rows.is_empty() {
+            // XXX Is this the right place to produce this error?  Might the
+            // caller have already done a name-to-id translation?
+            return Err(ApiError::not_found_by_id(
+                ApiResourceType::Instance,
+                instance_id,
+            ));
+        }
+
+        if rows.len() > 1 {
+            // XXX error context
+            return Err(ApiError::internal_error(
+                "unexpectedly got more than one row for conditional update",
+            ));
+        }
+
+        let found_id: Uuid = rows[0].try_get("found_id").map_err(sql_error)?;
+        let previous_state_str: &str =
+            rows[0].try_get("previous_state").map_err(sql_error)?;
+        let previous_state: ApiInstanceState = previous_state_str.parse()?;
+        let deleted_id: Option<Uuid> =
+            rows[0].try_get("deleted_id").map_err(sql_error)?;
+        // TODO-cleanup would a sql_assert! macro help here?
+        if found_id != *instance_id {
+            // XXX error context
+            return Err(ApiError::internal_error(&format!(
+                "unexpected instance found (expected id {}, found {})",
+                instance_id, found_id,
+            )));
+        }
+
+        if let Some(did) = deleted_id {
+            if did != *instance_id {
+                Err(ApiError::internal_error(&format!(
+                    "unexpected instance deleted (expected id {}, found {})",
+                    instance_id, did,
+                )))
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(ApiError::InvalidRequest {
+                message: format!(
+                    "instance cannot be deleted in state \"{}\"",
+                    previous_state
+                ),
+            })
+        }
+    }
 }
 
 /* XXX Should this be From<>?  May want more context */
@@ -925,16 +1041,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
 
         let run_state_str: &str =
             value.try_get("instance_state").map_err(sql_error)?;
-        // XXX this serde conversion (and error conversion) is janky and maybe
-        // not right right?
-        let run_state_json = serde_json::to_string(run_state_str).unwrap();
-        let run_state: ApiInstanceState = serde_json::from_str(&run_state_json)
-            .map_err(|e| {
-                ApiError::internal_error(&format!(
-                    "invalid run state: {}",
-                    e.to_string()
-                ))
-            })?;
+        let run_state: ApiInstanceState = run_state_str.parse()?;
         let time_updated: chrono::DateTime<chrono::Utc> =
             value.try_get("time_state_updated").map_err(sql_error)?;
         let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;

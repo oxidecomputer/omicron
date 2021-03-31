@@ -10,7 +10,6 @@ use crate::api_model::ApiName;
 use crate::api_model::ApiResourceType;
 use crate::api_model::CreateResult;
 use crate::api_model::DataPageParams;
-use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::PaginationOrder::Ascending;
@@ -42,11 +41,6 @@ pub struct DataStore {
 struct CdsData {
     /** index mapping project name to project id */
     projects_by_name: BTreeMap<ApiName, Uuid>,
-    /** project instances, indexed by project name, then by instance name */
-    instances_by_project_id:
-        BTreeMap<Uuid, BTreeMap<ApiName, Arc<ApiInstance>>>,
-    /** project instances, indexed by Uuid */
-    instances_by_id: BTreeMap<Uuid, Arc<ApiInstance>>,
 
     /** disks, indexed by Uuid */
     disks_by_id: BTreeMap<Uuid, Arc<ApiDisk>>,
@@ -78,8 +72,6 @@ impl DataStore {
         DataStore {
             data: Mutex::new(CdsData {
                 projects_by_name: BTreeMap::new(),
-                instances_by_project_id: BTreeMap::new(),
-                instances_by_id: BTreeMap::new(),
                 disks_by_id: BTreeMap::new(),
                 disks_by_project_id: BTreeMap::new(),
             }),
@@ -89,32 +81,6 @@ impl DataStore {
     /*
      * Instances
      */
-
-    pub async fn project_delete_instance(
-        &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> DeleteResult {
-        let mut data = self.data.lock().await;
-        let project_id = *collection_lookup(
-            &data.projects_by_name,
-            project_name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-        let project_instances = &mut data.instances_by_project_id;
-        let instances = project_instances
-            .get_mut(&project_id)
-            .expect("project existed but had no instance collection");
-        let instance = instances.remove(instance_name).ok_or_else(|| {
-            ApiError::not_found_by_name(
-                ApiResourceType::Instance,
-                instance_name,
-            )
-        })?;
-        data.instances_by_id.remove(&instance.identity.id).unwrap();
-        Ok(())
-    }
 
     /**
      * List disks associated with a given instance.

@@ -494,15 +494,17 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
-        let sa = self.instance_sled(&instance).await?;
-        let runtime_params = ApiInstanceRuntimeStateRequested {
-            run_state: ApiInstanceState::Destroyed,
-            reboot_wanted: false,
-        };
-        self.instance_set_runtime(&instance, sa, runtime_params).await?;
-        Ok(())
+        /*
+         * XXX Can/should we restructure this to be done with one query? (would
+         * that fail the wrong way if the project OR instance didn't exist?)
+         */
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let instance = self
+            .db_datastore
+            .instance_fetch_by_name(&project_id, instance_name)
+            .await?;
+        self.db_datastore.project_delete_instance(&instance.identity.id).await
     }
 
     pub async fn project_lookup_instance(
@@ -518,16 +520,6 @@ impl Nexus {
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
-            .await
-    }
-
-    pub async fn project_delete_instance(
-        &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> DeleteResult {
-        self.datastore
-            .project_delete_instance(project_name, instance_name)
             .await
     }
 
