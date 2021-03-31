@@ -20,6 +20,7 @@ use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
+use crate::api_model::ListResult2;
 use crate::api_model::LookupResult2;
 use crate::api_model::UpdateResult2;
 use chrono::DateTime;
@@ -224,6 +225,7 @@ impl DataStore {
             Project,
             Project::ALL_COLUMNS,
             "time_deleted IS NULL",
+            &[],
             "id",
             pagparams,
         )
@@ -246,6 +248,7 @@ impl DataStore {
             Project,
             Project::ALL_COLUMNS,
             "time_deleted IS NULL",
+            &[],
             "name",
             pagparams,
         )
@@ -494,6 +497,29 @@ impl DataStore {
         }
     }
 
+    pub async fn project_list_instances(
+        &self,
+        project_id: &Uuid,
+        pagparams: &DataPageParams<'_, ApiName>,
+    ) -> ListResult2<ApiInstance> {
+        let client = self.pool.acquire().await?;
+        let rows = sql_pagination(
+            &client,
+            Instance,
+            Instance::ALL_COLUMNS,
+            "time_deleted IS NULL AND project_id = $1",
+            &[project_id],
+            "name",
+            pagparams,
+        )
+        .await?;
+        let list = rows
+            .iter()
+            .map(|row| ApiInstance::try_from(row))
+            .collect::<Vec<Result<ApiInstance, ApiError>>>();
+        Ok(futures::stream::iter(list).boxed())
+    }
+
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
@@ -651,8 +677,9 @@ fn sql_error_create(
 fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     client: &'a tokio_postgres::Client,
     _table: T, // TODO-cleanup
-    columns: &[&'static str],
+    columns: &'a [&'static str],
     base_where: &'static str,
+    base_params: &'a [&'a (dyn ToSql + Sync)],
     column_name: &'static str,
     pagparams: &'a DataPageParams<'a, K>,
 ) -> impl Future<Output = Result<Vec<Row>, ApiError>> + 'a {
@@ -670,17 +697,31 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     let limit = i64::from(pagparams.limit.get());
     async move {
         let query_result = if let Some(marker_value) = &pagparams.marker {
+            let mut params = base_params.to_vec();
+            params.push(&marker_value);
+            params.push(&limit);
             let sql = format!(
-                "{} AND {} {} $1 ORDER BY {} {} LIMIT $2",
-                base_sql, column_name, operator, column_name, order
+                "{} AND {} {} ${} ORDER BY {} {} LIMIT ${}",
+                base_sql,
+                column_name,
+                operator,
+                params.len() - 1,
+                column_name,
+                order,
+                params.len(),
             );
-            client.query(sql.as_str(), &[&marker_value, &limit]).await
+            client.query(sql.as_str(), &params.as_slice()).await
         } else {
+            let mut params = base_params.to_vec();
+            params.push(&limit);
             let sql = format!(
-                "{} ORDER BY {} {} LIMIT $1",
-                base_sql, column_name, order
+                "{} ORDER BY {} {} LIMIT ${}",
+                base_sql,
+                column_name,
+                order,
+                params.len(),
             );
-            client.query(sql.as_str(), &[&limit]).await
+            client.query(sql.as_str(), &params.as_slice()).await
         };
 
         query_result.map_err(sql_error)

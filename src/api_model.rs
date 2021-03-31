@@ -45,6 +45,8 @@ pub type CreateResult2<T> = Result<T, ApiError>;
 pub type DeleteResult = Result<(), ApiError>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
+/** Result of a list operation that returns an ObjectStream (no Arc) */
+pub type ListResult2<T> = Result<ObjectStream2<T>, ApiError>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<Arc<T>, ApiError>;
 /** Result of a lookup operation for the specified type (no Arc) */
@@ -56,6 +58,11 @@ pub type UpdateResult2<T> = Result<T, ApiError>;
 
 /** A stream of Results, each potentially representing an object in the API */
 pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;
+/**
+ * A stream of Results, each potentially representing an object in the API
+ * (no Arc)
+ */
+pub type ObjectStream2<T> = BoxStream<'static, Result<T, ApiError>>;
 
 /*
  * General-purpose types used for client request parameters and return values.
@@ -390,6 +397,17 @@ pub trait ApiObject {
  */
 pub async fn to_view_list<T: ApiObject>(
     object_stream: ObjectStream<T>,
+) -> Vec<T::View> {
+    object_stream
+        .filter(|maybe_object| ready(maybe_object.is_ok()))
+        .map(|maybe_object| maybe_object.unwrap().to_view())
+        .collect::<Vec<T::View>>()
+        .await
+}
+
+// XXX
+pub async fn to_view_list2<T: ApiObject>(
+    object_stream: ObjectStream2<T>,
 ) -> Vec<T::View> {
     object_stream
         .filter(|maybe_object| ready(maybe_object.is_ok()))

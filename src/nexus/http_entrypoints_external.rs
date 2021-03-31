@@ -5,6 +5,7 @@
 use super::ServerContext;
 
 use crate::api_model::to_view_list;
+use crate::api_model::to_view_list2;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskView;
@@ -385,7 +386,7 @@ async fn api_project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(instance_stream).await;
+    let view_list = to_view_list2(instance_stream).await;
     Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 

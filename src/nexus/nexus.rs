@@ -27,6 +27,7 @@ use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
+use crate::api_model::ListResult2;
 use crate::api_model::LookupResult;
 use crate::api_model::LookupResult2;
 use crate::api_model::UpdateResult;
@@ -402,8 +403,14 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiInstance> {
-        self.datastore.project_list_instances(project_name, pagparams).await
+    ) -> ListResult2<ApiInstance> {
+        /*
+         * XXX Can/should we restructure this to be done with one query? (would
+         * that fail the wrong way if the project didn't exist?)
+         */
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore.project_list_instances(&project_id, pagparams).await
     }
 
     pub async fn project_create_instance(
@@ -503,7 +510,10 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> LookupResult2<ApiInstance> {
-        /* XXX Can/should we restructure this to be done with one query? */
+        /*
+         * XXX Can/should we restructure this to be done with one query? (would
+         * that fail the wrong way if the project didn't exist?)
+         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore

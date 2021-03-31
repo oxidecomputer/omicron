@@ -90,25 +90,6 @@ impl DataStore {
      * Instances
      */
 
-    pub async fn project_list_instances(
-        &self,
-        project_name: &ApiName,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiInstance> {
-        let data = self.data.lock().await;
-        let project_id = collection_lookup(
-            &data.projects_by_name,
-            project_name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-        let project_instances = &data.instances_by_project_id;
-        let instances = project_instances
-            .get(&project_id)
-            .expect("project existed but had no instance collection");
-        collection_page(&instances, pagparams)
-    }
-
     pub async fn project_delete_instance(
         &self,
         project_name: &ApiName,
