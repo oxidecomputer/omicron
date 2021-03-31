@@ -57,7 +57,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     );
 
     template_builder.append(
-        "create_instance_record",
+        "initial_runtime",
         "CreateInstanceRecord",
         new_action_noop_undo(sic_create_instance_record),
     );
@@ -72,7 +72,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
 }
 
 async fn sic_generate_instance_id(
-    sagactx: ActionContext<SagaInstanceCreate>,
+    _: ActionContext<SagaInstanceCreate>,
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
@@ -90,7 +90,7 @@ async fn sic_alloc_server(
 
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<(), ActionError> {
+) -> Result<ApiInstanceRuntimeState, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
@@ -104,11 +104,7 @@ async fn sic_create_instance_record(
         time_updated: Utc::now(),
     };
 
-    /*
-     * TODO-correctness needs to handle the case where the
-     * record already exists and looks similar vs. different
-     */
-    osagactx
+    let instance = osagactx
         .datastore()
         .project_create_instance(
             &instance_id?,
@@ -118,7 +114,7 @@ async fn sic_create_instance_record(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
+    Ok(instance.runtime)
 }
 
 async fn sic_instance_ensure(
@@ -134,20 +130,10 @@ async fn sic_instance_ensure(
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    let initial_runtime =
+        sagactx.lookup::<ApiInstanceRuntimeState>("initial_runtime")?;
     let sa = osagactx
         .sled_client(&sled_uuid)
-        .await
-        .map_err(ActionError::action_failed)?;
-    // XXX
-    todo!();
-    /*
-     * TODO-datastore This should be cached from the previous
-     * stage once we figure out how best to pass this
-     * information between saga actions.
-     */
-    let mut instance = osagactx
-        .datastore()
-        .instance_lookup_by_id(&instance_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -156,19 +142,13 @@ async fn sic_instance_ensure(
      * database to reflect the new intermediate state.
      */
     let new_runtime_state = sa
-        .instance_ensure(
-            instance.identity.id,
-            instance.runtime.clone(),
-            runtime_params,
-        )
+        .instance_ensure(instance_id, initial_runtime, runtime_params)
         .await
         .map_err(ActionError::action_failed)?;
 
-    let instance_ref = Arc::make_mut(&mut instance);
-    instance_ref.runtime = new_runtime_state.clone();
     osagactx
         .datastore()
-        .instance_update(Arc::clone(&instance))
+        .instance_update_runtime(&instance_id, &new_runtime_state)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

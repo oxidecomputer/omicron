@@ -65,16 +65,21 @@ CREATE UNIQUE INDEX ON omicron.public.Project (
  * Instances
  */
 
-CREATE TYPE omicron.public.InstanceState AS ENUM (
-    'creating',
-    'starting',
-    'running',
-    'stopping',
-    'stopped',
-    'repairing',
-    'failed',
-    'destroyed'
-);
+/*
+ * TODO We'd like to use this enum for Instance.instance_state.  This doesn't
+ * currently work due to cockroachdb/cockroach#57411 /
+ * cockroachdb/cockroach#58084.
+ */
+-- CREATE TYPE omicron.public.InstanceState AS ENUM (
+--     'creating',
+--     'starting',
+--     'running',
+--     'stopping',
+--     'stopped',
+--     'repairing',
+--     'failed',
+--     'destroyed'
+-- );
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -100,7 +105,8 @@ CREATE TABLE omicron.public.Instance (
      * table?
      */
     /* Runtime state */
-    instance_state omicron.public.InstanceState NOT NULL,
+    -- instance_state omicron.public.InstanceState NOT NULL, // TODO see above
+    instance_state TEXT NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*

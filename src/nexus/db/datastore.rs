@@ -16,12 +16,12 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
-use crate::api_model::CreateResult;
+use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
-use crate::api_model::LookupResult;
-use crate::api_model::UpdateResult;
+use crate::api_model::LookupResult2;
+use crate::api_model::UpdateResult2;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
@@ -46,7 +46,7 @@ impl DataStore {
         &self,
         new_id: &Uuid,
         new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
+    ) -> CreateResult2<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         sql_insert_unique(
@@ -54,6 +54,7 @@ impl DataStore {
             Project,
             Project::ALL_COLUMNS,
             &new_project.identity.name.as_str(),
+            "",
             &[
                 new_id,
                 &new_project.identity.name,
@@ -70,7 +71,7 @@ impl DataStore {
     pub async fn project_fetch(
         &self,
         project_name: &ApiName,
-    ) -> LookupResult<ApiProject> {
+    ) -> LookupResult2<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
@@ -86,7 +87,7 @@ impl DataStore {
             .await
             .map_err(sql_error)?;
         match rows.len() {
-            1 => Ok(Arc::new(ApiProject::try_from(&rows[0])?)),
+            1 => Ok(ApiProject::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_name(
                 ApiResourceType::Project,
                 project_name,
@@ -149,8 +150,8 @@ impl DataStore {
          */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        let rows = client
-            .query(
+        let nrows = client
+            .execute(
                 format!(
                     "UPDATE {} SET time_deleted = $1 WHERE \
                     time_deleted IS NULL AND name = $2 LIMIT 2 \
@@ -164,14 +165,14 @@ impl DataStore {
             .await
             .map_err(sql_error)?;
         /* TODO-log log the returned row(s) */
-        match rows.len() {
+        match nrows {
             1 => Ok(()),
             0 => Err(ApiError::not_found_by_name(
                 ApiResourceType::Project,
                 project_name,
             )),
             len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
+                "expected at most one row updated, found {}",
                 len
             ))),
         }
@@ -261,7 +262,7 @@ impl DataStore {
         &self,
         project_name: &ApiName,
         update_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject> {
+    ) -> UpdateResult2<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -296,7 +297,7 @@ impl DataStore {
                 ApiResourceType::Project,
                 project_name,
             )),
-            1 => Ok(Arc::new(ApiProject::try_from(&rows[0])?)),
+            1 => Ok(ApiProject::try_from(&rows[0])?),
             len => Err(ApiError::internal_error(&format!(
                 "expected 1 row from UPDATE query, but found {}",
                 len
@@ -310,7 +311,7 @@ impl DataStore {
         project_id: &Uuid,
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
-    ) -> CreateResult<ApiInstance> {
+    ) -> CreateResult2<ApiInstance> {
         //
         // XXX Idempotently insert a record for this instance.  The following
         // discussion describes our caller, not technically this function, but
@@ -407,6 +408,12 @@ impl DataStore {
         //     In that case, we just want to fail right away -- the whole saga
         //     is going to fail with a user error.
         //
+        // TODO-design It seems fair to say that this behavior is sufficiently
+        // caller-specific that it does not belong in the datastore.  But what
+        // does?
+        //
+
+        //
         // XXX To-be-determined:
         //
         // Should the two SQL statements in the ACTION happen in one
@@ -417,25 +424,144 @@ impl DataStore {
         // means _for a given constraint_, there can be only one thing imposing
         // it.  We have two different constraints here.
         //
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        sql_insert_unique(
+            &client,
+            Instance,
+            Instance::ALL_COLUMNS,
+            params.identity.name.as_str(),
+            "ON CONFLICT (id) DO NOTHING",
+            &[
+                instance_id,
+                &params.identity.name,
+                &params.identity.description,
+                &now,
+                &now,
+                &(None as Option<DateTime<Utc>>),
+                project_id,
+                &runtime_initial.run_state.to_string(),
+                &now,
+                // XXX should use try_from
+                &(runtime_initial.gen as i64),
+                &runtime_initial.sled_uuid,
+                &(params.ncpus.0 as i64),
+                // XXX unwrap
+                &(i64::try_from(params.memory.to_whole_mebibytes()).unwrap()),
+                &params.hostname,
+            ],
+        )
+        .await?;
 
-        // XXX
-        todo!();
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE id = $1",
+                    Instance::ALL_COLUMNS.join(", "),
+                    Instance::TABLE_NAME,
+                )
+                .as_str(),
+                &[instance_id],
+            )
+            .await
+            .map_err(|e| {
+                sql_error_create(
+                    ApiResourceType::Instance,
+                    &params.identity.name.as_str(),
+                    e,
+                )
+            })?;
+
+        match rows.len() {
+            1 => {
+                let instance = ApiInstance::try_from(&rows[0])?;
+                if instance.runtime.run_state != ApiInstanceState::Creating
+                    || instance.runtime.gen != 1
+                {
+                    Err(ApiError::internal_error(&format!(
+                        "creating instance: found existing instance with \
+                        unexpected state ({:?}) or generation ({})",
+                        instance.runtime.run_state, instance.runtime.gen,
+                    )))
+                } else {
+                    Ok(instance)
+                }
+            }
+            len => Err(ApiError::internal_error(&format!(
+                "creating instance: expected one instance, found {}",
+                len
+            ))),
+        }
     }
 
-    pub async fn instance_lookup_by_id(
+    pub async fn instance_fetch(
         &self,
-        id: &Uuid,
-    ) -> LookupResult<ApiInstance> {
-        // XXX
-        todo!();
+        instance_id: &Uuid,
+    ) -> LookupResult2<ApiInstance> {
+        let client = self.pool.acquire().await?;
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+                        id = $1 LIMIT 2",
+                    Instance::ALL_COLUMNS.join(", "),
+                    Instance::TABLE_NAME
+                )
+                .as_str(),
+                &[&instance_id],
+            )
+            .await
+            .map_err(sql_error)?;
+        match rows.len() {
+            1 => Ok(ApiInstance::try_from(&rows[0])?),
+            0 => Err(ApiError::not_found_by_id(
+                ApiResourceType::Instance,
+                instance_id,
+            )),
+            len => Err(ApiError::internal_error(&format!(
+                "expected at most one row from database query, but found {}",
+                len
+            ))),
+        }
     }
 
-    pub async fn instance_update(
+    pub async fn instance_update_runtime(
         &self,
-        new_instance: Arc<ApiInstance>,
-    ) -> Result<(), ApiError> {
-        // XXX
-        todo!();
+        instance_id: &Uuid,
+        new_runtime: &ApiInstanceRuntimeState,
+    ) -> Result<bool, ApiError> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let nupdated = client
+            .execute(
+                format!(
+                    "UPDATE {} SET \
+                        instance_state = $1, \
+                        state_generation = $2, \
+                        active_server_id = $3, \
+                        time_state_updated = $4 \
+                    WHERE id = $5 AND state_generation < $2 LIMIT 2",
+                    Instance::TABLE_NAME,
+                )
+                .as_str(),
+                &[
+                    &new_runtime.run_state.to_string(),
+                    &(new_runtime.gen as i64),
+                    &new_runtime.sled_uuid,
+                    &now,
+                    instance_id,
+                ],
+            )
+            .await
+            .map_err(sql_error)?;
+        if nupdated > 1 {
+            return Err(ApiError::internal_error(&format!(
+                "unexpected number of rows updated by UPDATE query: {}",
+                nupdated
+            )));
+        }
+
+        Ok(nupdated == 1)
     }
 }
 
@@ -481,7 +607,7 @@ fn sql_error_create(
  */
 fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     client: &'a tokio_postgres::Client,
-    table: T,
+    _table: T, // TODO-cleanup
     columns: &[&'static str],
     base_where: &'static str,
     column_name: &'static str,
@@ -573,11 +699,12 @@ impl ToSql for ApiName {
  */
 fn sql_insert_unique<'a, T>(
     client: &'a tokio_postgres::Client,
-    table: T,
+    _table: T, // TODO-cleanup
     table_columns: &'a [&'static str],
     unique_value: &'a str,
+    conflict_sql: &'static str,
     values: &'a [&'a (dyn ToSql + Sync)],
-) -> impl Future<Output = Result<Arc<T::ApiModelType>, ApiError>> + 'a
+) -> impl Future<Output = Result<T::ApiModelType, ApiError>> + 'a
 where
     T: Table,
 {
@@ -591,10 +718,11 @@ where
         .as_slice()
         .join(", ");
     let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+        "INSERT INTO {} ({}) VALUES ({}) {} RETURNING {}",
         T::TABLE_NAME,
         table_field_str,
         values_str,
+        conflict_sql,
         all_columns_str
     );
     async move {
@@ -612,8 +740,7 @@ where
             }
         };
 
-        // XXX With this design, do we really want to use Arc?
-        Ok(Arc::new(T::ApiModelType::try_from(row)?))
+        Ok(T::ApiModelType::try_from(row)?)
     }
 }
 
@@ -690,6 +817,7 @@ impl Table for Instance {
         "time_deleted",
         "project_id",
         "instance_state",
+        "time_state_updated",
         "state_generation",
         "active_server_id",
         "ncpus",
@@ -713,14 +841,16 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
 
         let run_state_str: &str =
             value.try_get("instance_state").map_err(sql_error)?;
-        // XXX is this serde error conversion right?
-        let run_state: ApiInstanceState = serde_json::from_str(run_state_str)
+        // XXX this serde conversion (and error conversion) is janky and maybe
+        // not right right?
+        let run_state_json = serde_json::to_string(run_state_str).unwrap();
+        let run_state: ApiInstanceState = serde_json::from_str(&run_state_json)
             .map_err(|e| {
-            ApiError::internal_error(&format!(
-                "invalid run state: {}",
-                e.to_string()
-            ))
-        })?;
+                ApiError::internal_error(&format!(
+                    "invalid run state: {}",
+                    e.to_string()
+                ))
+            })?;
         let time_updated: chrono::DateTime<chrono::Utc> =
             value.try_get("time_state_updated").map_err(sql_error)?;
         let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;

@@ -23,6 +23,7 @@ use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiSled;
 use crate::api_model::CreateResult;
+use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
@@ -206,14 +207,16 @@ impl Nexus {
         new_project: &ApiProjectCreateParams,
     ) -> CreateResult<ApiProject> {
         let id = Uuid::new_v4();
-        self.db_datastore.project_create_with_id(&id, new_project).await
+        Ok(Arc::new(
+            self.db_datastore.project_create_with_id(&id, new_project).await?,
+        ))
     }
 
     pub async fn project_fetch(
         &self,
         name: &ApiName,
     ) -> LookupResult<ApiProject> {
-        self.db_datastore.project_fetch(name).await
+        Ok(Arc::new(self.db_datastore.project_fetch(name).await?))
     }
 
     pub async fn projects_list_by_name(
@@ -239,7 +242,7 @@ impl Nexus {
         name: &ApiName,
         new_params: &ApiProjectUpdateParams,
     ) -> UpdateResult<ApiProject> {
-        self.db_datastore.project_update(name, new_params).await
+        Ok(Arc::new(self.db_datastore.project_update(name, new_params).await?))
     }
 
     /*
@@ -405,7 +408,7 @@ impl Nexus {
         self: &Arc<Self>,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
-    ) -> CreateResult<ApiInstance> {
+    ) -> CreateResult2<ApiInstance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
@@ -455,8 +458,7 @@ impl Nexus {
          * that, for internal interfaces!  Can we do this on a
          * per-dropshot-server-basis?)
          */
-        let instance =
-            self.datastore.instance_lookup_by_id(&instance_id).await?;
+        let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         Ok(instance)
     }
 

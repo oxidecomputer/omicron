@@ -31,18 +31,28 @@ use uuid::Uuid;
  * The type aliases below exist primarily to ensure consistency among return
  * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
  * type argument `T` generally implements `ApiObject`.
+ *
+ * XXX The "2" set of types ("CreateResult2") do not include Arcs.  We should
+ * consider removing Arc from all of these, but this parallel set of types is
+ * useful as a transition.
  */
 
 /** Result of a create operation for the specified type */
 pub type CreateResult<T> = Result<Arc<T>, ApiError>;
+/** Result of a create operation for the specified type (no Arc) */
+pub type CreateResult2<T> = Result<T, ApiError>;
 /** Result of a delete operation for the specified type */
 pub type DeleteResult = Result<(), ApiError>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<Arc<T>, ApiError>;
+/** Result of a lookup operation for the specified type (no Arc) */
+pub type LookupResult2<T> = Result<T, ApiError>;
 /** Result of an update operation for the specified type */
 pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
+/** Result of an update operation for the specified type (no Arc) */
+pub type UpdateResult2<T> = Result<T, ApiError>;
 
 /** A stream of Results, each potentially representing an object in the API */
 pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;

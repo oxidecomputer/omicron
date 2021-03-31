@@ -5,10 +5,7 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskState;
-use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
-use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiResourceType;
 use crate::api_model::CreateResult;
@@ -18,7 +15,6 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::PaginationOrder::Ascending;
 use crate::api_model::PaginationOrder::Descending;
-use chrono::Utc;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use std::collections::BTreeMap;
@@ -111,59 +107,6 @@ impl DataStore {
             .get(&project_id)
             .expect("project existed but had no instance collection");
         collection_page(&instances, pagparams)
-    }
-
-    pub async fn project_create_instance(
-        &self,
-        instance_id: &Uuid,
-        project_name: &ApiName,
-        params: &ApiInstanceCreateParams,
-        runtime_initial: &ApiInstanceRuntimeState,
-    ) -> CreateResult<ApiInstance> {
-        let now = Utc::now();
-        let newname = params.identity.name.clone();
-
-        let mut data = self.data.lock().await;
-
-        let project_id = *collection_lookup(
-            &data.projects_by_name,
-            project_name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-
-        let instances = data
-            .instances_by_project_id
-            .get_mut(&project_id)
-            .expect("project existed but had no instance collection");
-
-        if instances.contains_key(&newname) {
-            return Err(ApiError::ObjectAlreadyExists {
-                type_name: ApiResourceType::Instance,
-                object_name: String::from(newname),
-            });
-        }
-
-        let instance = Arc::new(ApiInstance {
-            identity: ApiIdentityMetadata {
-                id: *instance_id,
-                name: params.identity.name.clone(),
-                description: params.identity.description.clone(),
-                time_created: now,
-                time_modified: now,
-            },
-            project_id,
-            ncpus: params.ncpus,
-            memory: params.memory,
-            boot_disk_size: params.boot_disk_size,
-            hostname: params.hostname.clone(),
-            runtime: runtime_initial.clone(),
-        });
-
-        instances.insert(newname, Arc::clone(&instance));
-        data.instances_by_id
-            .insert(instance.identity.id, Arc::clone(&instance));
-        Ok(instance)
     }
 
     pub async fn project_lookup_instance(
