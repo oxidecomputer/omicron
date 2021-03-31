@@ -173,44 +173,6 @@ impl DataStore {
         )?))
     }
 
-    /*
-     * TODO-correctness This ought to take some kind of generation counter or
-     * etag that can be used for optimistic concurrency control inside the
-     * datastore.
-     */
-    pub async fn instance_update(
-        &self,
-        new_instance: Arc<ApiInstance>,
-    ) -> Result<(), ApiError> {
-        let id = new_instance.identity.id;
-        let instance_name = new_instance.identity.name.clone();
-        let mut data = self.data.lock().await;
-        let old_name = {
-            let old_instance = collection_lookup(
-                &data.instances_by_id,
-                &id,
-                ApiResourceType::Instance,
-                &ApiError::not_found_by_id,
-            )?;
-
-            assert_eq!(old_instance.identity.id, id);
-            old_instance.identity.name.clone()
-        };
-
-        /*
-         * In case this update changes the name of the instance, remove it from
-         * the list of instances in the project and re-add it with the new name.
-         */
-        let instances = data
-            .instances_by_project_id
-            .get_mut(&new_instance.project_id)
-            .unwrap();
-        instances.remove(&old_name).unwrap();
-        instances.insert(instance_name, Arc::clone(&new_instance));
-        data.instances_by_id.insert(id, Arc::clone(&new_instance)).unwrap();
-        Ok(())
-    }
-
     /**
      * List disks associated with a given instance.
      */

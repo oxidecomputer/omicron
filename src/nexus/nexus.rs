@@ -28,7 +28,9 @@ use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
+use crate::api_model::LookupResult2;
 use crate::api_model::UpdateResult;
+use crate::api_model::UpdateResult2;
 use crate::nexus::datastore::collection_page;
 use crate::nexus::datastore::DataStore;
 use crate::nexus::db;
@@ -492,7 +494,7 @@ impl Nexus {
             run_state: ApiInstanceState::Destroyed,
             reboot_wanted: false,
         };
-        self.instance_set_runtime(instance, sa, runtime_params).await?;
+        self.instance_set_runtime(&instance, sa, runtime_params).await?;
         Ok(())
     }
 
@@ -500,9 +502,12 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance> {
-        self.datastore
-            .project_lookup_instance(project_name, instance_name)
+    ) -> LookupResult2<ApiInstance> {
+        /* XXX Can/should we restructure this to be done with one query? */
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore
+            .instance_fetch_by_name(&project_id, instance_name)
             .await
     }
 
@@ -569,7 +574,7 @@ impl Nexus {
      */
     async fn instance_sled(
         &self,
-        instance: &Arc<ApiInstance>,
+        instance: &ApiInstance,
     ) -> Result<Arc<sled_agent::Client>, ApiError> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
@@ -582,7 +587,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+    ) -> UpdateResult2<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
          * runtime state with "reboot_wanted".  We cannot simply stop the
@@ -603,14 +608,15 @@ impl Nexus {
 
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
-            Arc::clone(&instance),
+            &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: true,
             },
         )
-        .await
+        .await?;
+        self.db_datastore.instance_fetch(&instance.identity.id).await
     }
 
     /**
@@ -620,7 +626,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+    ) -> UpdateResult2<ApiInstance> {
         let instance = self
             .datastore
             .project_lookup_instance(project_name, instance_name)
@@ -628,14 +634,15 @@ impl Nexus {
 
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
-            Arc::clone(&instance),
+            &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
                 reboot_wanted: false,
             },
         )
-        .await
+        .await?;
+        self.db_datastore.instance_fetch(&instance.identity.id).await
     }
 
     /**
@@ -645,7 +652,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+    ) -> UpdateResult2<ApiInstance> {
         let instance = self
             .datastore
             .project_lookup_instance(project_name, instance_name)
@@ -653,14 +660,15 @@ impl Nexus {
 
         self.check_runtime_change_allowed(&instance)?;
         self.instance_set_runtime(
-            Arc::clone(&instance),
+            &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Stopped,
                 reboot_wanted: false,
             },
         )
-        .await
+        .await?;
+        self.db_datastore.instance_fetch(&instance.identity.id).await
     }
 
     /**
@@ -669,10 +677,10 @@ impl Nexus {
      */
     async fn instance_set_runtime(
         &self,
-        mut instance: Arc<ApiInstance>,
+        instance: &ApiInstance,
         sa: Arc<sled_agent::Client>,
         runtime_params: ApiInstanceRuntimeStateRequested,
-    ) -> UpdateResult<ApiInstance> {
+    ) -> Result<(), ApiError> {
         /*
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
@@ -685,10 +693,10 @@ impl Nexus {
             )
             .await?;
 
-        let instance_ref = Arc::make_mut(&mut instance);
-        instance_ref.runtime = new_runtime_state.clone();
-        self.datastore.instance_update(Arc::clone(&instance)).await?;
-        Ok(instance)
+        self.db_datastore
+            .instance_update_runtime(&instance.identity.id, &new_runtime_state)
+            .await?;
+        Ok(())
     }
 
     /**
@@ -1062,16 +1070,11 @@ impl Nexus {
         id: &Uuid,
         new_runtime_state: &ApiInstanceRuntimeState,
     ) -> Result<(), ApiError> {
-        let datastore = &self.datastore;
         let log = &self.log;
 
-        let result = datastore
-            .instance_lookup_by_id(id)
-            .and_then(|old_instance| {
-                let mut new_instance = (*old_instance).clone();
-                new_instance.runtime = new_runtime_state.clone();
-                datastore.instance_update(Arc::new(new_instance))
-            })
+        let result = self
+            .db_datastore
+            .instance_update_runtime(id, new_runtime_state)
             .await;
 
         match result {
@@ -1085,6 +1088,8 @@ impl Nexus {
             /*
              * If the instance doesn't exist, swallow the error -- there's
              * nothing to do here.
+             * XXX It's not clear that we can even get here any more because
+             * instance_update_runtime() does not distinguish this error.
              * TODO-robustness This could only be possible if we've removed an
              * Instance from the datastore altogether.  When would we do that?
              * We don't want to do it as soon as something's destroyed, I think,
@@ -1100,6 +1105,9 @@ impl Nexus {
 
             /*
              * If the datastore is unavailable, propagate that to the caller.
+             * XXX Really this should be any _transient_ error.  How can we
+             * distinguish?  Maybe datastore should emit something different
+             * from ApiError with an Into<ApiError>.
              */
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";

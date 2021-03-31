@@ -8,7 +8,6 @@ use crate::api_model::to_view_list;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskView;
-use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
@@ -446,7 +445,7 @@ async fn api_project_instances_get_instance(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let instance: Arc<ApiInstance> =
+    let instance =
         nexus.project_lookup_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseOk(instance.to_view()))
 }

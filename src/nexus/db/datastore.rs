@@ -525,6 +525,38 @@ impl DataStore {
         }
     }
 
+    pub async fn instance_fetch_by_name(
+        &self,
+        project_id: &Uuid,
+        instance_name: &ApiName,
+    ) -> LookupResult2<ApiInstance> {
+        let client = self.pool.acquire().await?;
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+                        project_id = $1 AND name = $2 LIMIT 2",
+                    Instance::ALL_COLUMNS.join(", "),
+                    Instance::TABLE_NAME
+                )
+                .as_str(),
+                &[project_id, instance_name],
+            )
+            .await
+            .map_err(sql_error)?;
+        match rows.len() {
+            1 => Ok(ApiInstance::try_from(&rows[0])?),
+            0 => Err(ApiError::not_found_by_name(
+                ApiResourceType::Instance,
+                instance_name,
+            )),
+            len => Err(ApiError::internal_error(&format!(
+                "expected at most one row from database query, but found {}",
+                len
+            ))),
+        }
+    }
+
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
@@ -532,6 +564,16 @@ impl DataStore {
     ) -> Result<bool, ApiError> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
+
+        /*
+         * TODO-design It's tempting to return the updated state of the Instance
+         * here because it's convenient for consumers and by using a RETURNING
+         * clause, we could ensure that the "update" and "fetch" are atomic.
+         * But in the unusual case that we _don't_ update the row because our
+         * update is older than the one in the database, we would have to fetch
+         * the current state explicitly.  For now, we'll just require consumers
+         * to explicitly fetch the state if they want that.
+         */
         let nupdated = client
             .execute(
                 format!(
@@ -554,6 +596,7 @@ impl DataStore {
             )
             .await
             .map_err(sql_error)?;
+
         if nupdated > 1 {
             return Err(ApiError::internal_error(&format!(
                 "unexpected number of rows updated by UPDATE query: {}",
