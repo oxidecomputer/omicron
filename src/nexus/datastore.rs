@@ -109,31 +109,6 @@ impl DataStore {
         collection_page(&instances, pagparams)
     }
 
-    pub async fn project_lookup_instance(
-        &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance> {
-        let data = self.data.lock().await;
-        let project_id = collection_lookup(
-            &data.projects_by_name,
-            project_name,
-            ApiResourceType::Project,
-            &ApiError::not_found_by_name,
-        )?;
-        let project_instances = &data.instances_by_project_id;
-        let instances = project_instances
-            .get(&project_id)
-            .expect("project existed but had no instance collection");
-        let instance = collection_lookup(
-            &instances,
-            instance_name,
-            ApiResourceType::Instance,
-            &ApiError::not_found_by_name,
-        )?;
-        Ok(Arc::clone(instance))
-    }
-
     pub async fn project_delete_instance(
         &self,
         project_name: &ApiName,
@@ -160,25 +135,12 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn instance_lookup_by_id(
-        &self,
-        id: &Uuid,
-    ) -> LookupResult<ApiInstance> {
-        let data = self.data.lock().await;
-        Ok(Arc::clone(collection_lookup(
-            &data.instances_by_id,
-            id,
-            ApiResourceType::Instance,
-            &ApiError::not_found_by_id,
-        )?))
-    }
-
     /**
      * List disks associated with a given instance.
      */
     pub async fn instance_list_disks(
         &self,
-        instance: &Arc<ApiInstance>,
+        instance: &ApiInstance,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         /*

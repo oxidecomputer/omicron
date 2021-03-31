@@ -523,7 +523,7 @@ impl Nexus {
 
     fn check_runtime_change_allowed(
         &self,
-        instance: &Arc<ApiInstance>,
+        runtime: &ApiInstanceRuntimeState,
     ) -> Result<(), ApiError> {
         /*
          * Users are allowed to request a start or stop even if the instance is
@@ -532,8 +532,7 @@ impl Nexus {
          * runtime state we saw here was stale.  However, users are not allowed
          * to change the state of an instance that's failed or destroyed.
          */
-        let run_state = &instance.runtime.run_state;
-        let allowed = match run_state {
+        let allowed = match runtime.run_state {
             ApiInstanceState::Creating => true,
             ApiInstanceState::Starting => true,
             ApiInstanceState::Running => true,
@@ -551,7 +550,7 @@ impl Nexus {
             Err(ApiError::InvalidRequest {
                 message: format!(
                     "instance state cannot be changed from state \"{}\"",
-                    run_state
+                    runtime.run_state
                 ),
             })
         }
@@ -570,7 +569,8 @@ impl Nexus {
     }
 
     /**
-     * Returns the sled_agent::Client for the host where this Instance is running.
+     * Returns the sled_agent::Client for the host where this Instance is
+     * running.
      */
     async fn instance_sled(
         &self,
@@ -601,12 +601,10 @@ impl Nexus {
          * never lose track of the fact that this Instance was supposed to be
          * running.
          */
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance)?;
+        self.check_runtime_change_allowed(&instance.runtime)?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -627,12 +625,10 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> UpdateResult2<ApiInstance> {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance)?;
+        self.check_runtime_change_allowed(&instance.runtime)?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -653,12 +649,10 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> UpdateResult2<ApiInstance> {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance)?;
+        self.check_runtime_change_allowed(&instance.runtime)?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -708,10 +702,8 @@ impl Nexus {
         instance_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDiskAttachment> {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
         let disks =
             self.datastore.instance_list_disks(&instance, pagparams).await?;
         let attachments = disks
@@ -740,10 +732,8 @@ impl Nexus {
         instance_name: &ApiName,
         disk_name: &ApiName,
     ) -> LookupResult<ApiDiskAttachment> {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
         let disk =
             self.datastore.project_lookup_disk(project_name, disk_name).await?;
         if let Some(instance_id) =
@@ -779,17 +769,15 @@ impl Nexus {
         instance_name: &ApiName,
         disk_name: &ApiName,
     ) -> CreateResult<ApiDiskAttachment> {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
         let disk =
             self.datastore.project_lookup_disk(project_name, disk_name).await?;
         let instance_id = &instance.identity.id;
 
         fn disk_attachment_for(
-            instance: &Arc<ApiInstance>,
-            disk: &Arc<ApiDisk>,
+            instance: &ApiInstance,
+            disk: &ApiDisk,
         ) -> CreateResult<ApiDiskAttachment> {
             let instance_id = &instance.identity.id;
             assert_eq!(
@@ -899,10 +887,8 @@ impl Nexus {
         instance_name: &ApiName,
         disk_name: &ApiName,
     ) -> DeleteResult {
-        let instance = self
-            .datastore
-            .project_lookup_instance(project_name, instance_name)
-            .await?;
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
         let disk =
             self.datastore.project_lookup_disk(project_name, disk_name).await?;
         let instance_id = &instance.identity.id;
@@ -1181,7 +1167,7 @@ impl TestInterfaces for Nexus {
         &self,
         id: &Uuid,
     ) -> Result<Arc<sled_agent::Client>, ApiError> {
-        let instance = self.datastore.instance_lookup_by_id(id).await?;
+        let instance = self.db_datastore.instance_fetch(id).await?;
         self.instance_sled(&instance).await
     }
 
@@ -1192,8 +1178,7 @@ impl TestInterfaces for Nexus {
         let disk = self.datastore.disk_lookup_by_id(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();
-        let instance =
-            self.datastore.instance_lookup_by_id(instance_id).await?;
+        let instance = self.db_datastore.instance_fetch(instance_id).await?;
         self.instance_sled(&instance).await
     }
 }
