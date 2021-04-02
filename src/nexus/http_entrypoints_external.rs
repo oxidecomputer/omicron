@@ -282,7 +282,7 @@ async fn api_project_disks_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(disk_stream).await;
+    let view_list = to_view_list2(disk_stream).await;
     Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 

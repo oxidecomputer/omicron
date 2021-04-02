@@ -870,7 +870,7 @@ impl Display for ApiDiskState {
 }
 
 impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
-    type Error = &'static str;
+    type Error = String;
 
     fn try_from(
         (s, maybe_id): (&str, Option<Uuid>),
@@ -883,7 +883,7 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
             ("attaching", Some(id)) => Ok(ApiDiskState::Attaching(id)),
             ("attached", Some(id)) => Ok(ApiDiskState::Attached(id)),
             ("detaching", Some(id)) => Ok(ApiDiskState::Detaching(id)),
-            _ => Err("unexpected value for disk state"),
+            _ => Err(format!("unexpected value for disk state: {:?}", s)),
         }
     }
 }

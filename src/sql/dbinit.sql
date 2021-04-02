@@ -168,7 +168,7 @@ CREATE TABLE omicron.public.Disk (
      */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
-    disk_state TEXT(15) NOT NULL,
+    disk_state STRING(15) NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*

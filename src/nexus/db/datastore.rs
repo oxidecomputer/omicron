@@ -11,6 +11,7 @@ use super::Pool;
 use crate::api_error::ApiError;
 use crate::api_model::ApiByteCount;
 use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiIdentityMetadata;
@@ -760,6 +761,321 @@ impl DataStore {
     /*
      * Disks
      */
+
+    /**
+     * List disks associated with a given instance.
+     */
+    // XXX This could get ApiDiskAttachment objects instead and potentially be a
+    // bit more efficient (and less coupled to the other fields in the Disk row)
+    pub async fn instance_list_disks(
+        &self,
+        instance_id: &Uuid,
+        pagparams: &DataPageParams<'_, ApiName>,
+    ) -> ListResult2<ApiDisk> {
+        let client = self.pool.acquire().await?;
+        let rows = sql_pagination(
+            &client,
+            Disk,
+            Disk::ALL_COLUMNS, // XXX
+            // XXX Want an index here:
+            // (attach_instance_id) WHERE time_deleted IS NULL AND
+            // attach_instance_id IS NOT NULL
+            "time_deleted IS NULL AND attach_instance_id IS NOT NULL AND \
+            disk_state IN ('attaching', 'attached', 'detaching') AND \
+            attach_instance_id = $1",
+            &[instance_id],
+            "name",
+            pagparams,
+        )
+        .await?;
+        let list = rows
+            .iter()
+            .map(|row| ApiDisk::try_from(row))
+            .collect::<Vec<Result<ApiDisk, ApiError>>>();
+        Ok(futures::stream::iter(list).boxed())
+    }
+
+    pub async fn project_create_disk(
+        &self,
+        disk_id: &Uuid,
+        project_id: &Uuid,
+        params: &ApiDiskCreateParams,
+        runtime_initial: &ApiDiskRuntimeState,
+    ) -> CreateResult2<ApiDisk> {
+        /* See project_create_instance() */
+        /* XXX commonize with project_create_instance() */
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        sql_insert_unique(
+            &client,
+            Disk,
+            Disk::ALL_COLUMNS,
+            params.identity.name.as_str(),
+            "ON CONFLICT (id) DO NOTHING",
+            &[
+                disk_id,
+                &params.identity.name,
+                &params.identity.description,
+                &now,
+                &now,
+                &(None as Option<DateTime<Utc>>),
+                project_id,
+                &runtime_initial.disk_state.to_string(),
+                &now,
+                // XXX should use try_from
+                &(runtime_initial.gen as i64),
+                &runtime_initial.disk_state.attached_instance_id(),
+                // XXX should use try_from
+                &(params.size.to_bytes() as i64),
+                &params.snapshot_id,
+            ],
+        )
+        .await?;
+
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE id = $1",
+                    Disk::ALL_COLUMNS.join(", "),
+                    Disk::TABLE_NAME,
+                )
+                .as_str(),
+                &[disk_id],
+            )
+            .await
+            .map_err(|e| {
+                sql_error_create(
+                    ApiResourceType::Disk,
+                    &params.identity.name.as_str(),
+                    e,
+                )
+            })?;
+
+        match rows.len() {
+            1 => {
+                let disk = ApiDisk::try_from(&rows[0])?;
+                if disk.runtime.disk_state != ApiDiskState::Creating
+                    || disk.runtime.gen != 1
+                {
+                    Err(ApiError::internal_error(&format!(
+                        "creating disk: found existing disk with \
+                        unexpected state ({:?}) or generation ({})",
+                        disk.runtime.disk_state, disk.runtime.gen,
+                    )))
+                } else {
+                    Ok(disk)
+                }
+            }
+            len => Err(ApiError::internal_error(&format!(
+                "creating disk: expected one disk, found {}",
+                len
+            ))),
+        }
+    }
+
+    /* XXX commonize with instance version */
+    pub async fn project_list_disks(
+        &self,
+        project_id: &Uuid,
+        pagparams: &DataPageParams<'_, ApiName>,
+    ) -> ListResult2<ApiDisk> {
+        let client = self.pool.acquire().await?;
+        let rows = sql_pagination(
+            &client,
+            Disk,
+            Disk::ALL_COLUMNS,
+            "time_deleted IS NULL AND project_id = $1",
+            &[project_id],
+            "name",
+            pagparams,
+        )
+        .await?;
+        let list = rows
+            .iter()
+            .map(|row| ApiDisk::try_from(row))
+            .collect::<Vec<Result<ApiDisk, ApiError>>>();
+        Ok(futures::stream::iter(list).boxed())
+    }
+
+    pub async fn disk_update_runtime(
+        &self,
+        disk_id: &Uuid,
+        new_runtime: &ApiDiskRuntimeState,
+    ) -> Result<bool, ApiError> {
+        /* XXX See and commonize with instance_update_runtime() */
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+
+        let nupdated = client
+            .execute(
+                format!(
+                    "UPDATE {} SET \
+                        disk_state = $1, \
+                        state_generation = $2, \
+                        attach_instance_id = $3, \
+                        time_state_updated = $4 \
+                    WHERE id = $5 AND state_generation < $2 LIMIT 2",
+                    Disk::TABLE_NAME,
+                )
+                .as_str(),
+                &[
+                    &new_runtime.disk_state.to_string(),
+                    &(new_runtime.gen as i64), // XXX (and instance analog)
+                    &new_runtime.disk_state.attached_instance_id(),
+                    &now,
+                    disk_id,
+                ],
+            )
+            .await
+            .map_err(sql_error)?;
+
+        if nupdated > 1 {
+            return Err(ApiError::internal_error(&format!(
+                "unexpected number of rows updated by UPDATE query: {}",
+                nupdated
+            )));
+        }
+
+        Ok(nupdated == 1)
+    }
+
+    /* XXX commonize with instance version */
+    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult2<ApiDisk> {
+        let client = self.pool.acquire().await?;
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+                        id = $1 LIMIT 2",
+                    Disk::ALL_COLUMNS.join(", "),
+                    Disk::TABLE_NAME
+                )
+                .as_str(),
+                &[&disk_id],
+            )
+            .await
+            .map_err(sql_error)?;
+        match rows.len() {
+            1 => Ok(ApiDisk::try_from(&rows[0])?),
+            0 => Err(ApiError::not_found_by_id(ApiResourceType::Disk, disk_id)),
+            len => Err(ApiError::internal_error(&format!(
+                "expected at most one row from database query, but found {}",
+                len
+            ))),
+        }
+    }
+
+    /* XXX commonize with instance version */
+    pub async fn disk_fetch_by_name(
+        &self,
+        project_id: &Uuid,
+        disk_name: &ApiName,
+    ) -> LookupResult2<ApiDisk> {
+        let client = self.pool.acquire().await?;
+        let rows = client
+            .query(
+                format!(
+                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+                        project_id = $1 AND name = $2 LIMIT 2",
+                    Disk::ALL_COLUMNS.join(", "),
+                    Disk::TABLE_NAME
+                )
+                .as_str(),
+                &[project_id, disk_name],
+            )
+            .await
+            .map_err(sql_error)?;
+        match rows.len() {
+            1 => Ok(ApiDisk::try_from(&rows[0])?),
+            0 => Err(ApiError::not_found_by_name(
+                ApiResourceType::Disk,
+                disk_name,
+            )),
+            len => Err(ApiError::internal_error(&format!(
+                "expected at most one row from database query, but found {}",
+                len
+            ))),
+        }
+    }
+
+    /* XXX commonize with instance version */
+    pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let sql = "WITH \
+            matching_rows AS \
+            (SELECT id, disk_state, attach_instance_id FROM Disk WHERE \
+            time_deleted IS NULL AND id = $1 LIMIT 2),
+            \
+            deleted_ids AS
+            (UPDATE Disk \
+            SET time_deleted = $2, disk_state = 'destroyed' WHERE \
+            time_deleted IS NULL AND id = $1 AND \
+            disk_state IN ('detached', 'faulted') LIMIT 2 RETURNING id)
+            \
+            SELECT \
+                i.id AS found_id, \
+                i.disk_state AS previous_state, \
+                i.attach_instance_id AS attach_instance_id, \
+                d.id as deleted_id \
+                FROM matching_rows i \
+                FULL OUTER JOIN deleted_ids d ON i.id = d.id";
+        let rows =
+            client.query(sql, &[disk_id, &now]).await.map_err(sql_error)?;
+
+        if rows.is_empty() {
+            // XXX Is this the right place to produce this error?  Might the
+            // caller have already done a name-to-id translation?
+            return Err(ApiError::not_found_by_id(
+                ApiResourceType::Disk,
+                disk_id,
+            ));
+        }
+
+        if rows.len() > 1 {
+            // XXX error context
+            return Err(ApiError::internal_error(
+                "unexpectedly got more than one row for conditional update",
+            ));
+        }
+
+        let found_id: Uuid = rows[0].try_get("found_id").map_err(sql_error)?;
+        let previous_state_str: &str =
+            rows[0].try_get("previous_state").map_err(sql_error)?;
+        let attached_instance_id: Option<Uuid> =
+            rows[0].try_get("attach_instance_id").map_err(sql_error)?;
+        let previous_state: ApiDiskState =
+            ApiDiskState::try_from((previous_state_str, attached_instance_id))
+                .map_err(|e| ApiError::internal_error(&e))?;
+        let deleted_id: Option<Uuid> =
+            rows[0].try_get("deleted_id").map_err(sql_error)?;
+        // TODO-cleanup would a sql_assert! macro help here?
+        if found_id != *disk_id {
+            // XXX error context
+            return Err(ApiError::internal_error(&format!(
+                "unexpected disk found (expected id {}, found {})",
+                disk_id, found_id,
+            )));
+        }
+
+        if let Some(did) = deleted_id {
+            if did != *disk_id {
+                Err(ApiError::internal_error(&format!(
+                    "unexpected disk deleted (expected id {}, found {})",
+                    disk_id, did,
+                )))
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(ApiError::InvalidRequest {
+                message: format!(
+                    "disk cannot be deleted in state \"{}\"",
+                    previous_state
+                ),
+            })
+        }
+    }
 }
 
 /* XXX Should this be From<>?  May want more context */
@@ -1145,7 +1461,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
             value.try_get("attach_instance_id").map_err(sql_error)?;
         let disk_state =
             ApiDiskState::try_from((disk_state_str, instance_uuid))
-                .map_err(ApiError::internal_error)?;
+                .map_err(|e| ApiError::internal_error(&e))?;
         let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
         let time_updated: chrono::DateTime<chrono::Utc> =
             value.try_get("time_state_updated").map_err(sql_error)?;
