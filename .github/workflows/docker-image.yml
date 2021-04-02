@@ -29,6 +29,6 @@ jobs:
         with:
           push: true
           file: ./Dockerfile
-          tags: ['ghcr.io/${{ github.repository_owner }}/omicron:${{ steps.extract_branch.outputs.branch }}', ' ghcr.io/${{ github.repository_owner }}/omicron:${{ github.sha }}']
+          tags: ghcr.io/${{ github.repository_owner }}/omicron:${{ steps.extract_branch.outputs.branch }},ghcr.io/${{ github.repository_owner }}/omicron:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
