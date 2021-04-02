@@ -135,15 +135,18 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
  * Disks
  */
 
-CREATE TYPE omicron.public.DiskState AS ENUM (
-    'creating',
-    'detached',
-    'attaching',
-    'attached',
-    'detaching',
-    'destroyed',
-    'faulted'
-);
+/*
+ * TODO See the note on InstanceState above.
+ */
+-- CREATE TYPE omicron.public.DiskState AS ENUM (
+--     'creating',
+--     'detached',
+--     'attaching',
+--     'attached',
+--     'detaching',
+--     'destroyed',
+--     'faulted'
+-- );
 
 CREATE TABLE omicron.public.Disk (
     /* Identity metadata */
@@ -164,7 +167,8 @@ CREATE TABLE omicron.public.Disk (
      * table?
      */
     /* Runtime state */
-    disk_state omicron.public.DiskState NOT NULL,
+    -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
+    disk_state TEXT(15) NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*

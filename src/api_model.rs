@@ -14,6 +14,7 @@ use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -581,19 +582,7 @@ impl FromStr for ApiInstanceState {
     type Err = ApiError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        /*
-         * Round-tripping through serde is a little absurd, but has the benefit
-         * of always staying in sync with the real definition.  (The initial
-         * serialization is necessary to correctly handle any quotes or the like
-         * in the input string.)
-         */
-        let json = serde_json::to_string(s).unwrap();
-        serde_json::from_str(&json).map_err(|e| {
-            ApiError::internal_error(&format!(
-                "invalid run state: {}",
-                e.to_string()
-            ))
-        })
+        parse_str_using_serde(s)
     }
 }
 
@@ -878,6 +867,43 @@ impl Display for ApiDiskState {
 
         write!(f, "{}", label)
     }
+}
+
+impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
+    type Error = &'static str;
+
+    fn try_from(
+        (s, maybe_id): (&str, Option<Uuid>),
+    ) -> Result<Self, Self::Error> {
+        match (s, maybe_id) {
+            ("creating", None) => Ok(ApiDiskState::Creating),
+            ("detached", None) => Ok(ApiDiskState::Detached),
+            ("destroyed", None) => Ok(ApiDiskState::Destroyed),
+            ("faulted", None) => Ok(ApiDiskState::Faulted),
+            ("attaching", Some(id)) => Ok(ApiDiskState::Attaching(id)),
+            ("attached", Some(id)) => Ok(ApiDiskState::Attached(id)),
+            ("detaching", Some(id)) => Ok(ApiDiskState::Detaching(id)),
+            _ => Err("unexpected value for disk state"),
+        }
+    }
+}
+
+fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
+    s: &str,
+) -> Result<T, ApiError> {
+    /*
+     * Round-tripping through serde is a little absurd, but has the benefit
+     * of always staying in sync with the real definition.  (The initial
+     * serialization is necessary to correctly handle any quotes or the like
+     * in the input string.)
+     */
+    let json = serde_json::to_string(s).unwrap();
+    serde_json::from_str(&json).map_err(|e| {
+        ApiError::internal_error(&format!(
+            "unsupported value: {}",
+            e.to_string()
+        ))
+    })
 }
 
 impl ApiDiskState {

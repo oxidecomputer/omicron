@@ -10,6 +10,9 @@
 use super::Pool;
 use crate::api_error::ApiError;
 use crate::api_model::ApiByteCount;
+use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskRuntimeState;
+use crate::api_model::ApiDiskState;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCpuCount;
@@ -32,6 +35,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::future::Future;
 use std::sync::Arc;
 use tokio_postgres::row::Row;
@@ -312,6 +316,10 @@ impl DataStore {
             ))),
         }
     }
+
+    /*
+     * Instances
+     */
 
     pub async fn project_create_instance(
         &self,
@@ -748,6 +756,10 @@ impl DataStore {
             })
         }
     }
+
+    /*
+     * Disks
+     */
 }
 
 /* XXX Should this be From<>?  May want more context */
@@ -944,6 +956,32 @@ where
     }
 }
 
+impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        // XXX really need some kind of context for these errors
+        let name_str: &str = value.try_get("name").map_err(sql_error)?;
+        let name = ApiName::try_from(name_str).map_err(|e| {
+            ApiError::internal_error(&format!(
+                "database project.name {:?}: {}",
+                name_str, e
+            ))
+        })?;
+        // XXX What to do with non-NULL time_deleted?
+        Ok(ApiIdentityMetadata {
+            id: value.try_get("id").map_err(sql_error)?,
+            name,
+            description: value.try_get("description").map_err(sql_error)?,
+            time_created: value.try_get("time_created").map_err(sql_error)?,
+            // XXX is it time_updated or time_metadata_updated
+            time_modified: value
+                .try_get("time_metadata_updated")
+                .map_err(sql_error)?,
+        })
+    }
+}
+
 /*
  * We want to find a better way to abstract this.  Diesel provides a compelling
  * model in terms of using it, but it also seems fairly heavyweight, and this
@@ -976,29 +1014,10 @@ impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX really need some kind of context for these errors
-        let name_str: &str = value.try_get("name").map_err(sql_error)?;
-        let name = ApiName::try_from(name_str).map_err(|e| {
-            ApiError::internal_error(&format!(
-                "database project.name {:?}: {}",
-                name_str, e
-            ))
-        })?;
-        // XXX What to do with non-NULL time_deleted?
+        let identity = ApiIdentityMetadata::try_from(value)?;
         Ok(ApiProject {
             generation: 1, // XXX
-            identity: ApiIdentityMetadata {
-                id: value.try_get("id").map_err(sql_error)?,
-                name,
-                description: value.try_get("description").map_err(sql_error)?,
-                time_created: value
-                    .try_get("time_created")
-                    .map_err(sql_error)?,
-                // XXX is it time_updated or time_metadata_updated
-                time_modified: value
-                    .try_get("time_metadata_updated")
-                    .map_err(sql_error)?,
-            },
+            identity,
         })
     }
 }
@@ -1031,14 +1050,28 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         // XXX really need some kind of context for these errors
-        let name_str: &str = value.try_get("name").map_err(sql_error)?;
-        let name = ApiName::try_from(name_str).map_err(|e| {
-            ApiError::internal_error(&format!(
-                "database instance.name {:?}: {}",
-                name_str, e
-            ))
-        })?;
+        let identity = ApiIdentityMetadata::try_from(value)?;
+        let runtime = ApiInstanceRuntimeState::try_from(value)?;
+        let memory_mib: i64 = value.try_get("memory_mib").map_err(sql_error)?;
+        let ncpus: i64 = value.try_get("ncpus").map_err(sql_error)?;
 
+        // XXX What to do with non-NULL time_deleted?
+        Ok(ApiInstance {
+            identity,
+            project_id: value.try_get("project_id").map_err(sql_error)?,
+            ncpus: ApiInstanceCpuCount(ncpus as u16), // XXX
+            memory: ApiByteCount::from_mebibytes(memory_mib as u64),
+            hostname: value.try_get("hostname").map_err(sql_error)?,
+            runtime,
+            boot_disk_size: ApiByteCount::from_bytes(0), // XXX
+        })
+    }
+}
+
+impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let run_state_str: &str =
             value.try_get("instance_state").map_err(sql_error)?;
         let run_state: ApiInstanceState = run_state_str.parse()?;
@@ -1047,35 +1080,79 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
         let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
         let sled_uuid: Uuid =
             value.try_get("active_server_id").map_err(sql_error)?;
-        let memory_mib: i64 = value.try_get("memory_mib").map_err(sql_error)?;
-        let ncpus: i64 = value.try_get("ncpus").map_err(sql_error)?;
+
+        Ok(ApiInstanceRuntimeState {
+            run_state,
+            reboot_in_progress: false, // XXX
+            sled_uuid,
+            gen: gen.try_into().unwrap(), // XXX`
+            time_updated,
+        })
+    }
+}
+
+struct Disk;
+impl Table for Disk {
+    type ApiModelType = ApiDisk;
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
+    const TABLE_NAME: &'static str = "Disk";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_metadata_updated",
+        "time_deleted",
+        "project_id",
+        "disk_state",
+        "time_state_updated",
+        "state_generation",
+        "attach_instance_id",
+        "size_bytes",
+        "origin_snapshot",
+    ];
+}
+
+impl TryFrom<&tokio_postgres::Row> for ApiDisk {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let identity = ApiIdentityMetadata::try_from(value)?;
+
+        let size: i64 = value.try_get("size_bytes").map_err(sql_error)?;
+        let origin: Option<Uuid> =
+            value.try_get("origin_snapshot").map_err(sql_error)?;
+        let runtime = ApiDiskRuntimeState::try_from(value)?;
 
         // XXX What to do with non-NULL time_deleted?
-        Ok(ApiInstance {
-            identity: ApiIdentityMetadata {
-                id: value.try_get("id").map_err(sql_error)?,
-                name,
-                description: value.try_get("description").map_err(sql_error)?,
-                time_created: value
-                    .try_get("time_created")
-                    .map_err(sql_error)?,
-                // XXX is it time_updated or time_metadata_updated
-                time_modified: value
-                    .try_get("time_metadata_updated")
-                    .map_err(sql_error)?,
-            },
+        Ok(ApiDisk {
+            identity,
             project_id: value.try_get("project_id").map_err(sql_error)?,
-            ncpus: ApiInstanceCpuCount(ncpus as u16),
-            memory: ApiByteCount::from_mebibytes(memory_mib as u64),
-            hostname: value.try_get("hostname").map_err(sql_error)?,
-            runtime: ApiInstanceRuntimeState {
-                run_state,
-                reboot_in_progress: false, // XXX
-                sled_uuid,
-                gen: gen as u64,
-                time_updated,
-            },
-            boot_disk_size: ApiByteCount::from_bytes(0), // XXX
+            create_snapshot_id: origin,
+            size: ApiByteCount::from_bytes(size.try_into().unwrap()), // XXX
+            runtime: runtime,
+        })
+    }
+}
+
+impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let disk_state_str: &str =
+            value.try_get("disk_state").map_err(sql_error)?;
+        let instance_uuid: Option<Uuid> =
+            value.try_get("attach_instance_id").map_err(sql_error)?;
+        let disk_state =
+            ApiDiskState::try_from((disk_state_str, instance_uuid))
+                .map_err(ApiError::internal_error)?;
+        let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
+        let time_updated: chrono::DateTime<chrono::Utc> =
+            value.try_get("time_state_updated").map_err(sql_error)?;
+        Ok(ApiDiskRuntimeState {
+            disk_state,
+            gen: gen.try_into().unwrap(), // XXX`
+            time_updated,
         })
     }
 }
