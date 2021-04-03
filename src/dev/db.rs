@@ -646,7 +646,7 @@ fn make_pg_config(
 
     let unsupported_values = check_unsupported
         .into_iter()
-        .filter_map(|o| o)
+        .flatten()
         .collect::<Vec<&'static str>>();
     if unsupported_values.len() > 0 {
         bail!(
