@@ -452,7 +452,7 @@ async fn test_disks() {
     let error = client
         .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
         .await;
-    assert_eq!(error.message, "disk is attached");
+    assert_eq!(error.message, "disk cannot be deleted in state \"attaching\"");
 
     /* Now, begin a detach while the disk is still being attached. */
     client
@@ -476,7 +476,7 @@ async fn test_disks() {
     let error = client
         .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
         .await;
-    assert_eq!(error.message, "disk is attached");
+    assert_eq!(error.message, "disk cannot be deleted in state \"attaching\"");
 
     /* Finish detachment. */
     disk_simulate(nexus, &disk.identity.id).await;
