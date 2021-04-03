@@ -314,48 +314,35 @@ async fn test_instances() {
 
     /*
      * Once more, try to reboot it.  This should not work on a destroyed
-     * instance.  (This will likely be an invalid test after we figure out how
-     * to make DELETE remove the instance from the namespace, but it's still
-     * useful to exercise this case now.)
+     * instance.
+     * XXX Review if we want this to be a 404 or not.
      */
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
     /*
      * Similarly, we should not be able to start or stop the instance.
      */
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/start", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/stop", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
     /*
      * The rest of these examples attempt to create invalid instances.  We don't

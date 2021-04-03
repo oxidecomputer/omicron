@@ -644,10 +644,8 @@ fn make_pg_config(
         pg_config.get_dbname().map(|_| "dbname"),
     ];
 
-    let unsupported_values = check_unsupported
-        .into_iter()
-        .flatten()
-        .collect::<Vec<&'static str>>();
+    let unsupported_values =
+        check_unsupported.into_iter().flatten().collect::<Vec<&'static str>>();
     if unsupported_values.len() > 0 {
         bail!(
             "unsupported PostgreSQL listen URL \
@@ -699,7 +697,10 @@ fn make_pg_config(
         let url = format!(
             "postgresql://{}@{}:{}/{}?sslmode=disable",
             // XXX user should be COCKROACHDB_USER
-            "root", ip_host, ports[0], COCKROACHDB_DATABASE
+            "root",
+            ip_host,
+            ports[0],
+            COCKROACHDB_DATABASE
         );
         url.parse::<PostgresConfigWithUrl>().with_context(|| {
             format!("parse modified PostgreSQL config {:?}", url)
@@ -716,9 +717,6 @@ fn make_pg_config(
  * Returns true if the database that this client is connected to contains
  * the Omicron schema
  *
- * Note that this will change the currently-selected database if the Omicron
- * one exists.
- *
  * Panics if the attempt to run a query fails for any reason other than the
  * schema not existing.  (This is intended to be run from the test suite.)
  */
@@ -730,7 +728,7 @@ pub async fn has_omicron_schema(client: &tokio_postgres::Client) -> bool {
                 e.code().expect("got non-SQL error checking for schema");
             assert_eq!(
                 *sql_error,
-                tokio_postgres::error::SqlState::UNDEFINED_DATABASE
+                tokio_postgres::error::SqlState::UNDEFINED_TABLE
             );
             false
         }
@@ -1168,11 +1166,11 @@ mod test {
             db2.connect().await.expect("failed to connect to second database");
 
         client1
-            .execute("CREATE TABLE foo (v int)", &[])
+            .batch_execute("CREATE DATABASE d; use d; CREATE TABLE foo (v int)")
             .await
             .expect("create (1)");
         client2
-            .execute("CREATE TABLE foo (v int)", &[])
+            .batch_execute("CREATE DATABASE d; use d; CREATE TABLE foo (v int)")
             .await
             .expect("create (2)");
         client1
@@ -1194,7 +1192,8 @@ mod test {
         let config = make_pg_config(url).expect("failed to parse basic case");
         assert_eq!(
             config.to_string().as_str(),
-            "postgresql://omicron@127.0.0.1:45913/omicron?sslmode=disable",
+            // XXX user should become "omicron"
+            "postgresql://root@127.0.0.1:45913/omicron?sslmode=disable",
         );
     }
 
