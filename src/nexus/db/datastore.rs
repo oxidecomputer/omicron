@@ -1268,7 +1268,7 @@ where
             }
         };
 
-        Ok(T::ApiModelType::try_from(row)?)
+        T::ApiModelType::try_from(row)
     }
 }
 
