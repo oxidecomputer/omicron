@@ -31,6 +31,9 @@
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
  * clear this first.
+ *
+ * NOTE: the database and user names MUST be kept in sync with the
+ * initialization code and dbwipe.sql.
  */
 CREATE DATABASE omicron;
 CREATE USER omicron;

@@ -19,8 +19,11 @@ bind_address = "127.0.0.1:0"
 bind_address = "127.0.0.1:0"
 
 [database]
-# XXX needs to be updated for the test suite
-url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
+#
+# NOTE: for the test suite, this value will be replaced with one appropriate
+# for the database that's started by the test runner.
+#
+url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel
