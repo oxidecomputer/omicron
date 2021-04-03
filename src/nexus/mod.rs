@@ -14,10 +14,10 @@ mod nexus;
 mod saga_interface;
 mod sagas;
 
-pub use db::PostgresConfigWithUrl;
 pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
+pub use db::PostgresConfigWithUrl;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 

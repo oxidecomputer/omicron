@@ -728,7 +728,7 @@ impl Nexus {
                     instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
-                    disk_state: disk.runtime.disk_state.clone(),
+                    disk_state: disk.runtime.disk_state,
                 }))
             })
             .collect::<Vec<Result<Arc<ApiDiskAttachment>, ApiError>>>()
