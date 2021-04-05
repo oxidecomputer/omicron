@@ -28,7 +28,6 @@ use crate::api_model::ApiResourceType;
 use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
-use crate::api_model::ListResult;
 use crate::api_model::ListResult2;
 use crate::api_model::LookupResult2;
 use crate::api_model::UpdateResult2;
@@ -228,7 +227,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult2<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -242,8 +241,8 @@ impl DataStore {
         .await?;
         let list = rows
             .iter()
-            .map(|row| ApiProject::try_from(row).map(Arc::new))
-            .collect::<Vec<Result<Arc<ApiProject>, ApiError>>>();
+            .map(|row| ApiProject::try_from(row))
+            .collect::<Vec<Result<ApiProject, ApiError>>>();
         Ok(futures::stream::iter(list).boxed())
     }
 
@@ -251,7 +250,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult2<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -265,8 +264,8 @@ impl DataStore {
         .await?;
         let list = rows
             .iter()
-            .map(|row| ApiProject::try_from(row).map(Arc::new))
-            .collect::<Vec<Result<Arc<ApiProject>, ApiError>>>();
+            .map(|row| ApiProject::try_from(row))
+            .collect::<Vec<Result<ApiProject, ApiError>>>();
         Ok(futures::stream::iter(list).boxed())
     }
 

@@ -22,15 +22,11 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiSled;
-use crate::api_model::CreateResult;
 use crate::api_model::CreateResult2;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
-use crate::api_model::ListResult;
 use crate::api_model::ListResult2;
-use crate::api_model::LookupResult;
 use crate::api_model::LookupResult2;
-use crate::api_model::UpdateResult;
 use crate::api_model::UpdateResult2;
 use crate::nexus::datastore::collection_page;
 use crate::nexus::db;
@@ -87,8 +83,8 @@ pub struct Nexus {
     /** general server log */
     log: Logger,
 
-    /** cached ApiRack structure representing the single rack. */
-    api_rack: Arc<ApiRack>,
+    /** cached rack identity metadata */
+    api_rack_identity: ApiIdentityMetadata,
 
     /** persistent storage for resources in the control plane */
     db_datastore: db::DataStore,
@@ -124,15 +120,13 @@ impl Nexus {
         Nexus {
             id: *id,
             log,
-            api_rack: Arc::new(ApiRack {
-                identity: ApiIdentityMetadata {
-                    id: *id,
-                    name: ApiName::try_from(format!("rack-{}", *id)).unwrap(),
-                    description: String::from(""),
-                    time_created: Utc::now(),
-                    time_modified: Utc::now(),
-                },
-            }),
+            api_rack_identity: ApiIdentityMetadata {
+                id: *id,
+                name: ApiName::try_from(format!("rack-{}", *id)).unwrap(),
+                description: String::from(""),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
             db_datastore: db::DataStore::new(Arc::new(pool)),
             sled_agents: Mutex::new(BTreeMap::new()),
         }
@@ -202,31 +196,29 @@ impl Nexus {
     pub async fn project_create(
         &self,
         new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
+    ) -> CreateResult2<ApiProject> {
         let id = Uuid::new_v4();
-        Ok(Arc::new(
-            self.db_datastore.project_create_with_id(&id, new_project).await?,
-        ))
+        Ok(self.db_datastore.project_create_with_id(&id, new_project).await?)
     }
 
     pub async fn project_fetch(
         &self,
         name: &ApiName,
-    ) -> LookupResult<ApiProject> {
-        Ok(Arc::new(self.db_datastore.project_fetch(name).await?))
+    ) -> LookupResult2<ApiProject> {
+        Ok(self.db_datastore.project_fetch(name).await?)
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult2<ApiProject> {
         self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult2<ApiProject> {
         self.db_datastore.projects_list_by_id(pagparams).await
     }
 
@@ -238,8 +230,8 @@ impl Nexus {
         &self,
         name: &ApiName,
         new_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject> {
-        Ok(Arc::new(self.db_datastore.project_update(name, new_params).await?))
+    ) -> UpdateResult2<ApiProject> {
+        Ok(self.db_datastore.project_update(name, new_params).await?)
     }
 
     /*
@@ -712,7 +704,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDiskAttachment> {
+    ) -> ListResult2<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disks = self
@@ -723,15 +715,15 @@ impl Nexus {
             .filter(|maybe_disk| ready(maybe_disk.is_ok()))
             .map(|maybe_disk| {
                 let disk = maybe_disk.unwrap();
-                Ok(Arc::new(ApiDiskAttachment {
+                Ok(ApiDiskAttachment {
                     instance_name: instance.identity.name.clone(),
                     instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
                     disk_state: disk.runtime.disk_state,
-                }))
+                })
             })
-            .collect::<Vec<Result<Arc<ApiDiskAttachment>, ApiError>>>()
+            .collect::<Vec<Result<ApiDiskAttachment, ApiError>>>()
             .await;
         Ok(futures::stream::iter(attachments).boxed())
     }
@@ -744,7 +736,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         disk_name: &ApiName,
-    ) -> LookupResult<ApiDiskAttachment> {
+    ) -> LookupResult2<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
@@ -752,13 +744,13 @@ impl Nexus {
             disk.runtime.disk_state.attached_instance_id()
         {
             if instance_id == &instance.identity.id {
-                return Ok(Arc::new(ApiDiskAttachment {
+                return Ok(ApiDiskAttachment {
                     instance_name: instance.identity.name.clone(),
                     instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
                     disk_state: disk.runtime.disk_state.clone(),
-                }));
+                });
             }
         }
 
@@ -780,7 +772,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         disk_name: &ApiName,
-    ) -> CreateResult<ApiDiskAttachment> {
+    ) -> CreateResult2<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
@@ -789,24 +781,24 @@ impl Nexus {
         fn disk_attachment_for(
             instance: &ApiInstance,
             disk: &ApiDisk,
-        ) -> CreateResult<ApiDiskAttachment> {
+        ) -> CreateResult2<ApiDiskAttachment> {
             let instance_id = &instance.identity.id;
             assert_eq!(
                 instance_id,
                 disk.runtime.disk_state.attached_instance_id().unwrap()
             );
-            Ok(Arc::new(ApiDiskAttachment {
+            Ok(ApiDiskAttachment {
                 instance_name: instance.identity.name.clone(),
                 instance_id: *instance_id,
                 disk_id: disk.identity.id,
                 disk_name: disk.identity.name.clone(),
                 disk_state: disk.runtime.disk_state.clone(),
-            }))
+            })
         }
 
         fn disk_attachment_error(
             disk: &ApiDisk,
-        ) -> CreateResult<ApiDiskAttachment> {
+        ) -> CreateResult2<ApiDiskAttachment> {
             let disk_status = match disk.runtime.disk_state {
                 ApiDiskState::Destroyed => "disk is destroyed",
                 ApiDiskState::Faulted => "disk is faulted",
@@ -977,14 +969,14 @@ impl Nexus {
      * Racks.  We simulate just one for now.
      */
 
-    fn as_rack(&self) -> Arc<ApiRack> {
-        Arc::clone(&self.api_rack)
+    fn as_rack(&self) -> ApiRack {
+        ApiRack { identity: self.api_rack_identity.clone() }
     }
 
     pub async fn racks_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiRack> {
+    ) -> ListResult2<ApiRack> {
         if let Some(marker) = pagparams.marker {
             if *marker >= self.id {
                 return Ok(futures::stream::empty().boxed());
@@ -994,7 +986,7 @@ impl Nexus {
         Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
     }
 
-    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
+    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult2<ApiRack> {
         if *rack_id == self.id {
             Ok(self.as_rack())
         } else {
@@ -1006,19 +998,19 @@ impl Nexus {
      * Sleds.
      * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiSled for each sled_agent::Client that
-     * we've got.
+     * them, etc.  For now, we expose an ApiSled for each sled_agent::Client
+     * that we've got.
      */
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiSled> {
+    ) -> ListResult2<ApiSled> {
         let sled_agents = self.sled_agents.lock().await;
         let sleds = collection_page(&sled_agents, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sa| {
                 let sa = sa.unwrap();
-                Ok(Arc::new(ApiSled {
+                Ok(ApiSled {
                     identity: ApiIdentityMetadata {
                         /* TODO-correctness cons up real metadata here */
                         id: sa.id,
@@ -1029,20 +1021,20 @@ impl Nexus {
                         time_modified: Utc::now(),
                     },
                     service_address: sa.service_address,
-                }))
+                })
             })
-            .collect::<Vec<Result<Arc<ApiSled>, ApiError>>>()
+            .collect::<Vec<Result<ApiSled, ApiError>>>()
             .await;
         Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
+    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult2<ApiSled> {
         let nexuses = self.sled_agents.lock().await;
         let sa = nexuses.get(sled_id).ok_or_else(|| {
             ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)
         })?;
 
-        Ok(Arc::new(ApiSled {
+        Ok(ApiSled {
             identity: ApiIdentityMetadata {
                 /* TODO-correctness cons up real metadata here */
                 id: sa.id,
@@ -1052,7 +1044,7 @@ impl Nexus {
                 time_modified: Utc::now(),
             },
             service_address: sa.service_address,
-        }))
+        })
     }
 
     /*

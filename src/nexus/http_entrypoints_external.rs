@@ -5,7 +5,6 @@
 use super::ServerContext;
 
 use crate::api_model::to_view_list;
-use crate::api_model::to_view_list2;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskView;
@@ -13,7 +12,6 @@ use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
-use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
@@ -204,7 +202,7 @@ async fn api_projects_get_project(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project: Arc<ApiProject> = nexus.project_fetch(&project_name).await?;
+    let project = nexus.project_fetch(&project_name).await?;
     Ok(HttpResponseOk(project.to_view()))
 }
 
@@ -282,7 +280,7 @@ async fn api_project_disks_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list2(disk_stream).await;
+    let view_list = to_view_list(disk_stream).await;
     Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 
@@ -386,7 +384,7 @@ async fn api_project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list2(instance_stream).await;
+    let view_list = to_view_list(instance_stream).await;
     Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
 }
 
