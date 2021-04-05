@@ -1,3 +1,8 @@
+# 
+# Dockerfile: build a Docker image for Omicron.  This is used by the console for
+# prototyping and development.  This will not be used for deployment to a real 
+# rack.
+# 
 # ------------------------------------------------------------------------------
 # Cargo Build Stage
 # ------------------------------------------------------------------------------
