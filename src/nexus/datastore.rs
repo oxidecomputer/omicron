@@ -4,7 +4,7 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::DataPageParams;
-use crate::api_model::ListResult2;
+use crate::api_model::ListResult;
 use crate::api_model::PaginationOrder::Ascending;
 use crate::api_model::PaginationOrder::Descending;
 use futures::StreamExt;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 pub fn collection_page<KeyType, ValueType>(
     search_tree: &BTreeMap<KeyType, Arc<ValueType>>,
     pagparams: &DataPageParams<'_, KeyType>,
-) -> ListResult2<Arc<ValueType>>
+) -> ListResult<Arc<ValueType>>
 where
     KeyType: std::cmp::Ord,
     ValueType: Send + Sync + 'static,

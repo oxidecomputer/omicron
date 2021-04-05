@@ -22,12 +22,12 @@ use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiRack;
 use crate::api_model::ApiResourceType;
 use crate::api_model::ApiSled;
-use crate::api_model::CreateResult2;
+use crate::api_model::CreateResult;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
-use crate::api_model::ListResult2;
-use crate::api_model::LookupResult2;
-use crate::api_model::UpdateResult2;
+use crate::api_model::ListResult;
+use crate::api_model::LookupResult;
+use crate::api_model::UpdateResult;
 use crate::nexus::datastore::collection_page;
 use crate::nexus::db;
 use crate::nexus::saga_interface::SagaContext;
@@ -196,7 +196,7 @@ impl Nexus {
     pub async fn project_create(
         &self,
         new_project: &ApiProjectCreateParams,
-    ) -> CreateResult2<ApiProject> {
+    ) -> CreateResult<ApiProject> {
         let id = Uuid::new_v4();
         Ok(self.db_datastore.project_create_with_id(&id, new_project).await?)
     }
@@ -204,21 +204,21 @@ impl Nexus {
     pub async fn project_fetch(
         &self,
         name: &ApiName,
-    ) -> LookupResult2<ApiProject> {
+    ) -> LookupResult<ApiProject> {
         Ok(self.db_datastore.project_fetch(name).await?)
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiProject> {
+    ) -> ListResult<ApiProject> {
         self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult2<ApiProject> {
+    ) -> ListResult<ApiProject> {
         self.db_datastore.projects_list_by_id(pagparams).await
     }
 
@@ -230,7 +230,7 @@ impl Nexus {
         &self,
         name: &ApiName,
         new_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult2<ApiProject> {
+    ) -> UpdateResult<ApiProject> {
         Ok(self.db_datastore.project_update(name, new_params).await?)
     }
 
@@ -242,7 +242,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiDisk> {
+    ) -> ListResult<ApiDisk> {
         /*
          * XXX Can/should we restructure this to be done with one query? (would
          * that fail the wrong way if the project didn't exist?)
@@ -256,7 +256,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         params: &ApiDiskCreateParams,
-    ) -> CreateResult2<ApiDisk> {
+    ) -> CreateResult<ApiDisk> {
         let project = self.project_fetch(project_name).await?;
 
         /*
@@ -314,7 +314,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         disk_name: &ApiName,
-    ) -> LookupResult2<ApiDisk> {
+    ) -> LookupResult<ApiDisk> {
         /*
          * XXX Can/should we restructure this to be done with one query? (would
          * that fail the wrong way if the project didn't exist?)
@@ -404,7 +404,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiInstance> {
+    ) -> ListResult<ApiInstance> {
         /*
          * XXX Can/should we restructure this to be done with one query? (would
          * that fail the wrong way if the project didn't exist?)
@@ -418,7 +418,7 @@ impl Nexus {
         self: &Arc<Self>,
         project_name: &ApiName,
         params: &ApiInstanceCreateParams,
-    ) -> CreateResult2<ApiInstance> {
+    ) -> CreateResult<ApiInstance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
@@ -512,7 +512,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> LookupResult2<ApiInstance> {
+    ) -> LookupResult<ApiInstance> {
         /*
          * XXX Can/should we restructure this to be done with one query? (would
          * that fail the wrong way if the project didn't exist?)
@@ -590,7 +590,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult2<ApiInstance> {
+    ) -> UpdateResult<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
          * runtime state with "reboot_wanted".  We cannot simply stop the
@@ -627,7 +627,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult2<ApiInstance> {
+    ) -> UpdateResult<ApiInstance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -651,7 +651,7 @@ impl Nexus {
         &self,
         project_name: &ApiName,
         instance_name: &ApiName,
-    ) -> UpdateResult2<ApiInstance> {
+    ) -> UpdateResult<ApiInstance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -704,7 +704,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiDiskAttachment> {
+    ) -> ListResult<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disks = self
@@ -736,7 +736,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         disk_name: &ApiName,
-    ) -> LookupResult2<ApiDiskAttachment> {
+    ) -> LookupResult<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
@@ -772,7 +772,7 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
         disk_name: &ApiName,
-    ) -> CreateResult2<ApiDiskAttachment> {
+    ) -> CreateResult<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
@@ -781,7 +781,7 @@ impl Nexus {
         fn disk_attachment_for(
             instance: &ApiInstance,
             disk: &ApiDisk,
-        ) -> CreateResult2<ApiDiskAttachment> {
+        ) -> CreateResult<ApiDiskAttachment> {
             let instance_id = &instance.identity.id;
             assert_eq!(
                 instance_id,
@@ -798,7 +798,7 @@ impl Nexus {
 
         fn disk_attachment_error(
             disk: &ApiDisk,
-        ) -> CreateResult2<ApiDiskAttachment> {
+        ) -> CreateResult<ApiDiskAttachment> {
             let disk_status = match disk.runtime.disk_state {
                 ApiDiskState::Destroyed => "disk is destroyed",
                 ApiDiskState::Faulted => "disk is faulted",
@@ -976,7 +976,7 @@ impl Nexus {
     pub async fn racks_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult2<ApiRack> {
+    ) -> ListResult<ApiRack> {
         if let Some(marker) = pagparams.marker {
             if *marker >= self.id {
                 return Ok(futures::stream::empty().boxed());
@@ -986,7 +986,7 @@ impl Nexus {
         Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
     }
 
-    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult2<ApiRack> {
+    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
         if *rack_id == self.id {
             Ok(self.as_rack())
         } else {
@@ -1004,7 +1004,7 @@ impl Nexus {
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult2<ApiSled> {
+    ) -> ListResult<ApiSled> {
         let sled_agents = self.sled_agents.lock().await;
         let sleds = collection_page(&sled_agents, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
@@ -1028,7 +1028,7 @@ impl Nexus {
         Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult2<ApiSled> {
+    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
         let nexuses = self.sled_agents.lock().await;
         let sa = nexuses.get(sled_id).ok_or_else(|| {
             ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)

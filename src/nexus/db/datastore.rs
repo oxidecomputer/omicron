@@ -25,12 +25,12 @@ use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiResourceType;
-use crate::api_model::CreateResult2;
+use crate::api_model::CreateResult;
 use crate::api_model::DataPageParams;
 use crate::api_model::DeleteResult;
-use crate::api_model::ListResult2;
-use crate::api_model::LookupResult2;
-use crate::api_model::UpdateResult2;
+use crate::api_model::ListResult;
+use crate::api_model::LookupResult;
+use crate::api_model::UpdateResult;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
@@ -56,7 +56,7 @@ impl DataStore {
         &self,
         new_id: &Uuid,
         new_project: &ApiProjectCreateParams,
-    ) -> CreateResult2<ApiProject> {
+    ) -> CreateResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         sql_insert_unique(
@@ -81,7 +81,7 @@ impl DataStore {
     pub async fn project_fetch(
         &self,
         project_name: &ApiName,
-    ) -> LookupResult2<ApiProject> {
+    ) -> LookupResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
@@ -227,7 +227,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult2<ApiProject> {
+    ) -> ListResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -250,7 +250,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiProject> {
+    ) -> ListResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -274,7 +274,7 @@ impl DataStore {
         &self,
         project_name: &ApiName,
         update_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult2<ApiProject> {
+    ) -> UpdateResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -327,7 +327,7 @@ impl DataStore {
         project_id: &Uuid,
         params: &ApiInstanceCreateParams,
         runtime_initial: &ApiInstanceRuntimeState,
-    ) -> CreateResult2<ApiInstance> {
+    ) -> CreateResult<ApiInstance> {
         //
         // XXX Idempotently insert a record for this instance.  The following
         // discussion describes our caller, not technically this function, but
@@ -514,7 +514,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiInstance> {
+    ) -> ListResult<ApiInstance> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -536,7 +536,7 @@ impl DataStore {
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
-    ) -> LookupResult2<ApiInstance> {
+    ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
@@ -568,7 +568,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         instance_name: &ApiName,
-    ) -> LookupResult2<ApiInstance> {
+    ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
@@ -770,7 +770,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiDisk> {
+    ) -> ListResult<ApiDisk> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -800,7 +800,7 @@ impl DataStore {
         project_id: &Uuid,
         params: &ApiDiskCreateParams,
         runtime_initial: &ApiDiskRuntimeState,
-    ) -> CreateResult2<ApiDisk> {
+    ) -> CreateResult<ApiDisk> {
         /* See project_create_instance() */
         /* XXX commonize with project_create_instance() */
         let client = self.pool.acquire().await?;
@@ -877,7 +877,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult2<ApiDisk> {
+    ) -> ListResult<ApiDisk> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
@@ -939,7 +939,7 @@ impl DataStore {
     }
 
     /* XXX commonize with instance version */
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult2<ApiDisk> {
+    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
@@ -969,7 +969,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         disk_name: &ApiName,
-    ) -> LookupResult2<ApiDisk> {
+    ) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
         let rows = client
             .query(
