@@ -1,3 +1,7 @@
+#
+# GitHub Actions configuration to automatically build and publish a Docker image
+# for Omicron.  See README for details.
+#
 name: docker-image
 on: push
 jobs:
