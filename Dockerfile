@@ -13,8 +13,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /usr/src/omicron
 
-RUN rustup default nightly
-
 COPY . .
 
 WORKDIR /usr/src/omicron
