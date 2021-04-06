@@ -53,6 +53,9 @@ enum DbError {
 
     #[error("extracting column {column_name:?} from row")]
     DeserializeError { column_name: String, source: tokio_postgres::Error },
+
+    #[error("executing {sql:?}: expected one row, but found {nrows_found}")]
+    BadRowCount { sql: String, nrows_found: usize },
 }
 
 impl DbError {
@@ -60,6 +63,7 @@ impl DbError {
         match self {
             DbError::SqlError { ref source, .. } => Some(source),
             DbError::DeserializeError { ref source, .. } => Some(source),
+            DbError::BadRowCount { .. } => None,
         }
     }
 }
@@ -105,7 +109,7 @@ impl DataStore {
         project_name: &ApiName,
     ) -> LookupResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
@@ -115,20 +119,15 @@ impl DataStore {
             )
             .as_str(),
             &[&project_name],
+            || {
+                ApiError::not_found_by_name(
+                    ApiResourceType::Project,
+                    project_name,
+                )
+            },
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => Ok(ApiProject::try_from(&rows[0])?),
-            0 => Err(ApiError::not_found_by_name(
-                ApiResourceType::Project,
-                project_name,
-            )),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
-                len
-            ))),
-        }
+        .await?;
+        Ok(ApiProject::try_from(&row)?)
     }
 
     /// Delete a project
@@ -217,7 +216,7 @@ impl DataStore {
     ) -> Result<Uuid, ApiError> {
         let client = self.pool.acquire().await?;
 
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT id FROM {} WHERE name = $1 AND \
@@ -226,23 +225,10 @@ impl DataStore {
             )
             .as_str(),
             &[&name],
+            || ApiError::not_found_by_name(ApiResourceType::Project, name),
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => sql_row_value(&rows[0], 0),
-            0 => {
-                Err(ApiError::not_found_by_name(ApiResourceType::Project, name))
-            }
-            /*
-             * TODO-design This should really include a bunch more information,
-             * like the SQL and the type of object we were expecting.
-             */
-            _ => Err(ApiError::internal_error(&format!(
-                "expected 1 row from database query, but found {}",
-                rows.len()
-            ))),
-        }
+        .await?;
+        sql_row_value(&row, 0)
     }
 
     /// List a page of projects by id
@@ -323,25 +309,11 @@ impl DataStore {
         ));
         params.push(project_name);
 
-        let rows =
-            sql_query(&client, sql.as_str(), &params).await.map_err(|e| {
-                sql_error_on_create(
-                    Project::RESOURCE_TYPE,
-                    project_name.as_str(),
-                    e,
-                )
-            })?;
-        match rows.len() {
-            0 => Err(ApiError::not_found_by_name(
-                ApiResourceType::Project,
-                project_name,
-            )),
-            1 => Ok(ApiProject::try_from(&rows[0])?),
-            len => Err(ApiError::internal_error(&format!(
-                "expected 1 row from UPDATE query, but found {}",
-                len
-            ))),
-        }
+        let row = sql_query_maybe_one(&client, sql.as_str(), &params, || {
+            ApiError::not_found_by_name(ApiResourceType::Project, project_name)
+        })
+        .await?;
+        Ok(ApiProject::try_from(&row)?)
     }
 
     /*
@@ -496,7 +468,14 @@ impl DataStore {
         )
         .await?;
 
-        let rows = sql_query(
+        /*
+         * If we get here, then we successfully inserted the record.  It would
+         * be a bug if something else were to remove that record before we have
+         * a chance to fetch it.  As a result, sql_query_always_one() is correct
+         * here, even though it looks like this query could legitimately return
+         * 0 rows.
+         */
+        let row = sql_query_always_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE id = $1",
@@ -515,25 +494,17 @@ impl DataStore {
             )
         })?;
 
-        match rows.len() {
-            1 => {
-                let instance = ApiInstance::try_from(&rows[0])?;
-                if instance.runtime.run_state != ApiInstanceState::Creating
-                    || instance.runtime.gen != 1
-                {
-                    Err(ApiError::internal_error(&format!(
-                        "creating instance: found existing instance with \
+        let instance = ApiInstance::try_from(&row)?;
+        if instance.runtime.run_state != ApiInstanceState::Creating
+            || instance.runtime.gen != 1
+        {
+            Err(ApiError::internal_error(&format!(
+                "creating instance: found existing instance with \
                         unexpected state ({:?}) or generation ({})",
-                        instance.runtime.run_state, instance.runtime.gen,
-                    )))
-                } else {
-                    Ok(instance)
-                }
-            }
-            len => Err(ApiError::internal_error(&format!(
-                "creating instance: expected one instance, found {}",
-                len
-            ))),
+                instance.runtime.run_state, instance.runtime.gen,
+            )))
+        } else {
+            Ok(instance)
         }
     }
 
@@ -565,7 +536,7 @@ impl DataStore {
         instance_id: &Uuid,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
@@ -575,20 +546,15 @@ impl DataStore {
             )
             .as_str(),
             &[&instance_id],
+            || {
+                ApiError::not_found_by_id(
+                    ApiResourceType::Instance,
+                    instance_id,
+                )
+            },
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => Ok(ApiInstance::try_from(&rows[0])?),
-            0 => Err(ApiError::not_found_by_id(
-                ApiResourceType::Instance,
-                instance_id,
-            )),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
-                len
-            ))),
-        }
+        .await?;
+        Ok(ApiInstance::try_from(&row)?)
     }
 
     pub async fn instance_fetch_by_name(
@@ -597,7 +563,7 @@ impl DataStore {
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
@@ -607,20 +573,15 @@ impl DataStore {
             )
             .as_str(),
             &[project_id, instance_name],
+            || {
+                ApiError::not_found_by_name(
+                    ApiResourceType::Instance,
+                    instance_name,
+                )
+            },
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => Ok(ApiInstance::try_from(&rows[0])?),
-            0 => Err(ApiError::not_found_by_name(
-                ApiResourceType::Instance,
-                instance_name,
-            )),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
-                len
-            ))),
-        }
+        .await?;
+        Ok(ApiInstance::try_from(&row)?)
     }
 
     pub async fn instance_update_runtime(
@@ -714,9 +675,6 @@ impl DataStore {
                 d.id as deleted_id \
                 FROM matching_rows i \
                 FULL OUTER JOIN deleted_ids d ON i.id = d.id";
-        let rows = sql_query(&client, sql, &[instance_id, &now])
-            .await
-            .map_err(sql_error_generic)?;
 
         /*
          * There are only three expected cases here:
@@ -735,30 +693,27 @@ impl DataStore {
          * one returned row), but they should not happen.  We treat these as
          * internal errors.
          */
-        if rows.is_empty() {
-            // XXX Is this the right place to produce this error?  Might the
-            // caller have already done a name-to-id translation?
-            return Err(ApiError::not_found_by_id(
-                ApiResourceType::Instance,
-                instance_id,
-            ));
-        }
+        // XXX Is this the right place to produce the NotFound error?  Might
+        // the caller have already done a name-to-id translation?
+        let row =
+            sql_query_maybe_one(&client, sql, &[instance_id, &now], || {
+                ApiError::not_found_by_id(
+                    ApiResourceType::Instance,
+                    instance_id,
+                )
+            })
+            .await?;
 
-        if rows.len() > 1 {
-            // XXX error context
-            return Err(ApiError::internal_error(
-                "unexpectedly got more than one row for conditional update",
-            ));
-        }
-
-        let found_id: Uuid = sql_row_value(&rows[0], "found_id")?;
-        let previous_state_str: &str =
-            sql_row_value(&rows[0], "previous_state")?;
+        let found_id: Uuid = sql_row_value(&row, "found_id")?;
+        let previous_state_str: &str = sql_row_value(&row, "previous_state")?;
         let previous_state: ApiInstanceState = previous_state_str.parse()?;
-        let deleted_id: Option<Uuid> = sql_row_value(&rows[0], "deleted_id")?;
+        let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
         // TODO-cleanup would a sql_assert! macro help here?
         if found_id != *instance_id {
-            // XXX error context
+            // XXX error context -- as I look at this, would this (and some of
+            // the other cases) be simpler if the return value of query()
+            // included the SQL and a way to generate errors that referenced the
+            // SQL?
             return Err(ApiError::internal_error(&format!(
                 "unexpected instance found (expected id {}, found {})",
                 instance_id, found_id,
@@ -858,7 +813,14 @@ impl DataStore {
         )
         .await?;
 
-        let rows = sql_query(
+        /*
+         * If we get here, then we successfully inserted the record.  It would
+         * be a bug if something else were to remove that record before we have
+         * a chance to fetch it.  As a result, sql_query_always_one() is correct
+         * here, even though it looks like this query could legitimately return
+         * 0 rows.
+         */
+        let row = sql_query_always_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE id = $1",
@@ -877,25 +839,17 @@ impl DataStore {
             )
         })?;
 
-        match rows.len() {
-            1 => {
-                let disk = ApiDisk::try_from(&rows[0])?;
-                if disk.runtime.disk_state != ApiDiskState::Creating
-                    || disk.runtime.gen != 1
-                {
-                    Err(ApiError::internal_error(&format!(
-                        "creating disk: found existing disk with \
+        let disk = ApiDisk::try_from(&row)?;
+        if disk.runtime.disk_state != ApiDiskState::Creating
+            || disk.runtime.gen != 1
+        {
+            Err(ApiError::internal_error(&format!(
+                "creating disk: found existing disk with \
                         unexpected state ({:?}) or generation ({})",
-                        disk.runtime.disk_state, disk.runtime.gen,
-                    )))
-                } else {
-                    Ok(disk)
-                }
-            }
-            len => Err(ApiError::internal_error(&format!(
-                "creating disk: expected one disk, found {}",
-                len
-            ))),
+                disk.runtime.disk_state, disk.runtime.gen,
+            )))
+        } else {
+            Ok(disk)
         }
     }
 
@@ -968,7 +922,7 @@ impl DataStore {
     /* XXX commonize with instance version */
     pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
@@ -978,17 +932,10 @@ impl DataStore {
             )
             .as_str(),
             &[&disk_id],
+            || ApiError::not_found_by_id(ApiResourceType::Disk, disk_id),
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => Ok(ApiDisk::try_from(&rows[0])?),
-            0 => Err(ApiError::not_found_by_id(ApiResourceType::Disk, disk_id)),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
-                len
-            ))),
-        }
+        .await?;
+        Ok(ApiDisk::try_from(&row)?)
     }
 
     /* XXX commonize with instance version */
@@ -998,7 +945,7 @@ impl DataStore {
         disk_name: &ApiName,
     ) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let rows = sql_query(
+        let row = sql_query_maybe_one(
             &client,
             format!(
                 "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
@@ -1008,20 +955,10 @@ impl DataStore {
             )
             .as_str(),
             &[project_id, disk_name],
+            || ApiError::not_found_by_name(ApiResourceType::Disk, disk_name),
         )
-        .await
-        .map_err(sql_error_generic)?;
-        match rows.len() {
-            1 => Ok(ApiDisk::try_from(&rows[0])?),
-            0 => Err(ApiError::not_found_by_name(
-                ApiResourceType::Disk,
-                disk_name,
-            )),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row from database query, but found {}",
-                len
-            ))),
-        }
+        .await?;
+        Ok(ApiDisk::try_from(&row)?)
     }
 
     /* XXX commonize with instance version */
@@ -1046,35 +983,22 @@ impl DataStore {
                 d.id as deleted_id \
                 FROM matching_rows i \
                 FULL OUTER JOIN deleted_ids d ON i.id = d.id";
-        let rows = sql_query(&client, sql, &[disk_id, &now])
-            .await
-            .map_err(sql_error_generic)?;
+        // XXX Is this the right place to produce the NotFound error?  Might
+        // the caller have already done a name-to-id translation?
 
-        if rows.is_empty() {
-            // XXX Is this the right place to produce this error?  Might the
-            // caller have already done a name-to-id translation?
-            return Err(ApiError::not_found_by_id(
-                ApiResourceType::Disk,
-                disk_id,
-            ));
-        }
+        let row = sql_query_maybe_one(&client, sql, &[disk_id, &now], || {
+            ApiError::not_found_by_id(ApiResourceType::Disk, disk_id)
+        })
+        .await?;
 
-        if rows.len() > 1 {
-            // XXX error context
-            return Err(ApiError::internal_error(
-                "unexpectedly got more than one row for conditional update",
-            ));
-        }
-
-        let found_id: Uuid = sql_row_value(&rows[0], "found_id")?;
-        let previous_state_str: &str =
-            sql_row_value(&rows[0], "previous_state")?;
+        let found_id: Uuid = sql_row_value(&row, "found_id")?;
+        let previous_state_str: &str = sql_row_value(&row, "previous_state")?;
         let attached_instance_id: Option<Uuid> =
-            sql_row_value(&rows[0], "attach_instance_id")?;
+            sql_row_value(&row, "attach_instance_id")?;
         let previous_state: ApiDiskState =
             ApiDiskState::try_from((previous_state_str, attached_instance_id))
                 .map_err(|e| ApiError::internal_error(&e))?;
-        let deleted_id: Option<Uuid> = sql_row_value(&rows[0], "deleted_id")?;
+        let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
         // TODO-cleanup would a sql_assert! macro help here?
         if found_id != *disk_id {
             // XXX error context
@@ -1262,6 +1186,45 @@ async fn sql_query(
 }
 
 /**
+ * Like [`sql_query()`], but produces an error unless exactly one row is
+ * returned.
+ */
+async fn sql_query_always_one(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<tokio_postgres::Row, DbError> {
+    sql_query(client, sql, params).await.and_then(|mut rows| match rows.len() {
+        1 => Ok(rows.pop().unwrap()),
+        nrows_found => {
+            Err(DbError::BadRowCount { sql: sql.to_owned(), nrows_found })
+        }
+    })
+}
+
+/**
+ * XXX?
+ */
+/* XXX TODO-debugging can we include the SQL in the ApiError */
+async fn sql_query_maybe_one(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+    mkzerror: impl Fn() -> ApiError,
+) -> Result<tokio_postgres::Row, ApiError> {
+    sql_query(client, sql, params).await.map_err(sql_error_generic).and_then(
+        |mut rows| match rows.len() {
+            1 => Ok(rows.pop().unwrap()),
+            0 => Err(mkzerror()),
+            nrows_found => Err(sql_error_generic(DbError::BadRowCount {
+                sql: sql.to_owned(),
+                nrows_found,
+            })),
+        },
+    )
+}
+
+/**
  * Wrapper around [`tokio_postgres::Client::execute`] that produces errors
  * that include the SQL.
  */
@@ -1342,21 +1305,12 @@ where
         all_columns_str
     );
     async move {
-        let rows =
-            sql_query(client, sql.as_str(), values).await.map_err(|e| {
-                sql_error_on_create(T::RESOURCE_TYPE, unique_value, e)
-            })?;
-        let row = match rows.len() {
-            1 => &rows[0],
-            len => {
-                return Err(ApiError::internal_error(&format!(
-                    "expected 1 row from INSERT query, but found {}",
-                    len
-                )))
-            }
-        };
+        let row =
+            sql_query_always_one(client, sql.as_str(), values).await.map_err(
+                |e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e),
+            )?;
 
-        T::ApiModelType::try_from(row)
+        T::ApiModelType::try_from(&row)
     }
 }
 
