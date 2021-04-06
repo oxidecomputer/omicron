@@ -55,7 +55,7 @@ enum DbError {
     DeserializeError { column_name: String, source: tokio_postgres::Error },
 
     #[error("executing {sql:?}: expected one row, but found {nrows_found}")]
-    BadRowCount { sql: String, nrows_found: usize },
+    BadRowCount { sql: String, nrows_found: u64 },
 }
 
 impl DbError {
@@ -181,7 +181,7 @@ impl DataStore {
          */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        let nrows = sql_execute(
+        sql_execute_maybe_one(
             &client,
             format!(
                 "UPDATE {} SET time_deleted = $1 WHERE \
@@ -192,21 +192,14 @@ impl DataStore {
             )
             .as_str(),
             &[&now, &project_name],
+            || {
+                ApiError::not_found_by_name(
+                    ApiResourceType::Project,
+                    project_name,
+                )
+            },
         )
         .await
-        .map_err(sql_error_generic)?;
-        /* TODO-log log the returned row(s) */
-        match nrows {
-            1 => Ok(()),
-            0 => Err(ApiError::not_found_by_name(
-                ApiResourceType::Project,
-                project_name,
-            )),
-            len => Err(ApiError::internal_error(&format!(
-                "expected at most one row updated, found {}",
-                len
-            ))),
-        }
     }
 
     /// Look up the id for a project based on its name
@@ -588,7 +581,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         new_runtime: &ApiInstanceRuntimeState,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<(), ApiError> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -601,7 +594,7 @@ impl DataStore {
          * the current state explicitly.  For now, we'll just require consumers
          * to explicitly fetch the state if they want that.
          */
-        let nupdated = sql_execute(
+        sql_execute_maybe_one(
             &client,
             format!(
                 "UPDATE {} SET \
@@ -620,18 +613,14 @@ impl DataStore {
                 &now,
                 instance_id,
             ],
+            || {
+                ApiError::not_found_by_id(
+                    ApiResourceType::Instance,
+                    instance_id,
+                )
+            },
         )
         .await
-        .map_err(sql_error_generic)?;
-
-        if nupdated > 1 {
-            return Err(ApiError::internal_error(&format!(
-                "unexpected number of rows updated by UPDATE query: {}",
-                nupdated
-            )));
-        }
-
-        Ok(nupdated == 1)
     }
 
     pub async fn project_delete_instance(
@@ -881,12 +870,12 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
         new_runtime: &ApiDiskRuntimeState,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<(), ApiError> {
         /* XXX See and commonize with instance_update_runtime() */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let nupdated = sql_execute(
+        sql_execute_maybe_one(
             &client,
             format!(
                 "UPDATE {} SET \
@@ -905,18 +894,9 @@ impl DataStore {
                 &now,
                 disk_id,
             ],
+            || ApiError::not_found_by_id(ApiResourceType::Disk, disk_id),
         )
         .await
-        .map_err(sql_error_generic)?;
-
-        if nupdated > 1 {
-            return Err(ApiError::internal_error(&format!(
-                "unexpected number of rows updated by UPDATE query: {}",
-                nupdated
-            )));
-        }
-
-        Ok(nupdated == 1)
     }
 
     /* XXX commonize with instance version */
@@ -1197,7 +1177,10 @@ async fn sql_query_always_one(
     sql_query(client, sql, params).await.and_then(|mut rows| match rows.len() {
         1 => Ok(rows.pop().unwrap()),
         nrows_found => {
-            Err(DbError::BadRowCount { sql: sql.to_owned(), nrows_found })
+            Err(DbError::BadRowCount {
+                sql: sql.to_owned(),
+                nrows_found: u64::try_from(nrows_found).unwrap(), // XXX
+            })
         }
     })
 }
@@ -1218,7 +1201,7 @@ async fn sql_query_maybe_one(
             0 => Err(mkzerror()),
             nrows_found => Err(sql_error_generic(DbError::BadRowCount {
                 sql: sql.to_owned(),
-                nrows_found,
+                nrows_found: u64::try_from(nrows_found).unwrap(), // XXX
             })),
         },
     )
@@ -1238,6 +1221,28 @@ async fn sql_execute(
         .execute(sql, params)
         .await
         .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
+}
+
+/**
+ * XXX?
+ */
+/* XXX TODO-debugging can we include the SQL in the ApiError */
+async fn sql_execute_maybe_one(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+    mkzerror: impl Fn() -> ApiError,
+) -> Result<(), ApiError> {
+    sql_execute(client, sql, params).await.map_err(sql_error_generic).and_then(
+        |nrows| match nrows {
+            1 => Ok(()),
+            0 => Err(mkzerror()),
+            nrows_found => Err(sql_error_generic(DbError::BadRowCount {
+                sql: sql.to_owned(),
+                nrows_found,
+            })),
+        },
+    )
 }
 
 /**

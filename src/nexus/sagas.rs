@@ -150,6 +150,5 @@ async fn sic_instance_ensure(
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime_state)
         .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
+        .map_err(ActionError::action_failed)
 }

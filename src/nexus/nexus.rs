@@ -692,8 +692,7 @@ impl Nexus {
 
         self.db_datastore
             .instance_update_runtime(&instance.identity.id, &new_runtime)
-            .await?;
-        Ok(())
+            .await
     }
 
     /**
@@ -961,8 +960,7 @@ impl Nexus {
             .await?;
         self.db_datastore
             .disk_update_runtime(&disk.identity.id, &new_runtime)
-            .await?;
-        Ok(())
+            .await
     }
 
     /*
@@ -1078,8 +1076,6 @@ impl Nexus {
             /*
              * If the instance doesn't exist, swallow the error -- there's
              * nothing to do here.
-             * XXX It's not clear that we can even get here any more because
-             * instance_update_runtime() does not distinguish this error.
              * TODO-robustness This could only be possible if we've removed an
              * Instance from the datastore altogether.  When would we do that?
              * We don't want to do it as soon as something's destroyed, I think,
