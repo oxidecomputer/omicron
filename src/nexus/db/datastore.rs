@@ -36,11 +36,33 @@ use chrono::Utc;
 use futures::StreamExt;
 use std::convert::TryFrom;
 use std::convert::TryInto;
+use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
-use tokio_postgres::row::Row;
+use thiserror::Error;
+use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
+
+// XXX How can we include a backtrace here the way thiserror does
+// automatically?
+#[derive(Error, Debug)]
+enum DbError {
+    #[error("executing {sql:?}")]
+    SqlError { sql: String, source: tokio_postgres::Error },
+
+    #[error("extracting column {column_name:?} from row")]
+    DeserializeError { column_name: String, source: tokio_postgres::Error },
+}
+
+impl DbError {
+    pub fn db_source(&self) -> Option<&tokio_postgres::Error> {
+        match self {
+            DbError::SqlError { ref source, .. } => Some(source),
+            DbError::DeserializeError { ref source, .. } => Some(source),
+        }
+    }
+}
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -83,19 +105,19 @@ impl DataStore {
         project_name: &ApiName,
     ) -> LookupResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
                         name = $1 LIMIT 2",
-                    Project::ALL_COLUMNS.join(", "),
-                    Project::TABLE_NAME
-                )
-                .as_str(),
-                &[&project_name],
+                Project::ALL_COLUMNS.join(", "),
+                Project::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[&project_name],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
             1 => Ok(ApiProject::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_name(
@@ -160,20 +182,20 @@ impl DataStore {
          */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        let nrows = client
-            .execute(
-                format!(
-                    "UPDATE {} SET time_deleted = $1 WHERE \
+        let nrows = sql_execute(
+            &client,
+            format!(
+                "UPDATE {} SET time_deleted = $1 WHERE \
                     time_deleted IS NULL AND name = $2 LIMIT 2 \
                     RETURNING {}",
-                    Project::TABLE_NAME,
-                    Project::ALL_COLUMNS.join(", ")
-                )
-                .as_str(),
-                &[&now, &project_name],
+                Project::TABLE_NAME,
+                Project::ALL_COLUMNS.join(", ")
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[&now, &project_name],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         /* TODO-log log the returned row(s) */
         match nrows {
             1 => Ok(()),
@@ -195,20 +217,20 @@ impl DataStore {
     ) -> Result<Uuid, ApiError> {
         let client = self.pool.acquire().await?;
 
-        let rows = client
-            .query(
-                format!(
-                    "SELECT id FROM {} WHERE name = $1 AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT id FROM {} WHERE name = $1 AND \
                         time_deleted IS NULL LIMIT 2",
-                    Project::TABLE_NAME
-                )
-                .as_str(),
-                &[&name],
+                Project::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[&name],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
-            1 => Ok(rows[0].try_get(0).map_err(sql_error)?),
+            1 => sql_row_value(&rows[0], 0),
             0 => {
                 Err(ApiError::not_found_by_name(ApiResourceType::Project, name))
             }
@@ -301,9 +323,14 @@ impl DataStore {
         ));
         params.push(project_name);
 
-        let rows = client.query(sql.as_str(), &params).await.map_err(|e| {
-            sql_error_create(Project::RESOURCE_TYPE, project_name.as_str(), e)
-        })?;
+        let rows =
+            sql_query(&client, sql.as_str(), &params).await.map_err(|e| {
+                sql_error_on_create(
+                    Project::RESOURCE_TYPE,
+                    project_name.as_str(),
+                    e,
+                )
+            })?;
         match rows.len() {
             0 => Err(ApiError::not_found_by_name(
                 ApiResourceType::Project,
@@ -469,24 +496,24 @@ impl DataStore {
         )
         .await?;
 
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE id = $1",
-                    Instance::ALL_COLUMNS.join(", "),
-                    Instance::TABLE_NAME,
-                )
-                .as_str(),
-                &[instance_id],
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE id = $1",
+                Instance::ALL_COLUMNS.join(", "),
+                Instance::TABLE_NAME,
             )
-            .await
-            .map_err(|e| {
-                sql_error_create(
-                    ApiResourceType::Instance,
-                    &params.identity.name.as_str(),
-                    e,
-                )
-            })?;
+            .as_str(),
+            &[instance_id],
+        )
+        .await
+        .map_err(|e| {
+            sql_error_on_create(
+                ApiResourceType::Instance,
+                &params.identity.name.as_str(),
+                e,
+            )
+        })?;
 
         match rows.len() {
             1 => {
@@ -538,19 +565,19 @@ impl DataStore {
         instance_id: &Uuid,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
                         id = $1 LIMIT 2",
-                    Instance::ALL_COLUMNS.join(", "),
-                    Instance::TABLE_NAME
-                )
-                .as_str(),
-                &[&instance_id],
+                Instance::ALL_COLUMNS.join(", "),
+                Instance::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[&instance_id],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
             1 => Ok(ApiInstance::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_id(
@@ -570,19 +597,19 @@ impl DataStore {
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
                         project_id = $1 AND name = $2 LIMIT 2",
-                    Instance::ALL_COLUMNS.join(", "),
-                    Instance::TABLE_NAME
-                )
-                .as_str(),
-                &[project_id, instance_name],
+                Instance::ALL_COLUMNS.join(", "),
+                Instance::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[project_id, instance_name],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
             1 => Ok(ApiInstance::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_name(
@@ -613,28 +640,28 @@ impl DataStore {
          * the current state explicitly.  For now, we'll just require consumers
          * to explicitly fetch the state if they want that.
          */
-        let nupdated = client
-            .execute(
-                format!(
-                    "UPDATE {} SET \
+        let nupdated = sql_execute(
+            &client,
+            format!(
+                "UPDATE {} SET \
                         instance_state = $1, \
                         state_generation = $2, \
                         active_server_id = $3, \
                         time_state_updated = $4 \
                     WHERE id = $5 AND state_generation < $2 LIMIT 2",
-                    Instance::TABLE_NAME,
-                )
-                .as_str(),
-                &[
-                    &new_runtime.run_state.to_string(),
-                    &(new_runtime.gen as i64),
-                    &new_runtime.sled_uuid,
-                    &now,
-                    instance_id,
-                ],
+                Instance::TABLE_NAME,
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[
+                &new_runtime.run_state.to_string(),
+                &(new_runtime.gen as i64),
+                &new_runtime.sled_uuid,
+                &now,
+                instance_id,
+            ],
+        )
+        .await
+        .map_err(sql_error_generic)?;
 
         if nupdated > 1 {
             return Err(ApiError::internal_error(&format!(
@@ -687,8 +714,9 @@ impl DataStore {
                 d.id as deleted_id \
                 FROM matching_rows i \
                 FULL OUTER JOIN deleted_ids d ON i.id = d.id";
-        let rows =
-            client.query(sql, &[instance_id, &now]).await.map_err(sql_error)?;
+        let rows = sql_query(&client, sql, &[instance_id, &now])
+            .await
+            .map_err(sql_error_generic)?;
 
         /*
          * There are only three expected cases here:
@@ -723,12 +751,11 @@ impl DataStore {
             ));
         }
 
-        let found_id: Uuid = rows[0].try_get("found_id").map_err(sql_error)?;
+        let found_id: Uuid = sql_row_value(&rows[0], "found_id")?;
         let previous_state_str: &str =
-            rows[0].try_get("previous_state").map_err(sql_error)?;
+            sql_row_value(&rows[0], "previous_state")?;
         let previous_state: ApiInstanceState = previous_state_str.parse()?;
-        let deleted_id: Option<Uuid> =
-            rows[0].try_get("deleted_id").map_err(sql_error)?;
+        let deleted_id: Option<Uuid> = sql_row_value(&rows[0], "deleted_id")?;
         // TODO-cleanup would a sql_assert! macro help here?
         if found_id != *instance_id {
             // XXX error context
@@ -831,24 +858,24 @@ impl DataStore {
         )
         .await?;
 
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE id = $1",
-                    Disk::ALL_COLUMNS.join(", "),
-                    Disk::TABLE_NAME,
-                )
-                .as_str(),
-                &[disk_id],
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE id = $1",
+                Disk::ALL_COLUMNS.join(", "),
+                Disk::TABLE_NAME,
             )
-            .await
-            .map_err(|e| {
-                sql_error_create(
-                    ApiResourceType::Disk,
-                    &params.identity.name.as_str(),
-                    e,
-                )
-            })?;
+            .as_str(),
+            &[disk_id],
+        )
+        .await
+        .map_err(|e| {
+            sql_error_on_create(
+                ApiResourceType::Disk,
+                &params.identity.name.as_str(),
+                e,
+            )
+        })?;
 
         match rows.len() {
             1 => {
@@ -905,28 +932,28 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let nupdated = client
-            .execute(
-                format!(
-                    "UPDATE {} SET \
+        let nupdated = sql_execute(
+            &client,
+            format!(
+                "UPDATE {} SET \
                         disk_state = $1, \
                         state_generation = $2, \
                         attach_instance_id = $3, \
                         time_state_updated = $4 \
                     WHERE id = $5 AND state_generation < $2 LIMIT 2",
-                    Disk::TABLE_NAME,
-                )
-                .as_str(),
-                &[
-                    &new_runtime.disk_state.to_string(),
-                    &(new_runtime.gen as i64), // XXX (and instance analog)
-                    &new_runtime.disk_state.attached_instance_id(),
-                    &now,
-                    disk_id,
-                ],
+                Disk::TABLE_NAME,
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[
+                &new_runtime.disk_state.to_string(),
+                &(new_runtime.gen as i64), // XXX (and instance analog)
+                &new_runtime.disk_state.attached_instance_id(),
+                &now,
+                disk_id,
+            ],
+        )
+        .await
+        .map_err(sql_error_generic)?;
 
         if nupdated > 1 {
             return Err(ApiError::internal_error(&format!(
@@ -941,19 +968,19 @@ impl DataStore {
     /* XXX commonize with instance version */
     pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
                         id = $1 LIMIT 2",
-                    Disk::ALL_COLUMNS.join(", "),
-                    Disk::TABLE_NAME
-                )
-                .as_str(),
-                &[&disk_id],
+                Disk::ALL_COLUMNS.join(", "),
+                Disk::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[&disk_id],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
             1 => Ok(ApiDisk::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_id(ApiResourceType::Disk, disk_id)),
@@ -971,19 +998,19 @@ impl DataStore {
         disk_name: &ApiName,
     ) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let rows = client
-            .query(
-                format!(
-                    "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
+        let rows = sql_query(
+            &client,
+            format!(
+                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
                         project_id = $1 AND name = $2 LIMIT 2",
-                    Disk::ALL_COLUMNS.join(", "),
-                    Disk::TABLE_NAME
-                )
-                .as_str(),
-                &[project_id, disk_name],
+                Disk::ALL_COLUMNS.join(", "),
+                Disk::TABLE_NAME
             )
-            .await
-            .map_err(sql_error)?;
+            .as_str(),
+            &[project_id, disk_name],
+        )
+        .await
+        .map_err(sql_error_generic)?;
         match rows.len() {
             1 => Ok(ApiDisk::try_from(&rows[0])?),
             0 => Err(ApiError::not_found_by_name(
@@ -1019,8 +1046,9 @@ impl DataStore {
                 d.id as deleted_id \
                 FROM matching_rows i \
                 FULL OUTER JOIN deleted_ids d ON i.id = d.id";
-        let rows =
-            client.query(sql, &[disk_id, &now]).await.map_err(sql_error)?;
+        let rows = sql_query(&client, sql, &[disk_id, &now])
+            .await
+            .map_err(sql_error_generic)?;
 
         if rows.is_empty() {
             // XXX Is this the right place to produce this error?  Might the
@@ -1038,16 +1066,15 @@ impl DataStore {
             ));
         }
 
-        let found_id: Uuid = rows[0].try_get("found_id").map_err(sql_error)?;
+        let found_id: Uuid = sql_row_value(&rows[0], "found_id")?;
         let previous_state_str: &str =
-            rows[0].try_get("previous_state").map_err(sql_error)?;
+            sql_row_value(&rows[0], "previous_state")?;
         let attached_instance_id: Option<Uuid> =
-            rows[0].try_get("attach_instance_id").map_err(sql_error)?;
+            sql_row_value(&rows[0], "attach_instance_id")?;
         let previous_state: ApiDiskState =
             ApiDiskState::try_from((previous_state_str, attached_instance_id))
                 .map_err(|e| ApiError::internal_error(&e))?;
-        let deleted_id: Option<Uuid> =
-            rows[0].try_get("deleted_id").map_err(sql_error)?;
+        let deleted_id: Option<Uuid> = sql_row_value(&rows[0], "deleted_id")?;
         // TODO-cleanup would a sql_assert! macro help here?
         if found_id != *disk_id {
             // XXX error context
@@ -1078,28 +1105,34 @@ impl DataStore {
 }
 
 /* XXX Should this be From<>?  May want more context */
-fn sql_error(e: tokio_postgres::Error) -> ApiError {
-    match e.code() {
-        None => ApiError::InternalError {
-            message: format!("unexpected database error: {}", e.to_string()),
-        },
-        Some(code) => ApiError::InternalError {
-            message: format!(
-                "unexpected database error (code {}): {}",
-                code.code(),
-                e.to_string()
-            ),
-        },
-    }
+fn sql_error_generic(e: DbError) -> ApiError {
+    let extra = match e.db_source().and_then(|s| s.code()) {
+        Some(code) => format!(" (code {})", code.code()),
+        None => String::new(),
+    };
+
+    /*
+     * TODO-debuggability it would be nice to preserve the DbError here
+     * so that the SQL is visible in the log.
+     */
+    ApiError::internal_error(&format!(
+        "unexpected database error{}: {}",
+        extra,
+        e.to_string()
+    ))
 }
 
-fn sql_error_create(
+fn sql_error_on_create(
     rtype: ApiResourceType,
     unique_value: &str,
-    e: tokio_postgres::Error,
+    e: DbError,
 ) -> ApiError {
-    if let Some(code) = e.code() {
+    if let Some(code) = e.db_source().and_then(|s| s.code()) {
         if *code == tokio_postgres::error::SqlState::UNIQUE_VIOLATION {
+            /*
+             * TODO-debuggability it would be nice to preserve the DbError here
+             * so that the SQL is visible in the log.
+             */
             return ApiError::ObjectAlreadyExists {
                 type_name: rtype,
                 object_name: unique_value.to_owned(),
@@ -1107,7 +1140,7 @@ fn sql_error_create(
         }
     }
 
-    sql_error(e)
+    sql_error_generic(e)
 }
 
 /*
@@ -1125,7 +1158,7 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     base_params: &'a [&'a (dyn ToSql + Sync)],
     column_name: &'static str,
     pagparams: &'a DataPageParams<'a, K>,
-) -> impl Future<Output = Result<Vec<Row>, ApiError>> + 'a {
+) -> impl Future<Output = Result<Vec<tokio_postgres::Row>, ApiError>> + 'a {
     let (operator, order) = match pagparams.direction {
         dropshot::PaginationOrder::Ascending => (">", "ASC"),
         dropshot::PaginationOrder::Descending => ("<", "DESC"),
@@ -1153,7 +1186,7 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
                 order,
                 params.len(),
             );
-            client.query(sql.as_str(), &params.as_slice()).await
+            sql_query(&client, sql.as_str(), &params.as_slice()).await
         } else {
             let mut params = base_params.to_vec();
             params.push(&limit);
@@ -1164,10 +1197,10 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
                 order,
                 params.len(),
             );
-            client.query(sql.as_str(), &params.as_slice()).await
+            sql_query(client, sql.as_str(), &params.as_slice()).await
         };
 
-        query_result.map_err(sql_error)
+        query_result.map_err(sql_error_generic)
     }
 }
 
@@ -1203,6 +1236,62 @@ impl ToSql for ApiName {
     > {
         self.as_str().to_sql_checked(ty, out)
     }
+}
+
+/**
+ * Wrapper around [`tokio_postgres::Client::query`] that produces errors
+ * that include the SQL.
+ */
+/*
+ * XXX TODO-debugging It would be really, really valuable to include the
+ * query parameters here as well.  However, the only thing we can do with
+ * ToSql is to serialize it to a PostgreSQL type (as a string of bytes).
+ * We could require that these impl some trait that also provides Debug, and
+ * then we could use that.  Or we could find a way to parse the resulting
+ * PostgreSQL value and print _that_ out as a String somehow?
+ */
+async fn sql_query(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<Vec<tokio_postgres::Row>, DbError> {
+    client
+        .query(sql, params)
+        .await
+        .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
+}
+
+/**
+ * Wrapper around [`tokio_postgres::Client::execute`] that produces errors
+ * that include the SQL.
+ */
+/* XXX TODO-debugging See sql_query(). */
+async fn sql_execute(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<u64, DbError> {
+    client
+        .execute(sql, params)
+        .await
+        .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
+}
+
+/**
+ * Extract a named field from a row.
+ */
+fn sql_row_value<'a, I, T>(
+    row: &'a tokio_postgres::Row,
+    idx: I,
+) -> Result<T, ApiError>
+where
+    I: tokio_postgres::row::RowIndex + fmt::Display,
+    T: FromSql<'a>,
+{
+    let column_name = idx.to_string();
+    row.try_get(idx).map_err(|source| {
+        sql_error_generic(DbError::DeserializeError { column_name, source })
+    })
 }
 
 /**
@@ -1253,10 +1342,10 @@ where
         all_columns_str
     );
     async move {
-        let rows = client
-            .query(sql.as_str(), values)
-            .await
-            .map_err(|e| sql_error_create(T::RESOURCE_TYPE, unique_value, e))?;
+        let rows =
+            sql_query(client, sql.as_str(), values).await.map_err(|e| {
+                sql_error_on_create(T::RESOURCE_TYPE, unique_value, e)
+            })?;
         let row = match rows.len() {
             1 => &rows[0],
             len => {
@@ -1275,8 +1364,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX really need some kind of context for these errors
-        let name_str: &str = value.try_get("name").map_err(sql_error)?;
+        let name_str: &str = sql_row_value(value, "name")?;
         let name = ApiName::try_from(name_str).map_err(|e| {
             ApiError::internal_error(&format!(
                 "database project.name {:?}: {}",
@@ -1285,14 +1373,12 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
         })?;
         // XXX What to do with non-NULL time_deleted?
         Ok(ApiIdentityMetadata {
-            id: value.try_get("id").map_err(sql_error)?,
+            id: sql_row_value(value, "id")?,
             name,
-            description: value.try_get("description").map_err(sql_error)?,
-            time_created: value.try_get("time_created").map_err(sql_error)?,
+            description: sql_row_value(value, "description")?,
+            time_created: sql_row_value(value, "time_created")?,
             // XXX is it time_updated or time_metadata_updated
-            time_modified: value
-                .try_get("time_metadata_updated")
-                .map_err(sql_error)?,
+            time_modified: sql_row_value(value, "time_metadata_updated")?,
         })
     }
 }
@@ -1304,7 +1390,10 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
  * case, even though we do it a lot for basic CRUD.
  */
 trait Table {
-    type ApiModelType: for<'a> TryFrom<&'a Row, Error = ApiError>;
+    type ApiModelType: for<'a> TryFrom<
+        &'a tokio_postgres::Row,
+        Error = ApiError,
+    >;
     const RESOURCE_TYPE: ApiResourceType;
     const TABLE_NAME: &'static str;
     const ALL_COLUMNS: &'static [&'static str];
@@ -1364,19 +1453,18 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX really need some kind of context for these errors
         let identity = ApiIdentityMetadata::try_from(value)?;
         let runtime = ApiInstanceRuntimeState::try_from(value)?;
-        let memory_mib: i64 = value.try_get("memory_mib").map_err(sql_error)?;
-        let ncpus: i64 = value.try_get("ncpus").map_err(sql_error)?;
+        let memory_mib: i64 = sql_row_value(value, "memory_mib")?;
+        let ncpus: i64 = sql_row_value(value, "ncpus")?;
 
         // XXX What to do with non-NULL time_deleted?
         Ok(ApiInstance {
             identity,
-            project_id: value.try_get("project_id").map_err(sql_error)?,
+            project_id: sql_row_value(value, "project_id")?,
             ncpus: ApiInstanceCpuCount(ncpus as u16), // XXX
             memory: ApiByteCount::from_mebibytes(memory_mib as u64),
-            hostname: value.try_get("hostname").map_err(sql_error)?,
+            hostname: sql_row_value(value, "hostname")?,
             runtime,
             boot_disk_size: ApiByteCount::from_bytes(0), // XXX
         })
@@ -1387,14 +1475,12 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let run_state_str: &str =
-            value.try_get("instance_state").map_err(sql_error)?;
+        let run_state_str: &str = sql_row_value(value, "instance_state")?;
         let run_state: ApiInstanceState = run_state_str.parse()?;
         let time_updated: chrono::DateTime<chrono::Utc> =
-            value.try_get("time_state_updated").map_err(sql_error)?;
-        let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
-        let sled_uuid: Uuid =
-            value.try_get("active_server_id").map_err(sql_error)?;
+            sql_row_value(value, "time_state_updated")?;
+        let gen: i64 = sql_row_value(value, "state_generation")?;
+        let sled_uuid: Uuid = sql_row_value(value, "active_server_id")?;
 
         Ok(ApiInstanceRuntimeState {
             run_state,
@@ -1434,15 +1520,14 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let identity = ApiIdentityMetadata::try_from(value)?;
 
-        let size: i64 = value.try_get("size_bytes").map_err(sql_error)?;
-        let origin: Option<Uuid> =
-            value.try_get("origin_snapshot").map_err(sql_error)?;
+        let size: i64 = sql_row_value(value, "size_bytes")?;
+        let origin: Option<Uuid> = sql_row_value(value, "origin_snapshot")?;
         let runtime = ApiDiskRuntimeState::try_from(value)?;
 
         // XXX What to do with non-NULL time_deleted?
         Ok(ApiDisk {
             identity,
-            project_id: value.try_get("project_id").map_err(sql_error)?,
+            project_id: sql_row_value(value, "project_id")?,
             create_snapshot_id: origin,
             size: ApiByteCount::from_bytes(size.try_into().unwrap()), // XXX
             runtime: runtime,
@@ -1454,16 +1539,15 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let disk_state_str: &str =
-            value.try_get("disk_state").map_err(sql_error)?;
+        let disk_state_str: &str = sql_row_value(value, "disk_state")?;
         let instance_uuid: Option<Uuid> =
-            value.try_get("attach_instance_id").map_err(sql_error)?;
+            sql_row_value(value, "attach_instance_id")?;
         let disk_state =
             ApiDiskState::try_from((disk_state_str, instance_uuid))
                 .map_err(|e| ApiError::internal_error(&e))?;
-        let gen: i64 = value.try_get("state_generation").map_err(sql_error)?;
+        let gen: i64 = sql_row_value(value, "state_generation")?;
         let time_updated: chrono::DateTime<chrono::Utc> =
-            value.try_get("time_state_updated").map_err(sql_error)?;
+            sql_row_value(value, "time_state_updated")?;
         Ok(ApiDiskRuntimeState {
             disk_state,
             gen: gen.try_into().unwrap(), // XXX`
