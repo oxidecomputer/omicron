@@ -31,6 +31,7 @@ use crate::api_model::DeleteResult;
 use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
+use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
@@ -636,24 +637,11 @@ impl DataStore {
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         let previous_gen: i64 = sql_row_value(&row, "initial_generation")?;
         let updated_id: Option<Uuid> = sql_row_value(&row, "updated_id")?;
-        // XXX sql_assert!
-        if found_id != *instance_id {
-            return Err(ApiError::internal_error(&format!(
-                "instance runtime update: unexpected instance found \
-                (expected id {}, found {})",
-                instance_id, found_id
-            )));
-        }
+        bail_unless!(found_id == *instance_id);
 
         if let Some(uid) = updated_id {
-            if uid != *instance_id {
-                Err(ApiError::internal_error(&format!(
-                    "unexpected instance updated (expected id {}, found {})",
-                    instance_id, uid,
-                )))
-            } else {
-                Ok(true)
-            }
+            bail_unless!(uid == *instance_id);
+            Ok(true)
         } else {
             // XXX log
             Ok(false)
@@ -734,27 +722,14 @@ impl DataStore {
         let previous_state_str: &str = sql_row_value(&row, "previous_state")?;
         let previous_state: ApiInstanceState = previous_state_str.parse()?;
         let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
-        // TODO-cleanup would a sql_assert! macro help here?
-        if found_id != *instance_id {
-            // XXX error context -- as I look at this, would this (and some of
-            // the other cases) be simpler if the return value of query()
-            // included the SQL and a way to generate errors that referenced the
-            // SQL?
-            return Err(ApiError::internal_error(&format!(
-                "unexpected instance found (expected id {}, found {})",
-                instance_id, found_id,
-            )));
-        }
-
+        // XXX error context -- as I look at this, would this (and some of
+        // the other cases) be simpler if the return value of query()
+        // included the SQL and a way to generate errors that referenced the
+        // SQL?
+        bail_unless!(found_id == *instance_id);
         if let Some(did) = deleted_id {
-            if did != *instance_id {
-                Err(ApiError::internal_error(&format!(
-                    "unexpected instance deleted (expected id {}, found {})",
-                    instance_id, did,
-                )))
-            } else {
-                Ok(())
-            }
+            bail_unless!(did == *instance_id);
+            Ok(())
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
@@ -1016,24 +991,11 @@ impl DataStore {
             ApiDiskState::try_from((previous_state_str, attached_instance_id))
                 .map_err(|e| ApiError::internal_error(&e))?;
         let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
-        // TODO-cleanup would a sql_assert! macro help here?
-        if found_id != *disk_id {
-            // XXX error context
-            return Err(ApiError::internal_error(&format!(
-                "unexpected disk found (expected id {}, found {})",
-                disk_id, found_id,
-            )));
-        }
+        bail_unless!(found_id == *disk_id);
 
         if let Some(did) = deleted_id {
-            if did != *disk_id {
-                Err(ApiError::internal_error(&format!(
-                    "unexpected disk deleted (expected id {}, found {})",
-                    disk_id, did,
-                )))
-            } else {
-                Ok(())
-            }
+            bail_unless(did == *disk_id);
+            Ok(())
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
@@ -1453,7 +1415,6 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
         let memory_mib: i64 = sql_row_value(value, "memory_mib")?;
         let ncpus: i64 = sql_row_value(value, "ncpus")?;
 
-        // XXX What to do with non-NULL time_deleted?
         Ok(ApiInstance {
             identity,
             project_id: sql_row_value(value, "project_id")?,
@@ -1519,7 +1480,6 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
         let origin: Option<Uuid> = sql_row_value(value, "origin_snapshot")?;
         let runtime = ApiDiskRuntimeState::try_from(value)?;
 
-        // XXX What to do with non-NULL time_deleted?
         Ok(ApiDisk {
             identity,
             project_id: sql_row_value(value, "project_id")?,

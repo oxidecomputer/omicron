@@ -13,9 +13,10 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-macro_rules! bail_on {
+#[macro_export]
+macro_rules! bail_unless {
     ($cond:expr $(,)?) => {
-        bail_on!($cond, "failed runtime check: {:?}", stringify!($cond))
+        bail_unless!($cond, "failed runtime check: {:?}", stringify!($cond))
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
@@ -30,14 +31,14 @@ mod test {
     use super::ApiError;
 
     #[test]
-    fn test_bail_on() {
+    fn test_bail_unless() {
         /* Success cases */
         let no_bail = || {
-            bail_on!(1 + 1 == 2, "wrong answer: {}", 3);
+            bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
             Ok(())
         };
         let no_bail_label_args = || {
-            bail_on!(1 + 1 == 2, "wrong answer: {}", 3);
+            bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
             Ok(())
         };
         assert_eq!(Ok(()), no_bail());
@@ -45,15 +46,15 @@ mod test {
 
         /* Failure cases */
         let do_bail = || {
-            bail_on!(1 + 1 == 3);
+            bail_unless!(1 + 1 == 3);
             Ok(())
         };
         let do_bail_label = || {
-            bail_on!(1 + 1 == 3, "uh-oh");
+            bail_unless!(1 + 1 == 3, "uh-oh");
             Ok(())
         };
         let do_bail_label_args = || {
-            bail_on!(1 + 1 == 3, "wrong answer: {}", 3);
+            bail_unless!(1 + 1 == 3, "wrong answer: {}", 3);
             Ok(())
         };
 
