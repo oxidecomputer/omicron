@@ -32,6 +32,7 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::bail_unless;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
@@ -455,8 +456,7 @@ impl DataStore {
                 &(runtime_initial.gen as i64),
                 &runtime_initial.sled_uuid,
                 &(params.ncpus.0 as i64),
-                // XXX unwrap
-                &(i64::try_from(params.memory.to_whole_mebibytes()).unwrap()),
+                &params.memory,
                 &params.hostname,
             ],
         )
@@ -994,7 +994,7 @@ impl DataStore {
         bail_unless!(found_id == *disk_id);
 
         if let Some(did) = deleted_id {
-            bail_unless(did == *disk_id);
+            bail_unless!(did == *disk_id);
             Ok(())
         } else {
             Err(ApiError::InvalidRequest {
@@ -1137,6 +1137,69 @@ impl ToSql for ApiName {
         Box<dyn std::error::Error + Sync + Send>,
     > {
         self.as_str().to_sql_checked(ty, out)
+    }
+}
+
+/*
+ * TODO-coverage tests for these FromSql and ToSql implementations
+ */
+
+impl ToSql for ApiByteCount {
+    fn to_sql(
+        &self,
+        ty: &tokio_postgres::types::Type,
+        out: &mut tokio_postgres::types::private::BytesMut,
+    ) -> Result<
+        tokio_postgres::types::IsNull,
+        Box<dyn std::error::Error + Sync + Send>,
+    >
+    where
+        Self: Sized,
+    {
+        let bytes = self.to_bytes_i64();
+        bytes.to_sql(ty, out)
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool
+    where
+        Self: Sized,
+    {
+        <i64 as ToSql>::accepts(ty)
+    }
+
+    tokio_postgres::types::to_sql_checked!();
+}
+
+impl<'a> FromSql<'a> for ApiByteCount {
+    fn from_sql(
+        ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let bytes: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
+        ApiByteCount::try_from(bytes)
+            .context("parsing byte count")
+            .map_err(|e| e.into())
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        <i64 as FromSql>::accepts(ty)
+    }
+}
+
+impl<'a> FromSql<'a> for ApiInstanceCpuCount {
+    fn from_sql(
+        ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let value: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
+        u16::try_from(value)
+            .map(ApiInstanceCpuCount)
+            .context("parsing CPU count")
+            .map_err(|e| e.into())
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        <i64 as FromSql>::accepts(ty)
     }
 }
 
@@ -1401,7 +1464,7 @@ impl Table for Instance {
         "state_generation",
         "active_server_id",
         "ncpus",
-        "memory_mib",
+        "memory",
         "hostname",
     ];
 }
@@ -1412,17 +1475,17 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let identity = ApiIdentityMetadata::try_from(value)?;
         let runtime = ApiInstanceRuntimeState::try_from(value)?;
-        let memory_mib: i64 = sql_row_value(value, "memory_mib")?;
-        let ncpus: i64 = sql_row_value(value, "ncpus")?;
+        let memory: ApiByteCount = sql_row_value(value, "memory")?;
+        let ncpus: ApiInstanceCpuCount = sql_row_value(value, "ncpus")?;
 
         Ok(ApiInstance {
             identity,
             project_id: sql_row_value(value, "project_id")?,
-            ncpus: ApiInstanceCpuCount(ncpus as u16), // XXX
-            memory: ApiByteCount::from_mebibytes(memory_mib as u64),
+            ncpus,
+            memory,
             hostname: sql_row_value(value, "hostname")?,
             runtime,
-            boot_disk_size: ApiByteCount::from_bytes(0), // XXX
+            boot_disk_size: ApiByteCount::from(0u32), // XXX
         })
     }
 }
@@ -1476,7 +1539,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let identity = ApiIdentityMetadata::try_from(value)?;
 
-        let size: i64 = sql_row_value(value, "size_bytes")?;
+        let size: ApiByteCount = sql_row_value(value, "size_bytes")?;
         let origin: Option<Uuid> = sql_row_value(value, "origin_snapshot")?;
         let runtime = ApiDiskRuntimeState::try_from(value)?;
 
@@ -1484,7 +1547,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
             identity,
             project_id: sql_row_value(value, "project_id")?,
             create_snapshot_id: origin,
-            size: ApiByteCount::from_bytes(size.try_into().unwrap()), // XXX
+            size,
             runtime: runtime,
         })
     }

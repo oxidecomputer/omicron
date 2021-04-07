@@ -26,6 +26,7 @@ use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
+use thiserror::Error;
 use uuid::Uuid;
 
 /*
@@ -262,29 +263,45 @@ impl ApiName {
 
 /**
  * A count of bytes, typically used either for memory or storage capacity
+ *
+ * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+ * inconvenient to define constructors: a u32 constructor can be infallible, but
+ * an i64 constructor can fail (if the value is negative) and a u64 constructor
+ * can fail (if the value is larger than i64::MAX).  We provide all of these for
+ * consumers' convenience.
  */
 /*
  * TODO-cleanup This could benefit from a more complete implementation.
  * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
  * need to write a validator for that.
  */
+/*
+ * The maximum byte count of i64::MAX comes from the fact that this is stored in
+ * the database as an i64.  Constraining it here ensures that we can't fail to
+ * serialize the value.
+ */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiByteCount(u64);
 impl ApiByteCount {
-    pub fn from_bytes(bytes: u64) -> ApiByteCount {
-        ApiByteCount(bytes)
+    pub fn from_kibibytes_u32(kibibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
     }
-    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * kibibytes)
+
+    pub fn from_mebibytes_u32(mebibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
     }
-    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
+
+    pub fn from_gibibytes_u32(gibibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes))
+            .unwrap()
     }
-    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
-    }
-    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
+
+    /*
+     * We provide this convenience because we've already validated the range of
+     * the byte count so there's no need for consumers to check, unwrap, etc.
+     */
+    pub fn to_bytes_i64(&self) -> i64 {
+        i64::try_from(self.0).unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
@@ -301,6 +318,43 @@ impl ApiByteCount {
     }
     pub fn to_whole_tebibytes(&self) -> u64 {
         self.to_bytes() / 1024 / 1024 / 1024 / 1024
+    }
+}
+
+/* TODO-cleanup This could use the experimental std::num::IntErrorKind. */
+#[derive(Debug, Eq, Error, Ord, PartialEq, PartialOrd)]
+pub enum ByteCountRangeError {
+    #[error("value is too small for a byte count")]
+    TooSmall,
+    #[error("value is too large for a byte count")]
+    TooLarge,
+}
+
+impl TryFrom<u64> for ApiByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: u64) -> Result<Self, Self::Error> {
+        if i64::try_from(bytes).is_err() {
+            Err(ByteCountRangeError::TooLarge)
+        } else {
+            Ok(ApiByteCount(bytes))
+        }
+    }
+}
+
+impl TryFrom<i64> for ApiByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: i64) -> Result<Self, Self::Error> {
+        Ok(ApiByteCount(
+            u64::try_from(bytes).map_err(|_| ByteCountRangeError::TooSmall)?,
+        ))
+    }
+}
+
+impl From<u32> for ApiByteCount {
+    fn from(value: u32) -> Self {
+        ApiByteCount(u64::from(value))
     }
 }
 
@@ -1183,23 +1237,58 @@ mod test {
 
     #[test]
     fn test_bytecount() {
-        let zero = ApiByteCount::from_bytes(0);
+        /* Smallest supported value: all constructors */
+        let zero = ApiByteCount::from(0u32);
         assert_eq!(0, zero.to_bytes());
         assert_eq!(0, zero.to_whole_kibibytes());
         assert_eq!(0, zero.to_whole_mebibytes());
         assert_eq!(0, zero.to_whole_gibibytes());
         assert_eq!(0, zero.to_whole_tebibytes());
+        let zero = ApiByteCount::try_from(0i64).unwrap();
+        assert_eq!(0, zero.to_bytes());
+        let zero = ApiByteCount::try_from(0u64).unwrap();
+        assert_eq!(0, zero.to_bytes());
 
-        let three_terabytes = 3_000_000_000_000;
-        let tb3 = ApiByteCount::from_bytes(three_terabytes);
+        /* Largest supported value: both constructors that support it. */
+        let max = ApiByteCount::try_from(i64::MAX).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, max.to_bytes_i64());
+
+        let maxu64 = u64::try_from(i64::MAX).unwrap();
+        let max = ApiByteCount::try_from(maxu64).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, max.to_bytes_i64() as i64);
+        assert_eq!(
+            (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
+            max.to_whole_tebibytes()
+        );
+
+        /* Value too large (only one constructor can hit this) */
+        let bogus = ApiByteCount::try_from(maxu64 + 1).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too large for a byte count");
+        /* Value too small (only one constructor can hit this) */
+        let bogus = ApiByteCount::try_from(-1i64).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+        /* For good measure, let's check i64::MIN */
+        let bogus = ApiByteCount::try_from(i64::MIN).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        /*
+         * We've now exhaustively tested both sides of all boundary conditions
+         * for all three constructors (to the extent that that's possible).
+         * Check non-trivial cases for the various accessor functions.  This
+         * means picking values in the middle of the range.
+         */
+        let three_terabytes = 3_000_000_000_000u64;
+        let tb3 = ApiByteCount::try_from(three_terabytes).unwrap();
         assert_eq!(three_terabytes, tb3.to_bytes());
         assert_eq!(2929687500, tb3.to_whole_kibibytes());
         assert_eq!(2861022, tb3.to_whole_mebibytes());
         assert_eq!(2793, tb3.to_whole_gibibytes());
         assert_eq!(2, tb3.to_whole_tebibytes());
 
-        let three_tebibytes = 3 * 1024 * 1024 * 1024 * 1024;
-        let tib3 = ApiByteCount::from_bytes(three_tebibytes);
+        let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
+        let tib3 = ApiByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());

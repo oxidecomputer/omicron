@@ -123,7 +123,7 @@ CREATE TABLE omicron.public.Instance (
 
     /* Instance configuration */
     ncpus INT NOT NULL,
-    memory_mib INT NOT NULL,
+    memory INT NOT NULL,
     hostname STRING(63) NOT NULL
 );
 

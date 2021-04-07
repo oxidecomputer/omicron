@@ -86,7 +86,7 @@ async fn test_disks() {
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
-        size: ApiByteCount::from_gibibytes(1),
+        size: ApiByteCount::from_gibibytes_u32(1),
     };
     let disk: ApiDiskView =
         objects_post(&client, &url_disks, new_disk.clone()).await;
@@ -137,8 +137,8 @@ async fn test_disks() {
                 description: String::from("sells rainsticks"),
             },
             ncpus: ApiInstanceCpuCount(4),
-            memory: ApiByteCount::from_mebibytes(256),
-            boot_disk_size: ApiByteCount::from_gibibytes(1),
+            memory: ApiByteCount::from_mebibytes_u32(256),
+            boot_disk_size: ApiByteCount::from_gibibytes_u32(1),
             hostname: String::from("rainsticks"),
         },
     )
@@ -258,8 +258,8 @@ async fn test_disks() {
                 description: String::from("instance2"),
             },
             ncpus: ApiInstanceCpuCount(4),
-            memory: ApiByteCount::from_mebibytes(256),
-            boot_disk_size: ApiByteCount::from_gibibytes(1),
+            memory: ApiByteCount::from_mebibytes_u32(256),
+            boot_disk_size: ApiByteCount::from_gibibytes_u32(1),
             hostname: String::from("instance2"),
         },
     )
