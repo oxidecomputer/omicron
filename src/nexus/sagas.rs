@@ -138,8 +138,9 @@ async fn sic_instance_ensure(
         .map_err(ActionError::action_failed)?;
 
     /*
-     * Ask the SA to begin the state change.  Then update the
-     * database to reflect the new intermediate state.
+     * Ask the sled agent to begin the state change.  Then update the database
+     * to reflect the new intermediate state.  If this update is not the newest
+     * one, that's fine.  That might just mean the sled agent beat us to it.
      */
     let new_runtime_state = sa
         .instance_ensure(instance_id, initial_runtime, runtime_params)
@@ -150,5 +151,6 @@ async fn sic_instance_ensure(
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime_state)
         .await
+        .map(|_| ())
         .map_err(ActionError::action_failed)
 }

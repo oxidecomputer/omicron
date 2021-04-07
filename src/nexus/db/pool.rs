@@ -55,7 +55,7 @@ impl Pool {
          * It would also be nice if callers could provide parameters for, e.g.,
          * how long to wait for a connection here.  Really, it would be nice if
          * they could create their own handles to the connection pool with
-         * parameters like this.
+         * parameters like this.  It could also have its own logger.
          */
         self.pool.get().await.map(|conn| Conn { conn }).map_err(|e| {
             ApiError::ServiceUnavailable {

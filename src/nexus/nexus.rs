@@ -679,8 +679,10 @@ impl Nexus {
         requested: ApiInstanceRuntimeStateRequested,
     ) -> Result<(), ApiError> {
         /*
-         * Ask the SA to begin the state change.  Then update the database to
-         * reflect the new intermediate state.
+         * Ask the sled agent to begin the state change.  Then update the
+         * database to reflect the new intermediate state.  If this update is
+         * not the newest one, that's fine.  That might just mean the sled agent
+         * beat us to it.
          */
         let new_runtime = sa
             .instance_ensure(
@@ -693,6 +695,7 @@ impl Nexus {
         self.db_datastore
             .instance_update_runtime(&instance.identity.id, &new_runtime)
             .await
+            .map(|_| ())
     }
 
     /**
@@ -1066,10 +1069,16 @@ impl Nexus {
             .await;
 
         match result {
-            Ok(_) => {
+            Ok(true) => {
                 info!(log, "instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            Ok(false) => {
+                info!(log, "instance update from sled agent ignored (old)";
+                    "instance_id" => %id);
                 Ok(())
             }
 

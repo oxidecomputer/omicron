@@ -48,10 +48,10 @@ use uuid::Uuid;
 // automatically?
 #[derive(Error, Debug)]
 enum DbError {
-    #[error("executing {sql:?}")]
+    #[error("executing {sql:?}: {source:#}")]
     SqlError { sql: String, source: tokio_postgres::Error },
 
-    #[error("extracting column {column_name:?} from row")]
+    #[error("extracting column {column_name:?} from row: {source:#}")]
     DeserializeError { column_name: String, source: tokio_postgres::Error },
 
     #[error("executing {sql:?}: expected one row, but found {nrows_found}")]
@@ -581,7 +581,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         new_runtime: &ApiInstanceRuntimeState,
-    ) -> Result<(), ApiError> {
+    ) -> Result<bool, ApiError> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -594,15 +594,26 @@ impl DataStore {
          * the current state explicitly.  For now, we'll just require consumers
          * to explicitly fetch the state if they want that.
          */
-        sql_execute_maybe_one(
+        // XXX Definitely needs to be commonized.  See instance delete and disk
+        // runtime update.
+        let row = sql_query_maybe_one(
             &client,
             format!(
-                "UPDATE {} SET \
+                "WITH found_rows AS \
+                (SELECT id, state_generation FROM {} WHERE id = $5), \
+                updated_rows AS \
+                (UPDATE {} SET \
                         instance_state = $1, \
                         state_generation = $2, \
                         active_server_id = $3, \
                         time_state_updated = $4 \
-                    WHERE id = $5 AND state_generation < $2 LIMIT 2",
+                    WHERE id = $5 AND state_generation < $2 \
+                    LIMIT 2 RETURNING id) \
+                SELECT r.id AS found_id, \
+                    r.state_generation as initial_generation, \
+                    u.id AS updated_id FROM found_rows r \
+                    FULL OUTER JOIN updated_rows u ON r.id = u.id",
+                Instance::TABLE_NAME,
                 Instance::TABLE_NAME,
             )
             .as_str(),
@@ -620,7 +631,33 @@ impl DataStore {
                 )
             },
         )
-        .await
+        .await?;
+
+        let found_id: Uuid = sql_row_value(&row, "found_id")?;
+        let previous_gen: i64 = sql_row_value(&row, "initial_generation")?;
+        let updated_id: Option<Uuid> = sql_row_value(&row, "updated_id")?;
+        // XXX sql_assert!
+        if found_id != *instance_id {
+            return Err(ApiError::internal_error(&format!(
+                "instance runtime update: unexpected instance found \
+                (expected id {}, found {})",
+                instance_id, found_id
+            )));
+        }
+
+        if let Some(uid) = updated_id {
+            if uid != *instance_id {
+                Err(ApiError::internal_error(&format!(
+                    "unexpected instance updated (expected id {}, found {})",
+                    instance_id, uid,
+                )))
+            } else {
+                Ok(true)
+            }
+        } else {
+            // XXX log
+            Ok(false)
+        }
     }
 
     pub async fn project_delete_instance(
@@ -1020,9 +1057,8 @@ fn sql_error_generic(e: DbError) -> ApiError {
      * so that the SQL is visible in the log.
      */
     ApiError::internal_error(&format!(
-        "unexpected database error{}: {}",
-        extra,
-        e.to_string()
+        "unexpected database error{}: {:#}",
+        extra, e
     ))
 }
 
