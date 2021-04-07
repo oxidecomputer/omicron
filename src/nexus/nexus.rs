@@ -761,8 +761,8 @@ impl Nexus {
             ApiResourceType::DiskAttachment,
             format!(
                 "disk \"{}\" is not attached to instance \"{}\"",
-                String::from(disk_name.clone()),
-                String::from(instance_name.clone())
+                disk_name.as_str(),
+                instance_name.as_str()
             ),
         ))
     }

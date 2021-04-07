@@ -135,7 +135,7 @@ impl ApiError {
     ) -> ApiError {
         ApiError::ObjectNotFound {
             type_name,
-            lookup_type: LookupType::ByName(String::from(name.clone())),
+            lookup_type: LookupType::ByName(name.as_str().to_owned()),
         }
     }
 

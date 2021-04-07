@@ -151,13 +151,13 @@ async fn test_disks() {
     let url_instance_disks = format!(
         "/projects/{}/instances/{}/disks",
         project_name,
-        String::from(instance.identity.name.clone())
+        instance.identity.name.as_str()
     );
     let url_instance_disk = format!(
         "/projects/{}/instances/{}/disks/{}",
         project_name,
-        String::from(instance.identity.name.clone()),
-        String::from(disk.identity.name.clone())
+        instance.identity.name.as_str(),
+        disk.identity.name.as_str(),
     );
     let attachments =
         object_get::<Vec<ApiDiskAttachment>>(&client, &url_instance_disks)
@@ -267,8 +267,8 @@ async fn test_disks() {
     let url_instance2_disk = format!(
         "/projects/{}/instances/{}/disks/{}",
         project_name,
-        String::from(instance2.identity.name.clone()),
-        String::from(disk.identity.name.clone())
+        instance2.identity.name.as_str(),
+        disk.identity.name.as_str()
     );
     let error = client
         .make_request_error(

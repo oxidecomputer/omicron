@@ -5,6 +5,11 @@
 /*
  * XXX review all queries for use of indexes (may need "time_deleted IS
  * NOT NULL" conditions)
+ *
+ * XXX document the pattern here: things that can be expressed in a single SQL
+ * column impl ToSql/FromSql directly.  Things that don't impl TryFrom<&Row>.
+ * These definitions probably ought to go in a file of their own:
+ * db/conversions.rs?
  */
 
 use super::Pool;
@@ -37,7 +42,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
 use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -634,7 +638,8 @@ impl DataStore {
         .await?;
 
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let previous_gen: i64 = sql_row_value(&row, "initial_generation")?;
+        let previous_gen: ApiGeneration =
+            sql_row_value(&row, "initial_generation")?;
         let updated_id: Option<Uuid> = sql_row_value(&row, "updated_id")?;
         bail_unless!(found_id == *instance_id);
 
@@ -718,8 +723,8 @@ impl DataStore {
             .await?;
 
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let previous_state_str: &str = sql_row_value(&row, "previous_state")?;
-        let previous_state: ApiInstanceState = previous_state_str.parse()?;
+        let previous_state: ApiInstanceState =
+            sql_row_value(&row, "previous_state")?;
         let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
         // XXX error context -- as I look at this, would this (and some of
         // the other cases) be simpler if the return value of query()
@@ -1103,52 +1108,18 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     }
 }
 
-impl ToSql for ApiName {
-    fn to_sql(
-        &self,
-        ty: &tokio_postgres::types::Type,
-        out: &mut tokio_postgres::types::private::BytesMut,
-    ) -> Result<
-        tokio_postgres::types::IsNull,
-        Box<dyn std::error::Error + Sync + Send>,
-    >
-    where
-        Self: Sized,
-    {
-        self.as_str().to_sql(ty, out)
-    }
-
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool
-    where
-        Self: Sized,
-    {
-        <&str as ToSql>::accepts(ty)
-    }
-
-    fn to_sql_checked(
-        &self,
-        ty: &tokio_postgres::types::Type,
-        out: &mut tokio_postgres::types::private::BytesMut,
-    ) -> Result<
-        tokio_postgres::types::IsNull,
-        Box<dyn std::error::Error + Sync + Send>,
-    > {
-        self.as_str().to_sql_checked(ty, out)
-    }
-}
-
 /*
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
 /**
- * Defines impls for ToSql and FromSql for a type T such that &T: Into<i64> and
- * T: TryFrom<i64>.  These impls delegate to the i64 impls of these traits.
- * This is useful because we define a bunch of numeric newtypes that are
- * implemented in the database as i64.
+ * Defines impls for ToSql and FromSql for a type T such that &T: Into<D> and
+ * T: TryFrom<D>.  These impls delegate to the "D" impls of these traits.  This
+ * is useful because we define a bunch of numeric and string newtypes that are
+ * implemented in the database as i64 and string, respectively.
  */
-macro_rules! impl_sql_wrapping_i64 {
-    ($T:ident) => {
+macro_rules! impl_sql_wrapping {
+    ($T:ident, $D:ty) => {
         impl ToSql for $T {
             fn to_sql(
                 &self,
@@ -1158,11 +1129,11 @@ macro_rules! impl_sql_wrapping_i64 {
                 tokio_postgres::types::IsNull,
                 Box<dyn std::error::Error + Send + Sync>,
             > {
-                i64::from(self).to_sql(ty, out)
+                <$D>::from(self).to_sql(ty, out)
             }
 
             fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <i64 as ToSql>::accepts(ty)
+                <$D as ToSql>::accepts(ty)
             }
 
             tokio_postgres::types::to_sql_checked!();
@@ -1173,20 +1144,22 @@ macro_rules! impl_sql_wrapping_i64 {
                 ty: &tokio_postgres::types::Type,
                 raw: &'a [u8],
             ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-                let value: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
+                let value: $D = <$D as FromSql>::from_sql(ty, raw)?;
                 $T::try_from(value).map_err(|e| e.into())
             }
 
             fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <i64 as FromSql>::accepts(ty)
+                <$D as FromSql>::accepts(ty)
             }
         }
     };
 }
 
-impl_sql_wrapping_i64!(ApiByteCount);
-impl_sql_wrapping_i64!(ApiGeneration);
-impl_sql_wrapping_i64!(ApiInstanceCpuCount);
+impl_sql_wrapping!(ApiByteCount, i64);
+impl_sql_wrapping!(ApiGeneration, i64);
+impl_sql_wrapping!(ApiInstanceCpuCount, i64);
+impl_sql_wrapping!(ApiInstanceState, &str);
+impl_sql_wrapping!(ApiName, &str);
 
 /**
  * Wrapper around [`tokio_postgres::Client::query`] that produces errors
@@ -1367,17 +1340,10 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let name_str: &str = sql_row_value(value, "name")?;
-        let name = ApiName::try_from(name_str).map_err(|e| {
-            ApiError::internal_error(&format!(
-                "database project.name {:?}: {}",
-                name_str, e
-            ))
-        })?;
         // XXX What to do with non-NULL time_deleted?
         Ok(ApiIdentityMetadata {
             id: sql_row_value(value, "id")?,
-            name,
+            name: sql_row_value(value, "name")?,
             description: sql_row_value(value, "description")?,
             time_created: sql_row_value(value, "time_created")?,
             // XXX is it time_updated or time_metadata_updated
@@ -1421,8 +1387,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let identity = ApiIdentityMetadata::try_from(value)?;
-        Ok(ApiProject { identity })
+        Ok(ApiProject { identity: ApiIdentityMetadata::try_from(value)? })
     }
 }
 
@@ -1453,18 +1418,13 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let identity = ApiIdentityMetadata::try_from(value)?;
-        let runtime = ApiInstanceRuntimeState::try_from(value)?;
-        let memory: ApiByteCount = sql_row_value(value, "memory")?;
-        let ncpus: ApiInstanceCpuCount = sql_row_value(value, "ncpus")?;
-
         Ok(ApiInstance {
-            identity,
+            identity: ApiIdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
-            ncpus,
-            memory,
+            ncpus: sql_row_value(value, "ncpus")?,
+            memory: sql_row_value(value, "memory")?,
             hostname: sql_row_value(value, "hostname")?,
-            runtime,
+            runtime: ApiInstanceRuntimeState::try_from(value)?,
             boot_disk_size: ApiByteCount::from(0u32), // XXX
         })
     }
@@ -1474,19 +1434,12 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let run_state_str: &str = sql_row_value(value, "instance_state")?;
-        let run_state: ApiInstanceState = run_state_str.parse()?;
-        let time_updated: chrono::DateTime<chrono::Utc> =
-            sql_row_value(value, "time_state_updated")?;
-        let gen: i64 = sql_row_value(value, "state_generation")?;
-        let sled_uuid: Uuid = sql_row_value(value, "active_server_id")?;
-
         Ok(ApiInstanceRuntimeState {
-            run_state,
+            run_state: sql_row_value(value, "instance_state")?,
             reboot_in_progress: false, // XXX
-            sled_uuid,
-            gen: gen.try_into().unwrap(), // XXX`
-            time_updated,
+            sled_uuid: sql_row_value(value, "active_server_id")?,
+            gen: sql_row_value(value, "state_generation")?,
+            time_updated: sql_row_value(value, "time_state_updated")?,
         })
     }
 }
@@ -1517,18 +1470,12 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let identity = ApiIdentityMetadata::try_from(value)?;
-
-        let size: ApiByteCount = sql_row_value(value, "size_bytes")?;
-        let origin: Option<Uuid> = sql_row_value(value, "origin_snapshot")?;
-        let runtime = ApiDiskRuntimeState::try_from(value)?;
-
         Ok(ApiDisk {
-            identity,
+            identity: ApiIdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
-            create_snapshot_id: origin,
-            size,
-            runtime: runtime,
+            create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
+            size: sql_row_value(value, "size_bytes")?,
+            runtime: ApiDiskRuntimeState::try_from(value)?,
         })
     }
 }
@@ -1543,13 +1490,10 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
         let disk_state =
             ApiDiskState::try_from((disk_state_str, instance_uuid))
                 .map_err(|e| ApiError::internal_error(&e))?;
-        let gen: i64 = sql_row_value(value, "state_generation")?;
-        let time_updated: chrono::DateTime<chrono::Utc> =
-            sql_row_value(value, "time_state_updated")?;
         Ok(ApiDiskRuntimeState {
             disk_state,
-            gen: gen.try_into().unwrap(), // XXX`
-            time_updated,
+            gen: sql_row_value(value, "state_generation")?,
+            time_updated: sql_row_value(value, "time_state_updated")?,
         })
     }
 }

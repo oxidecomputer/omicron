@@ -27,7 +27,6 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
-use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -117,6 +116,7 @@ pub struct ApiName(String);
  * `ApiName::try_from(String)` is the primary method for constructing an ApiName
  * from an input string.  This validates the string according to our
  * requirements for a name.
+ * TODO-cleanup why shouldn't callers use TryFrom<&str>?
  */
 impl TryFrom<String> for ApiName {
     type Error = String;
@@ -167,14 +167,9 @@ impl TryFrom<&str> for ApiName {
     }
 }
 
-/**
- * Convert an `ApiName` into the `String` representing the actual name.
- * TODO-cleanup It probably makes more sense to use `as_str()` but there's a
- * bunch of code using this implementation.
- */
-impl From<ApiName> for String {
-    fn from(value: ApiName) -> String {
-        value.0
+impl<'a> From<&'a ApiName> for &'a str {
+    fn from(n: &'a ApiName) -> Self {
+        n.as_str()
     }
 }
 
@@ -644,7 +639,33 @@ pub enum ApiInstanceState {
 
 impl Display for ApiInstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        let label = match self {
+        write!(f, "{}", self.label())
+    }
+}
+
+/*
+ * TODO-cleanup why is this error type different from the one for ApiName?  The
+ * reason is probably that ApiName can be provided by the user, so we want a
+ * good validation error.  ApiInstanceState cannot.  Still, is there a way to
+ * unify these?
+ */
+impl TryFrom<&str> for ApiInstanceState {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        parse_str_using_serde(value)
+    }
+}
+
+impl<'a> From<&'a ApiInstanceState> for &'a str {
+    fn from(s: &'a ApiInstanceState) -> &'a str {
+        s.label()
+    }
+}
+
+impl ApiInstanceState {
+    fn label(&self) -> &str {
+        match self {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
@@ -653,21 +674,9 @@ impl Display for ApiInstanceState {
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
-        };
-
-        write!(f, "{}", label)
+        }
     }
-}
 
-impl FromStr for ApiInstanceState {
-    type Err = ApiError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_str_using_serde(s)
-    }
-}
-
-impl ApiInstanceState {
     /**
      * Returns true if the given state represents a fully stopped Instance.
      * This means that a transition from an is_not_stopped() state must go
@@ -905,8 +914,7 @@ impl ApiObject for ApiDisk {
          * TODO-correctness: can the name always be used as a path like this
          * or might it need to be sanitized?
          */
-        let device_path =
-            format!("/mnt/{}", String::from(self.identity.name.clone()),);
+        let device_path = format!("/mnt/{}", self.identity.name.as_str());
         ApiDiskView {
             identity: self.identity.clone(),
             project_id: self.project_id,
@@ -987,7 +995,7 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
 
 fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
     s: &str,
-) -> Result<T, ApiError> {
+) -> Result<T, anyhow::Error> {
     /*
      * Round-tripping through serde is a little absurd, but has the benefit
      * of always staying in sync with the real definition.  (The initial
@@ -995,12 +1003,7 @@ fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
      * in the input string.)
      */
     let json = serde_json::to_string(s).unwrap();
-    serde_json::from_str(&json).map_err(|e| {
-        ApiError::internal_error(&format!(
-            "unsupported value: {}",
-            e.to_string()
-        ))
-    })
+    serde_json::from_str(&json).context("parsing instance state")
 }
 
 impl ApiDiskState {
@@ -1284,7 +1287,7 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, String::from(ApiName::try_from(name).unwrap()));
+            assert_eq!(name, ApiName::try_from(name).unwrap().as_str());
         }
     }
 
