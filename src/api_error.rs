@@ -13,6 +13,67 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
+macro_rules! bail_on {
+    ($cond:expr $(,)?) => {
+        bail_on!($cond, "failed runtime check: {:?}", stringify!($cond))
+    };
+    ($cond:expr, $($arg:tt)+) => {
+        if !$cond {
+            return Err($crate::api_error::ApiError::internal_error(&format!(
+                $($arg)*)))
+        }
+    };
+}
+
+#[cfg(test)]
+mod test {
+    use super::ApiError;
+
+    #[test]
+    fn test_bail_on() {
+        /* Success cases */
+        let no_bail = || {
+            bail_on!(1 + 1 == 2, "wrong answer: {}", 3);
+            Ok(())
+        };
+        let no_bail_label_args = || {
+            bail_on!(1 + 1 == 2, "wrong answer: {}", 3);
+            Ok(())
+        };
+        assert_eq!(Ok(()), no_bail());
+        assert_eq!(Ok(()), no_bail_label_args());
+
+        /* Failure cases */
+        let do_bail = || {
+            bail_on!(1 + 1 == 3);
+            Ok(())
+        };
+        let do_bail_label = || {
+            bail_on!(1 + 1 == 3, "uh-oh");
+            Ok(())
+        };
+        let do_bail_label_args = || {
+            bail_on!(1 + 1 == 3, "wrong answer: {}", 3);
+            Ok(())
+        };
+
+        let checks = [
+            (do_bail(), "failed runtime check: \"1 + 1 == 3\""),
+            (do_bail_label(), "uh-oh"),
+            (do_bail_label_args(), "wrong answer: 3"),
+        ];
+
+        for (result, expected_message) in &checks {
+            let error = result.as_ref().unwrap_err();
+            if let ApiError::InternalError { message } = error {
+                assert_eq!(*expected_message, message);
+            } else {
+                panic!("got something other than an InternalError");
+            }
+        }
+    }
+}
+
 /**
  * An error that can be generated within a control plane component
  *
