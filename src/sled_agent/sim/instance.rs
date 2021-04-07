@@ -141,7 +141,7 @@ impl Simulatable for SimInstance {
             run_state: immed_next_state.clone(),
             reboot_in_progress: reb_wanted,
             sled_uuid: current.sled_uuid,
-            gen: current.gen + 1,
+            gen: current.gen.next(),
             time_updated: Utc::now(),
         };
 
@@ -194,7 +194,7 @@ impl Simulatable for SimInstance {
             run_state: run_state_after.clone(),
             reboot_in_progress: pending.reboot_wanted,
             sled_uuid: current.sled_uuid,
-            gen: current.gen + 1,
+            gen: current.gen.next(),
             time_updated: Utc::now(),
         };
 

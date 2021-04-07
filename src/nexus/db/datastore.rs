@@ -14,6 +14,7 @@ use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
+use crate::api_model::ApiGeneration;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCpuCount;
@@ -32,7 +33,6 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::bail_unless;
-use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
@@ -452,10 +452,9 @@ impl DataStore {
                 project_id,
                 &runtime_initial.run_state.to_string(),
                 &now,
-                // XXX should use try_from
-                &(runtime_initial.gen as i64),
+                &runtime_initial.gen,
                 &runtime_initial.sled_uuid,
-                &(params.ncpus.0 as i64),
+                &params.ncpus,
                 &params.memory,
                 &params.hostname,
             ],
@@ -490,7 +489,7 @@ impl DataStore {
 
         let instance = ApiInstance::try_from(&row)?;
         if instance.runtime.run_state != ApiInstanceState::Creating
-            || instance.runtime.gen != 1
+            || instance.runtime.gen != runtime_initial.gen
         {
             Err(ApiError::internal_error(&format!(
                 "creating instance: found existing instance with \
@@ -620,7 +619,7 @@ impl DataStore {
             .as_str(),
             &[
                 &new_runtime.run_state.to_string(),
-                &(new_runtime.gen as i64),
+                &new_runtime.gen,
                 &new_runtime.sled_uuid,
                 &now,
                 instance_id,
@@ -804,11 +803,9 @@ impl DataStore {
                 project_id,
                 &runtime_initial.disk_state.to_string(),
                 &now,
-                // XXX should use try_from
-                &(runtime_initial.gen as i64),
+                &runtime_initial.gen,
                 &runtime_initial.disk_state.attached_instance_id(),
-                // XXX should use try_from
-                &(params.size.to_bytes() as i64),
+                &params.size,
                 &params.snapshot_id,
             ],
         )
@@ -842,7 +839,7 @@ impl DataStore {
 
         let disk = ApiDisk::try_from(&row)?;
         if disk.runtime.disk_state != ApiDiskState::Creating
-            || disk.runtime.gen != 1
+            || disk.runtime.gen != runtime_initial.gen
         {
             Err(ApiError::internal_error(&format!(
                 "creating disk: found existing disk with \
@@ -901,7 +898,7 @@ impl DataStore {
             .as_str(),
             &[
                 &new_runtime.disk_state.to_string(),
-                &(new_runtime.gen as i64), // XXX (and instance analog)
+                &new_runtime.gen,
                 &new_runtime.disk_state.attached_instance_id(),
                 &now,
                 disk_id,
@@ -1144,64 +1141,52 @@ impl ToSql for ApiName {
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
-impl ToSql for ApiByteCount {
-    fn to_sql(
-        &self,
-        ty: &tokio_postgres::types::Type,
-        out: &mut tokio_postgres::types::private::BytesMut,
-    ) -> Result<
-        tokio_postgres::types::IsNull,
-        Box<dyn std::error::Error + Sync + Send>,
-    >
-    where
-        Self: Sized,
-    {
-        let bytes = self.to_bytes_i64();
-        bytes.to_sql(ty, out)
-    }
+/**
+ * Defines impls for ToSql and FromSql for a type T such that &T: Into<i64> and
+ * T: TryFrom<i64>.  These impls delegate to the i64 impls of these traits.
+ * This is useful because we define a bunch of numeric newtypes that are
+ * implemented in the database as i64.
+ */
+macro_rules! impl_sql_wrapping_i64 {
+    ($T:ident) => {
+        impl ToSql for $T {
+            fn to_sql(
+                &self,
+                ty: &tokio_postgres::types::Type,
+                out: &mut tokio_postgres::types::private::BytesMut,
+            ) -> Result<
+                tokio_postgres::types::IsNull,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
+                i64::from(self).to_sql(ty, out)
+            }
 
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool
-    where
-        Self: Sized,
-    {
-        <i64 as ToSql>::accepts(ty)
-    }
+            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+                <i64 as ToSql>::accepts(ty)
+            }
 
-    tokio_postgres::types::to_sql_checked!();
+            tokio_postgres::types::to_sql_checked!();
+        }
+
+        impl<'a> FromSql<'a> for $T {
+            fn from_sql(
+                ty: &tokio_postgres::types::Type,
+                raw: &'a [u8],
+            ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+                let value: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
+                $T::try_from(value).map_err(|e| e.into())
+            }
+
+            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+                <i64 as FromSql>::accepts(ty)
+            }
+        }
+    };
 }
 
-impl<'a> FromSql<'a> for ApiByteCount {
-    fn from_sql(
-        ty: &tokio_postgres::types::Type,
-        raw: &'a [u8],
-    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let bytes: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
-        ApiByteCount::try_from(bytes)
-            .context("parsing byte count")
-            .map_err(|e| e.into())
-    }
-
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-        <i64 as FromSql>::accepts(ty)
-    }
-}
-
-impl<'a> FromSql<'a> for ApiInstanceCpuCount {
-    fn from_sql(
-        ty: &tokio_postgres::types::Type,
-        raw: &'a [u8],
-    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let value: i64 = <i64 as FromSql>::from_sql(ty, raw)?;
-        u16::try_from(value)
-            .map(ApiInstanceCpuCount)
-            .context("parsing CPU count")
-            .map_err(|e| e.into())
-    }
-
-    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-        <i64 as FromSql>::accepts(ty)
-    }
-}
+impl_sql_wrapping_i64!(ApiByteCount);
+impl_sql_wrapping_i64!(ApiGeneration);
+impl_sql_wrapping_i64!(ApiInstanceCpuCount);
 
 /**
  * Wrapper around [`tokio_postgres::Client::query`] that produces errors
@@ -1237,12 +1222,10 @@ async fn sql_query_always_one(
 ) -> Result<tokio_postgres::Row, DbError> {
     sql_query(client, sql, params).await.and_then(|mut rows| match rows.len() {
         1 => Ok(rows.pop().unwrap()),
-        nrows_found => {
-            Err(DbError::BadRowCount {
-                sql: sql.to_owned(),
-                nrows_found: u64::try_from(nrows_found).unwrap(),
-            })
-        }
+        nrows_found => Err(DbError::BadRowCount {
+            sql: sql.to_owned(),
+            nrows_found: u64::try_from(nrows_found).unwrap(),
+        }),
     })
 }
 
@@ -1439,10 +1422,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiProject {
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let identity = ApiIdentityMetadata::try_from(value)?;
-        Ok(ApiProject {
-            generation: 1, // XXX
-            identity,
-        })
+        Ok(ApiProject { identity })
     }
 }
 

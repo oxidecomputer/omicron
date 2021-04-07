@@ -6,6 +6,8 @@
  */
 
 use crate::api_error::ApiError;
+use anyhow::anyhow;
+use anyhow::Context;
 use api_identity::ApiObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -296,14 +298,6 @@ impl ApiByteCount {
             .unwrap()
     }
 
-    /*
-     * We provide this convenience because we've already validated the range of
-     * the byte count so there's no need for consumers to check, unwrap, etc.
-     */
-    pub fn to_bytes_i64(&self) -> i64 {
-        i64::try_from(self.0).unwrap()
-    }
-
     pub fn to_bytes(&self) -> u64 {
         self.0
     }
@@ -329,7 +323,6 @@ pub enum ByteCountRangeError {
     #[error("value is too large for a byte count")]
     TooLarge,
 }
-
 impl TryFrom<u64> for ApiByteCount {
     type Error = ByteCountRangeError;
 
@@ -355,6 +348,76 @@ impl TryFrom<i64> for ApiByteCount {
 impl From<u32> for ApiByteCount {
     fn from(value: u32) -> Self {
         ApiByteCount(u64::from(value))
+    }
+}
+
+impl From<&ApiByteCount> for i64 {
+    fn from(b: &ApiByteCount) -> Self {
+        /* We have already validated that this value is in range. */
+        i64::try_from(b.0).unwrap()
+    }
+}
+
+/**
+ * Generation numbers stored in the database, used for optimistic concurrency
+ * control
+ */
+/*
+ * Because generation numbers are stored in the database, we represent them as
+ * i64.  For the same reason as for
+ */
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+pub struct ApiGeneration(u64);
+impl ApiGeneration {
+    pub fn new() -> ApiGeneration {
+        ApiGeneration(1)
+    }
+
+    pub fn next(&self) -> ApiGeneration {
+        /*
+         * It should technically be an operational error if this wraps or even
+         * exceeds the value allowed by an i64.  But it seems unlikely enough to
+         * happen in practice that we can probably feel safe with this.
+         */
+        let next_gen = self.0 + 1;
+        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        ApiGeneration(next_gen)
+    }
+}
+
+impl Display for ApiGeneration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        f.write_str(&self.0.to_string())
+    }
+}
+
+impl From<&ApiGeneration> for i64 {
+    fn from(g: &ApiGeneration) -> Self {
+        /* We have already validated that the value is within range. */
+        // XXX What if we deserialize a value out of range?
+        i64::try_from(g.0).unwrap()
+    }
+}
+
+impl TryFrom<i64> for ApiGeneration {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(ApiGeneration(
+            u64::try_from(value)
+                .map_err(|_| anyhow!("generation number too large"))?,
+        ))
     }
 }
 
@@ -501,15 +564,6 @@ pub struct ApiIdentityMetadataUpdateParams {
 pub struct ApiProject {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
-
-    /*
-     * TODO We define a generation number here at the model layer so that in
-     * theory the model layer can handle optimistic concurrency control (i.e.,
-     * put-only-if-matches-etag and the like).  It's not yet clear if a
-     * generation number is the right way to express this.
-     */
-    /** generation number for this version of the object. */
-    pub generation: u64,
 }
 
 impl ApiObject for ApiProject {
@@ -638,6 +692,22 @@ impl ApiInstanceState {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceCpuCount(pub u16);
 
+impl TryFrom<i64> for ApiInstanceCpuCount {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(ApiInstanceCpuCount(
+            u16::try_from(value).context("parsing CPU count")?,
+        ))
+    }
+}
+
+impl From<&ApiInstanceCpuCount> for i64 {
+    fn from(c: &ApiInstanceCpuCount) -> Self {
+        i64::from(c.0)
+    }
+}
+
 /**
  * An Instance (VM) in the external API
  */
@@ -693,7 +763,7 @@ pub struct ApiInstanceRuntimeState {
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
     /** generation number for this state */
-    pub gen: u64,
+    pub gen: ApiGeneration,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
@@ -969,7 +1039,7 @@ pub struct ApiDiskRuntimeState {
     /** runtime state of the Disk */
     pub disk_state: ApiDiskState,
     /** generation number for this state */
-    pub gen: u64,
+    pub gen: ApiGeneration,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
@@ -1252,12 +1322,12 @@ mod test {
         /* Largest supported value: both constructors that support it. */
         let max = ApiByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, max.to_bytes_i64());
+        assert_eq!(i64::MAX, i64::from(&max));
 
         let maxu64 = u64::try_from(i64::MAX).unwrap();
         let max = ApiByteCount::try_from(maxu64).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, max.to_bytes_i64() as i64);
+        assert_eq!(i64::MAX, i64::from(&max));
         assert_eq!(
             (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
             max.to_whole_tebibytes()

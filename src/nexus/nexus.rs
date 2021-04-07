@@ -9,6 +9,7 @@ use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiDiskStateRequested;
+use crate::api_model::ApiGeneration;
 use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
@@ -279,7 +280,7 @@ impl Nexus {
                 params,
                 &ApiDiskRuntimeState {
                     disk_state: ApiDiskState::Creating,
-                    gen: 1,
+                    gen: ApiGeneration::new(),
                     time_updated: Utc::now(),
                 },
             )
@@ -301,7 +302,7 @@ impl Nexus {
                 &disk_id,
                 &ApiDiskRuntimeState {
                     disk_state: ApiDiskState::Detached,
-                    gen: disk_created.runtime.gen + 1,
+                    gen: disk_created.runtime.gen.next(),
                     time_updated: Utc::now(),
                 },
             )

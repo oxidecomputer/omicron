@@ -9,6 +9,7 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
+use crate::api_model::ApiGeneration;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
@@ -100,7 +101,7 @@ async fn sic_create_instance_record(
         run_state: ApiInstanceState::Creating,
         reboot_in_progress: false,
         sled_uuid: sled_uuid?,
-        gen: 1,
+        gen: ApiGeneration::new(),
         time_updated: Utc::now(),
     };
 
