@@ -1240,7 +1240,7 @@ async fn sql_query_always_one(
         nrows_found => {
             Err(DbError::BadRowCount {
                 sql: sql.to_owned(),
-                nrows_found: u64::try_from(nrows_found).unwrap(), // XXX
+                nrows_found: u64::try_from(nrows_found).unwrap(),
             })
         }
     })
@@ -1262,7 +1262,7 @@ async fn sql_query_maybe_one(
             0 => Err(mkzerror()),
             nrows_found => Err(sql_error_generic(DbError::BadRowCount {
                 sql: sql.to_owned(),
-                nrows_found: u64::try_from(nrows_found).unwrap(), // XXX
+                nrows_found: u64::try_from(nrows_found).unwrap(),
             })),
         },
     )
