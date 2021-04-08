@@ -50,8 +50,14 @@ use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
-// XXX How can we include a backtrace here the way thiserror does
-// automatically?
+/*
+ * TODO-debug It would be nice to have a backtrace in these errors.  thiserror
+ * is capable of including one automatically if there's a member called
+ * "backtrace" with the type "Backtrace", but it's not clear how that would get
+ * populated aside from maybe a thiserror-generated `From` impl.  It looks like
+ * one has to do that explicitly using std::backtrace::Backtrace::capture(),
+ * which is a nightly-only API.  So we'll defer that for now.
+ */
 #[derive(Error, Debug)]
 enum DbError {
     #[error("executing {sql:?}: {source:#}")]

@@ -400,7 +400,10 @@ impl Display for ApiGeneration {
 impl From<&ApiGeneration> for i64 {
     fn from(g: &ApiGeneration) -> Self {
         /* We have already validated that the value is within range. */
-        // XXX What if we deserialize a value out of range?
+        /*
+         * TODO-robustness We need to ensure that we don't deserialize a value
+         * out of range here.
+         */
         i64::try_from(g.0).unwrap()
     }
 }
