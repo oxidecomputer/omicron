@@ -40,6 +40,40 @@ impl DbError {
     }
 }
 
+/**
+ * Simple interface for constructing SQL string fragments that use parameters
+ */
+pub struct SqlString<'a> {
+    contents: String,
+    params: Vec<&'a (dyn ToSql + Sync)>,
+}
+
+impl<'a> SqlString<'a> {
+    pub fn new() -> SqlString<'a> {
+        SqlString { contents: String::new(), params: Vec::new() }
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        self.contents.push_str(s)
+    }
+
+    pub fn next_param<'b>(&'b mut self, v: &'a (dyn ToSql + Sync)) -> String
+    where
+        'a: 'b,
+    {
+        self.params.push(v);
+        format!("${}", self.params.len())
+    }
+
+    pub fn sql_fragment(&self) -> &str {
+        &self.contents
+    }
+
+    pub fn sql_params(&self) -> &[&'a (dyn ToSql + Sync)] {
+        &self.params
+    }
+}
+
 /** Given an arbitrary [`DbError`], produce an [`ApiError`] for the problem. */
 /* XXX Should this be From<>?  May want more context */
 pub fn sql_error_generic(e: DbError) -> ApiError {

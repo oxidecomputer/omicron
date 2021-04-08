@@ -11,6 +11,15 @@
  * parameters.  This way, we can easily identify the relatively small set of
  * unique WHERE clauses, but in a way that can also be inserted into UPDATE,
  * DELETE, SELECT, or CTEs using these, etc.
+ *
+ * Inventory of queries:
+ * (1) select an entire row by id (not deleted)
+ * (2) select an entire row by (parent_id, name) (not deleted)
+ * (3) select an id by (parent_id, name) (not deleted)
+ * (4) select a page of rows by (parent_id, name)
+ * (5) update a row by id AND state generation
+ *     (always using our CTE pattern)
+ * (6) INSERT all values in a row, possibly with a conflict clause
  */
 
 use super::Pool;
@@ -53,8 +62,13 @@ use super::operations::sql_query_always_one;
 use super::operations::sql_query_maybe_one;
 use super::operations::sql_row_value;
 use super::operations::DbError;
+use super::operations::SqlString;
 use super::schema::Disk;
 use super::schema::Instance;
+use super::schema::LookupByUniqueId;
+use super::schema::LookupByUniqueName;
+use super::schema::LookupByUniqueNameInProject;
+use super::schema::LookupKey;
 use super::schema::Project;
 use super::schema::Table;
 
@@ -65,6 +79,33 @@ pub struct DataStore {
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
         DataStore { pool }
+    }
+
+    /// Fetch an entire row using the specified lookup
+    async fn fetch_row_by<'a, L, T>(
+        &self,
+        client: &tokio_postgres::Client,
+        lookup_params: L::Params,
+    ) -> LookupResult<T::ApiModelType>
+    where
+        L: LookupKey<'a>,
+        T: Table,
+    {
+        let mut lookup_cond_sql = SqlString::new();
+        L::where_select_rows(lookup_params, &mut lookup_cond_sql);
+
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} AND {} LIMIT 2",
+            T::ALL_COLUMNS.join(", "),
+            T::TABLE_NAME,
+            T::LIVE_CONDITIONS,
+            &lookup_cond_sql.sql_fragment(),
+        );
+        let query_params = lookup_cond_sql.sql_params();
+        let mkzerror = || L::where_select_error::<T>(lookup_params);
+        let row =
+            sql_query_maybe_one(client, &sql, query_params, mkzerror).await?;
+        T::ApiModelType::try_from(&row)
     }
 
     /// Create a project
@@ -99,25 +140,11 @@ impl DataStore {
         project_name: &ApiName,
     ) -> LookupResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        let row = sql_query_maybe_one(
+        self.fetch_row_by::<LookupByUniqueName, Project>(
             &client,
-            format!(
-                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
-                        name = $1 LIMIT 2",
-                Project::ALL_COLUMNS.join(", "),
-                Project::TABLE_NAME
-            )
-            .as_str(),
-            &[&project_name],
-            || {
-                ApiError::not_found_by_name(
-                    ApiResourceType::Project,
-                    project_name,
-                )
-            },
+            (project_name,),
         )
-        .await?;
-        Ok(ApiProject::try_from(&row)?)
+        .await
     }
 
     /// Delete a project
@@ -455,6 +482,8 @@ impl DataStore {
          * a chance to fetch it.  As a result, sql_query_always_one() is correct
          * here, even though it looks like this query could legitimately return
          * 0 rows.
+         * XXX use new fetch_row_by?
+         * XXX specify time_deleted?
          */
         let row = sql_query_always_one(
             &client,
@@ -517,25 +546,8 @@ impl DataStore {
         instance_id: &Uuid,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let row = sql_query_maybe_one(
-            &client,
-            format!(
-                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
-                        id = $1 LIMIT 2",
-                Instance::ALL_COLUMNS.join(", "),
-                Instance::TABLE_NAME
-            )
-            .as_str(),
-            &[&instance_id],
-            || {
-                ApiError::not_found_by_id(
-                    ApiResourceType::Instance,
-                    instance_id,
-                )
-            },
-        )
-        .await?;
-        Ok(ApiInstance::try_from(&row)?)
+        self.fetch_row_by::<LookupByUniqueId, Instance>(&client, (instance_id,))
+            .await
     }
 
     pub async fn instance_fetch_by_name(
@@ -544,25 +556,11 @@ impl DataStore {
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let row = sql_query_maybe_one(
+        self.fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
-            format!(
-                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
-                        project_id = $1 AND name = $2 LIMIT 2",
-                Instance::ALL_COLUMNS.join(", "),
-                Instance::TABLE_NAME
-            )
-            .as_str(),
-            &[project_id, instance_name],
-            || {
-                ApiError::not_found_by_name(
-                    ApiResourceType::Instance,
-                    instance_name,
-                )
-            },
+            (project_id, instance_name),
         )
-        .await?;
-        Ok(ApiInstance::try_from(&row)?)
+        .await
     }
 
     pub async fn instance_update_runtime(
@@ -892,46 +890,22 @@ impl DataStore {
         .await
     }
 
-    /* XXX commonize with instance version */
     pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let row = sql_query_maybe_one(
-            &client,
-            format!(
-                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
-                        id = $1 LIMIT 2",
-                Disk::ALL_COLUMNS.join(", "),
-                Disk::TABLE_NAME
-            )
-            .as_str(),
-            &[&disk_id],
-            || ApiError::not_found_by_id(ApiResourceType::Disk, disk_id),
-        )
-        .await?;
-        Ok(ApiDisk::try_from(&row)?)
+        self.fetch_row_by::<LookupByUniqueId, Disk>(&client, (disk_id,)).await
     }
 
-    /* XXX commonize with instance version */
     pub async fn disk_fetch_by_name(
         &self,
         project_id: &Uuid,
         disk_name: &ApiName,
     ) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let row = sql_query_maybe_one(
+        self.fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
-            format!(
-                "SELECT {} FROM {} WHERE time_deleted IS NULL AND \
-                        project_id = $1 AND name = $2 LIMIT 2",
-                Disk::ALL_COLUMNS.join(", "),
-                Disk::TABLE_NAME
-            )
-            .as_str(),
-            &[project_id, disk_name],
-            || ApiError::not_found_by_name(ApiResourceType::Disk, disk_name),
+            (project_id, disk_name),
         )
-        .await?;
-        Ok(ApiDisk::try_from(&row)?)
+        .await
     }
 
     /* XXX commonize with instance version */
