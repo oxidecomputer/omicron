@@ -5,25 +5,23 @@
 /*
  * XXX review all queries for use of indexes (may need "time_deleted IS
  * NOT NULL" conditions)
- *
- * XXX document the pattern here: things that can be expressed in a single SQL
- * column impl ToSql/FromSql directly.  Things that don't impl TryFrom<&Row>.
- * These definitions probably ought to go in a file of their own:
- * db/conversions.rs?
+ * Figure out how to automate this.  It's tricky, but maybe the way to think
+ * about this is that we have Tables, and for each Table there's a fixed set of
+ * WHERE clauses, each of which includes a string SQL fragment and a set of
+ * parameters.  This way, we can easily identify the relatively small set of
+ * unique WHERE clauses, but in a way that can also be inserted into UPDATE,
+ * DELETE, SELECT, or CTEs using these, etc.
  */
 
 use super::Pool;
 use crate::api_error::ApiError;
-use crate::api_model::ApiByteCount;
 use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiGeneration;
-use crate::api_model::ApiIdentityMetadata;
 use crate::api_model::ApiInstance;
-use crate::api_model::ApiInstanceCpuCount;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceState;
@@ -43,43 +41,22 @@ use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
 use std::convert::TryFrom;
-use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
-use thiserror::Error;
-use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
-/*
- * TODO-debug It would be nice to have a backtrace in these errors.  thiserror
- * is capable of including one automatically if there's a member called
- * "backtrace" with the type "Backtrace", but it's not clear how that would get
- * populated aside from maybe a thiserror-generated `From` impl.  It looks like
- * one has to do that explicitly using std::backtrace::Backtrace::capture(),
- * which is a nightly-only API.  So we'll defer that for now.
- */
-#[derive(Error, Debug)]
-enum DbError {
-    #[error("executing {sql:?}: {source:#}")]
-    SqlError { sql: String, source: tokio_postgres::Error },
-
-    #[error("extracting column {column_name:?} from row: {source:#}")]
-    DeserializeError { column_name: String, source: tokio_postgres::Error },
-
-    #[error("executing {sql:?}: expected one row, but found {nrows_found}")]
-    BadRowCount { sql: String, nrows_found: u64 },
-}
-
-impl DbError {
-    pub fn db_source(&self) -> Option<&tokio_postgres::Error> {
-        match self {
-            DbError::SqlError { ref source, .. } => Some(source),
-            DbError::DeserializeError { ref source, .. } => Some(source),
-            DbError::BadRowCount { .. } => None,
-        }
-    }
-}
+use super::operations::sql_error_generic;
+use super::operations::sql_execute_maybe_one;
+use super::operations::sql_query;
+use super::operations::sql_query_always_one;
+use super::operations::sql_query_maybe_one;
+use super::operations::sql_row_value;
+use super::operations::DbError;
+use super::schema::Disk;
+use super::schema::Instance;
+use super::schema::Project;
+use super::schema::Table;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -1011,23 +988,10 @@ impl DataStore {
     }
 }
 
-/* XXX Should this be From<>?  May want more context */
-fn sql_error_generic(e: DbError) -> ApiError {
-    let extra = match e.db_source().and_then(|s| s.code()) {
-        Some(code) => format!(" (code {})", code.code()),
-        None => String::new(),
-    };
-
-    /*
-     * TODO-debuggability it would be nice to preserve the DbError here
-     * so that the SQL is visible in the log.
-     */
-    ApiError::internal_error(&format!(
-        "unexpected database error{}: {:#}",
-        extra, e
-    ))
-}
-
+/**
+ * Given a [`DbError`] while creating an instance of type `rtype`, produce an
+ * appropriate [`ApiError`].
+ */
 fn sql_error_on_create(
     rtype: ApiResourceType,
     unique_value: &str,
@@ -1110,177 +1074,6 @@ fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
     }
 }
 
-/*
- * TODO-coverage tests for these FromSql and ToSql implementations
- */
-
-/**
- * Defines impls for ToSql and FromSql for a type T such that &T: Into<D> and
- * T: TryFrom<D>.  These impls delegate to the "D" impls of these traits.  This
- * is useful because we define a bunch of numeric and string newtypes that are
- * implemented in the database as i64 and string, respectively.
- */
-macro_rules! impl_sql_wrapping {
-    ($T:ident, $D:ty) => {
-        impl ToSql for $T {
-            fn to_sql(
-                &self,
-                ty: &tokio_postgres::types::Type,
-                out: &mut tokio_postgres::types::private::BytesMut,
-            ) -> Result<
-                tokio_postgres::types::IsNull,
-                Box<dyn std::error::Error + Send + Sync>,
-            > {
-                <$D>::from(self).to_sql(ty, out)
-            }
-
-            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <$D as ToSql>::accepts(ty)
-            }
-
-            tokio_postgres::types::to_sql_checked!();
-        }
-
-        impl<'a> FromSql<'a> for $T {
-            fn from_sql(
-                ty: &tokio_postgres::types::Type,
-                raw: &'a [u8],
-            ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-                let value: $D = <$D as FromSql>::from_sql(ty, raw)?;
-                $T::try_from(value).map_err(|e| e.into())
-            }
-
-            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <$D as FromSql>::accepts(ty)
-            }
-        }
-    };
-}
-
-impl_sql_wrapping!(ApiByteCount, i64);
-impl_sql_wrapping!(ApiGeneration, i64);
-impl_sql_wrapping!(ApiInstanceCpuCount, i64);
-impl_sql_wrapping!(ApiInstanceState, &str);
-impl_sql_wrapping!(ApiName, &str);
-
-/**
- * Wrapper around [`tokio_postgres::Client::query`] that produces errors
- * that include the SQL.
- */
-/*
- * XXX TODO-debugging It would be really, really valuable to include the
- * query parameters here as well.  However, the only thing we can do with
- * ToSql is to serialize it to a PostgreSQL type (as a string of bytes).
- * We could require that these impl some trait that also provides Debug, and
- * then we could use that.  Or we could find a way to parse the resulting
- * PostgreSQL value and print _that_ out as a String somehow?
- */
-async fn sql_query(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<Vec<tokio_postgres::Row>, DbError> {
-    client
-        .query(sql, params)
-        .await
-        .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
-}
-
-/**
- * Like [`sql_query()`], but produces an error unless exactly one row is
- * returned.
- */
-async fn sql_query_always_one(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<tokio_postgres::Row, DbError> {
-    sql_query(client, sql, params).await.and_then(|mut rows| match rows.len() {
-        1 => Ok(rows.pop().unwrap()),
-        nrows_found => Err(DbError::BadRowCount {
-            sql: sql.to_owned(),
-            nrows_found: u64::try_from(nrows_found).unwrap(),
-        }),
-    })
-}
-
-/**
- * XXX?
- */
-/* XXX TODO-debugging can we include the SQL in the ApiError */
-async fn sql_query_maybe_one(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-    mkzerror: impl Fn() -> ApiError,
-) -> Result<tokio_postgres::Row, ApiError> {
-    sql_query(client, sql, params).await.map_err(sql_error_generic).and_then(
-        |mut rows| match rows.len() {
-            1 => Ok(rows.pop().unwrap()),
-            0 => Err(mkzerror()),
-            nrows_found => Err(sql_error_generic(DbError::BadRowCount {
-                sql: sql.to_owned(),
-                nrows_found: u64::try_from(nrows_found).unwrap(),
-            })),
-        },
-    )
-}
-
-/**
- * Wrapper around [`tokio_postgres::Client::execute`] that produces errors
- * that include the SQL.
- */
-/* XXX TODO-debugging See sql_query(). */
-async fn sql_execute(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<u64, DbError> {
-    client
-        .execute(sql, params)
-        .await
-        .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
-}
-
-/**
- * XXX?
- */
-/* XXX TODO-debugging can we include the SQL in the ApiError */
-async fn sql_execute_maybe_one(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-    mkzerror: impl Fn() -> ApiError,
-) -> Result<(), ApiError> {
-    sql_execute(client, sql, params).await.map_err(sql_error_generic).and_then(
-        |nrows| match nrows {
-            1 => Ok(()),
-            0 => Err(mkzerror()),
-            nrows_found => Err(sql_error_generic(DbError::BadRowCount {
-                sql: sql.to_owned(),
-                nrows_found,
-            })),
-        },
-    )
-}
-
-/**
- * Extract a named field from a row.
- */
-fn sql_row_value<'a, I, T>(
-    row: &'a tokio_postgres::Row,
-    idx: I,
-) -> Result<T, ApiError>
-where
-    I: tokio_postgres::row::RowIndex + fmt::Display,
-    T: FromSql<'a>,
-{
-    let column_name = idx.to_string();
-    row.try_get(idx).map_err(|source| {
-        sql_error_generic(DbError::DeserializeError { column_name, source })
-    })
-}
-
 /**
  * Using database connection `client`, insert a row into table `table_name`
  * having values `values` for the respective columns named `table_fields`.
@@ -1335,203 +1128,5 @@ where
             )?;
 
         T::ApiModelType::try_from(&row)
-    }
-}
-
-/// Load an [`ApiIdentityMetadata`] from a row of any table that contains the
-/// usual identity fields: "id", "name", "description, "time_created", and
-/// "time_metadata_updated".
-impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX What to do with non-NULL time_deleted?
-        Ok(ApiIdentityMetadata {
-            id: sql_row_value(value, "id")?,
-            name: sql_row_value(value, "name")?,
-            description: sql_row_value(value, "description")?,
-            time_created: sql_row_value(value, "time_created")?,
-            // XXX is it time_updated or time_metadata_updated
-            time_modified: sql_row_value(value, "time_metadata_updated")?,
-        })
-    }
-}
-
-/*
- * We want to find a better way to abstract this.  Diesel provides a compelling
- * model in terms of using it, but it also seems fairly heavyweight, and this
- * fetch-or-insert all-fields-of-an-object likely _isn't_ our most common use
- * case, even though we do it a lot for basic CRUD.
- */
-trait Table {
-    type ApiModelType: for<'a> TryFrom<
-        &'a tokio_postgres::Row,
-        Error = ApiError,
-    >;
-    const RESOURCE_TYPE: ApiResourceType;
-    const TABLE_NAME: &'static str;
-    const ALL_COLUMNS: &'static [&'static str];
-}
-
-struct Project;
-impl Table for Project {
-    type ApiModelType = ApiProject;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Project;
-    const TABLE_NAME: &'static str = "Project";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_metadata_updated",
-        "time_deleted",
-    ];
-}
-
-/// Load an [`ApiProject`] from a whole row of the "Project" table.
-impl TryFrom<&tokio_postgres::Row> for ApiProject {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiProject { identity: ApiIdentityMetadata::try_from(value)? })
-    }
-}
-
-struct Instance;
-impl Table for Instance {
-    type ApiModelType = ApiInstance;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Instance;
-    const TABLE_NAME: &'static str = "Instance";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_metadata_updated",
-        "time_deleted",
-        "project_id",
-        "instance_state",
-        "time_state_updated",
-        "state_generation",
-        "active_server_id",
-        "ncpus",
-        "memory",
-        "hostname",
-    ];
-}
-
-/// Load an [`ApiInstance`] from a whole row of the "Instance" table.
-impl TryFrom<&tokio_postgres::Row> for ApiInstance {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiInstance {
-            identity: ApiIdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            ncpus: sql_row_value(value, "ncpus")?,
-            memory: sql_row_value(value, "memory")?,
-            hostname: sql_row_value(value, "hostname")?,
-            runtime: ApiInstanceRuntimeState::try_from(value)?,
-            boot_disk_size: ApiByteCount::from(0u32), // XXX
-        })
-    }
-}
-
-/// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
-/// using the "instance_state", "active_server_id", "state_generation", and
-/// "time_state_updated" columns.
-impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiInstanceRuntimeState {
-            run_state: sql_row_value(value, "instance_state")?,
-            reboot_in_progress: false, // XXX
-            sled_uuid: sql_row_value(value, "active_server_id")?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
-    }
-}
-
-struct Disk;
-impl Table for Disk {
-    type ApiModelType = ApiDisk;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
-    const TABLE_NAME: &'static str = "Disk";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_metadata_updated",
-        "time_deleted",
-        "project_id",
-        "disk_state",
-        "time_state_updated",
-        "state_generation",
-        "attach_instance_id",
-        "size_bytes",
-        "origin_snapshot",
-    ];
-}
-
-/// Load an [`ApiDisk`] from a row of the "Disk" table.
-impl TryFrom<&tokio_postgres::Row> for ApiDisk {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDisk {
-            identity: ApiIdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
-            size: sql_row_value(value, "size_bytes")?,
-            runtime: ApiDiskRuntimeState::try_from(value)?,
-        })
-    }
-}
-
-/// Load an [`ApiDiskAttachment`] from a database row containing those columns
-/// of the Disk table that describe the attachment: "id", "name", "disk_state",
-/// "attach_instance_id"
-impl TryFrom<&tokio_postgres::Row> for ApiDiskAttachment {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDiskAttachment {
-            instance_id: sql_row_value(value, "attach_instance_id")?,
-            disk_id: sql_row_value(value, "id")?,
-            disk_name: sql_row_value(value, "name")?,
-            disk_state: ApiDiskState::try_from(value)?,
-        })
-    }
-}
-
-/// Load an [`ApiDiskState`] from a row from the Disk table, using the columns
-/// "disk_state" and "attach_instance_id".
-impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let disk_state_str: &str = sql_row_value(value, "disk_state")?;
-        let instance_uuid: Option<Uuid> =
-            sql_row_value(value, "attach_instance_id")?;
-        ApiDiskState::try_from((disk_state_str, instance_uuid))
-            .map_err(|e| ApiError::internal_error(&e))
-    }
-}
-
-/// Load an [`ApiDiskRuntimeState`'] from a row from the Disk table, using the
-/// columns needed for [`ApiDiskState`], plus "state_generation" and
-/// "time_state_updated".
-impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
-    type Error = ApiError;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDiskRuntimeState {
-            disk_state: ApiDiskState::try_from(value)?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
     }
 }

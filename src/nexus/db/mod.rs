@@ -3,8 +3,11 @@
  */
 
 mod config;
+mod conversions;
 mod datastore;
+mod operations;
 mod pool;
+mod schema;
 
 pub use config::Config;
 pub use config::PostgresConfigWithUrl;
