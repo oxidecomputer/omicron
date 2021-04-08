@@ -1071,10 +1071,9 @@ pub struct ApiDiskCreateParams {
 #[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiDiskAttachment {
-    pub instance_name: ApiName,
     pub instance_id: Uuid,
-    pub disk_name: ApiName,
     pub disk_id: Uuid,
+    pub disk_name: ApiName,
     pub disk_state: ApiDiskState,
 }
 

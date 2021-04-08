@@ -16,6 +16,7 @@ use super::Pool;
 use crate::api_error::ApiError;
 use crate::api_model::ApiByteCount;
 use crate::api_model::ApiDisk;
+use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
@@ -757,18 +758,16 @@ impl DataStore {
     /**
      * List disks associated with a given instance.
      */
-    // XXX This could get ApiDiskAttachment objects instead and potentially be a
-    // bit more efficient (and less coupled to the other fields in the Disk row)
     pub async fn instance_list_disks(
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDisk> {
+    ) -> ListResult<ApiDiskAttachment> {
         let client = self.pool.acquire().await?;
         let rows = sql_pagination(
             &client,
             Disk,
-            Disk::ALL_COLUMNS, // XXX
+            &["id", "name", "disk_state", "attach_instance_id"],
             "time_deleted IS NULL AND attach_instance_id IS NOT NULL AND \
             disk_state IN ('attaching', 'attached', 'detaching') AND \
             attach_instance_id = $1",
@@ -779,8 +778,8 @@ impl DataStore {
         .await?;
         let list = rows
             .iter()
-            .map(|row| ApiDisk::try_from(row))
-            .collect::<Vec<Result<ApiDisk, ApiError>>>();
+            .map(|row| ApiDiskAttachment::try_from(row))
+            .collect::<Vec<Result<ApiDiskAttachment, ApiError>>>();
         Ok(futures::stream::iter(list).boxed())
     }
 
@@ -1339,6 +1338,9 @@ where
     }
 }
 
+/// Load an [`ApiIdentityMetadata`] from a row of any table that contains the
+/// usual identity fields: "id", "name", "description, "time_created", and
+/// "time_metadata_updated".
 impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     type Error = ApiError;
 
@@ -1386,6 +1388,7 @@ impl Table for Project {
     ];
 }
 
+/// Load an [`ApiProject`] from a whole row of the "Project" table.
 impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
 
@@ -1417,6 +1420,7 @@ impl Table for Instance {
     ];
 }
 
+/// Load an [`ApiInstance`] from a whole row of the "Instance" table.
 impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     type Error = ApiError;
 
@@ -1433,6 +1437,9 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     }
 }
 
+/// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
+/// using the "instance_state", "active_server_id", "state_generation", and
+/// "time_state_updated" columns.
 impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     type Error = ApiError;
 
@@ -1469,6 +1476,7 @@ impl Table for Disk {
     ];
 }
 
+/// Load an [`ApiDisk`] from a row of the "Disk" table.
 impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     type Error = ApiError;
 
@@ -1483,18 +1491,45 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
+/// Load an [`ApiDiskAttachment`] from a database row containing those columns
+/// of the Disk table that describe the attachment: "id", "name", "disk_state",
+/// "attach_instance_id"
+impl TryFrom<&tokio_postgres::Row> for ApiDiskAttachment {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        Ok(ApiDiskAttachment {
+            instance_id: sql_row_value(value, "attach_instance_id")?,
+            disk_id: sql_row_value(value, "id")?,
+            disk_name: sql_row_value(value, "name")?,
+            disk_state: ApiDiskState::try_from(value)?,
+        })
+    }
+}
+
+/// Load an [`ApiDiskState`] from a row from the Disk table, using the columns
+/// "disk_state" and "attach_instance_id".
+impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let disk_state_str: &str = sql_row_value(value, "disk_state")?;
         let instance_uuid: Option<Uuid> =
             sql_row_value(value, "attach_instance_id")?;
-        let disk_state =
-            ApiDiskState::try_from((disk_state_str, instance_uuid))
-                .map_err(|e| ApiError::internal_error(&e))?;
+        ApiDiskState::try_from((disk_state_str, instance_uuid))
+            .map_err(|e| ApiError::internal_error(&e))
+    }
+}
+
+/// Load an [`ApiDiskRuntimeState`'] from a row from the Disk table, using the
+/// columns needed for [`ApiDiskState`], plus "state_generation" and
+/// "time_state_updated".
+impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(ApiDiskRuntimeState {
-            disk_state,
+            disk_state: ApiDiskState::try_from(value)?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,
         })

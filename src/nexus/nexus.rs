@@ -710,25 +710,9 @@ impl Nexus {
     ) -> ListResult<ApiDiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
-        let disks = self
-            .db_datastore
+        self.db_datastore
             .instance_list_disks(&instance.identity.id, pagparams)
-            .await?;
-        let attachments = disks
-            .filter(|maybe_disk| ready(maybe_disk.is_ok()))
-            .map(|maybe_disk| {
-                let disk = maybe_disk.unwrap();
-                Ok(ApiDiskAttachment {
-                    instance_name: instance.identity.name.clone(),
-                    instance_id: instance.identity.id,
-                    disk_name: disk.identity.name.clone(),
-                    disk_id: disk.identity.id,
-                    disk_state: disk.runtime.disk_state,
-                })
-            })
-            .collect::<Vec<Result<ApiDiskAttachment, ApiError>>>()
-            .await;
-        Ok(futures::stream::iter(attachments).boxed())
+            .await
     }
 
     /**
@@ -748,7 +732,6 @@ impl Nexus {
         {
             if instance_id == &instance.identity.id {
                 return Ok(ApiDiskAttachment {
-                    instance_name: instance.identity.name.clone(),
                     instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
@@ -791,7 +774,6 @@ impl Nexus {
                 disk.runtime.disk_state.attached_instance_id().unwrap()
             );
             Ok(ApiDiskAttachment {
-                instance_name: instance.identity.name.clone(),
                 instance_id: *instance_id,
                 disk_id: disk.identity.id,
                 disk_name: disk.identity.name.clone(),

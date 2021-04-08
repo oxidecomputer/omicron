@@ -187,7 +187,6 @@ async fn test_disks() {
         .unwrap();
     let attachment: ApiDiskAttachment = read_json(&mut response).await;
     let instance_id = &instance.identity.id;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, *instance_id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -198,7 +197,6 @@ async fn test_disks() {
 
     let attachment: ApiDiskAttachment =
         object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -218,7 +216,6 @@ async fn test_disks() {
     disk_simulate(nexus, &disk.identity.id).await;
     let attachment: ApiDiskAttachment =
         object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -407,7 +404,6 @@ async fn test_disks() {
         .unwrap();
     let attachment: ApiDiskAttachment = read_json(&mut response).await;
     let instance2_id = &instance2.identity.id;
-    assert_eq!(attachment.instance_name, instance2.identity.name);
     assert_eq!(attachment.instance_id, *instance2_id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
