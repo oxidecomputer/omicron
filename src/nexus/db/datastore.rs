@@ -769,9 +769,6 @@ impl DataStore {
             &client,
             Disk,
             Disk::ALL_COLUMNS, // XXX
-            // XXX Want an index here:
-            // (attach_instance_id) WHERE time_deleted IS NULL AND
-            // attach_instance_id IS NOT NULL
             "time_deleted IS NULL AND attach_instance_id IS NOT NULL AND \
             disk_state IN ('attaching', 'attached', 'detaching') AND \
             attach_instance_id = $1",

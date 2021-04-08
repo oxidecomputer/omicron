@@ -191,6 +191,11 @@ CREATE UNIQUE INDEX ON omicron.public.Disk (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE INDEX ON omicron.public.Disk (
+    attach_instance_id
+) WHERE
+    time_deleted IS NULL AND attach_instance_id IS NOT NULL;
+
 
 /*
  * Sleds
