@@ -33,8 +33,14 @@ const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
 /* This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql. */
 const COCKROACHDB_DATABASE: &'static str = "omicron";
 /** CockroachDB user name */
-/* This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql. */
-const COCKROACHDB_USER: &'static str = "omicron";
+/*
+ * TODO-security This should really use "omicron", which is created in
+ * src/sql/dbinit.sql.  Doing that requires either hardcoding a password or
+ * (better) using `cockroach cert` to set up a CA and certificates for this
+ * user.  We should modify the infrastructure here to do that rather than use
+ * "root" here.
+ */
+const COCKROACHDB_USER: &'static str = "root";
 
 /**
  * Builder for [`CockroachStarter`] that supports setting some command-line
@@ -696,11 +702,7 @@ fn make_pg_config(
     if let Host::Tcp(ip_host) = &hosts[0] {
         let url = format!(
             "postgresql://{}@{}:{}/{}?sslmode=disable",
-            // XXX user should be COCKROACHDB_USER
-            "root",
-            ip_host,
-            ports[0],
-            COCKROACHDB_DATABASE
+            COCKROACHDB_USER, ip_host, ports[0], COCKROACHDB_DATABASE
         );
         url.parse::<PostgresConfigWithUrl>().with_context(|| {
             format!("parse modified PostgreSQL config {:?}", url)
@@ -1192,7 +1194,7 @@ mod test {
         let config = make_pg_config(url).expect("failed to parse basic case");
         assert_eq!(
             config.to_string().as_str(),
-            // XXX user should become "omicron"
+            // TODO-security This user should become "omicron"
             "postgresql://root@127.0.0.1:45913/omicron?sslmode=disable",
         );
     }

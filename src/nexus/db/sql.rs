@@ -26,15 +26,19 @@ use tokio_postgres::types::ToSql;
  * this interface:
  *
  * ```no_run
- * let sql = SqlString::new();
+ * # #[tokio::main]
+ * # async fn main() {
+ * # use omicron::nexus::db::sql::SqlString;
+ * let mut sql = SqlString::new();
  * let param = sql.next_param(&"Robert'); DROP TABLE Students;--");
- * sql.push_str(format!("SELECT * FROM Students WHERE name = {}", param));
- * assert_eq!(sql.sql_fragment(), "SELECT * FROM Students WHERE name = $1")
+ * sql.push_str(&format!("SELECT * FROM Students WHERE name = {}", param));
+ * assert_eq!(sql.sql_fragment(), "SELECT * FROM Students WHERE name = $1");
  *
  * // You can safely use this like so:
  * # fn get_client() -> tokio_postgres::Client { unimplemented!(); }
  * let client: tokio_postgres::Client = get_client();
- * let rows = client.query(sql.sql_str(), sql.sql_params()).await;
+ * let rows = client.query(sql.sql_fragment(), sql.sql_params()).await;
+ * # }
  * ```
  */
 pub struct SqlString<'a> {
@@ -349,8 +353,10 @@ where
  * ## Example
  *
  * ```
+ * # use omicron::nexus::db::sql::SqlString;
+ * # use omicron::nexus::db::sql::where_cond;
  * use tokio_postgres::types::FromSql;
- * #use tokio_postgres::types::IsNull;
+ * # use tokio_postgres::types::IsNull;
  * use tokio_postgres::types::ToSql;
  * use tokio_postgres::types::Type;
  *
@@ -367,7 +373,7 @@ where
  * // Parameter $1 will serialize to the SQL string `"Ashburn"`
  * let mut bytes = bytes::BytesMut::new();
  * # let there =
- * params[0].to_sql_checked(&Type::TEXT, &mut bytes)
+ * params[0].to_sql_checked(&Type::TEXT, &mut bytes);
  * # assert!(matches!(there.unwrap(), IsNull::No));
  * let back = <String as FromSql<'_>>::from_sql(&Type::TEXT, &bytes)
  *     .expect("failed to deserialize $1");
@@ -387,7 +393,10 @@ where
  *
  * If `column_names.len() != param_values.len()`.
  */
-fn where_cond<'a, 'b>(
+/*
+ * NOTE: This function is public only so that we can access it from the example.
+ */
+pub fn where_cond<'a, 'b>(
     column_names: &'b [&'static str],
     param_values: &'b [&'a (dyn ToSql + Sync)],
     operator: &'static str,
@@ -516,6 +525,6 @@ mod test {
         where_cond(column_names, param_values, "=", &mut output);
     }
 
-    /* XXX TODO-coverage tests for SqlString */
-    /* XXX TODO-coverage tests for LookupKey */
+    /* TODO-coverage tests for SqlString */
+    /* TODO-coverage tests for LookupKey */
 }
