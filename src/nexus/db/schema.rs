@@ -9,7 +9,6 @@ use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DataPageParams;
-use std::borrow::Borrow;
 use std::convert::TryFrom;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
@@ -42,7 +41,7 @@ pub trait LookupKey<'a> {
 
     /* Pagination */
 
-    type PageParamsFixed: IntoToSqlVec<'a>;
+    type PageParamsFixed: IntoToSqlVec<'a> + 'a;
     const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str];
     type PageParamsMarker: ToSql + Sync + Clone + 'static;
     const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str];
@@ -67,8 +66,12 @@ pub trait LookupKey<'a> {
          * project_id.
          */
         let fixed_column_names = Self::PAGE_FIXED_COLUMN_NAMES;
-        let fixed_param_values = page_params_fixed.to_sql_vec();
-        where_cond(fixed_column_names, fixed_param_values, "=", output);
+        if fixed_column_names.len() > 0 {
+            let fixed_param_values = page_params_fixed.to_sql_vec();
+            output.push_str(" AND (");
+            where_cond(fixed_column_names, fixed_param_values, "=", output);
+            output.push_str(") ");
+        }
 
         /*
          * If a marker was provided, then generate conditions that resume the
@@ -78,8 +81,9 @@ pub trait LookupKey<'a> {
             let var_column_names = Self::PAGE_MARKER_COLUMN_NAMES;
             let marker_ref = marker as &(dyn ToSql + Sync);
             let var_param_values = vec![marker_ref];
-            output.push_str(" AND ");
+            output.push_str(" AND (");
             where_cond(var_column_names, var_param_values, operator, output);
+            output.push_str(") ");
         }
 
         /*
@@ -89,11 +93,11 @@ pub trait LookupKey<'a> {
         let order_clauses = Self::PAGE_MARKER_COLUMN_NAMES
             .iter()
             .map(|column_name: &&'static str| {
-                format!("{} {}", output.next_param(column_name), order)
+                format!("{} {}", *column_name, order)
             })
             .collect::<Vec<String>>()
             .join(", ");
-        output.push_str("ORDER BY ");
+        output.push_str(" ORDER BY ");
         output.push_str(&order_clauses);
         output.push_str(" ");
     }
@@ -171,6 +175,31 @@ impl<'a> LookupKey<'a> for LookupByUniqueNameInProject {
     const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str] = &["name"];
 }
 
+pub struct LookupByAttachedInstance;
+impl<'a> LookupKey<'a> for LookupByAttachedInstance {
+    /*
+     * XXX TODO-cleanup Maybe we should split up LookupKey and PaginationKey
+     * because it's not clear that a lookup makes sense here.
+     */
+    type LookupParams = (&'a Uuid,); /* unused */
+    const LOOKUP_COLUMN_NAMES: &'static [&'static str] = &["__unused__"];
+    fn where_select_error<T: Table>(_: Self::LookupParams) -> ApiError {
+        ApiError::internal_error("attempted lookup attached instance")
+    }
+
+    /*
+     * TODO-design What if we want an additional filter here (like disk_state in
+     * ('attaching', 'attached', 'detaching'))?  This would almost work using
+     * the fixed columns except that we cannot change the operator or supply
+     * multiple values.
+     */
+    type PageParamsFixed = (&'a Uuid,);
+    const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str] =
+        &["attach_instance_id"];
+    type PageParamsMarker = ApiName;
+    const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str] = &["name"];
+}
+
 pub trait IntoToSqlVec<'a> {
     fn to_sql_vec(self) -> Vec<&'a (dyn ToSql + Sync)>;
 }
@@ -180,12 +209,6 @@ impl<'a> IntoToSqlVec<'a> for () {
         Vec::new()
     }
 }
-
-// impl<'a, T: ToSql + Sync> IntoToSqlVec<'a> for &[T] {
-//     fn to_sql_vec(self) -> Vec<&'a (dyn ToSql + Sync)> {
-//         self.to_vec()
-//     }
-// }
 
 impl<'a, 't1, T1> IntoToSqlVec<'a> for (&'t1 T1,)
 where
@@ -233,22 +256,11 @@ pub trait Table {
     /** List of names of all columns in the table. */
     const ALL_COLUMNS: &'static [&'static str];
 
-    /** Type of the primary key column. */
-    type PrimaryKey: ToSql + Borrow<Uuid> + Sync;
-    /** Column name for the primary key */
-    const PRIMARY_KEY_COLUMN_NAME: &'static str = "id";
     /**
      * Parts of a WHERE clause that should be included in all queries for live
      * records
      */
     const LIVE_CONDITIONS: &'static str = "time_deleted IS NULL";
-
-    /** Type of the column linking each object to its parent */
-    type ParentPrimaryKey: ToSql + Borrow<Uuid> + Sync;
-    /** Name of the column linking each object to its parent */
-    const PARENT_KEY_COLUMN_NAME: &'static str;
-    /** Name of the column containing each object's name */
-    const NAME_COLUMN_NAME: &'static str = "name";
 }
 
 /** Describes the "Project" table */
@@ -265,9 +277,6 @@ impl Table for Project {
         "time_metadata_updated",
         "time_deleted",
     ];
-    type PrimaryKey = Uuid;
-    type ParentPrimaryKey = Uuid; // XXX
-    const PARENT_KEY_COLUMN_NAME: &'static str = "__nonexistent__"; // XXX
 }
 
 /** Describes the "Instance" table */
@@ -292,9 +301,6 @@ impl Table for Instance {
         "memory",
         "hostname",
     ];
-    type PrimaryKey = Uuid;
-    type ParentPrimaryKey = Uuid;
-    const PARENT_KEY_COLUMN_NAME: &'static str = "id";
 }
 
 /** Describes the "Disk" table */
@@ -318,7 +324,4 @@ impl Table for Disk {
         "size_bytes",
         "origin_snapshot",
     ];
-    type PrimaryKey = Uuid;
-    type ParentPrimaryKey = Uuid;
-    const PARENT_KEY_COLUMN_NAME: &'static str = "id";
 }

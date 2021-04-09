@@ -65,6 +65,7 @@ use super::operations::DbError;
 use super::operations::SqlString;
 use super::schema::Disk;
 use super::schema::Instance;
+use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
@@ -108,41 +109,73 @@ impl DataStore {
         T::ApiModelType::try_from(&row)
     }
 
-    /// Fetch a page of rows using the specified lookup
-    async fn fetch_page_by<'a, 'b, L, T>(
+    /// Fetch a page of rows from a table using the specified lookup
+    async fn fetch_page_from_table<'a, L, T>(
         &self,
-        client: &tokio_postgres::Client,
+        client: &'a tokio_postgres::Client,
         fixed_params: L::PageParamsFixed,
-        pagparams: &'b DataPageParams<'b, L::PageParamsMarker>,
+        pagparams: &'a DataPageParams<'a, L::PageParamsMarker>,
     ) -> ListResult<T::ApiModelType>
     where
         L: LookupKey<'a>,
+        L::PageParamsFixed: 'a,
         T: Table,
-        'b: 'a,
     {
-        let mut page_cond_sql = SqlString::new();
-        L::where_select_page(fixed_params, pagparams, &mut page_cond_sql);
-        let limit = i64::from(pagparams.limit.get());
-        let limit_clause =
-            format!("LIMIT {}", page_cond_sql.next_param(&limit));
-        page_cond_sql.push_str(limit_clause.as_str());
+        self.fetch_page_by::<L, T, T::ApiModelType>(
+            client,
+            fixed_params,
+            pagparams,
+            T::ALL_COLUMNS,
+        )
+        .await
+    }
 
-        let sql = format!(
-            "SELECT {} FROM {} WHERE ({}) AND {}",
-            T::ALL_COLUMNS.join(", "),
-            T::TABLE_NAME,
-            T::LIVE_CONDITIONS,
-            &page_cond_sql.sql_fragment(),
-        );
-        let query_params = page_cond_sql.sql_params();
-        let rows = sql_query(client, sql.as_str(), query_params)
-            .await
-            .map_err(sql_error_generic)?;
-        let list = rows
-            .iter()
-            .map(T::ApiModelType::try_from)
-            .collect::<Vec<Result<T::ApiModelType, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+    /// Like `fetch_page_from_table`, but the caller can specify which columns
+    /// to select and how to interpret the row
+    /*
+     * The explicit desugaring of "async fn" here is due to
+     * rust-lang/rust#63033.
+     * TODO-cleanup review the lifetimes and bounds on fetch_page_by()
+     */
+    fn fetch_page_by<'a, L, T, R>(
+        &self,
+        client: &'a tokio_postgres::Client,
+        fixed_params: L::PageParamsFixed,
+        pagparams: &'a DataPageParams<'a, L::PageParamsMarker>,
+        columns: &'static [&'static str],
+    ) -> impl Future<Output = ListResult<R>> + 'a
+    where
+        L: LookupKey<'a>,
+        T: Table,
+        R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
+            + Send
+            + 'static,
+    {
+        async move {
+            let mut page_cond_sql = SqlString::new();
+            L::where_select_page(fixed_params, pagparams, &mut page_cond_sql);
+            let limit = i64::from(pagparams.limit.get());
+            let limit_clause =
+                format!("LIMIT {}", page_cond_sql.next_param(&limit));
+            page_cond_sql.push_str(limit_clause.as_str());
+
+            let sql = format!(
+                "SELECT {} FROM {} WHERE ({}) {}",
+                columns.join(", "),
+                T::TABLE_NAME,
+                T::LIVE_CONDITIONS,
+                &page_cond_sql.sql_fragment(),
+            );
+            let query_params = page_cond_sql.sql_params();
+            let rows = sql_query(client, sql.as_str(), query_params)
+                .await
+                .map_err(sql_error_generic)?;
+            let list = rows
+                .iter()
+                .map(R::try_from)
+                .collect::<Vec<Result<R, ApiError>>>();
+            Ok(futures::stream::iter(list).boxed())
+        }
     }
 
     /// Create a project
@@ -284,21 +317,12 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        let rows = sql_pagination(
+        self.fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
-            Project,
-            Project::ALL_COLUMNS,
-            "time_deleted IS NULL",
-            &[],
-            "id",
+            (),
             pagparams,
         )
-        .await?;
-        let list = rows
-            .iter()
-            .map(|row| ApiProject::try_from(row))
-            .collect::<Vec<Result<ApiProject, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+        .await
     }
 
     /// List a page of projects by name
@@ -307,21 +331,13 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        let rows = sql_pagination(
+        self.fetch_page_by::<LookupByUniqueName, Project, <Project as Table>::ApiModelType>(
             &client,
-            Project,
-            Project::ALL_COLUMNS,
-            "time_deleted IS NULL",
-            &[],
-            "name",
+            (),
             pagparams,
+            Project::ALL_COLUMNS,
         )
-        .await?;
-        let list = rows
-            .iter()
-            .map(|row| ApiProject::try_from(row))
-            .collect::<Vec<Result<ApiProject, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+        .await
     }
 
     /// Updates a project by name (clobbering update -- no etag)
@@ -561,10 +577,11 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        self.fetch_page_by::<LookupByUniqueNameInProject, Instance>(
+        self.fetch_page_by::<LookupByUniqueNameInProject, Instance, <Instance as Table>::ApiModelType>(
             &client,
             (project_id,),
             pagparams,
+            Instance::ALL_COLUMNS,
         )
         .await
     }
@@ -767,23 +784,13 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDiskAttachment> {
         let client = self.pool.acquire().await?;
-        let rows = sql_pagination(
+        self.fetch_page_by::<LookupByAttachedInstance, Disk, ApiDiskAttachment>(
             &client,
-            Disk,
-            &["id", "name", "disk_state", "attach_instance_id"],
-            "time_deleted IS NULL AND attach_instance_id IS NOT NULL AND \
-            disk_state IN ('attaching', 'attached', 'detaching') AND \
-            attach_instance_id = $1",
-            &[instance_id],
-            "name",
+            (instance_id,),
             pagparams,
+            &["id", "name", "disk_state", "attach_instance_id"],
         )
-        .await?;
-        let list = rows
-            .iter()
-            .map(|row| ApiDiskAttachment::try_from(row))
-            .collect::<Vec<Result<ApiDiskAttachment, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+        .await
     }
 
     pub async fn project_create_disk(
@@ -861,28 +868,19 @@ impl DataStore {
         }
     }
 
-    /* XXX commonize with instance version */
     pub async fn project_list_disks(
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        let rows = sql_pagination(
+        self.fetch_page_by::<LookupByUniqueNameInProject, Disk, <Disk as Table>::ApiModelType>(
             &client,
-            Disk,
-            Disk::ALL_COLUMNS,
-            "time_deleted IS NULL AND project_id = $1",
-            &[project_id],
-            "name",
+            (project_id,),
             pagparams,
+            Disk::ALL_COLUMNS,
         )
-        .await?;
-        let list = rows
-            .iter()
-            .map(|row| ApiDisk::try_from(row))
-            .collect::<Vec<Result<ApiDisk, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+        .await
     }
 
     pub async fn disk_update_runtime(
@@ -1013,67 +1011,6 @@ fn sql_error_on_create(
     }
 
     sql_error_generic(e)
-}
-
-/*
- * XXX building SQL like this sucks (obviously).  The 'static str here is just
- * to make it less likely we accidentally put a user-provided string here if
- * this sicence experiment escapes the lab.
- * As below, the explicit desugaring of "async fn" here is due to
- * rust-lang/rust#63033.
- */
-fn sql_pagination<'a, T: Table, K: ToSql + Send + Sync>(
-    client: &'a tokio_postgres::Client,
-    _table: T, // TODO-cleanup
-    columns: &'a [&'static str],
-    base_where: &'static str,
-    base_params: &'a [&'a (dyn ToSql + Sync)],
-    column_name: &'static str,
-    pagparams: &'a DataPageParams<'a, K>,
-) -> impl Future<Output = Result<Vec<tokio_postgres::Row>, ApiError>> + 'a {
-    let (operator, order) = match pagparams.direction {
-        dropshot::PaginationOrder::Ascending => (">", "ASC"),
-        dropshot::PaginationOrder::Descending => ("<", "DESC"),
-    };
-
-    let base_sql = format!(
-        "SELECT {} FROM {} WHERE {} ",
-        columns.join(", "),
-        T::TABLE_NAME,
-        base_where
-    );
-    let limit = i64::from(pagparams.limit.get());
-    async move {
-        let query_result = if let Some(marker_value) = &pagparams.marker {
-            let mut params = base_params.to_vec();
-            params.push(&marker_value);
-            params.push(&limit);
-            let sql = format!(
-                "{} AND {} {} ${} ORDER BY {} {} LIMIT ${}",
-                base_sql,
-                column_name,
-                operator,
-                params.len() - 1,
-                column_name,
-                order,
-                params.len(),
-            );
-            sql_query(&client, sql.as_str(), &params.as_slice()).await
-        } else {
-            let mut params = base_params.to_vec();
-            params.push(&limit);
-            let sql = format!(
-                "{} ORDER BY {} {} LIMIT ${}",
-                base_sql,
-                column_name,
-                order,
-                params.len(),
-            );
-            sql_query(client, sql.as_str(), &params.as_slice()).await
-        };
-
-        query_result.map_err(sql_error_generic)
-    }
 }
 
 /**
