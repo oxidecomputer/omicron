@@ -86,14 +86,15 @@ impl DataStore {
     async fn fetch_row_by<'a, L, T>(
         &self,
         client: &tokio_postgres::Client,
-        lookup_params: L::LookupParams,
+        scope_params: L::ScopeParams,
+        item_key: &'a L::ItemKey,
     ) -> LookupResult<T::ApiModelType>
     where
         L: LookupKey<'a>,
         T: Table,
     {
         let mut lookup_cond_sql = SqlString::new();
-        L::where_select_rows(lookup_params, &mut lookup_cond_sql);
+        L::where_select_rows(scope_params, item_key, &mut lookup_cond_sql);
 
         let sql = format!(
             "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
@@ -103,7 +104,8 @@ impl DataStore {
             &lookup_cond_sql.sql_fragment(),
         );
         let query_params = lookup_cond_sql.sql_params();
-        let mkzerror = || L::where_select_error::<T>(lookup_params);
+        let mkzerror =
+            move || L::where_select_error::<T>(scope_params, item_key);
         let row =
             sql_query_maybe_one(client, &sql, query_params, mkzerror).await?;
         T::ApiModelType::try_from(&row)
@@ -113,17 +115,17 @@ impl DataStore {
     async fn fetch_page_from_table<'a, L, T>(
         &self,
         client: &'a tokio_postgres::Client,
-        fixed_params: L::PageParamsFixed,
-        pagparams: &'a DataPageParams<'a, L::PageParamsMarker>,
+        scope_params: L::ScopeParams,
+        pagparams: &'a DataPageParams<'a, L::ItemKey>,
     ) -> ListResult<T::ApiModelType>
     where
         L: LookupKey<'a>,
-        L::PageParamsFixed: 'a,
+        L::ScopeParams: 'a,
         T: Table,
     {
         self.fetch_page_by::<L, T, T::ApiModelType>(
             client,
-            fixed_params,
+            scope_params,
             pagparams,
             T::ALL_COLUMNS,
         )
@@ -140,8 +142,8 @@ impl DataStore {
     fn fetch_page_by<'a, L, T, R>(
         &self,
         client: &'a tokio_postgres::Client,
-        fixed_params: L::PageParamsFixed,
-        pagparams: &'a DataPageParams<'a, L::PageParamsMarker>,
+        scope_params: L::ScopeParams,
+        pagparams: &'a DataPageParams<'a, L::ItemKey>,
         columns: &'static [&'static str],
     ) -> impl Future<Output = ListResult<R>> + 'a
     where
@@ -153,7 +155,7 @@ impl DataStore {
     {
         async move {
             let mut page_cond_sql = SqlString::new();
-            L::where_select_page(fixed_params, pagparams, &mut page_cond_sql);
+            L::where_select_page(scope_params, pagparams, &mut page_cond_sql);
             let limit = i64::from(pagparams.limit.get());
             let limit_clause =
                 format!("LIMIT {}", page_cond_sql.next_param(&limit));
@@ -212,7 +214,8 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         self.fetch_row_by::<LookupByUniqueName, Project>(
             &client,
-            (project_name,),
+            (),
+            project_name,
         )
         .await
     }
@@ -591,8 +594,12 @@ impl DataStore {
         instance_id: &Uuid,
     ) -> LookupResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        self.fetch_row_by::<LookupByUniqueId, Instance>(&client, (instance_id,))
-            .await
+        self.fetch_row_by::<LookupByUniqueId, Instance>(
+            &client,
+            (),
+            instance_id,
+        )
+        .await
     }
 
     pub async fn instance_fetch_by_name(
@@ -603,7 +610,8 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         self.fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
-            (project_id, instance_name),
+            (project_id,),
+            instance_name,
         )
         .await
     }
@@ -918,7 +926,7 @@ impl DataStore {
 
     pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        self.fetch_row_by::<LookupByUniqueId, Disk>(&client, (disk_id,)).await
+        self.fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
 
     pub async fn disk_fetch_by_name(
@@ -929,7 +937,8 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         self.fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
-            (project_id, disk_name),
+            (project_id,),
+            disk_name,
         )
         .await
     }

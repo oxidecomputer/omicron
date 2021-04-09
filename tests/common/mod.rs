@@ -62,24 +62,9 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let log = &logctx.log;
 
     /* Start up CockroachDB. */
-    let mut builder = dev::db::CockroachStarterBuilder::new();
-    builder.redirect_stdio_to_files();
-    let starter = builder.build().unwrap();
-    info!(
-        &log,
-        "cockroach temporary directory: {}",
-        starter.temp_dir().display()
-    );
-    info!(&log, "cockroach command line: {}", starter.cmdline());
-    let database = starter.start().await.unwrap();
-    info!(&log, "cockroach pid: {}", database.pid());
-    let db_url = database.pg_config();
-    info!(&log, "cockroach listen URL: {}", db_url);
-    info!(&log, "cockroach: populating");
-    database.populate().await.expect("failed to populate database");
-    info!(&log, "cockroach: populated");
+    let database = dev::test_setup_database(log).await;
 
-    config.database.url = db_url.clone();
+    config.database.url = database.pg_config().clone();
     let server =
         nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
     let testctx_external = ClientTestContext::new(
@@ -105,12 +90,12 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     .unwrap();
 
     ControlPlaneTestContext {
-        server: server,
+        server,
         external_client: testctx_external,
         internal_client: testctx_internal,
-        database: database,
+        database,
         sled_agent: sa,
-        logctx: logctx,
+        logctx,
     }
 }
 
