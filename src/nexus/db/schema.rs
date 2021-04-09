@@ -110,6 +110,7 @@ mod test {
         check_table_schema::<Instance>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
+        logctx.cleanup_successful();
     }
 
     async fn check_table_schema<T: Table>(c: &tokio_postgres::Client) {
