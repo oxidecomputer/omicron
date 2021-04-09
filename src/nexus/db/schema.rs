@@ -8,6 +8,7 @@ use crate::api_model::ApiInstance;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiResourceType;
+use crate::api_model::DataPageParams;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use tokio_postgres::types::ToSql;
@@ -19,66 +20,172 @@ use super::operations::SqlString;
  * Used to generate WHERE clauses for individual row lookups and paginated scans
  */
 pub trait LookupKey<'a> {
-    type Params: IntoToSqlVec<'a> + Clone + Copy;
-    const COLUMN_NAMES: &'static [&'static str];
+    /* Direct lookup */
+
+    type LookupParams: IntoToSqlVec<'a> + Clone + Copy;
+    const LOOKUP_COLUMN_NAMES: &'static [&'static str];
 
     /** Returns a WHERE clause for selecting specific row(s) */
     fn where_select_rows<'b>(
-        params: Self::Params,
+        lookup_params: Self::LookupParams,
         output: &'b mut SqlString<'a>,
     ) where
         'a: 'b,
     {
-        let param_values = params.to_sql_vec();
-        let column_names = Self::COLUMN_NAMES;
-        assert_eq!(param_values.len(), column_names.len());
-        let conditions = column_names
-            .iter()
-            .zip(param_values)
-            .map(|(name, value): (&&'static str, &(dyn ToSql + Sync))| {
-                format!("({} = {})", name, output.next_param(value))
-            })
-            .collect::<Vec<String>>()
-            .join(" AND ");
-        output.push_str(conditions.as_str());
+        let column_names = Self::LOOKUP_COLUMN_NAMES;
+        let param_values = lookup_params.to_sql_vec();
+        where_cond(column_names, param_values, "=", output);
     }
 
     /** Returns an error for the case where no item was found */
-    fn where_select_error<T: Table>(params: Self::Params) -> ApiError;
+    fn where_select_error<T: Table>(params: Self::LookupParams) -> ApiError;
+
+    /* Pagination */
+
+    type PageParamsFixed: IntoToSqlVec<'a>;
+    const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str];
+    type PageParamsMarker: ToSql + Sync + Clone + 'static;
+    const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str];
+
+    /** Returns a WHERE clause for selecting a page of rows */
+    fn where_select_page<'b, 'c, 'd>(
+        page_params_fixed: Self::PageParamsFixed,
+        pagparams: &'c DataPageParams<'c, Self::PageParamsMarker>,
+        output: &'b mut SqlString<'d>,
+    ) where
+        'a: 'b + 'd,
+        'c: 'a,
+    {
+        let (operator, order) = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => (">", "ASC"),
+            dropshot::PaginationOrder::Descending => ("<", "DESC"),
+        };
+
+        /*
+         * First, generate the conditions that are true for every page.  For
+         * example, when listing Instances in a Project, this would specify the
+         * project_id.
+         */
+        let fixed_column_names = Self::PAGE_FIXED_COLUMN_NAMES;
+        let fixed_param_values = page_params_fixed.to_sql_vec();
+        where_cond(fixed_column_names, fixed_param_values, "=", output);
+
+        /*
+         * If a marker was provided, then generate conditions that resume the
+         * scan after the marker value.
+         */
+        if let Some(marker) = pagparams.marker {
+            let var_column_names = Self::PAGE_MARKER_COLUMN_NAMES;
+            let marker_ref = marker as &(dyn ToSql + Sync);
+            let var_param_values = vec![marker_ref];
+            output.push_str(" AND ");
+            where_cond(var_column_names, var_param_values, operator, output);
+        }
+
+        /*
+         * Generate the ORDER BY clause based on all of the columns that make up
+         * the marker.
+         */
+        let order_clauses = Self::PAGE_MARKER_COLUMN_NAMES
+            .iter()
+            .map(|column_name: &&'static str| {
+                format!("{} {}", output.next_param(column_name), order)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+        output.push_str("ORDER BY ");
+        output.push_str(&order_clauses);
+        output.push_str(" ");
+    }
+}
+
+/* TODO-coverage TODO-doc */
+fn where_cond<'a, 'b>(
+    column_names: &'static [&'static str],
+    param_values: Vec<&'a (dyn ToSql + Sync)>,
+    operator: &'static str,
+    output: &'b mut SqlString<'a>,
+) where
+    'a: 'b,
+{
+    assert_eq!(param_values.len(), column_names.len());
+    let conditions = column_names
+        .iter()
+        .zip(param_values)
+        .map(|(name, value): (&&'static str, &(dyn ToSql + Sync))| {
+            format!("({} {} {})", *name, operator, output.next_param(value))
+        })
+        .collect::<Vec<String>>()
+        .join(" AND ");
+    output.push_str(format!("( {} )", conditions).as_str());
 }
 
 // XXX document all this
 
 pub struct LookupByUniqueId;
 impl<'a> LookupKey<'a> for LookupByUniqueId {
-    type Params = (&'a Uuid,);
-    const COLUMN_NAMES: &'static [&'static str] = &["id"];
-    fn where_select_error<T: Table>(params: Self::Params) -> ApiError {
-        ApiError::not_found_by_id(T::RESOURCE_TYPE, params.0)
+    type LookupParams = (&'a Uuid,);
+    const LOOKUP_COLUMN_NAMES: &'static [&'static str] = &["id"];
+    fn where_select_error<T: Table>(
+        lookup_params: Self::LookupParams,
+    ) -> ApiError {
+        ApiError::not_found_by_id(T::RESOURCE_TYPE, lookup_params.0)
     }
+
+    type PageParamsFixed = ();
+    const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str] = &[];
+    type PageParamsMarker = Uuid;
+    const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str] = &["id"];
 }
 
 pub struct LookupByUniqueName;
 impl<'a> LookupKey<'a> for LookupByUniqueName {
-    type Params = (&'a ApiName,);
-    const COLUMN_NAMES: &'static [&'static str] = &["name"];
-    fn where_select_error<T: Table>(params: Self::Params) -> ApiError {
-        ApiError::not_found_by_name(T::RESOURCE_TYPE, params.0)
+    type LookupParams = (&'a ApiName,);
+    const LOOKUP_COLUMN_NAMES: &'static [&'static str] = &["name"];
+    fn where_select_error<T: Table>(
+        lookup_params: Self::LookupParams,
+    ) -> ApiError {
+        ApiError::not_found_by_name(T::RESOURCE_TYPE, lookup_params.0)
     }
+
+    type PageParamsFixed = ();
+    const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str] = &[];
+    type PageParamsMarker = ApiName;
+    const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str] = &["name"];
 }
 
 pub struct LookupByUniqueNameInProject;
 impl<'a> LookupKey<'a> for LookupByUniqueNameInProject {
-    type Params = (&'a Uuid, &'a ApiName);
-    const COLUMN_NAMES: &'static [&'static str] = &["project_id", "name"];
-    fn where_select_error<T: Table>(params: Self::Params) -> ApiError {
-        ApiError::not_found_by_name(T::RESOURCE_TYPE, params.1)
+    type LookupParams = (&'a Uuid, &'a ApiName);
+    const LOOKUP_COLUMN_NAMES: &'static [&'static str] =
+        &["project_id", "name"];
+    fn where_select_error<T: Table>(
+        lookup_params: Self::LookupParams,
+    ) -> ApiError {
+        ApiError::not_found_by_name(T::RESOURCE_TYPE, lookup_params.1)
     }
+
+    type PageParamsFixed = (&'a Uuid,);
+    const PAGE_FIXED_COLUMN_NAMES: &'static [&'static str] = &["project_id"];
+    type PageParamsMarker = ApiName;
+    const PAGE_MARKER_COLUMN_NAMES: &'static [&'static str] = &["name"];
 }
 
 pub trait IntoToSqlVec<'a> {
     fn to_sql_vec(self) -> Vec<&'a (dyn ToSql + Sync)>;
 }
+
+impl<'a> IntoToSqlVec<'a> for () {
+    fn to_sql_vec(self) -> Vec<&'a (dyn ToSql + Sync)> {
+        Vec::new()
+    }
+}
+
+// impl<'a, T: ToSql + Sync> IntoToSqlVec<'a> for &[T] {
+//     fn to_sql_vec(self) -> Vec<&'a (dyn ToSql + Sync)> {
+//         self.to_vec()
+//     }
+// }
 
 impl<'a, 't1, T1> IntoToSqlVec<'a> for (&'t1 T1,)
 where
@@ -115,10 +222,10 @@ where
  */
 pub trait Table {
     /** Struct describing rows of this type when the full row is needed */
-    type ApiModelType: for<'a> TryFrom<
-        &'a tokio_postgres::Row,
-        Error = ApiError,
-    >;
+    /* TODO-cleanup what does the 'static actually mean here? */
+    type ApiModelType: for<'a> TryFrom<&'a tokio_postgres::Row, Error = ApiError>
+        + Send
+        + 'static;
     /** [`ApiResourceType`] corresponding to rows of this table */
     const RESOURCE_TYPE: ApiResourceType;
     /** Name of the table */

@@ -85,7 +85,7 @@ impl DataStore {
     async fn fetch_row_by<'a, L, T>(
         &self,
         client: &tokio_postgres::Client,
-        lookup_params: L::Params,
+        lookup_params: L::LookupParams,
     ) -> LookupResult<T::ApiModelType>
     where
         L: LookupKey<'a>,
@@ -95,7 +95,7 @@ impl DataStore {
         L::where_select_rows(lookup_params, &mut lookup_cond_sql);
 
         let sql = format!(
-            "SELECT {} FROM {} WHERE {} AND {} LIMIT 2",
+            "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
             T::ALL_COLUMNS.join(", "),
             T::TABLE_NAME,
             T::LIVE_CONDITIONS,
@@ -106,6 +106,43 @@ impl DataStore {
         let row =
             sql_query_maybe_one(client, &sql, query_params, mkzerror).await?;
         T::ApiModelType::try_from(&row)
+    }
+
+    /// Fetch a page of rows using the specified lookup
+    async fn fetch_page_by<'a, 'b, L, T>(
+        &self,
+        client: &tokio_postgres::Client,
+        fixed_params: L::PageParamsFixed,
+        pagparams: &'b DataPageParams<'b, L::PageParamsMarker>,
+    ) -> ListResult<T::ApiModelType>
+    where
+        L: LookupKey<'a>,
+        T: Table,
+        'b: 'a,
+    {
+        let mut page_cond_sql = SqlString::new();
+        L::where_select_page(fixed_params, pagparams, &mut page_cond_sql);
+        let limit = i64::from(pagparams.limit.get());
+        let limit_clause =
+            format!("LIMIT {}", page_cond_sql.next_param(&limit));
+        page_cond_sql.push_str(limit_clause.as_str());
+
+        let sql = format!(
+            "SELECT {} FROM {} WHERE ({}) AND {}",
+            T::ALL_COLUMNS.join(", "),
+            T::TABLE_NAME,
+            T::LIVE_CONDITIONS,
+            &page_cond_sql.sql_fragment(),
+        );
+        let query_params = page_cond_sql.sql_params();
+        let rows = sql_query(client, sql.as_str(), query_params)
+            .await
+            .map_err(sql_error_generic)?;
+        let list = rows
+            .iter()
+            .map(T::ApiModelType::try_from)
+            .collect::<Vec<Result<T::ApiModelType, ApiError>>>();
+        Ok(futures::stream::iter(list).boxed())
     }
 
     /// Create a project
@@ -524,21 +561,12 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        let rows = sql_pagination(
+        self.fetch_page_by::<LookupByUniqueNameInProject, Instance>(
             &client,
-            Instance,
-            Instance::ALL_COLUMNS,
-            "time_deleted IS NULL AND project_id = $1",
-            &[project_id],
-            "name",
+            (project_id,),
             pagparams,
         )
-        .await?;
-        let list = rows
-            .iter()
-            .map(|row| ApiInstance::try_from(row))
-            .collect::<Vec<Result<ApiInstance, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
+        .await
     }
 
     pub async fn instance_fetch(
