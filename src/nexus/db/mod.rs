@@ -8,6 +8,7 @@ mod datastore;
 mod operations;
 mod pool;
 mod schema;
+mod sql;
 
 pub use config::Config;
 pub use config::PostgresConfigWithUrl;

@@ -805,6 +805,7 @@ dependencies = [
  "backoff",
  "bb8",
  "bb8-postgres",
+ "bytes",
  "chrono",
  "dropshot",
  "expectorate",

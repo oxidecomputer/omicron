@@ -74,6 +74,7 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 expectorate = "1.0.1"
+bytes = "1.0.1"
 newline-converter = "0.1.0"
 openapiv3 = "0.3.0"
 serde_urlencoded = "0.6.1"

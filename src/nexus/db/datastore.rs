@@ -62,16 +62,16 @@ use super::operations::sql_query_always_one;
 use super::operations::sql_query_maybe_one;
 use super::operations::sql_row_value;
 use super::operations::DbError;
-use super::operations::SqlString;
 use super::schema::Disk;
 use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
-use super::schema::LookupKey;
 use super::schema::Project;
-use super::schema::Table;
+use super::sql::LookupKey;
+use super::sql::SqlString;
+use super::sql::Table;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -86,15 +86,15 @@ impl DataStore {
     async fn fetch_row_by<'a, L, T>(
         &self,
         client: &tokio_postgres::Client,
-        scope_params: L::ScopeParams,
+        scope_key: L::ScopeKey,
         item_key: &'a L::ItemKey,
-    ) -> LookupResult<T::ApiModelType>
+    ) -> LookupResult<T::ModelType>
     where
         L: LookupKey<'a>,
         T: Table,
     {
         let mut lookup_cond_sql = SqlString::new();
-        L::where_select_rows(scope_params, item_key, &mut lookup_cond_sql);
+        L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
 
         let sql = format!(
             "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
@@ -104,28 +104,27 @@ impl DataStore {
             &lookup_cond_sql.sql_fragment(),
         );
         let query_params = lookup_cond_sql.sql_params();
-        let mkzerror =
-            move || L::where_select_error::<T>(scope_params, item_key);
+        let mkzerror = move || L::where_select_error::<T>(scope_key, item_key);
         let row =
             sql_query_maybe_one(client, &sql, query_params, mkzerror).await?;
-        T::ApiModelType::try_from(&row)
+        T::ModelType::try_from(&row)
     }
 
     /// Fetch a page of rows from a table using the specified lookup
     async fn fetch_page_from_table<'a, L, T>(
         &self,
         client: &'a tokio_postgres::Client,
-        scope_params: L::ScopeParams,
+        scope_key: L::ScopeKey,
         pagparams: &'a DataPageParams<'a, L::ItemKey>,
-    ) -> ListResult<T::ApiModelType>
+    ) -> ListResult<T::ModelType>
     where
         L: LookupKey<'a>,
-        L::ScopeParams: 'a,
+        L::ScopeKey: 'a,
         T: Table,
     {
-        self.fetch_page_by::<L, T, T::ApiModelType>(
+        self.fetch_page_by::<L, T, T::ModelType>(
             client,
-            scope_params,
+            scope_key,
             pagparams,
             T::ALL_COLUMNS,
         )
@@ -142,7 +141,7 @@ impl DataStore {
     fn fetch_page_by<'a, L, T, R>(
         &self,
         client: &'a tokio_postgres::Client,
-        scope_params: L::ScopeParams,
+        scope_key: L::ScopeKey,
         pagparams: &'a DataPageParams<'a, L::ItemKey>,
         columns: &'static [&'static str],
     ) -> impl Future<Output = ListResult<R>> + 'a
@@ -155,7 +154,7 @@ impl DataStore {
     {
         async move {
             let mut page_cond_sql = SqlString::new();
-            L::where_select_page(scope_params, pagparams, &mut page_cond_sql);
+            L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
             let limit = i64::from(pagparams.limit.get());
             let limit_clause =
                 format!("LIMIT {}", page_cond_sql.next_param(&limit));
@@ -334,7 +333,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiProject> {
         let client = self.pool.acquire().await?;
-        self.fetch_page_by::<LookupByUniqueName, Project, <Project as Table>::ApiModelType>(
+        self.fetch_page_by::<LookupByUniqueName, Project, <Project as Table>::ModelType>(
             &client,
             (),
             pagparams,
@@ -580,7 +579,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
         let client = self.pool.acquire().await?;
-        self.fetch_page_by::<LookupByUniqueNameInProject, Instance, <Instance as Table>::ApiModelType>(
+        self.fetch_page_by::<LookupByUniqueNameInProject, Instance, <Instance as Table>::ModelType>(
             &client,
             (project_id,),
             pagparams,
@@ -882,7 +881,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
         let client = self.pool.acquire().await?;
-        self.fetch_page_by::<LookupByUniqueNameInProject, Disk, <Disk as Table>::ApiModelType>(
+        self.fetch_page_by::<LookupByUniqueNameInProject, Disk, <Disk as Table>::ModelType>(
             &client,
             (project_id,),
             pagparams,
@@ -1048,7 +1047,7 @@ fn sql_insert_unique<'a, T>(
     unique_value: &'a str,
     conflict_sql: &'static str,
     values: &'a [&'a (dyn ToSql + Sync)],
-) -> impl Future<Output = Result<T::ApiModelType, ApiError>> + 'a
+) -> impl Future<Output = Result<T::ModelType, ApiError>> + 'a
 where
     T: Table,
 {
@@ -1075,6 +1074,6 @@ where
                 |e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e),
             )?;
 
-        T::ApiModelType::try_from(&row)
+        T::ModelType::try_from(&row)
     }
 }
