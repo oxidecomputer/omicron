@@ -84,8 +84,8 @@ subprocess = "0.2.4"
 # It's common during development to use a local copy of dropshot or steno in the
 # parent directory.  If you want to use those, uncomment one of these blocks.
 #
-[patch."https://github.com/oxidecomputer/dropshot"]
-dropshot = { path = "../dropshot/dropshot" }
+#[patch."https://github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot/dropshot" }
 #
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
