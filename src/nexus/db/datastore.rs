@@ -5,6 +5,7 @@
 /*
  * XXX review all queries for use of indexes (may need "time_deleted IS
  * NOT NULL" conditions)
+ *
  * Figure out how to automate this.  It's tricky, but maybe the way to think
  * about this is that we have Tables, and for each Table there's a fixed set of
  * WHERE clauses, each of which includes a string SQL fragment and a set of
@@ -12,14 +13,17 @@
  * unique WHERE clauses, but in a way that can also be inserted into UPDATE,
  * DELETE, SELECT, or CTEs using these, etc.
  *
- * Inventory of queries:
- * (1) select an entire row by id (not deleted)
- * (2) select an entire row by (parent_id, name) (not deleted)
- * (3) select an id by (parent_id, name) (not deleted)
- * (4) select a page of rows by (parent_id, name)
- * (5) update a row by id AND state generation
- *     (always using our CTE pattern)
- * (6) INSERT all values in a row, possibly with a conflict clause
+ * Inventory of queries not done so far:
+ * o update Project (possibly including conflict on unique name)
+ * o create Instance/Disk (INSERT ON CONFLICT DO NOTHING, SELECT, check state)
+ * o update Instance/Disk runtime (complicated CTE to distinguish error cases)
+ * o project delete (currently UPDATE, but probably needs similar CTE treatment)
+ *
+ * This probably breaks down into:
+ * o INSERT (new trait similar to what's used for pagination, plus surrounding
+ *   interfaces for doing this ON CONFLICT DO NOTHING and check state)
+ * o update-based-on-precondition using CTE
+ * o update-and-handle-conflict-error (same as previous case?)
  */
 
 use super::Pool;
@@ -82,6 +86,33 @@ impl DataStore {
         DataStore { pool }
     }
 
+    /// Fetch parts of a row using the specified lookup
+    async fn fetch_row_raw<'a, L, T>(
+        &self,
+        client: &tokio_postgres::Client,
+        scope_key: L::ScopeKey,
+        item_key: &'a L::ItemKey,
+        columns: &[&'static str],
+    ) -> LookupResult<tokio_postgres::Row>
+    where
+        L: LookupKey<'a>,
+        T: Table,
+    {
+        let mut lookup_cond_sql = SqlString::new();
+        L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
+
+        let sql = format!(
+            "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
+            columns.join(", "),
+            T::TABLE_NAME,
+            T::LIVE_CONDITIONS,
+            &lookup_cond_sql.sql_fragment(),
+        );
+        let query_params = lookup_cond_sql.sql_params();
+        let mkzerror = move || L::where_select_error::<T>(scope_key, item_key);
+        sql_query_maybe_one(client, &sql, query_params, mkzerror).await
+    }
+
     /// Fetch an entire row using the specified lookup
     async fn fetch_row_by<'a, L, T>(
         &self,
@@ -93,20 +124,9 @@ impl DataStore {
         L: LookupKey<'a>,
         T: Table,
     {
-        let mut lookup_cond_sql = SqlString::new();
-        L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
-
-        let sql = format!(
-            "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
-            T::ALL_COLUMNS.join(", "),
-            T::TABLE_NAME,
-            T::LIVE_CONDITIONS,
-            &lookup_cond_sql.sql_fragment(),
-        );
-        let query_params = lookup_cond_sql.sql_params();
-        let mkzerror = move || L::where_select_error::<T>(scope_key, item_key);
-        let row =
-            sql_query_maybe_one(client, &sql, query_params, mkzerror).await?;
+        let row = self
+            .fetch_row_raw::<L, T>(client, scope_key, item_key, T::ALL_COLUMNS)
+            .await?;
         T::ModelType::try_from(&row)
     }
 
@@ -297,20 +317,15 @@ impl DataStore {
         name: &ApiName,
     ) -> Result<Uuid, ApiError> {
         let client = self.pool.acquire().await?;
-
-        let row = sql_query_maybe_one(
-            &client,
-            format!(
-                "SELECT id FROM {} WHERE name = $1 AND \
-                        time_deleted IS NULL LIMIT 2",
-                Project::TABLE_NAME
+        let row = self
+            .fetch_row_raw::<LookupByUniqueName, Project>(
+                &client,
+                (),
+                name,
+                &["id"],
             )
-            .as_str(),
-            &[&name],
-            || ApiError::not_found_by_name(ApiResourceType::Project, name),
-        )
-        .await?;
-        sql_row_value(&row, 0)
+            .await?;
+        sql_row_value(&row, "id")
     }
 
     /// List a page of projects by id
