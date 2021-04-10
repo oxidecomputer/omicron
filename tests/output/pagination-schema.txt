@@ -203,7 +203,8 @@ schema for pagination parameters: page selector, scan by name or id
               "type": "string",
               "format": "uuid"
             }
-          }
+          },
+          "additionalProperties": false
         },
         {
           "type": "object",
@@ -214,7 +215,8 @@ schema for pagination parameters: page selector, scan by name or id
             "name": {
               "$ref": "#/definitions/ApiName"
             }
-          }
+          },
+          "additionalProperties": false
         }
       ]
     },
