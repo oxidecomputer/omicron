@@ -947,6 +947,7 @@ impl Nexus {
         self.db_datastore
             .disk_update_runtime(&disk.identity.id, &new_runtime)
             .await
+            .map(|_| ())
     }
 
     /*
@@ -1108,10 +1109,16 @@ impl Nexus {
 
         /* TODO-cleanup commonize with notify_instance_updated() */
         match result {
-            Ok(_) => {
+            Ok(true) => {
                 info!(log, "disk updated by sled agent";
                     "disk_id" => %id,
                     "new_state" => ?new_state);
+                Ok(())
+            }
+
+            Ok(false) => {
+                info!(log, "disk update from sled agent ignored (old)";
+                    "disk_id" => %id);
                 Ok(())
             }
 

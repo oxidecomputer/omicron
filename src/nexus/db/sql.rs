@@ -8,7 +8,9 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DataPageParams;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 
 /**
@@ -41,6 +43,11 @@ use tokio_postgres::types::ToSql;
  * # }
  * ```
  */
+/*
+ * TODO-design Would it be useful (and possible) to have a macro like
+ * `sql!(sql_str[, param...])` where `sql_str` is `&'static str` and the params
+ * are all numbered params?
+ */
 pub struct SqlString<'a> {
     contents: String,
     params: Vec<&'a (dyn ToSql + Sync)>,
@@ -49,6 +56,22 @@ pub struct SqlString<'a> {
 impl<'a> SqlString<'a> {
     pub fn new() -> SqlString<'a> {
         SqlString { contents: String::new(), params: Vec::new() }
+    }
+
+    /**
+     * Construct a new SqlString with an empty string, but whose first numbered
+     * parameter starts after the given string.  This is useful for cases where
+     * one chunk of code has generated a SqlString and another wants to insert
+     * that string (and parameters) into a new one.  Since the parameter numbers
+     * are baked into the SQL text, the only way this can work is if the
+     * existing SqlString's parameters come first.  The caller is responsible
+     * for joining the SQL text.
+     * XXX TODO-coverage
+     */
+    pub fn new_with_params(s: SqlString<'a>) -> (SqlString<'a>, String) {
+        let old_sql = s.sql_fragment().to_owned();
+        let new_str = SqlString { contents: String::new(), params: s.params };
+        (new_str, old_sql)
     }
 
     /**
@@ -84,6 +107,67 @@ impl<'a> SqlString<'a> {
     pub fn sql_params(&self) -> &[&'a (dyn ToSql + Sync)] {
         &self.params
     }
+}
+
+// XXX remove this -- it's just a BTreeMap
+// /**
+//  * Build up a list of SQL name-value pairs
+//  *
+//  * This struct stores names and corresponding SQL values and provides a way to
+//  * get them back out suitable for use in safe INSERT or UPDATE statements.  For
+//  * both INSERT and UPDATE, the values are provided as parameters to the query.
+//  *
+//  * Like the other interfaces here, the names here must be `&'static str` to make
+//  * it harder to accidentally provide user input here, as these cannot be passed
+//  * as separate parameters for the query.
+//  * TODO-cleanup should this just be a BTreeMap?
+//  */
+// pub struct SqlValueSet<'a> {
+//     names: Vec<&'static str>,
+//     values: Vec<&'a (dyn ToSql + Sync)>,
+//     names_unique: BTreeSet<&'static str>,
+// }
+//
+// impl<'a> SqlValueSet<'a> {
+//     fn new() -> SqlValueSet<'a> {
+//         SqlValueSet {
+//             names: Vec::new(),
+//             values: Vec::new(),
+//             names_unique: BTreeSet::new(),
+//         }
+//     }
+//
+//     fn set(&mut self, name: &'static str, value: &'a (dyn ToSql + Sync)) {
+//         assert!(
+//             self.names_unique.insert(name),
+//             "duplicate name specified for SqlValueSet"
+//         );
+//         self.names.push(name);
+//         self.values.push(value);
+//     }
+//
+//     fn names(&self) -> &[&'static str] {
+//         &self.names
+//     }
+//
+//     fn values(&self) -> &[&(dyn ToSql + Sync)] {
+//         &self.values
+//     }
+// }
+
+// XXX TODO-doc TODO-coverage
+pub fn sql_update_from_set<'a, 'b>(
+    kvpairs: &'a BTreeMap<&'static str, &'b (dyn ToSql + Sync)>,
+    output: &'a mut SqlString<'b>,
+) {
+    let set_parts = kvpairs
+        .iter()
+        .map(|(name, value): (&&'static str, &&(dyn ToSql + Sync))| {
+            assert!(valid_cockroachdb_identifier(*name));
+            format!("{} = {}", *name, output.next_param(*value))
+        })
+        .collect::<Vec<String>>();
+    output.push_str(&set_parts.join(", "));
 }
 
 /** Describes a table in the control plane database */
@@ -195,7 +279,7 @@ pub trait LookupKey<'a> {
     const ITEM_KEY_COLUMN_NAME: &'static str;
 
     /** Rust type describing the item key */
-    type ItemKey: ToSql + Sync + Clone + 'static;
+    type ItemKey: ToSql + for<'f> FromSql<'f> + Sync + Clone + 'static;
 
     /**
      * Generates an error for the case where no item was found for a particular
@@ -432,7 +516,7 @@ pub fn where_cond<'a, 'b>(
  *
  * This is intended as a sanity-check, not an authoritative validator.
  */
-fn valid_cockroachdb_identifier(name: &'static str) -> bool {
+pub fn valid_cockroachdb_identifier(name: &'static str) -> bool {
     /*
      * It would be nice if there were a supported library interface for this.
      * Instead, we rely on the CockroachDB documentation on the syntax for

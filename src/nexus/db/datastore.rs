@@ -33,7 +33,6 @@ use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
-use crate::api_model::ApiGeneration;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
@@ -53,6 +52,7 @@ use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::sync::Arc;
@@ -73,9 +73,16 @@ use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
+use super::sql;
 use super::sql::LookupKey;
 use super::sql::SqlString;
 use super::sql::Table;
+
+// XXX document, refactor, etc.
+pub struct UpdatePrecond {
+    pub found_state: tokio_postgres::Row,
+    pub updated: bool,
+}
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -197,6 +204,188 @@ impl DataStore {
                 .collect::<Vec<Result<R, ApiError>>>();
             Ok(futures::stream::iter(list).boxed())
         }
+    }
+
+    /// Conditionally update a row
+    // TODO-doc more details needed here
+    // TODO-coverage -- and check the SQL by hand
+    // XXX TODO-log log for both cases here
+    pub async fn update_precond<'a, 'b, T, L>(
+        &self,
+        client: &'b tokio_postgres::Client,
+        scope_key: L::ScopeKey,
+        item_key: &'a L::ItemKey,
+        precond_columns: &'b [&'static str],
+        update_values: &BTreeMap<&'static str, &'a (dyn ToSql + Sync)>,
+        precond_sql: SqlString<'a>,
+    ) -> Result<UpdatePrecond, ApiError>
+    where
+        T: Table,
+        L: LookupKey<'a>,
+    {
+        /*
+         * The first CTE will be a SELECT that finds the row we're going to
+         * update and includes the identifying columns plus any extra columns
+         * that the caller asked for.  (These are usually the columns associated
+         * with the preconditions.)  For example:
+         *
+         *     SELECT  id, state FROM Instance WHERE id = $1
+         *             ^^^  ^^^                      ^^
+         *              |    |
+         *              |    +---- "extra" columns (precondition columns)
+         *              |
+         *              +--------- "identifying" columns (can be several)
+         *                         (scope key  + item key columns)
+         *
+         * In our example, the update will be conditional on the existing value
+         * of "state".
+         */
+        let identifying_columns = {
+            let mut columns = L::SCOPE_KEY_COLUMN_NAMES.to_vec();
+            columns.push(L::ITEM_KEY_COLUMN_NAME);
+            columns
+        };
+
+        let mut selected_columns = identifying_columns.clone();
+        selected_columns.extend_from_slice(precond_columns);
+        for column in &selected_columns {
+            assert!(sql::valid_cockroachdb_identifier(*column));
+        }
+        assert!(sql::valid_cockroachdb_identifier(T::TABLE_NAME));
+
+        /*
+         * Construct the SQL string for the "SELECT" CTE.  We use
+         * SqlString::new_with_params() to construct a new SqlString whose first
+         * parameter will be after the last parameter from the caller-provided
+         * "precond_sql".  This is important, since we'll be sending this all
+         * over as one query, including both the SQL we're generating here and
+         * what the caller has constructed, and the latter already has the
+         * caller's parameter numbers baked into it.
+         */
+        let (mut lookup_cond_sql, precond_sql_str) =
+            SqlString::new_with_params(precond_sql);
+        L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
+        let select_sql_str = format!(
+            "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
+            selected_columns.join(", "),
+            T::TABLE_NAME,
+            T::LIVE_CONDITIONS,
+            lookup_cond_sql.sql_fragment(),
+        );
+
+        /*
+         * The second CTE will be an UPDATE that _may_ update the row that we
+         * found with the SELECT.  In our example, it would look like this:
+         *
+         *        UPDATE Instance
+         *   +-->     SET state = "running"
+         *   |        WHERE id = $1 AND state = "starting"
+         *   |              ^^^^^^^     ^^^^^^^^^^^^^^^^^
+         *   |                 |          +--- caller-provided precondition SQL
+         *   |                 |               (may include parameters!)
+         *   |                 |
+         *   |                 +--- Same as "SELECT" clause above
+         *   |
+         *   +------ "SET" clause constructed from the caller-provided
+         *           "update_values", a set of key-value pairs
+         *
+         * The WHERE clause looks just like the above SELECT's WHERE clause,
+         * plus the caller's preconditions.  As before, we'll use
+         * SqlString::new_with_params() to start a new SqlString with parameters
+         * that start after the ones we've already assembled so far.
+         */
+        let (mut update_set_sql, lookup_cond_str) =
+            SqlString::new_with_params(lookup_cond_sql);
+        sql::sql_update_from_set(update_values, &mut update_set_sql);
+        let update_sql_str = format!(
+            "UPDATE {} SET {} WHERE ({}) AND ({}) AND ({}) LIMIT 2 RETURNING {}",
+            T::TABLE_NAME,
+            update_set_sql.sql_fragment(),
+            T::LIVE_CONDITIONS,
+            lookup_cond_str.as_str(),
+            precond_sql_str,
+            selected_columns.join(", "),
+        );
+
+        /*
+         * Put it all together.  The result will look like this:
+         *
+         *    WITH found_rows   AS (  /* the above select part */ )
+         *         updated_rows AS (  /* the above update part */ )
+         *    SELECT
+         *         found.id    AS found_id,     <--- identifying columns
+         *         found.state AS found_state,  <--- initial values for "extra"
+         *                                           columns
+         *         updated.id  AS updated_id,   <--- identifying columns
+         *         updated.state AS updated_state,
+         *    FROM
+         *        found_rows found          <-- result of the "SELECT" CTE
+         *    FULL OUTER JOIN
+         *        updated_rows updated      <-- result of the "UPDATE" CTE
+         *    ON
+         *        found.id = updated.id     <-- identifying columns
+         *
+         * Now, both the SELECT and UPDATE have "LIMIT 2", which means the FULL
+         * OUTER JOIN cannot produce very many rows.  In practice, we expect the
+         * SELECT and UPDATE to find at most one row.  The FULL OUTER JOIN just
+         * allows us to identify state inconsistency (e.g., multiple rows with
+         * the same id values).
+         *
+         * There will be no new parameters in the SQL we're generating now.  We
+         * will need to provide the parameters from the various subparts above.
+         */
+        let select_columns = identifying_columns
+            .iter()
+            .chain(precond_columns.iter())
+            .map(|name: &&'static str| {
+                vec![
+                    format!("found.{} AS found_{}", *name, *name),
+                    format!("updated.{} AS updated_{}", *name, *name),
+                ]
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        let join_parts = identifying_columns
+            .iter()
+            .map(|name: &&'static str| {
+                format!("(found.{} = updated.{})", *name, *name)
+            })
+            .collect::<Vec<String>>();
+        let sql = format!(
+            "WITH found_rows   AS ({}), \
+                  updated_rows AS ({}) \
+             SELECT {} FROM \
+                 found_rows found \
+             FULL OUTER JOIN \
+                 updated_rows updated \
+             ON \
+                 {}",
+            select_sql_str,
+            update_sql_str,
+            select_columns.join(", "),
+            join_parts.join(" AND "),
+        );
+
+        let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
+        let row = sql_query_maybe_one(
+            &client,
+            sql.as_str(),
+            update_set_sql.sql_params(),
+            mkzerror,
+        )
+        .await?;
+        /*
+         * We successfully updated the row iff the "updated_*" columns for the
+         * identifying columns are non-NULL.  We pick the lookup_key column,
+         * purely out of convenience.
+         */
+        let updated_key = format!("found_{}", L::ITEM_KEY_COLUMN_NAME);
+        let check_updated_key: Option<L::ItemKey> =
+            sql_row_value(&row, updated_key.as_str())?;
+        Ok(UpdatePrecond {
+            found_state: row,
+            updated: check_updated_key.is_some(),
+        })
     }
 
     /// Create a project
@@ -630,6 +819,16 @@ impl DataStore {
         .await
     }
 
+    /*
+     * TODO-design It's tempting to return the updated state of the Instance
+     * here because it's convenient for consumers and by using a RETURNING
+     * clause, we could ensure that the "update" and "fetch" are atomic.
+     * But in the unusual case that we _don't_ update the row because our
+     * update is older than the one in the database, we would have to fetch
+     * the current state explicitly.  For now, we'll just require consumers
+     * to explicitly fetch the state if they want that.
+     */
+    // XXX Update instance delete and disk runtime update.
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
@@ -638,67 +837,32 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        /*
-         * TODO-design It's tempting to return the updated state of the Instance
-         * here because it's convenient for consumers and by using a RETURNING
-         * clause, we could ensure that the "update" and "fetch" are atomic.
-         * But in the unusual case that we _don't_ update the row because our
-         * update is older than the one in the database, we would have to fetch
-         * the current state explicitly.  For now, we'll just require consumers
-         * to explicitly fetch the state if they want that.
-         */
-        // XXX Definitely needs to be commonized.  See instance delete and disk
-        // runtime update.
-        let row = sql_query_maybe_one(
-            &client,
-            format!(
-                "WITH found_rows AS \
-                (SELECT id, state_generation FROM {} WHERE id = $5), \
-                updated_rows AS \
-                (UPDATE {} SET \
-                        instance_state = $1, \
-                        state_generation = $2, \
-                        active_server_id = $3, \
-                        time_state_updated = $4 \
-                    WHERE id = $5 AND state_generation < $2 \
-                    LIMIT 2 RETURNING id) \
-                SELECT r.id AS found_id, \
-                    r.state_generation as initial_generation, \
-                    u.id AS updated_id FROM found_rows r \
-                    FULL OUTER JOIN updated_rows u ON r.id = u.id",
-                Instance::TABLE_NAME,
-                Instance::TABLE_NAME,
-            )
-            .as_str(),
-            &[
-                &new_runtime.run_state.to_string(),
-                &new_runtime.gen,
-                &new_runtime.sled_uuid,
-                &now,
+        /* XXX want a way to make this set from any type? */
+        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
+            BTreeMap::new();
+        values.insert("instance_state", &new_runtime.run_state);
+        values.insert("state_generation", &new_runtime.gen);
+        values.insert("active_server_id", &new_runtime.sled_uuid);
+        values.insert("time_state_updated", &now);
+
+        let mut cond_sql = SqlString::new();
+        let param = cond_sql.next_param(&new_runtime.gen);
+        cond_sql.push_str(&format!("state_generation < {}", param));
+
+        let update = self
+            .update_precond::<Instance, LookupByUniqueId>(
+                &client,
+                (),
                 instance_id,
-            ],
-            || {
-                ApiError::not_found_by_id(
-                    ApiResourceType::Instance,
-                    instance_id,
-                )
-            },
-        )
-        .await?;
-
+                &["state_generation"],
+                &values,
+                cond_sql,
+            )
+            .await?;
+        let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let previous_gen: ApiGeneration =
-            sql_row_value(&row, "initial_generation")?;
-        let updated_id: Option<Uuid> = sql_row_value(&row, "updated_id")?;
         bail_unless!(found_id == *instance_id);
-
-        if let Some(uid) = updated_id {
-            bail_unless!(uid == *instance_id);
-            Ok(true)
-        } else {
-            // XXX log
-            Ok(false)
-        }
+        Ok(update.updated)
     }
 
     pub async fn project_delete_instance(
@@ -909,33 +1073,38 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
         new_runtime: &ApiDiskRuntimeState,
-    ) -> Result<(), ApiError> {
-        /* XXX See and commonize with instance_update_runtime() */
+    ) -> Result<bool, ApiError> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        sql_execute_maybe_one(
-            &client,
-            format!(
-                "UPDATE {} SET \
-                        disk_state = $1, \
-                        state_generation = $2, \
-                        attach_instance_id = $3, \
-                        time_state_updated = $4 \
-                    WHERE id = $5 AND state_generation < $2 LIMIT 2",
-                Disk::TABLE_NAME,
-            )
-            .as_str(),
-            &[
-                &new_runtime.disk_state.to_string(),
-                &new_runtime.gen,
-                &new_runtime.disk_state.attached_instance_id(),
-                &now,
+        /* XXX want a way to make this set from any type? */
+        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
+            BTreeMap::new();
+        let disk_state_str = new_runtime.disk_state.to_string();
+        values.insert("disk_state", &disk_state_str);
+        values.insert("state_generation", &new_runtime.gen);
+        let instance_id = new_runtime.disk_state.attached_instance_id();
+        values.insert("attach_instance_id", &instance_id);
+        values.insert("time_state_updated", &now);
+
+        let mut cond_sql = SqlString::new();
+        let param = cond_sql.next_param(&new_runtime.gen);
+        cond_sql.push_str(&format!("state_generation < {}", param));
+
+        let update = self
+            .update_precond::<Disk, LookupByUniqueId>(
+                &client,
+                (),
                 disk_id,
-            ],
-            || ApiError::not_found_by_id(ApiResourceType::Disk, disk_id),
-        )
-        .await
+                &["state_generation"],
+                &values,
+                cond_sql,
+            )
+            .await?;
+        let row = &update.found_state;
+        let found_id: Uuid = sql_row_value(&row, "found_id")?;
+        bail_unless!(found_id == *disk_id);
+        Ok(update.updated)
     }
 
     pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
