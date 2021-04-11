@@ -109,52 +109,6 @@ impl<'a> SqlString<'a> {
     }
 }
 
-// XXX remove this -- it's just a BTreeMap
-// /**
-//  * Build up a list of SQL name-value pairs
-//  *
-//  * This struct stores names and corresponding SQL values and provides a way to
-//  * get them back out suitable for use in safe INSERT or UPDATE statements.  For
-//  * both INSERT and UPDATE, the values are provided as parameters to the query.
-//  *
-//  * Like the other interfaces here, the names here must be `&'static str` to make
-//  * it harder to accidentally provide user input here, as these cannot be passed
-//  * as separate parameters for the query.
-//  * TODO-cleanup should this just be a BTreeMap?
-//  */
-// pub struct SqlValueSet<'a> {
-//     names: Vec<&'static str>,
-//     values: Vec<&'a (dyn ToSql + Sync)>,
-//     names_unique: BTreeSet<&'static str>,
-// }
-//
-// impl<'a> SqlValueSet<'a> {
-//     fn new() -> SqlValueSet<'a> {
-//         SqlValueSet {
-//             names: Vec::new(),
-//             values: Vec::new(),
-//             names_unique: BTreeSet::new(),
-//         }
-//     }
-//
-//     fn set(&mut self, name: &'static str, value: &'a (dyn ToSql + Sync)) {
-//         assert!(
-//             self.names_unique.insert(name),
-//             "duplicate name specified for SqlValueSet"
-//         );
-//         self.names.push(name);
-//         self.values.push(value);
-//     }
-//
-//     fn names(&self) -> &[&'static str] {
-//         &self.names
-//     }
-//
-//     fn values(&self) -> &[&(dyn ToSql + Sync)] {
-//         &self.values
-//     }
-// }
-
 // XXX TODO-doc TODO-coverage
 pub fn sql_update_from_set<'a, 'b>(
     kvpairs: &'a BTreeMap<&'static str, &'b (dyn ToSql + Sync)>,
