@@ -47,6 +47,7 @@ impl Table for Instance {
         "time_deleted",
         "project_id",
         "instance_state",
+        "reboot_in_progress",
         "time_state_updated",
         "state_generation",
         "active_server_id",

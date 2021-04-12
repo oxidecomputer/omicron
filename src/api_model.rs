@@ -735,8 +735,6 @@ pub struct ApiInstance {
     pub ncpus: ApiInstanceCpuCount,
     /** memory allocated for this Instance */
     pub memory: ApiByteCount,
-    /** size of the boot disk for the image */
-    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
@@ -753,7 +751,6 @@ impl ApiObject for ApiInstance {
             project_id: self.project_id,
             ncpus: self.ncpus,
             memory: self.memory,
-            boot_disk_size: self.boot_disk_size,
             hostname: self.hostname.clone(),
             runtime: self.runtime.to_view(),
         }
@@ -831,8 +828,6 @@ pub struct ApiInstanceView {
     pub ncpus: ApiInstanceCpuCount,
     /** memory, in gigabytes, allocated for this Instance */
     pub memory: ApiByteCount,
-    /** size of the boot disk for the image */
-    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
@@ -855,7 +850,6 @@ pub struct ApiInstanceCreateParams {
     pub identity: ApiIdentityMetadataCreateParams,
     pub ncpus: ApiInstanceCpuCount,
     pub memory: ApiByteCount,
-    pub boot_disk_size: ApiByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
 }
 

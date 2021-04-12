@@ -90,7 +90,6 @@ async fn test_instances() {
         },
         ncpus: ApiInstanceCpuCount(4),
         memory: ApiByteCount::from_mebibytes_u32(256),
-        boot_disk_size: ApiByteCount::from_gibibytes_u32(1),
         hostname: String::from("rainsticks"),
     };
     let instance: ApiInstanceView =
@@ -100,8 +99,6 @@ async fn test_instances() {
     let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
-    // XXX XXX need to fix this
-    // assert_eq!(instance.boot_disk_size.to_whole_mebibytes(), 1024);
     assert_eq!(instance.hostname, "rainsticks");
     assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
 
@@ -315,7 +312,6 @@ async fn test_instances() {
     /*
      * Once more, try to reboot it.  This should not work on a destroyed
      * instance.
-     * XXX Review if we want this to be a 404 or not.
      */
     client
         .make_request_error(
@@ -370,7 +366,6 @@ async fn test_instances() {
             "description": "will never exist",
             "ncpus": -3,
             "memory": 256,
-            "boot_disk_size": 2048,
             "hostname": "localhost",
         }
     "##;
@@ -447,10 +442,6 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
     assert_eq!(nfoundcpus1, nfoundcpus2);
 
     assert_eq!(instance1.memory.to_bytes(), instance2.memory.to_bytes());
-    assert_eq!(
-        instance1.boot_disk_size.to_bytes(),
-        instance2.boot_disk_size.to_bytes()
-    );
     assert_eq!(instance1.hostname, instance2.hostname);
     assert_eq!(instance1.runtime.run_state, instance2.runtime.run_state);
     assert_eq!(

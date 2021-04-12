@@ -138,7 +138,6 @@ async fn test_disks() {
             },
             ncpus: ApiInstanceCpuCount(4),
             memory: ApiByteCount::from_mebibytes_u32(256),
-            boot_disk_size: ApiByteCount::from_gibibytes_u32(1),
             hostname: String::from("rainsticks"),
         },
     )
@@ -256,7 +255,6 @@ async fn test_disks() {
             },
             ncpus: ApiInstanceCpuCount(4),
             memory: ApiByteCount::from_mebibytes_u32(256),
-            boot_disk_size: ApiByteCount::from_gibibytes_u32(1),
             hostname: String::from("instance2"),
         },
     )

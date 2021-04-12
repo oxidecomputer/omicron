@@ -179,7 +179,6 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
             memory: sql_row_value(value, "memory")?,
             hostname: sql_row_value(value, "hostname")?,
             runtime: ApiInstanceRuntimeState::try_from(value)?,
-            boot_disk_size: ApiByteCount::from(0u32), // XXX
         })
     }
 }
@@ -190,20 +189,19 @@ impl SqlSerialize for ApiInstanceCreateParams {
         output.set("ncpus", &self.ncpus);
         output.set("memory", &self.memory);
         output.set("hostname", &self.hostname);
-        // XXX boot_disk_size
     }
 }
 
 /// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
-/// using the "instance_state", "active_server_id", "state_generation", and
-/// "time_state_updated" columns.
+/// using the "instance_state", "reboot_in_progress", "active_server_id",
+/// "state_generation", and "time_state_updated" columns.
 impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(ApiInstanceRuntimeState {
             run_state: sql_row_value(value, "instance_state")?,
-            reboot_in_progress: false, // XXX
+            reboot_in_progress: sql_row_value(value, "reboot_in_progress")?,
             sled_uuid: sql_row_value(value, "active_server_id")?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,
@@ -217,7 +215,7 @@ impl SqlSerialize for ApiInstanceRuntimeState {
         output.set("active_server_id", &self.sled_uuid);
         output.set("state_generation", &self.gen);
         output.set("time_state_updated", &self.time_updated);
-        // XXX reboot_in_progress
+        output.set("reboot_in_progress", &self.reboot_in_progress);
     }
 }
 
