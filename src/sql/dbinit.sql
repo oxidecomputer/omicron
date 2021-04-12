@@ -49,7 +49,7 @@ CREATE TABLE omicron.public.Project (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ
 );
@@ -95,7 +95,7 @@ CREATE TABLE omicron.public.Instance (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     /* This is redundant for Instances, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
@@ -158,7 +158,7 @@ CREATE TABLE omicron.public.Disk (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
@@ -206,7 +206,7 @@ CREATE TABLE omicron.public.Sled (
     /* Identity metadata -- abbreviated for sleds */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
 
     sled_agent_ip INET
 );

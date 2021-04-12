@@ -127,7 +127,7 @@ impl_sql_wrapping!(ApiName, &str);
 
 /// Load an [`ApiIdentityMetadata`] from a row of any table that contains the
 /// usual identity fields: "id", "name", "description, "time_created", and
-/// "time_metadata_updated".
+/// "time_modified".
 impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     type Error = ApiError;
 
@@ -138,8 +138,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
             name: sql_row_value(value, "name")?,
             description: sql_row_value(value, "description")?,
             time_created: sql_row_value(value, "time_created")?,
-            // XXX is it time_updated or time_metadata_updated
-            time_modified: sql_row_value(value, "time_metadata_updated")?,
+            time_modified: sql_row_value(value, "time_modified")?,
         })
     }
 }

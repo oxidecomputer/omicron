@@ -27,7 +27,7 @@ impl Table for Project {
         "name",
         "description",
         "time_created",
-        "time_metadata_updated",
+        "time_modified",
         "time_deleted",
     ];
 }
@@ -43,7 +43,7 @@ impl Table for Instance {
         "name",
         "description",
         "time_created",
-        "time_metadata_updated",
+        "time_modified",
         "time_deleted",
         "project_id",
         "instance_state",
@@ -68,7 +68,7 @@ impl Table for Disk {
         "name",
         "description",
         "time_created",
-        "time_metadata_updated",
+        "time_modified",
         "time_deleted",
         "project_id",
         "disk_state",

@@ -427,7 +427,7 @@ impl DataStore {
         let mut values = SqlValueSet::new();
         values.set("id", new_id);
         values.set("time_created", &now);
-        values.set("time_metadata_updated", &now);
+        values.set("time_modified", &now);
         values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         new_project.sql_serialize(&mut values);
         sql_insert_unique::<Project>(
@@ -538,7 +538,7 @@ impl DataStore {
         let now = Utc::now();
 
         let mut sql = format!(
-            "UPDATE {} SET time_metadata_updated = $1 ",
+            "UPDATE {} SET time_modified = $1 ",
             Project::TABLE_NAME
         );
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now];
@@ -695,7 +695,7 @@ impl DataStore {
         let mut values = SqlValueSet::new();
         values.set("id", instance_id);
         values.set("time_created", &now);
-        values.set("time_metadata_updated", &now);
+        values.set("time_modified", &now);
         values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
@@ -917,7 +917,7 @@ impl DataStore {
         let mut values = SqlValueSet::new();
         values.set("id", disk_id);
         values.set("time_created", &now);
-        values.set("time_metadata_updated", &now);
+        values.set("time_modified", &now);
         values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
