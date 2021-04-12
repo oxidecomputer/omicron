@@ -210,6 +210,13 @@ impl DataStore {
     // TODO-doc more details needed here
     // TODO-coverage -- and check the SQL by hand
     // XXX TODO-log log for both cases here
+    /*
+     * We want to update the instance row to indicate it's being deleted
+     * only if it's in a state where that's possible.  While complicated,
+     * the SQL below allows us to atomically distinguish the cases we're
+     * interested in: successful update, failure because the row was in the
+     * wrong state, failure because the row doesn't exist.
+     */
     pub async fn update_precond<'a, 'b, T, L>(
         &self,
         client: &'b tokio_postgres::Client,
@@ -366,6 +373,26 @@ impl DataStore {
             join_parts.join(" AND "),
         );
 
+        /*
+         * XXX TODO update these docs
+         * There are only three expected cases here:
+         *
+         * (1) The Instance does not exist, which is true iff there were zero
+         *     returned rows.
+         *
+         * (2) There was exactly one Instance, and we updated it.  This is true
+         *     iff there is one row with a non-null "deleted_id".
+         *
+         * (3) There was exactly one Instance, but we did not update it because
+         *     it was not in a valid state for this update.  This is true iff
+         *     there is one row with a null "deleted_id".
+         *
+         * A lot of other things are operationally conceivable (i.e., more than
+         * one returned row), but they should not happen.  We treat these as
+         * internal errors.
+         */
+        // XXX Is this the right place to produce the NotFound error?  Might
+        // the caller have already done a name-to-id translation?
         let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
         let row = sql_query_maybe_one(
             &client,
@@ -379,7 +406,7 @@ impl DataStore {
          * identifying columns are non-NULL.  We pick the lookup_key column,
          * purely out of convenience.
          */
-        let updated_key = format!("found_{}", L::ITEM_KEY_COLUMN_NAME);
+        let updated_key = format!("updated_{}", L::ITEM_KEY_COLUMN_NAME);
         let check_updated_key: Option<L::ItemKey> =
             sql_row_value(&row, updated_key.as_str())?;
         Ok(UpdatePrecond {
@@ -828,7 +855,6 @@ impl DataStore {
      * the current state explicitly.  For now, we'll just require consumers
      * to explicitly fetch the state if they want that.
      */
-    // XXX Update instance delete and disk runtime update.
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
@@ -873,85 +899,48 @@ impl DataStore {
          * This is subject to change, but for now we're going to say that an
          * instance must be "stopped" or "failed" in order to delete it.  The
          * delete operation sets "time_deleted" (just like with other objects)
-         * and also sets the state to "destroyed".
-         *
-         * We want to update the instance row to indicate it's being deleted
-         * only if it's in a state where that's possible.  While complicated,
-         * the SQL below allows us to atomically distinguish the cases we're
-         * interested in: successful update, failure because the row was in the
-         * wrong state, failure because the row doesn't exist.
-         *
-         * By virtue of being "stopped", we assume there are no dependencies on
-         * this instance (e.g., disk attachments).  If that changes, we'll want
-         * to check for such dependencies here.
-         *
-         * XXX What's the right abstraction for this?
+         * and also sets the state to "destroyed".  By virtue of being
+         * "stopped", we assume there are no dependencies on this instance
+         * (e.g., disk attachments).  If that changes, we'll want to check for
+         * such dependencies here.
          */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        let sql = "WITH \
-            matching_rows AS \
-            (SELECT id, instance_state FROM Instance WHERE time_deleted \
-            IS NULL AND id = $1 LIMIT 2),
-            \
-            deleted_ids AS
-            (UPDATE Instance \
-            SET time_deleted = $2, instance_state = 'destroyed' WHERE \
-            time_deleted IS NULL AND id = $1 AND \
-            instance_state IN ('stopped', 'failed') LIMIT 2 RETURNING id)
-            \
-            SELECT \
-                i.id AS found_id, \
-                i.instance_state AS previous_state, \
-                d.id as deleted_id \
-                FROM matching_rows i \
-                FULL OUTER JOIN deleted_ids d ON i.id = d.id";
 
-        /*
-         * There are only three expected cases here:
-         *
-         * (1) The Instance does not exist, which is true iff there were zero
-         *     returned rows.
-         *
-         * (2) There was exactly one Instance, and we updated it.  This is true
-         *     iff there is one row with a non-null "deleted_id".
-         *
-         * (3) There was exactly one Instance, but we did not update it because
-         *     it was not in a valid state for this update.  This is true iff
-         *     there is one row with a null "deleted_id".
-         *
-         * A lot of other things are operationally conceivable (i.e., more than
-         * one returned row), but they should not happen.  We treat these as
-         * internal errors.
-         */
-        // XXX Is this the right place to produce the NotFound error?  Might
-        // the caller have already done a name-to-id translation?
-        let row =
-            sql_query_maybe_one(&client, sql, &[instance_id, &now], || {
-                ApiError::not_found_by_id(
-                    ApiResourceType::Instance,
-                    instance_id,
-                )
-            })
+        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
+            BTreeMap::new();
+        values.insert("instance_state", &ApiInstanceState::Destroyed);
+        values.insert("time_deleted", &now);
+
+        let mut cond_sql = SqlString::new();
+        let p1 = cond_sql.next_param(&ApiInstanceState::Stopped);
+        let p2 = cond_sql.next_param(&ApiInstanceState::Failed);
+        cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
+
+        let update = self
+            .update_precond::<Instance, LookupByUniqueId>(
+                &client,
+                (),
+                instance_id,
+                &["instance_state", "time_deleted"],
+                &values,
+                cond_sql,
+            )
             .await?;
 
+        let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let previous_state: ApiInstanceState =
-            sql_row_value(&row, "previous_state")?;
-        let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
-        // XXX error context -- as I look at this, would this (and some of
-        // the other cases) be simpler if the return value of query()
-        // included the SQL and a way to generate errors that referenced the
-        // SQL?
+        let instance_state: ApiInstanceState =
+            sql_row_value(&row, "found_instance_state")?;
         bail_unless!(found_id == *instance_id);
-        if let Some(did) = deleted_id {
-            bail_unless!(did == *instance_id);
+
+        if update.updated {
             Ok(())
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
                     "instance cannot be deleted in state \"{}\"",
-                    previous_state
+                    instance_state
                 ),
             })
         }
