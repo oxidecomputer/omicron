@@ -8,7 +8,6 @@
 use crate::api_error::ApiError;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DataPageParams;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
@@ -159,25 +158,32 @@ impl SqlValueSet {
     pub fn values(&self) -> Vec<&(dyn ToSql + Send + Sync)> {
         self.values.iter().map(|b| b.as_ref()).collect()
     }
+
+    // XXX TODO-doc TODO-coverage
+    pub fn to_update_sql<'a, 'b>(&'a self, output: &'b mut SqlString<'a>)
+    where
+        'a: 'b,
+    {
+        let set_parts = self
+            .names()
+            .iter()
+            .zip(self.values().iter())
+            .map(
+                |(name, value): (
+                    &&'static str,
+                    &&(dyn ToSql + Send + Sync),
+                )| {
+                    assert!(valid_cockroachdb_identifier(*name));
+                    format!("{} = {}", *name, output.next_param(*value))
+                },
+            )
+            .collect::<Vec<String>>();
+        output.push_str(&set_parts.join(", "));
+    }
 }
 
 pub trait SqlSerialize {
     fn sql_serialize(&self, output: &mut SqlValueSet);
-}
-
-// XXX TODO-doc TODO-coverage
-pub fn sql_update_from_set<'a, 'b>(
-    kvpairs: &'a BTreeMap<&'static str, &'b (dyn ToSql + Sync)>,
-    output: &'a mut SqlString<'b>,
-) {
-    let set_parts = kvpairs
-        .iter()
-        .map(|(name, value): (&&'static str, &&(dyn ToSql + Sync))| {
-            assert!(valid_cockroachdb_identifier(*name));
-            format!("{} = {}", *name, output.next_param(*value))
-        })
-        .collect::<Vec<String>>();
-    output.push_str(&set_parts.join(", "));
 }
 
 /** Describes a table in the control plane database */

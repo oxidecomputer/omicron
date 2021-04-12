@@ -51,7 +51,6 @@ use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::StreamExt;
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::sync::Arc;
@@ -225,7 +224,7 @@ impl DataStore {
         scope_key: L::ScopeKey,
         item_key: &'a L::ItemKey,
         precond_columns: &'b [&'static str],
-        update_values: &BTreeMap<&'static str, &'a (dyn ToSql + Sync)>,
+        update_values: &SqlValueSet,
         precond_sql: SqlString<'a>,
     ) -> Result<UpdatePrecond, ApiError>
     where
@@ -296,7 +295,7 @@ impl DataStore {
          *   |                 +--- Same as "SELECT" clause above
          *   |
          *   +------ "SET" clause constructed from the caller-provided
-         *           "update_values", a set of key-value pairs
+         *           "update_values", a SqlValueSet
          *
          * The WHERE clause looks just like the above SELECT's WHERE clause,
          * plus the caller's preconditions.  As before, we'll use
@@ -305,7 +304,7 @@ impl DataStore {
          */
         let (mut update_set_sql, lookup_cond_str) =
             SqlString::new_with_params(lookup_cond_sql);
-        sql::sql_update_from_set(update_values, &mut update_set_sql);
+        update_values.to_update_sql(&mut update_set_sql);
         let update_sql_str = format!(
             "UPDATE {} SET {} WHERE ({}) AND ({}) AND ({}) LIMIT 2 RETURNING {}",
             T::TABLE_NAME,
@@ -804,15 +803,9 @@ impl DataStore {
         new_runtime: &ApiInstanceRuntimeState,
     ) -> Result<bool, ApiError> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
 
-        /* XXX want a way to make this set from any type? */
-        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
-            BTreeMap::new();
-        values.insert("instance_state", &new_runtime.run_state);
-        values.insert("state_generation", &new_runtime.gen);
-        values.insert("active_server_id", &new_runtime.sled_uuid);
-        values.insert("time_state_updated", &now);
+        let mut values = SqlValueSet::new();
+        new_runtime.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
         let param = cond_sql.next_param(&new_runtime.gen);
@@ -850,10 +843,9 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
-            BTreeMap::new();
-        values.insert("instance_state", &ApiInstanceState::Destroyed);
-        values.insert("time_deleted", &now);
+        let mut values = SqlValueSet::new();
+        values.set("instance_state", &ApiInstanceState::Destroyed);
+        values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
         let p1 = cond_sql.next_param(&ApiInstanceState::Stopped);
@@ -994,17 +986,9 @@ impl DataStore {
         new_runtime: &ApiDiskRuntimeState,
     ) -> Result<bool, ApiError> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
 
-        /* XXX want a way to make this set from any type? */
-        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
-            BTreeMap::new();
-        let disk_state_str = new_runtime.disk_state.to_string();
-        values.insert("disk_state", &disk_state_str);
-        values.insert("state_generation", &new_runtime.gen);
-        let instance_id = new_runtime.disk_state.attached_instance_id();
-        values.insert("attach_instance_id", &instance_id);
-        values.insert("time_state_updated", &now);
+        let mut values = SqlValueSet::new();
+        new_runtime.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
         let param = cond_sql.next_param(&new_runtime.gen);
@@ -1049,17 +1033,14 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let disk_state_destroyed = ApiDiskState::Destroyed.to_string();
-        let disk_state_detached = ApiDiskState::Detached.to_string();
-        let disk_state_faulted = ApiDiskState::Faulted.to_string();
-
-        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
-            BTreeMap::new();
-        values.insert("disk_state", &disk_state_destroyed);
-        values.insert("time_deleted", &now);
+        let mut values = SqlValueSet::new();
+        values.set("time_deleted", &now);
+        ApiDiskState::Destroyed.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
+        let disk_state_detached = ApiDiskState::Detached.to_string();
         let p1 = cond_sql.next_param(&disk_state_detached);
+        let disk_state_faulted = ApiDiskState::Faulted.to_string();
         let p2 = cond_sql.next_param(&disk_state_faulted);
         cond_sql.push_str(&format!("disk_state in ({}, {})", p1, p2));
 
@@ -1078,7 +1059,9 @@ impl DataStore {
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         bail_unless!(found_id == *disk_id);
 
-        // XXX ApiDiskState could impl TryFrom(row)
+        // TODO-cleanup It would be nice to use
+        // ApiDiskState::try_from(&tokio_postgres::Row), but the column names
+        // are different here.
         let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
         let attach_instance_id: Option<Uuid> =
             sql_row_value(&row, "found_attach_instance_id")?;

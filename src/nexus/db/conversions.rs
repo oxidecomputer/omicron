@@ -299,7 +299,8 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
 
 impl SqlSerialize for ApiDiskState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("attach_instance_id", &(None as Option<Uuid>));
+        let attach_id = &self.attached_instance_id().map(|id| *id);
+        output.set("attach_instance_id", attach_id);
         output.set("disk_state", &self.label());
     }
 }
