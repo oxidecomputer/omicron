@@ -41,7 +41,24 @@ impl DbError {
 }
 
 /** Given an arbitrary [`DbError`], produce an [`ApiError`] for the problem. */
-/* XXX Should this be From<>?  May want more context */
+/*
+ * This could potentially be an `impl From<DbError> for ApiError`.  However,
+ * there are multiple different ways to do this transformation, depending on
+ * what the caller is doing.  See `sql_error_on_create()`.  If we impl'd `From`
+ * here, it would be easy to use this version instead of a more appropriate one
+ * without even realizing it.
+ *
+ * TODO-design It's possible we could better represent the underlying condition
+ * in the `DbError` so that this isn't a problem.  But that might just push the
+ * problem around: the nice thing about DbError today is that lower-level
+ * functions like `sql_query` can produce one without knowing what the caller is
+ * doing.  The caller gets to decide whether to dig deeper into the underlying
+ * error (by calling `sql_error_on_create()` or `sql_error_generic()`).  Now, we
+ * could have such callers produce a new variant of `DbError` for these other
+ * conversions, and then we could handle them all in the a `From` impl here.
+ * But it would still have the problem of being easy to misuse.  Right now, you
+ * at least have to explicitly opt into a conversion.
+ */
 pub fn sql_error_generic(e: DbError) -> ApiError {
     let extra = match e.db_source().and_then(|s| s.code()) {
         Some(code) => format!(" (code {})", code.code()),
