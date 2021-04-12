@@ -132,7 +132,17 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        // XXX What to do with non-NULL time_deleted?
+        let time_deleted: Option<DateTime<Utc>> =
+            sql_row_value(value, "time_deleted")?;
+        /*
+         * We could support representing deleted objects, but we would want to
+         * think about how to do that.  For example, we might want to use
+         * separate types so that the control plane can't accidentally do things
+         * like attach a disk to a deleted Instance.  We haven't figured any of
+         * this out, and there's no need yet.
+         */
+        bail_unless!(time_deleted.is_none(),
+            "model does not support objects that have been deleted");
         Ok(ApiIdentityMetadata {
             id: sql_row_value(value, "id")?,
             name: sql_row_value(value, "name")?,
@@ -147,7 +157,7 @@ impl SqlSerialize for ApiIdentityMetadataCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         output.set("name", &self.name);
         output.set("description", &self.description);
-        // XXX time_deleted?
+        output.set("time_deleted", &(None as Option<DateTime<Utc>>));
     }
 }
 
