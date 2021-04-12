@@ -45,22 +45,28 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiByteCount;
 use crate::api_model::ApiDisk;
 use crate::api_model::ApiDiskAttachment;
+use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskRuntimeState;
 use crate::api_model::ApiDiskState;
 use crate::api_model::ApiGeneration;
 use crate::api_model::ApiIdentityMetadata;
+use crate::api_model::ApiIdentityMetadataCreateParams;
 use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCpuCount;
+use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
+use crate::api_model::ApiProjectCreateParams;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 use super::operations::sql_row_value;
+use super::sql::SqlSerialize;
+use super::sql::SqlValueSet;
 
 /*
  * FromSql/ToSql impls used for simple Rust types
@@ -138,12 +144,26 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     }
 }
 
+impl SqlSerialize for ApiIdentityMetadataCreateParams {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("name", &self.name);
+        output.set("description", &self.description);
+        // XXX time_deleted?
+    }
+}
+
 /// Load an [`ApiProject`] from a whole row of the "Project" table.
 impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(ApiProject { identity: ApiIdentityMetadata::try_from(value)? })
+    }
+}
+
+impl SqlSerialize for ApiProjectCreateParams {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        self.identity.sql_serialize(output)
     }
 }
 
@@ -164,6 +184,16 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
     }
 }
 
+impl SqlSerialize for ApiInstanceCreateParams {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        self.identity.sql_serialize(output);
+        output.set("ncpus", &self.ncpus);
+        output.set("memory", &self.memory);
+        output.set("hostname", &self.hostname);
+        // XXX boot_disk_size
+    }
+}
+
 /// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
 /// using the "instance_state", "active_server_id", "state_generation", and
 /// "time_state_updated" columns.
@@ -181,6 +211,16 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     }
 }
 
+impl SqlSerialize for ApiInstanceRuntimeState {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("instance_state", &self.run_state);
+        output.set("active_server_id", &self.sled_uuid);
+        output.set("state_generation", &self.gen);
+        output.set("time_state_updated", &self.time_updated);
+        // XXX reboot_in_progress
+    }
+}
+
 /// Load an [`ApiDisk`] from a row of the "Disk" table.
 impl TryFrom<&tokio_postgres::Row> for ApiDisk {
     type Error = ApiError;
@@ -193,6 +233,14 @@ impl TryFrom<&tokio_postgres::Row> for ApiDisk {
             size: sql_row_value(value, "size_bytes")?,
             runtime: ApiDiskRuntimeState::try_from(value)?,
         })
+    }
+}
+
+impl SqlSerialize for ApiDiskCreateParams {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        self.identity.sql_serialize(output);
+        output.set("size_bytes", &self.size);
+        output.set("origin_snapshot", &self.snapshot_id);
     }
 }
 
@@ -227,6 +275,14 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
     }
 }
 
+impl SqlSerialize for ApiDiskRuntimeState {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        self.disk_state.sql_serialize(output);
+        output.set("state_generation", &self.gen);
+        output.set("time_state_updated", &self.time_updated);
+    }
+}
+
 /// Load an [`ApiDiskState`] from a row from the Disk table, using the columns
 /// "disk_state" and "attach_instance_id".
 impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
@@ -238,5 +294,12 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
             sql_row_value(value, "attach_instance_id")?;
         ApiDiskState::try_from((disk_state_str, instance_uuid))
             .map_err(|e| ApiError::internal_error(&e))
+    }
+}
+
+impl SqlSerialize for ApiDiskState {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("attach_instance_id", &(None as Option<Uuid>));
+        output.set("disk_state", &self.label());
     }
 }

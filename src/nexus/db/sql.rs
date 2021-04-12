@@ -9,6 +9,7 @@ use crate::api_error::ApiError;
 use crate::api_model::ApiResourceType;
 use crate::api_model::DataPageParams;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
@@ -107,6 +108,61 @@ impl<'a> SqlString<'a> {
     pub fn sql_params(&self) -> &[&'a (dyn ToSql + Sync)] {
         &self.params
     }
+}
+
+/**
+ * Build up a list of SQL name-value pairs
+ *
+ * This struct stores names and corresponding SQL values and provides a way to
+ * get them back out suitable for use in safe INSERT or UPDATE statements.  For
+ * both INSERT and UPDATE, the values are provided as parameters to the query.
+ *
+ * Like the other interfaces here, the names here must be `&'static str` to make
+ * it harder to accidentally supply user input here.  That's important because
+ * column names cannot be passed as parameters for the query.
+ */
+pub struct SqlValueSet {
+    names: Vec<&'static str>,
+    values: Vec<Box<dyn ToSql + Send + Sync>>,
+    names_unique: BTreeSet<&'static str>,
+}
+
+impl SqlValueSet {
+    pub fn new() -> SqlValueSet {
+        SqlValueSet {
+            names: Vec::new(),
+            values: Vec::new(),
+            names_unique: BTreeSet::new(),
+        }
+    }
+
+    /*
+     * TODO-design Can we do better (avoiding Clone) using tokio_postgres's
+     * query_raw()?
+     */
+    pub fn set<T>(&mut self, name: &'static str, value: &T)
+    where
+        T: ToSql + Send + Sync + Clone + 'static,
+    {
+        assert!(
+            self.names_unique.insert(name),
+            "duplicate name specified for SqlValueSet"
+        );
+        self.names.push(name);
+        self.values.push(Box::new((*value).clone()));
+    }
+
+    pub fn names(&self) -> &[&'static str] {
+        &self.names
+    }
+
+    pub fn values(&self) -> Vec<&(dyn ToSql + Send + Sync)> {
+        self.values.iter().map(|b| b.as_ref()).collect()
+    }
+}
+
+pub trait SqlSerialize {
+    fn sql_serialize(&self, output: &mut SqlValueSet);
 }
 
 // XXX TODO-doc TODO-coverage

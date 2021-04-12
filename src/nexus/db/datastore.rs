@@ -59,6 +59,7 @@ use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 use super::operations::sql_error_generic;
+use super::operations::sql_execute;
 use super::operations::sql_execute_maybe_one;
 use super::operations::sql_query;
 use super::operations::sql_query_always_one;
@@ -74,7 +75,9 @@ use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
 use super::sql;
 use super::sql::LookupKey;
+use super::sql::SqlSerialize;
 use super::sql::SqlString;
+use super::sql::SqlValueSet;
 use super::sql::Table;
 
 // XXX document, refactor, etc.
@@ -422,20 +425,16 @@ impl DataStore {
     ) -> CreateResult<ApiProject> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        sql_insert_unique(
+        let mut values = SqlValueSet::new();
+        values.set("id", new_id);
+        values.set("time_created", &now);
+        values.set("time_metadata_updated", &now);
+        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
+        new_project.sql_serialize(&mut values);
+        sql_insert_unique::<Project>(
             &client,
-            Project,
-            Project::ALL_COLUMNS,
+            &values,
             &new_project.identity.name.as_str(),
-            "",
-            &[
-                new_id,
-                &new_project.identity.name,
-                &new_project.identity.description,
-                &now,
-                &now,
-                &(None as Option<DateTime<Utc>>),
-            ],
         )
         .await
     }
@@ -455,54 +454,12 @@ impl DataStore {
     }
 
     /// Delete a project
+    /*
+     * TODO-correctness This needs to check whether there are any resources that
+     * depend on the Project (Disks, Instances).  We can do this with a
+     * generation counter that gets bumped when these resources are created.
+     */
     pub async fn project_delete(&self, project_name: &ApiName) -> DeleteResult {
-        /*
-         * XXX TODO-correctness This needs to check whether the project has any
-         * resources in it.  One way to do that would be to define a certain
-         * kind of generation number, maybe called a "resource-creation
-         * generation number" ("rcgen").  Every resource creation bumps the
-         * "rgen" of the parent project.  This operation fetches the current
-         * rgen of the project, then checks for various kinds of resources, then
-         * does the following UPDATE that sets time_deleted _conditional_ on the
-         * rgen being the same.  If this updates 0 rows, either the project is
-         * gone already or a new resource has been created.  (We'll want to make
-         * sure that we report the correct error!)  We'll want to think more
-         * carefully about this scheme, and maybe alternatives.  (Another idea
-         * would be to have resource creation and deletion update a regular
-         * counter.  But isn't that the same as denormalizing this piece of
-         * information?)
-         *
-         * Can we do all this in one big query, maybe with a few CTEs?  (e.g.,
-         * something like:
-         *
-         * WITH project AS
-         *     (select id from Project where time_deleted IS NULL and name =
-         *     $1),
-         *     project_instances as (select id from Instance where time_deleted
-         *     IS NULL and project_id = project.id LIMIT 1),
-         *     project_disks as (select id from Disk where time_deleted IS NULL
-         *     and project_id = project.id LIMIT 1),
-         *
-         *     UPDATE Project set time_deleted = $1 WHERE time_deleted IS NULL
-         *         AND id = project.id AND project_instances ...
-         *
-         * I'm not sure how to finish that SQL, and moreover, I'm not sure it
-         * solves the problem.  You can still create a new instance after
-         * listing the instances.  So I guess you still need the "rcgen".
-         * Still, you could potentially combine these to do it all in one go:
-         *
-         * WITH project AS
-         *     (select id,rcgen from Project where time_deleted IS NULL and
-         *     name = $1),
-         *     project_instances as (select id from Instance where time_deleted
-         *     IS NULL and project_id = project.id LIMIT 1),
-         *     project_disks as (select id from Disk where time_deleted IS NULL
-         *     and project_id = project.id LIMIT 1),
-         *
-         *     UPDATE Project set time_deleted = $1 WHERE time_deleted IS NULL
-         *         AND id = project.id AND rcgen = project.rcgen AND
-         *         project_instances ...
-         */
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         sql_execute_maybe_one(
@@ -735,72 +692,59 @@ impl DataStore {
         // it.  We have two different constraints here.
         //
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
-        sql_insert_unique(
+        let now = runtime_initial.time_updated;
+        let mut values = SqlValueSet::new();
+        values.set("id", instance_id);
+        values.set("time_created", &now);
+        values.set("time_metadata_updated", &now);
+        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
+        values.set("project_id", project_id);
+        params.sql_serialize(&mut values);
+        runtime_initial.sql_serialize(&mut values);
+        sql_insert_unique_idempotent::<Instance>(
             &client,
-            Instance,
-            Instance::ALL_COLUMNS,
+            &mut values,
             params.identity.name.as_str(),
-            "ON CONFLICT (id) DO NOTHING",
-            &[
-                instance_id,
-                &params.identity.name,
-                &params.identity.description,
-                &now,
-                &now,
-                &(None as Option<DateTime<Utc>>),
-                project_id,
-                &runtime_initial.run_state.to_string(),
-                &now,
-                &runtime_initial.gen,
-                &runtime_initial.sled_uuid,
-                &params.ncpus,
-                &params.memory,
-                &params.hostname,
-            ],
+            "id",
         )
         .await?;
 
         /*
          * If we get here, then we successfully inserted the record.  It would
          * be a bug if something else were to remove that record before we have
-         * a chance to fetch it.  As a result, sql_query_always_one() is correct
-         * here, even though it looks like this query could legitimately return
-         * 0 rows.
-         * XXX use new fetch_row_by?
-         * XXX specify time_deleted?
+         * a chance to fetch it.
          */
-        let row = sql_query_always_one(
-            &client,
-            format!(
-                "SELECT {} FROM {} WHERE id = $1",
-                Instance::ALL_COLUMNS.join(", "),
-                Instance::TABLE_NAME,
+        let instance = self
+            .fetch_row_by::<LookupByUniqueId, Instance>(
+                &client,
+                (),
+                instance_id,
             )
-            .as_str(),
-            &[instance_id],
-        )
-        .await
-        .map_err(|e| {
-            sql_error_on_create(
-                ApiResourceType::Instance,
-                &params.identity.name.as_str(),
-                e,
-            )
-        })?;
+            .await
+            .map_err(|e| {
+                /* XXX helper function for this */
+                if !matches!(e, ApiError::ObjectNotFound { .. }) {
+                    ApiError::internal_error(&format!(
+                        "failed to find saga-created record \
+                        after creating it: {:#}",
+                        e
+                    ))
+                } else {
+                    e
+                }
+            })?;
 
-        let instance = ApiInstance::try_from(&row)?;
-        if instance.runtime.run_state != ApiInstanceState::Creating
-            || instance.runtime.gen != runtime_initial.gen
-        {
-            Err(ApiError::internal_error(&format!(
-                "creating instance: found existing instance with \
-                        unexpected state ({:?}) or generation ({})",
-                instance.runtime.run_state, instance.runtime.gen,
-            )))
-        } else {
-            Ok(instance)
-        }
+        bail_unless!(
+            instance.runtime.run_state == ApiInstanceState::Creating,
+            "newly-created Instance has unexpected state: {:?}",
+            instance.runtime.run_state
+        );
+        bail_unless!(
+            instance.runtime.gen == runtime_initial.gen,
+            "newly-created Instance has unexpected generation: {:?}",
+            instance.runtime.gen
+        );
+        Ok(instance)
     }
 
     pub async fn project_list_instances(
@@ -977,69 +921,56 @@ impl DataStore {
         /* See project_create_instance() */
         /* XXX commonize with project_create_instance() */
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
-        sql_insert_unique(
+        let now = runtime_initial.time_updated;
+        let mut values = SqlValueSet::new();
+        values.set("id", disk_id);
+        values.set("time_created", &now);
+        values.set("time_metadata_updated", &now);
+        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
+        values.set("project_id", project_id);
+        params.sql_serialize(&mut values);
+        runtime_initial.sql_serialize(&mut values);
+        sql_insert_unique_idempotent::<Disk>(
             &client,
-            Disk,
-            Disk::ALL_COLUMNS,
+            &mut values,
             params.identity.name.as_str(),
-            "ON CONFLICT (id) DO NOTHING",
-            &[
-                disk_id,
-                &params.identity.name,
-                &params.identity.description,
-                &now,
-                &now,
-                &(None as Option<DateTime<Utc>>),
-                project_id,
-                &runtime_initial.disk_state.to_string(),
-                &now,
-                &runtime_initial.gen,
-                &runtime_initial.disk_state.attached_instance_id(),
-                &params.size,
-                &params.snapshot_id,
-            ],
+            "id",
         )
         .await?;
 
         /*
          * If we get here, then we successfully inserted the record.  It would
          * be a bug if something else were to remove that record before we have
-         * a chance to fetch it.  As a result, sql_query_always_one() is correct
-         * here, even though it looks like this query could legitimately return
-         * 0 rows.
+         * a chance to fetch it.
+         * XXX Still want to commonize with project_create_instance
          */
-        let row = sql_query_always_one(
-            &client,
-            format!(
-                "SELECT {} FROM {} WHERE id = $1",
-                Disk::ALL_COLUMNS.join(", "),
-                Disk::TABLE_NAME,
-            )
-            .as_str(),
-            &[disk_id],
-        )
-        .await
-        .map_err(|e| {
-            sql_error_on_create(
-                ApiResourceType::Disk,
-                &params.identity.name.as_str(),
-                e,
-            )
-        })?;
+        let disk = self
+            .fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id)
+            .await
+            .map_err(|e| {
+                /* XXX helper function for this */
+                if !matches!(e, ApiError::ObjectNotFound { .. }) {
+                    ApiError::internal_error(&format!(
+                        "failed to find saga-created record \
+                        after creating it: {:#}",
+                        e
+                    ))
+                } else {
+                    e
+                }
+            })?;
 
-        let disk = ApiDisk::try_from(&row)?;
-        if disk.runtime.disk_state != ApiDiskState::Creating
-            || disk.runtime.gen != runtime_initial.gen
-        {
-            Err(ApiError::internal_error(&format!(
-                "creating disk: found existing disk with \
-                        unexpected state ({:?}) or generation ({})",
-                disk.runtime.disk_state, disk.runtime.gen,
-            )))
-        } else {
-            Ok(disk)
-        }
+        bail_unless!(
+            disk.runtime.disk_state == ApiDiskState::Creating,
+            "newly-created Disk has unexpected state: {:?}",
+            disk.runtime.disk_state
+        );
+        bail_unless!(
+            disk.runtime.gen == runtime_initial.gen,
+            "newly-created Disk has unexpected generation: {:?}",
+            disk.runtime.gen
+        );
+        Ok(disk)
     }
 
     pub async fn project_list_disks(
@@ -1194,9 +1125,10 @@ fn sql_error_on_create(
 }
 
 /**
- * Using database connection `client`, insert a row into table `table_name`
- * having values `values` for the respective columns named `table_fields`.
+ * Using database connection `client`, insert a row into table `T` having values
+ * `values`.
  */
+/* XXX TODO-doc document better */
 /*
  * This is not as statically type-safe an API as you might think by looking at
  * it.  There's nothing that ensures that the types of the values correspond to
@@ -1206,46 +1138,86 @@ fn sql_error_on_create(
  * program.  That does not eliminate the runtime possibility that the types do
  * not, in fact, match the types in the database.
  *
- * The use of `'static` lifetimes here is a cheesy sanity check to catch SQL
- * injection.  (This is not a _good_ way to avoid SQL injection.  This is
- * intended as a last-ditch sanity check in case this code survives longer than
- * expected.)  Using the `async fn` syntax here runs afoul of
+ * The use of `'static` lifetimes here is just to make it harder to accidentally
+ * insert untrusted input here.  Using the `async fn` syntax here runs afoul of
  * rust-lang/rust#63033.  So we desugar the `async` explicitly.
  */
-fn sql_insert_unique<'a, T>(
-    client: &'a tokio_postgres::Client,
-    _table: T, // TODO-cleanup
-    table_columns: &'a [&'static str],
-    unique_value: &'a str,
-    conflict_sql: &'static str,
-    values: &'a [&'a (dyn ToSql + Sync)],
-) -> impl Future<Output = Result<T::ModelType, ApiError>> + 'a
+async fn sql_insert_unique<T>(
+    client: &tokio_postgres::Client,
+    values: &SqlValueSet,
+    unique_value: &str,
+) -> Result<T::ModelType, ApiError>
 where
     T: Table,
 {
-    assert_eq!(table_columns.len(), values.len());
-    // XXX Could assert that the specified columns are a subset of allowed ones
-    let table_field_str = table_columns.join(", ");
-    let all_columns_str = T::ALL_COLUMNS.join(", ");
-    let values_str = (1..=values.len())
-        .map(|i| format!("${}", i))
-        .collect::<Vec<String>>()
-        .as_slice()
-        .join(", ");
-    let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({}) {} RETURNING {}",
-        T::TABLE_NAME,
-        table_field_str,
-        values_str,
-        conflict_sql,
-        all_columns_str
-    );
-    async move {
-        let row =
-            sql_query_always_one(client, sql.as_str(), values).await.map_err(
-                |e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e),
-            )?;
+    let mut sql = SqlString::new();
+    let param_names = values
+        .values()
+        .iter()
+        .map(|value| sql.next_param(*value))
+        .collect::<Vec<String>>();
+    let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
 
-        T::ModelType::try_from(&row)
+    // XXX Could assert that the specified columns are a subset of allowed ones?
+    sql.push_str(
+        format!(
+            "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+            T::TABLE_NAME,
+            column_names.join(", "),
+            param_names.join(", "),
+            T::ALL_COLUMNS.join(", "),
+        )
+        .as_str(),
+    );
+
+    let row =
+        sql_query_always_one(client, sql.sql_fragment(), sql.sql_params())
+            .await
+            .map_err(|e| {
+                sql_error_on_create(T::RESOURCE_TYPE, unique_value, e)
+            })?;
+
+    T::ModelType::try_from(&row)
+}
+
+/*
+ * The use of `'static` lifetimes here is just to make it harder to accidentally
+ * insert untrusted input here.  Using the `async fn` syntax here runs afoul of
+ * rust-lang/rust#63033.  So we desugar the `async` explicitly.
+ */
+/* XXX TODO-doc and commonize with above */
+fn sql_insert_unique_idempotent<'a, T>(
+    client: &'a tokio_postgres::Client,
+    values: &'a SqlValueSet,
+    unique_value: &'a str,
+    ignore_conflicts_on: &'static str,
+) -> impl Future<Output = Result<(), ApiError>> + 'a
+where
+    T: Table,
+{
+    let mut sql = SqlString::new();
+    let param_names = values
+        .values()
+        .iter()
+        .map(|value| sql.next_param(*value))
+        .collect::<Vec<String>>();
+    let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
+
+    sql.push_str(
+        format!(
+            "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING",
+            T::TABLE_NAME,
+            column_names.join(", "),
+            param_names.join(", "),
+            ignore_conflicts_on,
+        )
+        .as_str(),
+    );
+
+    async move {
+        sql_execute(client, sql.sql_fragment(), sql.sql_params())
+            .await
+            .map_err(|e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e))
+            .map(|_| ())
     }
 }

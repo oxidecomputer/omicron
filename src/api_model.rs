@@ -963,17 +963,7 @@ pub enum ApiDiskState {
 
 impl Display for ApiDiskState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        let label = match self {
-            ApiDiskState::Creating => "creating",
-            ApiDiskState::Detached => "detached",
-            ApiDiskState::Attaching(_) => "attaching",
-            ApiDiskState::Attached(_) => "attached",
-            ApiDiskState::Detaching(_) => "detaching",
-            ApiDiskState::Destroyed => "destroyed",
-            ApiDiskState::Faulted => "faulted",
-        };
-
-        write!(f, "{}", label)
+        write!(f, "{}", self.label())
     }
 }
 
@@ -1010,6 +1000,21 @@ fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
 }
 
 impl ApiDiskState {
+    /**
+     * Returns the string label for this disk state
+     */
+    pub fn label(&self) -> &'static str {
+        match self {
+            ApiDiskState::Creating => "creating",
+            ApiDiskState::Detached => "detached",
+            ApiDiskState::Attaching(_) => "attaching",
+            ApiDiskState::Attached(_) => "attached",
+            ApiDiskState::Detaching(_) => "detaching",
+            ApiDiskState::Destroyed => "destroyed",
+            ApiDiskState::Faulted => "faulted",
+        }
+    }
+
     /**
      * Returns whether the Disk is currently attached to, being attached to, or
      * being detached from any Instance.
