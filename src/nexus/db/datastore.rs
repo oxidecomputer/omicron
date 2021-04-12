@@ -16,7 +16,6 @@
  * Inventory of queries not done so far:
  * o update Project (possibly including conflict on unique name)
  * o create Instance/Disk (INSERT ON CONFLICT DO NOTHING, SELECT, check state)
- * o update Instance/Disk runtime (complicated CTE to distinguish error cases)
  * o project delete (currently UPDATE, but probably needs similar CTE treatment)
  *
  * This probably breaks down into:
@@ -1115,54 +1114,54 @@ impl DataStore {
         .await
     }
 
-    /* XXX commonize with instance version */
     pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
-        let sql = "WITH \
-            matching_rows AS \
-            (SELECT id, disk_state, attach_instance_id FROM Disk WHERE \
-            time_deleted IS NULL AND id = $1 LIMIT 2),
-            \
-            deleted_ids AS
-            (UPDATE Disk \
-            SET time_deleted = $2, disk_state = 'destroyed' WHERE \
-            time_deleted IS NULL AND id = $1 AND \
-            disk_state IN ('detached', 'faulted') LIMIT 2 RETURNING id)
-            \
-            SELECT \
-                i.id AS found_id, \
-                i.disk_state AS previous_state, \
-                i.attach_instance_id AS attach_instance_id, \
-                d.id as deleted_id \
-                FROM matching_rows i \
-                FULL OUTER JOIN deleted_ids d ON i.id = d.id";
-        // XXX Is this the right place to produce the NotFound error?  Might
-        // the caller have already done a name-to-id translation?
 
-        let row = sql_query_maybe_one(&client, sql, &[disk_id, &now], || {
-            ApiError::not_found_by_id(ApiResourceType::Disk, disk_id)
-        })
-        .await?;
+        let disk_state_destroyed = ApiDiskState::Destroyed.to_string();
+        let disk_state_detached = ApiDiskState::Detached.to_string();
+        let disk_state_faulted = ApiDiskState::Faulted.to_string();
 
+        let mut values: BTreeMap<&'static str, &(dyn ToSql + Sync)> =
+            BTreeMap::new();
+        values.insert("disk_state", &disk_state_destroyed);
+        values.insert("time_deleted", &now);
+
+        let mut cond_sql = SqlString::new();
+        let p1 = cond_sql.next_param(&disk_state_detached);
+        let p2 = cond_sql.next_param(&disk_state_faulted);
+        cond_sql.push_str(&format!("disk_state in ({}, {})", p1, p2));
+
+        let update = self
+            .update_precond::<Disk, LookupByUniqueId>(
+                &client,
+                (),
+                disk_id,
+                &["disk_state", "attach_instance_id", "time_deleted"],
+                &values,
+                cond_sql,
+            )
+            .await?;
+
+        let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let previous_state_str: &str = sql_row_value(&row, "previous_state")?;
-        let attached_instance_id: Option<Uuid> =
-            sql_row_value(&row, "attach_instance_id")?;
-        let previous_state: ApiDiskState =
-            ApiDiskState::try_from((previous_state_str, attached_instance_id))
-                .map_err(|e| ApiError::internal_error(&e))?;
-        let deleted_id: Option<Uuid> = sql_row_value(&row, "deleted_id")?;
         bail_unless!(found_id == *disk_id);
 
-        if let Some(did) = deleted_id {
-            bail_unless!(did == *disk_id);
+        // XXX ApiDiskState could impl TryFrom(row)
+        let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
+        let attach_instance_id: Option<Uuid> =
+            sql_row_value(&row, "found_attach_instance_id")?;
+        let found_disk_state =
+            ApiDiskState::try_from((disk_state_str, attach_instance_id))
+                .map_err(|e| ApiError::internal_error(&e))?;
+
+        if update.updated {
             Ok(())
         } else {
             Err(ApiError::InvalidRequest {
                 message: format!(
                     "disk cannot be deleted in state \"{}\"",
-                    previous_state
+                    found_disk_state
                 ),
             })
         }
