@@ -15,7 +15,9 @@
  * (2) For Rust types that require multiple database values (e.g., an
  *     [`ApiDisk`], which represents an entire row from the Disk table, we impl
  *     `TryFrom<&tokio_postgres::Row>`.  The impl pulls multiple values out of
- *     the row, generally using the names of columns from the table.
+ *     the row, generally using the names of columns from the table.  We also
+ *     impl `SqlSerialize`, which records key-value pairs that can be safely
+ *     inserted into SQL "UPDATE" and "INSERT" statements.
  *
  * These often combine to form a hierarchy.  For example, to load an
  * [`ApiProject`] from a row from the Project table:
@@ -28,9 +30,6 @@
  *   `id` and `name`.
  * * `name` is an [`ApiName`], which is a newtype that wraps a Rust `String`.
  *   This has a `FromSql` impl.
- *
- * There is no insert or update analog for `TryFrom` yet.  These would have to
- * expand to parameters in a SQL query, which is trickier to abstract.
  */
 /*
  * TODO-cleanup We could potentially derive these TryFrom impls.  Diesel and
@@ -59,6 +58,9 @@ use crate::api_model::ApiInstanceState;
 use crate::api_model::ApiName;
 use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
+use crate::bail_unless;
+use chrono::DateTime;
+use chrono::Utc;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
@@ -122,7 +124,7 @@ impl_sql_wrapping!(ApiInstanceState, &str);
 impl_sql_wrapping!(ApiName, &str);
 
 /*
- * TryFrom impls used for more complex Rust types
+ * TryFrom and SqlSerialize impls used for more complex Rust types
  */
 
 /// Load an [`ApiIdentityMetadata`] from a row of any table that contains the
@@ -141,8 +143,10 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
          * like attach a disk to a deleted Instance.  We haven't figured any of
          * this out, and there's no need yet.
          */
-        bail_unless!(time_deleted.is_none(),
-            "model does not support objects that have been deleted");
+        bail_unless!(
+            time_deleted.is_none(),
+            "model does not support objects that have been deleted"
+        );
         Ok(ApiIdentityMetadata {
             id: sql_row_value(value, "id")?,
             name: sql_row_value(value, "name")?,
