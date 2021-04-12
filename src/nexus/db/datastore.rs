@@ -537,10 +537,8 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let mut sql = format!(
-            "UPDATE {} SET time_modified = $1 ",
-            Project::TABLE_NAME
-        );
+        let mut sql =
+            format!("UPDATE {} SET time_modified = $1 ", Project::TABLE_NAME);
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now];
 
         if let Some(new_name) = &update_params.identity.name {
