@@ -48,7 +48,6 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use crate::api_model::UpdateResult;
 use crate::bail_unless;
-use chrono::DateTime;
 use chrono::Utc;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -65,9 +64,9 @@ use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
+use super::sql::SqlSerialize;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
-use super::sql::SqlSerialize;
 use super::sql::Table;
 use super::sql_operations::sql_fetch_page_by;
 use super::sql_operations::sql_fetch_page_from_table;
@@ -98,7 +97,6 @@ impl DataStore {
         values.set("id", new_id);
         values.set("time_created", &now);
         values.set("time_modified", &now);
-        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         new_project.sql_serialize(&mut values);
         sql_insert_unique::<Project>(
             &client,
@@ -362,7 +360,6 @@ impl DataStore {
         values.set("id", instance_id);
         values.set("time_created", &now);
         values.set("time_modified", &now);
-        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
         runtime_initial.sql_serialize(&mut values);
@@ -576,7 +573,6 @@ impl DataStore {
         values.set("id", disk_id);
         values.set("time_created", &now);
         values.set("time_modified", &now);
-        values.set("time_deleted", &(None as Option<DateTime<Utc>>));
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
         runtime_initial.sql_serialize(&mut values);
