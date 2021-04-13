@@ -31,6 +31,7 @@ use crate::api_model::LookupResult;
 use crate::api_model::PaginationOrder::Ascending;
 use crate::api_model::PaginationOrder::Descending;
 use crate::api_model::UpdateResult;
+use crate::bail_unless;
 use crate::nexus::db;
 use crate::nexus::saga_interface::SagaContext;
 use crate::nexus::sagas;
@@ -1137,9 +1138,6 @@ impl TestInterfaces for Nexus {
 /**
  * List a page of items from a collection `search_tree` that maps lookup keys
  * directly to the actual objects
- *
- * For objects that are stored using two mappings (one from lookup keys to ids,
- * and one from ids to values), see [`collection_page_via_id`].
  */
 fn collection_page<KeyType, ValueType>(
     search_tree: &BTreeMap<KeyType, Arc<ValueType>>,

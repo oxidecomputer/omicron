@@ -148,7 +148,7 @@ pub struct UpdatePrecond {
 /// Besides the usual database errors, there are a few common cases here:
 ///
 /// * The specified row was not found.  In this case, a suitable
-///   [`ApiObject::ObjectNotFound`] error is returned.
+///   [`ApiError::ObjectNotFound`] error is returned.
 ///
 /// * The specified row was found and updated.  In this case, an
 ///   [`UpdatePrecond`] is returned with `updated = true`.

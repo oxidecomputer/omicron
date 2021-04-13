@@ -35,7 +35,7 @@ pub async fn test_setup_log(test_name: &str) -> LogContext {
 }
 
 /**
- * Set up a [`CockroachInstance`] for running tests against.
+ * Set up a [`db::CockroachInstance`] for running tests against.
  */
 pub async fn test_setup_database(log: &Logger) -> db::CockroachInstance {
     let mut builder = db::CockroachStarterBuilder::new();

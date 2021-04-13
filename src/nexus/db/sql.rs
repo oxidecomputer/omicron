@@ -269,20 +269,21 @@ pub trait Table {
  *
  * There are three common ways to identify an object:
  *
- *    o by its id, which is universally unique.  Any object can be looked up by
- *      its id.  This is implemented using [`LookupByUniqueId`].
- *    o by a name that is unique within the whole control plane.  Organizations
- *      have a unique name, for example, since they do not exist within any
- *      other scope.  This is implemented using [`LookupByUniqueName`].
- *    o by a name that is unique within the scope of a parent object, which
- *      itself has a unique id.  For example, Instances have names that are
- *      unique within their Project, so you can look up any Instance using the
- *      Project's id and the Instance's name.  This is implemented using
- *      [`LookupByUniqueNameInProject`].
+ * * by its id, which is universally unique.  Any object can be looked up by
+ *   its id.  This is implemented using [`super::schema::LookupByUniqueId`].
+ * * by a name that is unique within the whole control plane.  Organizations
+ *   have a unique name, for example, since they do not exist within any
+ *   other scope.  This is implemented using
+ *   [`super::schema::LookupByUniqueName`].
+ * * by a name that is unique within the scope of a parent object, which
+ *   itself has a unique id.  For example, Instances have names that are
+ *   unique within their Project, so you can look up any Instance using the
+ *   Project's id and the Instance's name.  This is implemented using
+ *   [`super::schema::LookupByUniqueNameInProject`].
  *
  * Other lookups are possible as well.  For example,
- * [`LookupByAttachedInstance`] specifically looks up disks based on the
- * instance that they're attached to.
+ * [`super::schema::LookupByAttachedInstance`] specifically looks up disks based
+ * on the instance that they're attached to.
  *
  *
  * ## Parts of a `LookupKey`
@@ -326,8 +327,9 @@ pub trait LookupKey<'a> {
      * Rust type describing the scope key
      *
      * This must be convertible into a list of SQL parameters of the same length
-     * and sequence as the column names in [`SCOPE_KEY_COLUMN_NAMES`].  This
-     * is done using the [`IntoToSqlVec`] trait.
+     * and sequence as the column names in
+     * [`LookupKey::SCOPE_KEY_COLUMN_NAMES`].  This is done using the
+     * [`IntoToSqlVec`] trait.
      */
     type ScopeKey: IntoToSqlVec<'a> + 'a + Clone + Copy;
 
@@ -381,10 +383,10 @@ pub trait LookupKey<'a> {
      * A "page" here is a sequence of rows according to some sort order, as in
      * API pagination.  Callers of this function specify the page by specifying
      * values from the last row they saw, not necessarily knowing exactly which
-     * row(s) are next.  By contrast, [`where_select_rows`] (besides usually
-     * being used to select a only single row) does not assume anything about
-     * the ordering and expects callers to provide the item key of the row they
-     * want.
+     * row(s) are next.  By contrast, [`LookupKey::where_select_rows`] (besides
+     * usually being used to select a only single row) does not assume anything
+     * about the ordering and expects callers to provide the item key of the row
+     * they want.
      */
     fn where_select_page<'b, 'c, 'd>(
         scope_key: Self::ScopeKey,
