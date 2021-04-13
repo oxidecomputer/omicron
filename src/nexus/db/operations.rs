@@ -116,8 +116,16 @@ pub async fn sql_query_always_one(
     })
 }
 
+/**
+ * Like [`sql_query()`], but produces an error based on the row count:
+ *
+ * * the result of `mkzerror()` if there are no rows returned.  This is
+ *   expected to be a suitable [`ApiError::ObjectNotFound`] error.
+ * * a generic InternalError if more than one row is returned.  This is
+ *   expected to be impossible for this query.  Otherwise, the caller should use
+ *   [`sql_query()`].
+ */
 /*
- * XXX TODO-doc
  * TODO-debugging can we include the SQL in the ApiError
  */
 pub async fn sql_query_maybe_one(
@@ -154,7 +162,15 @@ pub async fn sql_execute(
         .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
 }
 
-/* XXX TODO-doc */
+/**
+ * Like [`sql_execute()`], but produces an error based on the row count:
+ *
+ * * the result of `mkzerror()` if there are no rows returned.  This is
+ *   expected to be a suitable [`ApiError::ObjectNotFound`] error.
+ * * a generic InternalError if more than one row is returned.  This is
+ *   expected to be impossible for this query.  Otherwise, the caller should use
+ *   [`sql_query()`].
+ */
 /* TODO-debugging can we include the SQL in the ApiError */
 pub async fn sql_execute_maybe_one(
     client: &tokio_postgres::Client,
