@@ -2,8 +2,8 @@
  * Smoke tests for the omicron_dev command-line tool
  */
 
-use omicron::dev::db::has_omicron_schema;
-use omicron::dev::process_running;
+use omicron_common::dev::db::has_omicron_schema;
+use omicron_common::dev::process_running;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,7 +12,7 @@ use subprocess::ExitStatus;
 use subprocess::Redirection;
 
 /** name of the "omicron_dev" executable */
-const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron_dev");
+const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
 /** timeout used for various things that should be pretty quick */
 const TIMEOUT: Duration = Duration::from_secs(10);

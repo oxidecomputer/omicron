@@ -13,7 +13,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use std::sync::Arc;
 
-use omicron_bootstrap_agent::bootstrap_agent::BootstrapAgent;
+use crate::bootstrap_agent::BootstrapAgent;
 
 /**
  * Returns a description of the bootstrap agent API

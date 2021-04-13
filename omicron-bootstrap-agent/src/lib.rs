@@ -10,3 +10,6 @@ mod server;
 
 pub use config::Config;
 pub use server::Server;
+
+#[macro_use]
+extern crate slog;

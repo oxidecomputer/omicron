@@ -224,7 +224,7 @@ macro_rules! bail_unless {
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
-            return Err($crate::api_error::ApiError::internal_error(&format!(
+            return Err($crate::error::ApiError::internal_error(&format!(
                 $($arg)*)))
         }
     };

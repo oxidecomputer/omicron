@@ -1244,7 +1244,7 @@ pub struct BootstrapAgentShareResponse {
 mod test {
     use super::ApiByteCount;
     use super::ApiName;
-    use crate::api_error::ApiError;
+    use crate::error::ApiError;
     use std::convert::TryFrom;
 
     #[test]
