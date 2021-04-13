@@ -325,30 +325,16 @@ impl Nexus {
         disk_name: &ApiName,
     ) -> DeleteResult {
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        // XXX Rely on database constraint to check this?  (Actually, this
-        // should be impossible.)
-        // if disk.runtime.disk_state == ApiDiskState::Destroyed {
-        //     /*
-        //      * TODO-correctness In general, this program is inconsistent about
-        //      * deleting things that are already destroyed.  Should this succeed
-        //      * or not?  We should decide once and validate it everywhere.  (Even
-        //      * in this case, most of the time this request would not succeed,
-        //      * despite this branch, because we will have failed to locate the
-        //      * disk above.)
-        //      */
-        //     return Ok(());
-        // }
+        bail_unless!(disk.runtime.disk_state != ApiDiskState::Destroyed);
 
-        // XXX Rely on database constraint to check this?
-        // if disk.runtime.disk_state.is_attached() {
-        //     return Err(ApiError::InvalidRequest {
-        //         message: String::from("disk is attached"),
-        //     });
-        // }
+        if disk.runtime.disk_state.is_attached() {
+            return Err(ApiError::InvalidRequest {
+                message: String::from("disk is attached"),
+            });
+        }
 
         /*
-         * XXX Review this after recent changes
-         * TODO-robustness It's not clear how this handles the case where we
+         * TODO-correctness It's not clear how this handles the case where we
          * begin this delete operation while some other request is ongoing to
          * attach the disk.  We won't be able to see that in the state here.  We
          * might be able to detect this when we go update the disk's state to
@@ -362,14 +348,8 @@ impl Nexus {
          * state in the database before beginning the attach process.  If we did
          * that, we wouldn't have this problem, but we'd have a similar problem
          * of dealing with the case of a crash after recording this state and
-         * before actually beginning the attach process.
-         *
-         * TODO-debug Do we actually want to remove this right away or mark it
-         * Destroyed and not show it?  I think the latter, but then we need some
-         * way to clean these up later.  We also need to avoid camping on the
-         * name in the namespace.  (In traditional RDBMS terms, we want the
-         * unique index on the disk's name to be a partial index for state !=
-         * "destroyed".)
+         * before actually beginning the attach process.  Sagas can maybe
+         * address that.
          */
         self.db_datastore.project_delete_disk(&disk.identity.id).await
     }
@@ -1064,9 +1044,9 @@ impl Nexus {
 
             /*
              * If the datastore is unavailable, propagate that to the caller.
-             * XXX Really this should be any _transient_ error.  How can we
-             * distinguish?  Maybe datastore should emit something different
-             * from ApiError with an Into<ApiError>.
+             * TODO-robustness Really this should be any _transient_ error.  How
+             * can we distinguish?  Maybe datastore should emit something
+             * different from ApiError with an Into<ApiError>.
              */
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";

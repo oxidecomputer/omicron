@@ -377,9 +377,14 @@ where
      * returned row), but they should not be possible.  We treat these as
      * internal errors.
      */
-    // XXX Is this the right place to produce the NotFound error?  Might
-    // the caller have already done a name-to-id translation, in which case this
-    // error will be misleading?
+    /*
+     * TODO-correctness Is this a case where the caller may have already done a
+     * name-to-id translation?  If so, it might be confusing if we produce a
+     * NotFound based on the id, since that's not what the end user actually
+     * provided.  Maybe the caller should translate a NotFound-by-id to a
+     * NotFound-by-name if they get this error.  It sounds kind of cheesy but
+     * only the caller knows this translation has been done.
+     */
     let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
     let row = sql_query_maybe_one(
         &client,
