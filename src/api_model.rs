@@ -513,8 +513,8 @@ pub async fn to_view_list<T: ApiObject>(
 /**
  * Identity-related metadata that's included in nearly all public API objects
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiIdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -531,8 +531,8 @@ pub struct ApiIdentityMetadata {
 /**
  * Create-time identity-related parameters
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiIdentityMetadataCreateParams {
     pub name: ApiName,
     pub description: String,
@@ -541,8 +541,8 @@ pub struct ApiIdentityMetadataCreateParams {
 /**
  * Updateable identity-related parameters
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiIdentityMetadataUpdateParams {
     pub name: Option<ApiName>,
     pub description: Option<String>,
@@ -574,10 +574,10 @@ impl ApiObject for ApiProject {
 /**
  * Client view of an [`ApiProject`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(
     ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ApiProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -590,8 +590,8 @@ pub struct ApiProjectView {
 /**
  * Create-time parameters for an [`ApiProject`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiProjectCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -600,8 +600,8 @@ pub struct ApiProjectCreateParams {
 /**
  * Updateable properties of an [`ApiProject`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiProjectUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
@@ -792,8 +792,8 @@ pub struct ApiInstanceRuntimeStateRequested {
 /**
  * Client view of an [`ApiInstanceRuntimeState`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiInstanceRuntimeStateView {
     pub run_state: ApiInstanceState,
     pub time_run_state_updated: DateTime<Utc>,
@@ -812,10 +812,10 @@ impl ApiObject for ApiInstanceRuntimeState {
 /**
  * Client view of an [`ApiInstance`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(
     ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ApiInstanceView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -843,8 +843,8 @@ pub struct ApiInstanceView {
  * Presumably this will need to be its own kind of API object that can be
  * created, modified, removed, etc.
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiInstanceCreateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataCreateParams,
@@ -856,8 +856,8 @@ pub struct ApiInstanceCreateParams {
 /**
  * Updateable properties of an [`ApiInstance`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiInstanceUpdateParams {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadataUpdateParams,
@@ -890,10 +890,10 @@ pub struct ApiDisk {
 /**
  * Client view of an [`ApiDisk`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(
     ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ApiDiskView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
@@ -1055,8 +1055,8 @@ pub struct ApiDiskRuntimeState {
 /**
  * Create-time parameters for an [`ApiDisk`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiDiskCreateParams {
     /** common identifying metadata */
     #[serde(flatten)]
@@ -1070,8 +1070,8 @@ pub struct ApiDiskCreateParams {
 /**
  * Describes a Disk's attachment to an Instance
  */
-#[serde(rename_all = "camelCase")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiDiskAttachment {
     pub instance_id: Uuid,
     pub disk_id: Uuid,
@@ -1134,10 +1134,10 @@ impl ApiObject for ApiRack {
 /**
  * Client view of an [`ApiRack`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(
     ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ApiRackView {
     pub identity: ApiIdentityMetadata,
 }
@@ -1167,10 +1167,10 @@ impl ApiObject for ApiSled {
 /**
  * Client view of an [`ApiSled`]
  */
-#[serde(rename_all = "camelCase")]
 #[derive(
     ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ApiSledView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,

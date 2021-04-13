@@ -25,13 +25,13 @@ pub enum BootstrapError {
     Io(#[from] std::io::Error),
 
     #[error("Error configuring SMF: {0}")]
-    SMFConfig(#[from] smf::ConfigError),
+    SmfConfig(#[from] smf::ConfigError),
 
     #[error("Error modifying SMF service: {0}")]
-    SMFAdm(#[from] smf::AdmError),
+    SmfAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
-    API(#[from] ApiError),
+    Api(#[from] ApiError),
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.

@@ -142,6 +142,10 @@ Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: drop
 
 Once everything is up and running, you can use `curl` directly to hit either of the servers.  But it's easier to use the `oxapi_demo` wrapper (see below).
 
+== Docker image
+
+This repo includes a Dockerfile that builds an image containing the Nexus and sled agent.  There's a GitHub Actions workflow that builds and publishes the Docker image.  This is used by the https://github.com/oxidecomputer/console/[console] project for prototyping, demoing, and testing.  This is **not** the way Omicron will be deployed on production systems, but it's a useful vehicle for working with it.
+
 == Quick demo
 
 There's a small demo tool called `./tools/oxapi_demo` that provides a slightly friendlier interface than `curl`, with the same output format.  Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
