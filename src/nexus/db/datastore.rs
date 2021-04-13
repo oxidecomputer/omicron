@@ -5,6 +5,17 @@
 /*
  * TODO-scalability review all queries for use of indexes (may need
  * "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
+ *
+ * TODO-design Better support for joins?
+ * The interfaces here often require that to do anything with an object, a
+ * caller must first look up the id and then do operations with the id.  For
+ * example, the caller of project_list_disks() always looks up the project to
+ * get the project_id, then lists disks having that project_id.  It's possible
+ * to implement this instead with a JOIN in the database so that we do it with
+ * one database round-trip.  We could use CTEs similar to what we do with
+ * conditional updates to distinguish the case where the project didn't exist
+ * vs. there were no disks in it.  This seems likely to be a fair bit more
+ * complicated to do safely and generally compared to what we have now.
  */
 
 use super::Pool;

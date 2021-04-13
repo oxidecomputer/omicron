@@ -246,10 +246,6 @@ impl Nexus {
         project_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiDisk> {
-        /*
-         * XXX Can/should we restructure this to be done with one query? (would
-         * that fail the wrong way if the project didn't exist?)
-         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_disks(&project_id, pagparams).await
@@ -318,10 +314,6 @@ impl Nexus {
         project_name: &ApiName,
         disk_name: &ApiName,
     ) -> LookupResult<ApiDisk> {
-        /*
-         * XXX Can/should we restructure this to be done with one query? (would
-         * that fail the wrong way if the project didn't exist?)
-         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
@@ -408,10 +400,6 @@ impl Nexus {
         project_name: &ApiName,
         pagparams: &DataPageParams<'_, ApiName>,
     ) -> ListResult<ApiInstance> {
-        /*
-         * XXX Can/should we restructure this to be done with one query? (would
-         * that fail the wrong way if the project didn't exist?)
-         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_instances(&project_id, pagparams).await
@@ -498,10 +486,6 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        /*
-         * XXX Can/should we restructure this to be done with one query? (would
-         * that fail the wrong way if the project OR instance didn't exist?)
-         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let instance = self
@@ -516,10 +500,6 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> LookupResult<ApiInstance> {
-        /*
-         * XXX Can/should we restructure this to be done with one query? (would
-         * that fail the wrong way if the project didn't exist?)
-         */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore
@@ -858,8 +838,6 @@ impl Nexus {
             }
         }
 
-        // XXX We could do a bit better here by having set_runtime() return the
-        // runtime that it set.  Then we wouldn't need another fetch.
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
