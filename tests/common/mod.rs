@@ -8,6 +8,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron::api_model::ApiIdentityMetadata;
+use omicron::dev;
 use omicron::nexus;
 use omicron::sled_agent;
 use slog::Logger;
@@ -22,14 +23,16 @@ pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: nexus::Server,
+    pub database: dev::db::CockroachInstance,
     pub logctx: LogContext,
     sled_agent: sled_agent::Server,
 }
 
 impl ControlPlaneTestContext {
-    pub async fn teardown(self) {
+    pub async fn teardown(mut self) {
         self.server.http_server_external.close().await.unwrap();
         self.server.http_server_internal.close().await.unwrap();
+        self.database.cleanup().await.unwrap();
         self.sled_agent.http_server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
@@ -38,20 +41,30 @@ impl ControlPlaneTestContext {
 pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     /*
      * We load as much configuration as we can from the test suite configuration
-     * file.  In practice, TestContext requires that the TCP port be 0 and that
-     * if the log will go to a file then the path must be the sentinel value
-     * "UNUSED".  (See TestContext::new() for details.)  Given these
-     * restrictions, it may seem barely worth reading a config file at all.
-     * However, users can change the logging level and local IP if they want,
-     * and as we add more configuration options, we expect many of those can be
-     * usefully configured (and reconfigured) for the test suite.
+     * file.  In practice, TestContext requires that:
+     *
+     * - the Nexus TCP listen port be 0,
+     * - the CockroachDB TCP listen port be 0, and
+     * - if the log will go to a file then the path must be the sentinel value
+     *   "UNUSED".
+     *
+     * (See LogContext::new() for details.)  Given these restrictions, it may
+     * seem barely worth reading a config file at all.  However, users can
+     * change the logging level and local IP if they want, and as we add more
+     * configuration options, we expect many of those can be usefully configured
+     * (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let config = nexus::Config::from_file(config_file_path)
+    let mut config = nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+    let log = &logctx.log;
 
+    /* Start up CockroachDB. */
+    let database = dev::test_setup_database(log).await;
+
+    config.database.url = database.pg_config().clone();
     let server =
         nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
     let testctx_external = ClientTestContext::new(
@@ -77,11 +90,12 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     .unwrap();
 
     ControlPlaneTestContext {
-        server: server,
+        server,
         external_client: testctx_external,
         internal_client: testctx_internal,
+        database,
         sled_agent: sa,
-        logctx: logctx,
+        logctx,
     }
 }
 

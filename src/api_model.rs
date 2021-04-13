@@ -6,6 +6,8 @@
  */
 
 use crate::api_error::ApiError;
+use anyhow::anyhow;
+use anyhow::Context;
 use api_identity::ApiObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -14,6 +16,7 @@ use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -23,8 +26,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::num::NonZeroU32;
+use thiserror::Error;
 use uuid::Uuid;
 
 /*
@@ -34,18 +37,20 @@ use uuid::Uuid;
  */
 
 /** Result of a create operation for the specified type */
-pub type CreateResult<T> = Result<Arc<T>, ApiError>;
+pub type CreateResult<T> = Result<T, ApiError>;
 /** Result of a delete operation for the specified type */
 pub type DeleteResult = Result<(), ApiError>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
 /** Result of a lookup operation for the specified type */
-pub type LookupResult<T> = Result<Arc<T>, ApiError>;
+pub type LookupResult<T> = Result<T, ApiError>;
 /** Result of an update operation for the specified type */
-pub type UpdateResult<T> = Result<Arc<T>, ApiError>;
+pub type UpdateResult<T> = Result<T, ApiError>;
 
-/** A stream of Results, each potentially representing an object in the API */
-pub type ObjectStream<T> = BoxStream<'static, Result<Arc<T>, ApiError>>;
+/**
+ * A stream of Results, each potentially representing an object in the API
+ */
+pub type ObjectStream<T> = BoxStream<'static, Result<T, ApiError>>;
 
 /*
  * General-purpose types used for client request parameters and return values.
@@ -91,7 +96,7 @@ pub struct DataPageParams<'a, NameType> {
      * the end of the scan.  Dropshot assumes that if we provide fewer results
      * than this number, then we're done with the scan.
      */
-    pub limit: NonZeroUsize,
+    pub limit: NonZeroU32,
 }
 
 /**
@@ -111,6 +116,7 @@ pub struct ApiName(String);
  * `ApiName::try_from(String)` is the primary method for constructing an ApiName
  * from an input string.  This validates the string according to our
  * requirements for a name.
+ * TODO-cleanup why shouldn't callers use TryFrom<&str>?
  */
 impl TryFrom<String> for ApiName {
     type Error = String;
@@ -161,14 +167,9 @@ impl TryFrom<&str> for ApiName {
     }
 }
 
-/**
- * Convert an `ApiName` into the `String` representing the actual name.
- * TODO-cleanup It probably makes more sense to use `as_str()` but there's a
- * bunch of code using this implementation.
- */
-impl From<ApiName> for String {
-    fn from(value: ApiName) -> String {
-        value.0
+impl<'a> From<&'a ApiName> for &'a str {
+    fn from(n: &'a ApiName) -> Self {
+        n.as_str()
     }
 }
 
@@ -259,29 +260,37 @@ impl ApiName {
 
 /**
  * A count of bytes, typically used either for memory or storage capacity
+ *
+ * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+ * inconvenient to define constructors: a u32 constructor can be infallible, but
+ * an i64 constructor can fail (if the value is negative) and a u64 constructor
+ * can fail (if the value is larger than i64::MAX).  We provide all of these for
+ * consumers' convenience.
  */
 /*
  * TODO-cleanup This could benefit from a more complete implementation.
  * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
  * need to write a validator for that.
  */
+/*
+ * The maximum byte count of i64::MAX comes from the fact that this is stored in
+ * the database as an i64.  Constraining it here ensures that we can't fail to
+ * serialize the value.
+ */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiByteCount(u64);
 impl ApiByteCount {
-    pub fn from_bytes(bytes: u64) -> ApiByteCount {
-        ApiByteCount(bytes)
+    pub fn from_kibibytes_u32(kibibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
     }
-    pub fn from_kibibytes(kibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * kibibytes)
+
+    pub fn from_mebibytes_u32(mebibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
     }
-    pub fn from_mebibytes(mebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * mebibytes)
-    }
-    pub fn from_gibibytes(gibibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * gibibytes)
-    }
-    pub fn from_tebibytes(tebibytes: u64) -> ApiByteCount {
-        ApiByteCount::from_bytes(1024 * 1024 * 1024 * 1024 * tebibytes)
+
+    pub fn from_gibibytes_u32(gibibytes: u32) -> ApiByteCount {
+        ApiByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes))
+            .unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
@@ -298,6 +307,115 @@ impl ApiByteCount {
     }
     pub fn to_whole_tebibytes(&self) -> u64 {
         self.to_bytes() / 1024 / 1024 / 1024 / 1024
+    }
+}
+
+/* TODO-cleanup This could use the experimental std::num::IntErrorKind. */
+#[derive(Debug, Eq, Error, Ord, PartialEq, PartialOrd)]
+pub enum ByteCountRangeError {
+    #[error("value is too small for a byte count")]
+    TooSmall,
+    #[error("value is too large for a byte count")]
+    TooLarge,
+}
+impl TryFrom<u64> for ApiByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: u64) -> Result<Self, Self::Error> {
+        if i64::try_from(bytes).is_err() {
+            Err(ByteCountRangeError::TooLarge)
+        } else {
+            Ok(ApiByteCount(bytes))
+        }
+    }
+}
+
+impl TryFrom<i64> for ApiByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: i64) -> Result<Self, Self::Error> {
+        Ok(ApiByteCount(
+            u64::try_from(bytes).map_err(|_| ByteCountRangeError::TooSmall)?,
+        ))
+    }
+}
+
+impl From<u32> for ApiByteCount {
+    fn from(value: u32) -> Self {
+        ApiByteCount(u64::from(value))
+    }
+}
+
+impl From<&ApiByteCount> for i64 {
+    fn from(b: &ApiByteCount) -> Self {
+        /* We have already validated that this value is in range. */
+        i64::try_from(b.0).unwrap()
+    }
+}
+
+/**
+ * Generation numbers stored in the database, used for optimistic concurrency
+ * control
+ */
+/*
+ * Because generation numbers are stored in the database, we represent them as
+ * i64.  For the same reason as for
+ */
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+pub struct ApiGeneration(u64);
+impl ApiGeneration {
+    pub fn new() -> ApiGeneration {
+        ApiGeneration(1)
+    }
+
+    pub fn next(&self) -> ApiGeneration {
+        /*
+         * It should technically be an operational error if this wraps or even
+         * exceeds the value allowed by an i64.  But it seems unlikely enough to
+         * happen in practice that we can probably feel safe with this.
+         */
+        let next_gen = self.0 + 1;
+        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        ApiGeneration(next_gen)
+    }
+}
+
+impl Display for ApiGeneration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        f.write_str(&self.0.to_string())
+    }
+}
+
+impl From<&ApiGeneration> for i64 {
+    fn from(g: &ApiGeneration) -> Self {
+        /* We have already validated that the value is within range. */
+        /*
+         * TODO-robustness We need to ensure that we don't deserialize a value
+         * out of range here.
+         */
+        i64::try_from(g.0).unwrap()
+    }
+}
+
+impl TryFrom<i64> for ApiGeneration {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(ApiGeneration(
+            u64::try_from(value)
+                .map_err(|_| anyhow!("generation number too large"))?,
+        ))
     }
 }
 
@@ -444,15 +562,6 @@ pub struct ApiIdentityMetadataUpdateParams {
 pub struct ApiProject {
     /** common identifying metadata */
     pub identity: ApiIdentityMetadata,
-
-    /*
-     * TODO We define a generation number here at the model layer so that in
-     * theory the model layer can handle optimistic concurrency control (i.e.,
-     * put-only-if-matches-etag and the like).  It's not yet clear if a
-     * generation number is the right way to express this.
-     */
-    /** generation number for this version of the object. */
-    pub generation: u64,
 }
 
 impl ApiObject for ApiProject {
@@ -533,7 +642,33 @@ pub enum ApiInstanceState {
 
 impl Display for ApiInstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        let label = match self {
+        write!(f, "{}", self.label())
+    }
+}
+
+/*
+ * TODO-cleanup why is this error type different from the one for ApiName?  The
+ * reason is probably that ApiName can be provided by the user, so we want a
+ * good validation error.  ApiInstanceState cannot.  Still, is there a way to
+ * unify these?
+ */
+impl TryFrom<&str> for ApiInstanceState {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        parse_str_using_serde(value)
+    }
+}
+
+impl<'a> From<&'a ApiInstanceState> for &'a str {
+    fn from(s: &'a ApiInstanceState) -> &'a str {
+        s.label()
+    }
+}
+
+impl ApiInstanceState {
+    fn label(&self) -> &str {
+        match self {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
@@ -542,13 +677,9 @@ impl Display for ApiInstanceState {
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
-        };
-
-        write!(f, "{}", label)
+        }
     }
-}
 
-impl ApiInstanceState {
     /**
      * Returns true if the given state represents a fully stopped Instance.
      * This means that a transition from an is_not_stopped() state must go
@@ -571,7 +702,23 @@ impl ApiInstanceState {
 
 /** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiInstanceCpuCount(pub usize);
+pub struct ApiInstanceCpuCount(pub u16);
+
+impl TryFrom<i64> for ApiInstanceCpuCount {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(ApiInstanceCpuCount(
+            u16::try_from(value).context("parsing CPU count")?,
+        ))
+    }
+}
+
+impl From<&ApiInstanceCpuCount> for i64 {
+    fn from(c: &ApiInstanceCpuCount) -> Self {
+        i64::from(c.0)
+    }
+}
 
 /**
  * An Instance (VM) in the external API
@@ -588,8 +735,6 @@ pub struct ApiInstance {
     pub ncpus: ApiInstanceCpuCount,
     /** memory allocated for this Instance */
     pub memory: ApiByteCount,
-    /** size of the boot disk for the image */
-    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
@@ -606,7 +751,6 @@ impl ApiObject for ApiInstance {
             project_id: self.project_id,
             ncpus: self.ncpus,
             memory: self.memory,
-            boot_disk_size: self.boot_disk_size,
             hostname: self.hostname.clone(),
             runtime: self.runtime.to_view(),
         }
@@ -628,7 +772,7 @@ pub struct ApiInstanceRuntimeState {
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
     /** generation number for this state */
-    pub gen: u64,
+    pub gen: ApiGeneration,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
@@ -684,8 +828,6 @@ pub struct ApiInstanceView {
     pub ncpus: ApiInstanceCpuCount,
     /** memory, in gigabytes, allocated for this Instance */
     pub memory: ApiByteCount,
-    /** size of the boot disk for the image */
-    pub boot_disk_size: ApiByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
@@ -708,7 +850,6 @@ pub struct ApiInstanceCreateParams {
     pub identity: ApiIdentityMetadataCreateParams,
     pub ncpus: ApiInstanceCpuCount,
     pub memory: ApiByteCount,
-    pub boot_disk_size: ApiByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
 }
 
@@ -770,8 +911,7 @@ impl ApiObject for ApiDisk {
          * TODO-correctness: can the name always be used as a path like this
          * or might it need to be sanitized?
          */
-        let device_path =
-            format!("/mnt/{}", String::from(self.identity.name.clone()),);
+        let device_path = format!("/mnt/{}", self.identity.name.as_str());
         ApiDiskView {
             identity: self.identity.clone(),
             project_id: self.project_id,
@@ -817,7 +957,51 @@ pub enum ApiDiskState {
 
 impl Display for ApiDiskState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        let label = match self {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
+    type Error = String;
+
+    fn try_from(
+        (s, maybe_id): (&str, Option<Uuid>),
+    ) -> Result<Self, Self::Error> {
+        match (s, maybe_id) {
+            ("creating", None) => Ok(ApiDiskState::Creating),
+            ("detached", None) => Ok(ApiDiskState::Detached),
+            ("destroyed", None) => Ok(ApiDiskState::Destroyed),
+            ("faulted", None) => Ok(ApiDiskState::Faulted),
+            ("attaching", Some(id)) => Ok(ApiDiskState::Attaching(id)),
+            ("attached", Some(id)) => Ok(ApiDiskState::Attached(id)),
+            ("detaching", Some(id)) => Ok(ApiDiskState::Detaching(id)),
+            _ => Err(format!(
+                "unexpected value for disk state: {:?} with attached id {:?}",
+                s, maybe_id
+            )),
+        }
+    }
+}
+
+fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
+    s: &str,
+) -> Result<T, anyhow::Error> {
+    /*
+     * Round-tripping through serde is a little absurd, but has the benefit
+     * of always staying in sync with the real definition.  (The initial
+     * serialization is necessary to correctly handle any quotes or the like
+     * in the input string.)
+     */
+    let json = serde_json::to_string(s).unwrap();
+    serde_json::from_str(&json).context("parsing instance state")
+}
+
+impl ApiDiskState {
+    /**
+     * Returns the string label for this disk state
+     */
+    pub fn label(&self) -> &'static str {
+        match self {
             ApiDiskState::Creating => "creating",
             ApiDiskState::Detached => "detached",
             ApiDiskState::Attaching(_) => "attaching",
@@ -825,13 +1009,9 @@ impl Display for ApiDiskState {
             ApiDiskState::Detaching(_) => "detaching",
             ApiDiskState::Destroyed => "destroyed",
             ApiDiskState::Faulted => "faulted",
-        };
-
-        write!(f, "{}", label)
+        }
     }
-}
 
-impl ApiDiskState {
     /**
      * Returns whether the Disk is currently attached to, being attached to, or
      * being detached from any Instance.
@@ -867,7 +1047,7 @@ pub struct ApiDiskRuntimeState {
     /** runtime state of the Disk */
     pub disk_state: ApiDiskState,
     /** generation number for this state */
-    pub gen: u64,
+    pub gen: ApiGeneration,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
@@ -893,10 +1073,9 @@ pub struct ApiDiskCreateParams {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiDiskAttachment {
-    pub instance_name: ApiName,
     pub instance_id: Uuid,
-    pub disk_name: ApiName,
     pub disk_id: Uuid,
+    pub disk_name: ApiName,
     pub disk_state: ApiDiskState,
 }
 
@@ -1112,7 +1291,7 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, String::from(ApiName::try_from(name).unwrap()));
+            assert_eq!(name, ApiName::try_from(name).unwrap().as_str());
         }
     }
 
@@ -1135,23 +1314,58 @@ mod test {
 
     #[test]
     fn test_bytecount() {
-        let zero = ApiByteCount::from_bytes(0);
+        /* Smallest supported value: all constructors */
+        let zero = ApiByteCount::from(0u32);
         assert_eq!(0, zero.to_bytes());
         assert_eq!(0, zero.to_whole_kibibytes());
         assert_eq!(0, zero.to_whole_mebibytes());
         assert_eq!(0, zero.to_whole_gibibytes());
         assert_eq!(0, zero.to_whole_tebibytes());
+        let zero = ApiByteCount::try_from(0i64).unwrap();
+        assert_eq!(0, zero.to_bytes());
+        let zero = ApiByteCount::try_from(0u64).unwrap();
+        assert_eq!(0, zero.to_bytes());
 
-        let three_terabytes = 3_000_000_000_000;
-        let tb3 = ApiByteCount::from_bytes(three_terabytes);
+        /* Largest supported value: both constructors that support it. */
+        let max = ApiByteCount::try_from(i64::MAX).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, i64::from(&max));
+
+        let maxu64 = u64::try_from(i64::MAX).unwrap();
+        let max = ApiByteCount::try_from(maxu64).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(
+            (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
+            max.to_whole_tebibytes()
+        );
+
+        /* Value too large (only one constructor can hit this) */
+        let bogus = ApiByteCount::try_from(maxu64 + 1).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too large for a byte count");
+        /* Value too small (only one constructor can hit this) */
+        let bogus = ApiByteCount::try_from(-1i64).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+        /* For good measure, let's check i64::MIN */
+        let bogus = ApiByteCount::try_from(i64::MIN).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        /*
+         * We've now exhaustively tested both sides of all boundary conditions
+         * for all three constructors (to the extent that that's possible).
+         * Check non-trivial cases for the various accessor functions.  This
+         * means picking values in the middle of the range.
+         */
+        let three_terabytes = 3_000_000_000_000u64;
+        let tb3 = ApiByteCount::try_from(three_terabytes).unwrap();
         assert_eq!(three_terabytes, tb3.to_bytes());
         assert_eq!(2929687500, tb3.to_whole_kibibytes());
         assert_eq!(2861022, tb3.to_whole_mebibytes());
         assert_eq!(2793, tb3.to_whole_gibibytes());
         assert_eq!(2, tb3.to_whole_tebibytes());
 
-        let three_tebibytes = 3 * 1024 * 1024 * 1024 * 1024;
-        let tib3 = ApiByteCount::from_bytes(three_tebibytes);
+        let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
+        let tib3 = ApiByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());

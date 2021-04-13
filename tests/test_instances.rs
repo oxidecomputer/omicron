@@ -89,8 +89,7 @@ async fn test_instances() {
             description: String::from("sells rainsticks"),
         },
         ncpus: ApiInstanceCpuCount(4),
-        memory: ApiByteCount::from_mebibytes(256),
-        boot_disk_size: ApiByteCount::from_gibibytes(1),
+        memory: ApiByteCount::from_mebibytes_u32(256),
         hostname: String::from("rainsticks"),
     };
     let instance: ApiInstanceView =
@@ -100,7 +99,6 @@ async fn test_instances() {
     let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
-    assert_eq!(instance.boot_disk_size.to_whole_mebibytes(), 1024);
     assert_eq!(instance.hostname, "rainsticks");
     assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
 
@@ -293,6 +291,8 @@ async fn test_instances() {
             > instance.runtime.time_run_state_updated
     );
 
+    /* TODO-coverage add a test to try to delete the project at this point. */
+
     /* Delete the instance. */
     client
         .make_request_no_body(
@@ -311,48 +311,34 @@ async fn test_instances() {
 
     /*
      * Once more, try to reboot it.  This should not work on a destroyed
-     * instance.  (This will likely be an invalid test after we figure out how
-     * to make DELETE remove the instance from the namespace, but it's still
-     * useful to exercise this case now.)
+     * instance.
      */
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
     /*
      * Similarly, we should not be able to start or stop the instance.
      */
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/start", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
-    let error = client
+    client
         .make_request_error(
             Method::POST,
             &format!("{}/stop", instance_url),
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!(
-        error.message,
-        "instance state cannot be changed from state \"destroyed\""
-    );
 
     /*
      * The rest of these examples attempt to create invalid instances.  We don't
@@ -380,7 +366,6 @@ async fn test_instances() {
             "description": "will never exist",
             "ncpus": -3,
             "memory": 256,
-            "boot_disk_size": 2048,
             "hostname": "localhost",
         }
     "##;
@@ -457,10 +442,6 @@ fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
     assert_eq!(nfoundcpus1, nfoundcpus2);
 
     assert_eq!(instance1.memory.to_bytes(), instance2.memory.to_bytes());
-    assert_eq!(
-        instance1.boot_disk_size.to_bytes(),
-        instance2.boot_disk_size.to_bytes()
-    );
     assert_eq!(instance1.hostname, instance2.hostname);
     assert_eq!(instance1.runtime.run_state, instance2.runtime.run_state);
     assert_eq!(

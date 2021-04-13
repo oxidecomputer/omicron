@@ -15,6 +15,7 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
+use slog::Logger;
 
 /**
  * Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
@@ -31,6 +32,29 @@ pub async fn test_setup_log(test_name: &str) -> LogContext {
     };
 
     LogContext::new(test_name, &log_config)
+}
+
+/**
+ * Set up a [`db::CockroachInstance`] for running tests against.
+ */
+pub async fn test_setup_database(log: &Logger) -> db::CockroachInstance {
+    let mut builder = db::CockroachStarterBuilder::new();
+    builder.redirect_stdio_to_files();
+    let starter = builder.build().unwrap();
+    info!(
+        &log,
+        "cockroach temporary directory: {}",
+        starter.temp_dir().display()
+    );
+    info!(&log, "cockroach command line: {}", starter.cmdline());
+    let database = starter.start().await.unwrap();
+    info!(&log, "cockroach pid: {}", database.pid());
+    let db_url = database.pg_config();
+    info!(&log, "cockroach listen URL: {}", db_url);
+    info!(&log, "cockroach: populating");
+    database.populate().await.expect("failed to populate database");
+    info!(&log, "cockroach: populated");
+    database
 }
 
 /**

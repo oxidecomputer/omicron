@@ -5,7 +5,7 @@
 mod client;
 mod config;
 mod context;
-mod datastore;
+pub mod db; // Public only for some documentation examples
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 #[allow(clippy::module_inception)]
@@ -16,6 +16,7 @@ mod sagas;
 pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
+pub use db::PostgresConfigWithUrl;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 
@@ -65,7 +66,9 @@ impl Server {
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
-        let apictx = ServerContext::new(rack_id, ctxlog);
+        let pool = db::Pool::new(&config.database);
+
+        let apictx = ServerContext::new(rack_id, ctxlog, pool);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

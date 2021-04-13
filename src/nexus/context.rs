@@ -1,6 +1,7 @@
 /*!
  * Shared state used by API request handlers
  */
+use super::db;
 use super::Nexus;
 
 use slog::Logger;
@@ -22,11 +23,16 @@ impl ServerContext {
      * Create a new context with the given rack id and log.  This creates the
      * underlying nexus as well.
      */
-    pub fn new(rack_id: &Uuid, log: Logger) -> Arc<ServerContext> {
+    pub fn new(
+        rack_id: &Uuid,
+        log: Logger,
+        pool: db::Pool,
+    ) -> Arc<ServerContext> {
         Arc::new(ServerContext {
             nexus: Arc::new(Nexus::new_with_id(
                 rack_id,
                 log.new(o!("component" => "nexus")),
+                pool,
             )),
             log,
         })

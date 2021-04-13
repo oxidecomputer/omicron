@@ -86,7 +86,7 @@ async fn test_disks() {
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
-        size: ApiByteCount::from_gibibytes(1),
+        size: ApiByteCount::from_gibibytes_u32(1),
     };
     let disk: ApiDiskView =
         objects_post(&client, &url_disks, new_disk.clone()).await;
@@ -137,8 +137,7 @@ async fn test_disks() {
                 description: String::from("sells rainsticks"),
             },
             ncpus: ApiInstanceCpuCount(4),
-            memory: ApiByteCount::from_mebibytes(256),
-            boot_disk_size: ApiByteCount::from_gibibytes(1),
+            memory: ApiByteCount::from_mebibytes_u32(256),
             hostname: String::from("rainsticks"),
         },
     )
@@ -151,13 +150,13 @@ async fn test_disks() {
     let url_instance_disks = format!(
         "/projects/{}/instances/{}/disks",
         project_name,
-        String::from(instance.identity.name.clone())
+        instance.identity.name.as_str()
     );
     let url_instance_disk = format!(
         "/projects/{}/instances/{}/disks/{}",
         project_name,
-        String::from(instance.identity.name.clone()),
-        String::from(disk.identity.name.clone())
+        instance.identity.name.as_str(),
+        disk.identity.name.as_str(),
     );
     let attachments =
         object_get::<Vec<ApiDiskAttachment>>(&client, &url_instance_disks)
@@ -187,7 +186,6 @@ async fn test_disks() {
         .unwrap();
     let attachment: ApiDiskAttachment = read_json(&mut response).await;
     let instance_id = &instance.identity.id;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, *instance_id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -198,7 +196,6 @@ async fn test_disks() {
 
     let attachment: ApiDiskAttachment =
         object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -218,7 +215,6 @@ async fn test_disks() {
     disk_simulate(nexus, &disk.identity.id).await;
     let attachment: ApiDiskAttachment =
         object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_name, instance.identity.name);
     assert_eq!(attachment.instance_id, instance.identity.id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);
@@ -258,8 +254,7 @@ async fn test_disks() {
                 description: String::from("instance2"),
             },
             ncpus: ApiInstanceCpuCount(4),
-            memory: ApiByteCount::from_mebibytes(256),
-            boot_disk_size: ApiByteCount::from_gibibytes(1),
+            memory: ApiByteCount::from_mebibytes_u32(256),
             hostname: String::from("instance2"),
         },
     )
@@ -267,8 +262,8 @@ async fn test_disks() {
     let url_instance2_disk = format!(
         "/projects/{}/instances/{}/disks/{}",
         project_name,
-        String::from(instance2.identity.name.clone()),
-        String::from(disk.identity.name.clone())
+        instance2.identity.name.as_str(),
+        disk.identity.name.as_str()
     );
     let error = client
         .make_request_error(
@@ -407,7 +402,6 @@ async fn test_disks() {
         .unwrap();
     let attachment: ApiDiskAttachment = read_json(&mut response).await;
     let instance2_id = &instance2.identity.id;
-    assert_eq!(attachment.instance_name, instance2.identity.name);
     assert_eq!(attachment.instance_id, *instance2_id);
     assert_eq!(attachment.disk_name, disk.identity.name);
     assert_eq!(attachment.disk_id, disk.identity.id);

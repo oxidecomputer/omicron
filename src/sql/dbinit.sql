@@ -31,6 +31,9 @@
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
  * clear this first.
+ *
+ * NOTE: the database and user names MUST be kept in sync with the
+ * initialization code and dbwipe.sql.
  */
 CREATE DATABASE omicron;
 CREATE USER omicron;
@@ -46,7 +49,7 @@ CREATE TABLE omicron.public.Project (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ
 );
@@ -59,22 +62,27 @@ CREATE TABLE omicron.public.Project (
 CREATE UNIQUE INDEX ON omicron.public.Project (
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 /*
  * Instances
  */
 
-CREATE TYPE omicron.public.InstanceState AS ENUM (
-    'creating',
-    'starting',
-    'running',
-    'stopping',
-    'stopped',
-    'repairing',
-    'failed',
-    'destroyed'
-);
+/*
+ * TODO We'd like to use this enum for Instance.instance_state.  This doesn't
+ * currently work due to cockroachdb/cockroach#57411 /
+ * cockroachdb/cockroach#58084.
+ */
+-- CREATE TYPE omicron.public.InstanceState AS ENUM (
+--     'creating',
+--     'starting',
+--     'running',
+--     'stopping',
+--     'stopped',
+--     'repairing',
+--     'failed',
+--     'destroyed'
+-- );
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -87,7 +95,7 @@ CREATE TABLE omicron.public.Instance (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     /* This is redundant for Instances, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
@@ -100,7 +108,9 @@ CREATE TABLE omicron.public.Instance (
      * table?
      */
     /* Runtime state */
-    instance_state omicron.public.InstanceState NOT NULL,
+    -- instance_state omicron.public.InstanceState NOT NULL, // TODO see above
+    instance_state TEXT NOT NULL,
+    reboot_in_progress BOOL NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -114,7 +124,7 @@ CREATE TABLE omicron.public.Instance (
 
     /* Instance configuration */
     ncpus INT NOT NULL,
-    memory_mib INT NOT NULL,
+    memory INT NOT NULL,
     hostname STRING(63) NOT NULL
 );
 
@@ -122,22 +132,25 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
     project_id,
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 
 /*
  * Disks
  */
 
-CREATE TYPE omicron.public.DiskState AS ENUM (
-    'creating',
-    'detached',
-    'attaching',
-    'attached',
-    'detaching',
-    'destroyed',
-    'faulted'
-);
+/*
+ * TODO See the note on InstanceState above.
+ */
+-- CREATE TYPE omicron.public.DiskState AS ENUM (
+--     'creating',
+--     'detached',
+--     'attaching',
+--     'attached',
+--     'detaching',
+--     'destroyed',
+--     'faulted'
+-- );
 
 CREATE TABLE omicron.public.Disk (
     /* Identity metadata */
@@ -145,7 +158,7 @@ CREATE TABLE omicron.public.Disk (
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
@@ -158,7 +171,8 @@ CREATE TABLE omicron.public.Disk (
      * table?
      */
     /* Runtime state */
-    disk_state omicron.public.DiskState NOT NULL,
+    -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
+    disk_state STRING(15) NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -176,7 +190,12 @@ CREATE UNIQUE INDEX ON omicron.public.Disk (
     project_id,
     name
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.Disk (
+    attach_instance_id
+) WHERE
+    time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
 
 /*
@@ -187,7 +206,25 @@ CREATE TABLE omicron.public.Sled (
     /* Identity metadata -- abbreviated for sleds */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_metadata_updated TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
 
     sled_agent_ip INET
+);
+
+/*
+ * Metadata for the schema itself.  This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
+
+CREATE TABLE omicron.public.DbMetadata (
+    name  STRING(63) NOT NULL,
+    value STRING(1023) NOT NULL
+);
+
+INSERT INTO omicron.public.DbMetadata (
+    name,
+    value
+) VALUES (
+    'schema_version',
+    '1.0.0'
 );

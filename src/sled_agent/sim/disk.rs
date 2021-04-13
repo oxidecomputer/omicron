@@ -162,7 +162,7 @@ impl Simulatable for SimDisk {
         let (immed_next_state, next_async) = to_do.unwrap();
         let next_state = ApiDiskRuntimeState {
             disk_state: immed_next_state,
-            gen: current.gen + 1,
+            gen: current.gen.next(),
             time_updated: Utc::now(),
         };
 
@@ -199,7 +199,7 @@ impl Simulatable for SimDisk {
         };
         let next_runtime = ApiDiskRuntimeState {
             disk_state: next_state,
-            gen: current.gen + 1,
+            gen: current.gen.next(),
             time_updated: Utc::now(),
         };
         (next_runtime, None)

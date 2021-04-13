@@ -4,8 +4,7 @@
 
 use crate::api_error::ApiError;
 use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiProject;
-use crate::nexus::datastore::DataStore;
+use crate::nexus::db;
 use crate::nexus::Nexus;
 use crate::sled_agent;
 use std::sync::Arc;
@@ -41,13 +40,12 @@ impl SagaContext {
      */
     pub async fn alloc_server(
         &self,
-        _project: &ApiProject,
         _params: &ApiInstanceCreateParams,
     ) -> Result<Uuid, ApiError> {
         self.nexus.sled_allocate().await
     }
 
-    pub fn datastore(&self) -> &DataStore {
+    pub fn datastore(&self) -> &db::DataStore {
         self.nexus.datastore()
     }
 

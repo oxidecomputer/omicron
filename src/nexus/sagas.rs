@@ -9,14 +9,13 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
+use crate::api_model::ApiGeneration;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceRuntimeState;
 use crate::api_model::ApiInstanceRuntimeStateRequested;
 use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiName;
 use crate::nexus::saga_interface::SagaContext;
 use chrono::Utc;
-use core::future::ready;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -30,7 +29,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
-    pub project_name: ApiName,
+    pub project_id: Uuid,
     pub create_params: ApiInstanceCreateParams,
 }
 
@@ -46,7 +45,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.append(
         "instance_id",
         "GenerateInstanceId",
-        new_action_noop_undo(|_| ready(Ok(Uuid::new_v4()))),
+        new_action_noop_undo(sic_generate_instance_id),
     );
 
     template_builder.append(
@@ -55,123 +54,104 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         // TODO-robustness This still needs an undo action, and we should really
         // keep track of resources and reservations, etc.  See the comment on
         // SagaContext::alloc_server()
-        new_action_noop_undo(
-            move |sagactx: ActionContext<SagaInstanceCreate>| {
-                let osagactx = sagactx.user_data().clone();
-                let params = sagactx.saga_params().clone();
-                async move {
-                    let project = osagactx
-                        .datastore()
-                        .project_lookup(&params.project_name)
-                        .await
-                        .map_err(ActionError::action_failed)?;
-                    osagactx
-                        .alloc_server(&project, &params.create_params)
-                        .await
-                        .map_err(ActionError::action_failed)
-                }
-            },
-        ),
+        new_action_noop_undo(sic_alloc_server),
     );
 
     template_builder.append(
-        "create_instance_record",
+        "initial_runtime",
         "CreateInstanceRecord",
-        new_action_noop_undo(
-            move |sagactx: ActionContext<SagaInstanceCreate>| {
-                let osagactx = sagactx.user_data().clone();
-                let params = sagactx.saga_params().clone();
-                let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-                let instance_id = sagactx.lookup::<Uuid>("instance_id");
-
-                async move {
-                    let runtime = ApiInstanceRuntimeState {
-                        run_state: ApiInstanceState::Creating,
-                        reboot_in_progress: false,
-                        sled_uuid: sled_uuid?,
-                        gen: 1,
-                        time_updated: Utc::now(),
-                    };
-
-                    /*
-                     * TODO-correctness We want to have resolved the project
-                     * name to an id in an earlier step.  To do that, we need to
-                     * fix a bunch of the datastore issues.
-                     * TODO-correctness needs to handle the case where the
-                     * record already exists and looks similar vs. different
-                     */
-                    osagactx
-                        .datastore()
-                        .project_create_instance(
-                            &instance_id?,
-                            &params.project_name,
-                            &params.create_params,
-                            &runtime,
-                        )
-                        .await
-                        .map_err(ActionError::action_failed)?;
-                    Ok(())
-                }
-            },
-        ),
+        new_action_noop_undo(sic_create_instance_record),
     );
 
     template_builder.append(
         "instance_ensure",
         "InstanceEnsure",
-        new_action_noop_undo(
-            /*
-             * TODO-correctness is this idempotent?
-             */
-            move |sagactx: ActionContext<SagaInstanceCreate>| {
-                let osagactx = sagactx.user_data().clone();
-                let runtime_params = ApiInstanceRuntimeStateRequested {
-                    run_state: ApiInstanceState::Running,
-                    reboot_wanted: false,
-                };
-                async move {
-                    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-                    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
-                    let sa = osagactx
-                        .sled_client(&sled_uuid)
-                        .await
-                        .map_err(ActionError::action_failed)?;
-                    /*
-                     * TODO-datastore This should be cached from the previous
-                     * stage once we figure out how best to pass this
-                     * information between saga actions.
-                     */
-                    let mut instance = osagactx
-                        .datastore()
-                        .instance_lookup_by_id(&instance_id)
-                        .await
-                        .map_err(ActionError::action_failed)?;
-
-                    /*
-                     * Ask the SA to begin the state change.  Then update the
-                     * database to reflect the new intermediate state.
-                     */
-                    let new_runtime_state = sa
-                        .instance_ensure(
-                            instance.identity.id,
-                            instance.runtime.clone(),
-                            runtime_params,
-                        )
-                        .await
-                        .map_err(ActionError::action_failed)?;
-
-                    let instance_ref = Arc::make_mut(&mut instance);
-                    instance_ref.runtime = new_runtime_state.clone();
-                    osagactx
-                        .datastore()
-                        .instance_update(Arc::clone(&instance))
-                        .await
-                        .map_err(ActionError::action_failed)?;
-                    Ok(())
-                }
-            },
-        ),
+        new_action_noop_undo(sic_instance_ensure),
     );
 
     template_builder.build()
+}
+
+async fn sic_generate_instance_id(
+    _: ActionContext<SagaInstanceCreate>,
+) -> Result<Uuid, ActionError> {
+    Ok(Uuid::new_v4())
+}
+
+async fn sic_alloc_server(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Uuid, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    osagactx
+        .alloc_server(&params.create_params)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+async fn sic_create_instance_record(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<ApiInstanceRuntimeState, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id");
+    let instance_id = sagactx.lookup::<Uuid>("instance_id");
+
+    let runtime = ApiInstanceRuntimeState {
+        run_state: ApiInstanceState::Creating,
+        reboot_in_progress: false,
+        sled_uuid: sled_uuid?,
+        gen: ApiGeneration::new(),
+        time_updated: Utc::now(),
+    };
+
+    let instance = osagactx
+        .datastore()
+        .project_create_instance(
+            &instance_id?,
+            &params.project_id,
+            &params.create_params,
+            &runtime,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(instance.runtime)
+}
+
+async fn sic_instance_ensure(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), ActionError> {
+    /*
+     * TODO-correctness is this idempotent?
+     */
+    let osagactx = sagactx.user_data();
+    let runtime_params = ApiInstanceRuntimeStateRequested {
+        run_state: ApiInstanceState::Running,
+        reboot_wanted: false,
+    };
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    let initial_runtime =
+        sagactx.lookup::<ApiInstanceRuntimeState>("initial_runtime")?;
+    let sa = osagactx
+        .sled_client(&sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    /*
+     * Ask the sled agent to begin the state change.  Then update the database
+     * to reflect the new intermediate state.  If this update is not the newest
+     * one, that's fine.  That might just mean the sled agent beat us to it.
+     */
+    let new_runtime_state = sa
+        .instance_ensure(instance_id, initial_runtime, runtime_params)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &new_runtime_state)
+        .await
+        .map(|_| ())
+        .map_err(ActionError::action_failed)
 }

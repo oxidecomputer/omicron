@@ -73,7 +73,7 @@ impl ApiError {
     ) -> ApiError {
         ApiError::ObjectNotFound {
             type_name,
-            lookup_type: LookupType::ByName(String::from(name.clone())),
+            lookup_type: LookupType::ByName(name.as_str().to_owned()),
         }
     }
 
@@ -99,6 +99,18 @@ impl ApiError {
             type_name,
             lookup_type: LookupType::Other(message),
         }
+    }
+
+    /**
+     * Generates an [`ApiError::InternalError`] error with the specific message
+     *
+     * InternalError should be used for operational conditions that should not
+     * happen but that we cannot reasonably handle at runtime (e.g.,
+     * deserializing a value from the database, or finding two records for
+     * something that is supposed to be unique).
+     */
+    pub fn internal_error(message: &str) -> ApiError {
+        ApiError::InternalError { message: message.to_owned() }
     }
 
     /**
@@ -196,6 +208,73 @@ impl From<ApiError> for HttpError {
                 Some(String::from("ServiceNotAvailable")),
                 message,
             ),
+        }
+    }
+}
+
+/**
+ * Like [`assert!`], except that instead of panicking, this function returns an
+ * `Err(ApiError::InternalError)` with an appropriate message if the given
+ * condition is not true.
+ */
+#[macro_export]
+macro_rules! bail_unless {
+    ($cond:expr $(,)?) => {
+        bail_unless!($cond, "failed runtime check: {:?}", stringify!($cond))
+    };
+    ($cond:expr, $($arg:tt)+) => {
+        if !$cond {
+            return Err($crate::api_error::ApiError::internal_error(&format!(
+                $($arg)*)))
+        }
+    };
+}
+
+#[cfg(test)]
+mod test {
+    use super::ApiError;
+
+    #[test]
+    fn test_bail_unless() {
+        /* Success cases */
+        let no_bail = || {
+            bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
+            Ok(())
+        };
+        let no_bail_label_args = || {
+            bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
+            Ok(())
+        };
+        assert_eq!(Ok(()), no_bail());
+        assert_eq!(Ok(()), no_bail_label_args());
+
+        /* Failure cases */
+        let do_bail = || {
+            bail_unless!(1 + 1 == 3);
+            Ok(())
+        };
+        let do_bail_label = || {
+            bail_unless!(1 + 1 == 3, "uh-oh");
+            Ok(())
+        };
+        let do_bail_label_args = || {
+            bail_unless!(1 + 1 == 3, "wrong answer: {}", 3);
+            Ok(())
+        };
+
+        let checks = [
+            (do_bail(), "failed runtime check: \"1 + 1 == 3\""),
+            (do_bail_label(), "uh-oh"),
+            (do_bail_label_args(), "wrong answer: 3"),
+        ];
+
+        for (result, expected_message) in &checks {
+            let error = result.as_ref().unwrap_err();
+            if let ApiError::InternalError { message } = error {
+                assert_eq!(*expected_message, message);
+            } else {
+                panic!("got something other than an InternalError");
+            }
         }
     }
 }

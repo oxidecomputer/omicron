@@ -380,6 +380,7 @@ mod test {
     use crate::api_model::ApiDiskRuntimeState;
     use crate::api_model::ApiDiskState;
     use crate::api_model::ApiDiskStateRequested;
+    use crate::api_model::ApiGeneration;
     use crate::api_model::ApiInstanceRuntimeState;
     use crate::api_model::ApiInstanceRuntimeStateRequested;
     use crate::api_model::ApiInstanceState;
@@ -397,7 +398,7 @@ mod test {
                 run_state: initial_state,
                 reboot_in_progress: false,
                 sled_uuid: uuid::Uuid::new_v4(),
-                gen: 1,
+                gen: ApiGeneration::new(),
                 time_updated: Utc::now(),
             }
         };
@@ -412,7 +413,7 @@ mod test {
         let initial_runtime = {
             ApiDiskRuntimeState {
                 disk_state: initial_state,
-                gen: 1,
+                gen: ApiGeneration::new(),
                 time_updated: Utc::now(),
             }
         };
@@ -433,7 +434,7 @@ mod test {
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, 1);
+        assert_eq!(r1.gen, ApiGeneration::new());
 
         /*
          * There's no asynchronous transition going on yet so a
@@ -638,7 +639,7 @@ mod test {
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, 1);
+        assert_eq!(r1.gen, ApiGeneration::new());
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceState::Running,
@@ -841,7 +842,7 @@ mod test {
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, ApiDiskState::Creating);
-        assert_eq!(r1.gen, 1);
+        assert_eq!(r1.gen, ApiGeneration::new());
 
         /*
          * Try transitioning to every other detached state.

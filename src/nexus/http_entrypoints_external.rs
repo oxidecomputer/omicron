@@ -8,12 +8,10 @@ use crate::api_model::to_view_list;
 use crate::api_model::ApiDiskAttachment;
 use crate::api_model::ApiDiskCreateParams;
 use crate::api_model::ApiDiskView;
-use crate::api_model::ApiInstance;
 use crate::api_model::ApiInstanceCreateParams;
 use crate::api_model::ApiInstanceView;
 use crate::api_model::ApiName;
 use crate::api_model::ApiObject;
-use crate::api_model::ApiProject;
 use crate::api_model::ApiProjectCreateParams;
 use crate::api_model::ApiProjectUpdateParams;
 use crate::api_model::ApiProjectView;
@@ -47,7 +45,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -204,7 +202,7 @@ async fn api_projects_get_project(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project: Arc<ApiProject> = nexus.project_lookup(&project_name).await?;
+    let project = nexus.project_fetch(&project_name).await?;
     Ok(HttpResponseOk(project.to_view()))
 }
 
@@ -446,7 +444,7 @@ async fn api_project_instances_get_instance(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let instance: Arc<ApiInstance> =
+    let instance =
         nexus.project_lookup_instance(&project_name, &instance_name).await?;
     Ok(HttpResponseOk(instance.to_view()))
 }
@@ -552,7 +550,7 @@ async fn api_instance_disks_get(
     let fake_query = DataPageParams {
         marker: None,
         direction: PaginationOrder::Ascending,
-        limit: NonZeroUsize::new(std::usize::MAX).unwrap(),
+        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
     };
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)

@@ -1,6 +1,9 @@
 //! Facilities for managing a local database for development
 
 use crate::dev::poll;
+use crate::nexus::PostgresConfigWithUrl;
+use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use core::ops::Deref;
 use std::ffi::OsStr;
@@ -12,9 +15,32 @@ use std::time::Duration;
 use tempfile::tempdir;
 use tempfile::TempDir;
 use thiserror::Error;
+use tokio_postgres::config::Host;
+use tokio_postgres::config::SslMode;
 
 /// Default for how long to wait for CockroachDB to report its listening URL
 const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
+
+/*
+ * A default listen port of 0 allows the system to choose any available port.
+ * This is appropriate for the test suite and may be useful in some cases for
+ * omicron_dev.  However, omicron_dev by default chooses a specific port so that
+ * we can ship a Nexus configuration that will use the same port.
+ */
+const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
+
+/** CockroachDB database name */
+/* This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql. */
+const COCKROACHDB_DATABASE: &'static str = "omicron";
+/** CockroachDB user name */
+/*
+ * TODO-security This should really use "omicron", which is created in
+ * src/sql/dbinit.sql.  Doing that requires either hardcoding a password or
+ * (better) using `cockroach cert` to set up a CA and certificates for this
+ * user.  We should modify the infrastructure here to do that rather than use
+ * "root" here.
+ */
+const COCKROACHDB_USER: &'static str = "root";
 
 /**
  * Builder for [`CockroachStarter`] that supports setting some command-line
@@ -34,6 +60,8 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 pub struct CockroachStarterBuilder {
     /// optional value for the --store-dir option
     store_dir: Option<PathBuf>,
+    /// optional value for the listening port
+    listen_port: u16,
     /// command-line arguments, mirrored here for reporting
     args: Vec<String>,
     /// describes the command line that we're going to execute
@@ -52,6 +80,7 @@ impl CockroachStarterBuilder {
     fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder {
             store_dir: None,
+            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
@@ -73,11 +102,16 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--listen-addr=127.0.0.1:0")
             .arg("--http-addr=:0");
         builder
     }
 
+    /**
+     * Redirect stdout and stderr for the "cockroach" process to files within
+     * the temporary directory.  This is used by the test suite so that people
+     * don't get reams of irrelevant output when running `cargo test`.  This
+     * will be cleaned up as usual on success.
+     */
     pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
         self.redirect_stdio = true;
         self
@@ -98,6 +132,16 @@ impl CockroachStarterBuilder {
      */
     pub fn store_dir<P: AsRef<Path>>(mut self, store_dir: P) -> Self {
         self.store_dir.replace(store_dir.as_ref().to_owned());
+        self
+    }
+
+    /**
+     * Sets the listening port for the PostgreSQL and CockroachDB protocols
+     *
+     * We always listen only on 127.0.0.1.
+     */
+    pub fn listen_port(mut self, listen_port: u16) -> Self {
+        self.listen_port = listen_port;
         self
     }
 
@@ -146,8 +190,11 @@ impl CockroachStarterBuilder {
             });
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
+        let listen_arg = format!("127.0.0.1:{}", self.listen_port);
         self.arg("--store")
             .arg(store_dir)
+            .arg("--listen-addr")
+            .arg(&listen_arg)
             .arg("--listening-url-file")
             .arg(listen_url_file.as_os_str().to_owned());
 
@@ -280,16 +327,14 @@ impl CockroachStarter {
                     match tokio::fs::read_to_string(&listen_url_file).await {
                         Ok(listen_url) if listen_url.contains('\n') => {
                             let listen_url = listen_url.trim_end();
-                            let pg_config: tokio_postgres::config::Config =
-                                listen_url.parse().map_err(|source| {
-                                    poll::CondCheckError::Failed(
-                                        CockroachStartError::BadListenUrl {
-                                            listen_url: listen_url.to_string(),
-                                            source,
-                                        },
-                                    )
-                                })?;
-                            Ok((listen_url.to_string(), pg_config))
+                            make_pg_config(listen_url).map_err(|source| {
+                                poll::CondCheckError::Failed(
+                                    CockroachStartError::BadListenUrl {
+                                        listen_url: listen_url.to_string(),
+                                        source,
+                                    },
+                                )
+                            })
                         }
 
                         _ => Err(poll::CondCheckError::NotYet),
@@ -302,9 +347,8 @@ impl CockroachStarter {
         .await;
 
         match wait_result {
-            Ok((listen_url, pg_config)) => Ok(CockroachInstance {
+            Ok(pg_config) => Ok(CockroachInstance {
                 pid,
-                listen_url,
                 pg_config,
                 temp_dir_path: self.temp_dir.path().to_owned(),
                 temp_dir: Some(self.temp_dir),
@@ -341,7 +385,7 @@ pub enum CockroachStartError {
     BadListenUrl {
         listen_url: String,
         #[source]
-        source: tokio_postgres::Error,
+        source: anyhow::Error,
     },
 
     #[error(
@@ -362,10 +406,8 @@ pub enum CockroachStartError {
 pub struct CockroachInstance {
     /// child process id
     pid: u32,
-    /// Raw listen URL provided by CockroachDB
-    listen_url: String,
     /// PostgreSQL config to use to connect to CockroachDB as a SQL client
-    pg_config: tokio_postgres::config::Config,
+    pg_config: PostgresConfigWithUrl,
     /// handle to child process, if it hasn't been cleaned up already
     child_process: Option<tokio::process::Child>,
     /// handle to temporary directory, if it hasn't been cleaned up already
@@ -389,14 +431,14 @@ impl CockroachInstance {
      * object would impl a to_url() or the like, but it does not appear to.)
      */
     pub fn listen_url(&self) -> impl fmt::Display + '_ {
-        &self.listen_url
+        &self.pg_config
     }
 
     /**
      * Returns PostgreSQL client configuration suitable for connecting to the
      * CockroachDB database
      */
-    pub fn pg_config(&self) -> &tokio_postgres::config::Config {
+    pub fn pg_config(&self) -> &PostgresConfigWithUrl {
         &self.pg_config
     }
 
@@ -551,24 +593,144 @@ pub async fn wipe(
 }
 
 /**
+ * Given a listen URL reported by CockroachDB, returns a parsed
+ * [`PostgresConfigWithUrl`] suitable for connecting to a database backed by a
+ * [`CockroachInstance`].
+ */
+fn make_pg_config(
+    listen_url: &str,
+) -> Result<PostgresConfigWithUrl, anyhow::Error> {
+    /*
+     * TODO-design This is really irritating.
+     *
+     * CockroachDB reports a listen URL that does not specify a database to
+     * connect to.  (This makes sense.)  But we want to expose a client URL that
+     * does specify a database (since `CockroachInstance` essentially hardcodes
+     * a specific database name (via dbinit.sql and has_omicron_schema())) and
+     * user.
+     *
+     * We can parse the listen URL here into a tokio_postgres::Config, then use
+     * methods on that struct to modify it as needed.  But if we do that, we'd
+     * have no way to serialize it back into a URL.  Recall that
+     * tokio_postgres::Config does not provide any way to serialize a config as
+     * a URL string, which is why PostgresConfigWithUrl exists.  But the only
+     * way to construct a PostgresConfigWithUrl is by parsing a URL string,
+     * since that's the only way to be sure that the URL string matches the
+     * parsed config.
+     *
+     * Another option is to muck with the URL string directly to insert the user
+     * and database name.  That's brittle and error prone.
+     *
+     * So we break down and do what we were trying to avoid when we built
+     * PostgresConfigWithUrl: we'll construct a URL by hand from the parsed
+     * representation.  Then we'll parse that again.  This is just to maintain
+     * the invariant that the parsed representation is known to match the saved
+     * URL string.
+     *
+     * TODO-correctness this might be better using the "url" package, but it's
+     * also not clear that PostgreSQL URLs conform to those URLs.
+     */
+    let pg_config =
+        listen_url.parse::<tokio_postgres::Config>().with_context(|| {
+            format!("parse PostgreSQL config: {:?}", listen_url)
+        })?;
+
+    /*
+     * Our URL construction makes a bunch of assumptions about the PostgreSQL
+     * config that we were given.  Assert these here.  (We do not expect any of
+     * this to change from CockroachDB itself, and if so, this whole thing is
+     * used by development tools and the test suite, so this failure mode seems
+     * okay for now.)
+     */
+    let check_unsupported = vec![
+        pg_config.get_application_name().map(|_| "application_name"),
+        pg_config.get_connect_timeout().map(|_| "connect_timeout"),
+        pg_config.get_options().map(|_| "options"),
+        pg_config.get_password().map(|_| "password"),
+        pg_config.get_dbname().map(|_| "dbname"),
+    ];
+
+    let unsupported_values =
+        check_unsupported.into_iter().flatten().collect::<Vec<&'static str>>();
+    if unsupported_values.len() > 0 {
+        bail!(
+            "unsupported PostgreSQL listen URL \
+            (did not expect any of these fields: {}): {:?}",
+            unsupported_values.join(", "),
+            listen_url
+        );
+    }
+
+    /*
+     * As a side note: it's rather absurd that the default configuration enables
+     * keepalives with a two-hour timeout.  In most networking stacks,
+     * keepalives are disabled by default.  If you enable them and don't specify
+     * the idle time, you get a default two-hour idle time.  That's a relic of
+     * simpler times that makes no sense in most systems today.  It's fine to
+     * leave keepalives off unless configured by the consumer, but if one is
+     * going to enable them, one ought to at least provide a more useful default
+     * idle time.
+     */
+    if !pg_config.get_keepalives() {
+        bail!(
+            "unsupported PostgreSQL listen URL (keepalives disabled): {:?}",
+            listen_url
+        );
+    }
+
+    if pg_config.get_keepalives_idle() != Duration::from_secs(2 * 60 * 60) {
+        bail!(
+            "unsupported PostgreSQL listen URL (keepalive idle time): {:?}",
+            listen_url
+        );
+    }
+
+    if pg_config.get_ssl_mode() != SslMode::Disable {
+        bail!("unsupported PostgreSQL listen URL (ssl mode): {:?}", listen_url);
+    }
+    let hosts = pg_config.get_hosts();
+    let ports = pg_config.get_ports();
+    assert_eq!(hosts.len(), ports.len());
+    if hosts.len() != 1 {
+        bail!(
+            "unsupported PostgresQL listen URL \
+            (expected exactly one host): {:?}",
+            listen_url
+        );
+    }
+
+    if let Host::Tcp(ip_host) = &hosts[0] {
+        let url = format!(
+            "postgresql://{}@{}:{}/{}?sslmode=disable",
+            COCKROACHDB_USER, ip_host, ports[0], COCKROACHDB_DATABASE
+        );
+        url.parse::<PostgresConfigWithUrl>().with_context(|| {
+            format!("parse modified PostgreSQL config {:?}", url)
+        })
+    } else {
+        Err(anyhow!(
+            "unsupported PostsgreSQL listen URL (not TCP): {:?}",
+            listen_url
+        ))
+    }
+}
+
+/**
  * Returns true if the database that this client is connected to contains
  * the Omicron schema
- *
- * Note that this will change the currently-selected database if the Omicron
- * one exists.
  *
  * Panics if the attempt to run a query fails for any reason other than the
  * schema not existing.  (This is intended to be run from the test suite.)
  */
 pub async fn has_omicron_schema(client: &tokio_postgres::Client) -> bool {
-    match client.batch_execute("USE omicron; SELECT id FROM Project").await {
+    match client.batch_execute("SELECT id FROM Project").await {
         Ok(_) => true,
         Err(e) => {
             let sql_error =
                 e.code().expect("got non-SQL error checking for schema");
             assert_eq!(
                 *sql_error,
-                tokio_postgres::error::SqlState::UNDEFINED_DATABASE
+                tokio_postgres::error::SqlState::UNDEFINED_TABLE
             );
             false
         }
@@ -653,6 +815,7 @@ impl Client {
 #[cfg(test)]
 mod test {
     use super::has_omicron_schema;
+    use super::make_pg_config;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
@@ -665,11 +828,6 @@ mod test {
     use tokio::fs;
 
     fn new_builder() -> CockroachStarterBuilder {
-        /*
-         * We redirect stdout and stderr to files within the temporary directory
-         * so that people don't get reams of irrelevant output when running
-         * `cargo test`.  This will be cleaned up as usual on success.
-         */
         let mut builder = CockroachStarterBuilder::new();
         builder.redirect_stdio_to_files();
         builder
@@ -1010,11 +1168,11 @@ mod test {
             db2.connect().await.expect("failed to connect to second database");
 
         client1
-            .execute("CREATE TABLE foo (v int)", &[])
+            .batch_execute("CREATE DATABASE d; use d; CREATE TABLE foo (v int)")
             .await
             .expect("create (1)");
         client2
-            .execute("CREATE TABLE foo (v int)", &[])
+            .batch_execute("CREATE DATABASE d; use d; CREATE TABLE foo (v int)")
             .await
             .expect("create (2)");
         client1
@@ -1027,5 +1185,37 @@ mod test {
             client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
         assert_eq!(rows.len(), 0);
         client2.cleanup().await.expect("second connection closed ungracefully");
+    }
+
+    /* Success case for make_pg_config() */
+    #[test]
+    fn test_make_pg_config_ok() {
+        let url = "postgresql://root@127.0.0.1:45913?sslmode=disable";
+        let config = make_pg_config(url).expect("failed to parse basic case");
+        assert_eq!(
+            config.to_string().as_str(),
+            // TODO-security This user should become "omicron"
+            "postgresql://root@127.0.0.1:45913/omicron?sslmode=disable",
+        );
+    }
+
+    #[test]
+    fn test_make_pg_config_fail() {
+        /* failure to parse initial listen URL */
+        let error = make_pg_config("").unwrap_err().to_string();
+        eprintln!("found error: {}", error);
+        assert!(error.contains("unsupported PostgreSQL listen URL"));
+
+        /* unexpected contents in initial listen URL */
+        let error = make_pg_config(
+            "postgresql://root@127.0.0.1:45913/foobar?sslmode=disable",
+        )
+        .unwrap_err()
+        .to_string();
+        eprintln!("found error: {}", error);
+        assert!(error.contains(
+            "unsupported PostgreSQL listen URL \
+            (did not expect any of these fields: dbname)"
+        ));
     }
 }
