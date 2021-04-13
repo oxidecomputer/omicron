@@ -5,7 +5,6 @@
 mod client;
 mod config;
 mod context;
-mod datastore;
 pub mod db; // Public only for some documentation examples
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
