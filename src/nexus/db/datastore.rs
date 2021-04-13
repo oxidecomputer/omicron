@@ -55,7 +55,7 @@ use super::sql_operations::sql_fetch_page_from_table;
 use super::sql_operations::sql_fetch_row_by;
 use super::sql_operations::sql_fetch_row_raw;
 use super::sql_operations::sql_insert_unique;
-use super::sql_operations::sql_insert_unique_idempotent;
+use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 
 pub struct DataStore {
@@ -65,21 +65,6 @@ pub struct DataStore {
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
         DataStore { pool }
-    }
-
-    /// Verifies that the given error is _not_ an `ApiObject::ObjectNotFound`.
-    /// If it is, then it's converted to an `ApiError::InternalError` instead,
-    /// on the assumption that an `ObjectNotFound` in this context is neither
-    /// expected nor appropriate for the caller.
-    fn sql_error_not_missing(e: ApiError) -> ApiError {
-        if matches!(e, ApiError::ObjectNotFound { .. }) {
-            ApiError::internal_error(&format!(
-                "unexpected ObjectNotFound: {:#}",
-                e
-            ))
-        } else {
-            e
-        }
     }
 
     /// Create a project
@@ -360,26 +345,18 @@ impl DataStore {
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
         runtime_initial.sql_serialize(&mut values);
-        sql_insert_unique_idempotent::<Instance>(
+        let instance = sql_insert_unique_idempotent_and_fetch::<
+            Instance,
+            LookupByUniqueId,
+        >(
             &client,
-            &mut values,
+            &values,
             params.identity.name.as_str(),
             "id",
-        )
-        .await?;
-
-        /*
-         * If we get here, then we successfully inserted the record.  It would
-         * be a bug if something else were to remove that record before we have
-         * a chance to fetch it.
-         */
-        let instance = sql_fetch_row_by::<LookupByUniqueId, Instance>(
-            &client,
             (),
             instance_id,
         )
-        .await
-        .map_err(DataStore::sql_error_not_missing)?;
+        .await?;
 
         bail_unless!(
             instance.runtime.run_state == ApiInstanceState::Creating,
@@ -564,18 +541,17 @@ impl DataStore {
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
         runtime_initial.sql_serialize(&mut values);
-        sql_insert_unique_idempotent::<Disk>(
-            &client,
-            &mut values,
-            params.identity.name.as_str(),
-            "id",
-        )
-        .await?;
 
         let disk =
-            sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id)
-                .await
-                .map_err(DataStore::sql_error_not_missing)?;
+            sql_insert_unique_idempotent_and_fetch::<Disk, LookupByUniqueId>(
+                &client,
+                &mut values,
+                params.identity.name.as_str(),
+                "id",
+                (),
+                disk_id,
+            )
+            .await?;
 
         bail_unless!(
             disk.runtime.disk_state == ApiDiskState::Creating,

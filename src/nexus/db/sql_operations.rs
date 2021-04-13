@@ -463,3 +463,54 @@ where
             .map(|_| ())
     }
 }
+
+/* XXX TODO-doc + disclaimer about async desugaring */
+/*
+ * XXX working here -- want to replace callers of sql_insert_unique_idempotent
+ * with this one to commonize just a bit more
+ */
+pub fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
+    client: &'a tokio_postgres::Client,
+    values: &'a SqlValueSet,
+    unique_value: &'a str,
+    ignore_conflicts_on: &'static str,
+    scope_key: L::ScopeKey,
+    item_key: &'a L::ItemKey,
+) -> impl Future<Output = LookupResult<T::ModelType>> + 'a
+where
+    T: Table,
+    L: LookupKey<'a>,
+{
+    async move {
+        sql_insert_unique_idempotent::<T>(
+            client,
+            values,
+            unique_value,
+            ignore_conflicts_on,
+        )
+        .await?;
+
+        /*
+         * If we get here, then we successfully inserted the record.  It would
+         * be a bug if something else were to remove that record before we have
+         * a chance to fetch it.  (That's not generally true -- just something
+         * that must be true for this function to be correct, and is true in the
+         * cases of our callers.)
+         */
+        sql_fetch_row_by::<L, T>(client, scope_key, item_key)
+            .await
+            .map_err(sql_error_not_missing)
+    }
+}
+
+/// Verifies that the given error is _not_ an `ApiObject::ObjectNotFound`.
+/// If it is, then it's converted to an `ApiError::InternalError` instead,
+/// on the assumption that an `ObjectNotFound` in this context is neither
+/// expected nor appropriate for the caller.
+fn sql_error_not_missing(e: ApiError) -> ApiError {
+    if matches!(e, ApiError::ObjectNotFound { .. }) {
+        ApiError::internal_error(&format!("unexpected ObjectNotFound: {:#}", e))
+    } else {
+        e
+    }
+}
