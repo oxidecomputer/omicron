@@ -3,26 +3,8 @@
  */
 
 /*
- * XXX review all queries for use of indexes (may need "time_deleted IS
- * NOT NULL" conditions)
- *
- * Figure out how to automate this.  It's tricky, but maybe the way to think
- * about this is that we have Tables, and for each Table there's a fixed set of
- * WHERE clauses, each of which includes a string SQL fragment and a set of
- * parameters.  This way, we can easily identify the relatively small set of
- * unique WHERE clauses, but in a way that can also be inserted into UPDATE,
- * DELETE, SELECT, or CTEs using these, etc.
- *
- * Inventory of queries not done so far:
- * o update Project (possibly including conflict on unique name)
- * o create Instance/Disk (INSERT ON CONFLICT DO NOTHING, SELECT, check state)
- * o project delete (currently UPDATE, but probably needs similar CTE treatment)
- *
- * This probably breaks down into:
- * o INSERT (new trait similar to what's used for pagination, plus surrounding
- *   interfaces for doing this ON CONFLICT DO NOTHING and check state)
- * o update-based-on-precondition using CTE
- * o update-and-handle-conflict-error (same as previous case?)
+ * TODO-scalability review all queries for use of indexes (may need
+ * "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
  */
 
 use super::Pool;
@@ -83,6 +65,21 @@ pub struct DataStore {
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
         DataStore { pool }
+    }
+
+    /// Verifies that the given error is _not_ an `ApiObject::ObjectNotFound`.
+    /// If it is, then it's converted to an `ApiError::InternalError` instead,
+    /// on the assumption that an `ObjectNotFound` in this context is neither
+    /// expected nor appropriate for the caller.
+    fn sql_error_not_missing(e: ApiError) -> ApiError {
+        if matches!(e, ApiError::ObjectNotFound { .. }) {
+            ApiError::internal_error(&format!(
+                "unexpected ObjectNotFound: {:#}",
+                e
+            ))
+        } else {
+            e
+        }
     }
 
     /// Create a project
@@ -382,18 +379,7 @@ impl DataStore {
             instance_id,
         )
         .await
-        .map_err(|e| {
-            /* XXX helper function for this */
-            if !matches!(e, ApiError::ObjectNotFound { .. }) {
-                ApiError::internal_error(&format!(
-                    "failed to find saga-created record \
-                        after creating it: {:#}",
-                    e
-                ))
-            } else {
-                e
-            }
-        })?;
+        .map_err(DataStore::sql_error_not_missing)?;
 
         bail_unless!(
             instance.runtime.run_state == ApiInstanceState::Creating,
@@ -565,8 +551,10 @@ impl DataStore {
         params: &ApiDiskCreateParams,
         runtime_initial: &ApiDiskRuntimeState,
     ) -> CreateResult<ApiDisk> {
-        /* See project_create_instance() */
-        /* XXX commonize with project_create_instance() */
+        /*
+         * See project_create_instance() for a discussion of how this function
+         * works.  The pattern here is nearly identical.
+         */
         let client = self.pool.acquire().await?;
         let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
@@ -584,27 +572,10 @@ impl DataStore {
         )
         .await?;
 
-        /*
-         * If we get here, then we successfully inserted the record.  It would
-         * be a bug if something else were to remove that record before we have
-         * a chance to fetch it.
-         * XXX Still want to commonize with project_create_instance
-         */
         let disk =
             sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id)
                 .await
-                .map_err(|e| {
-                    /* XXX helper function for this */
-                    if !matches!(e, ApiError::ObjectNotFound { .. }) {
-                        ApiError::internal_error(&format!(
-                            "failed to find saga-created record \
-                        after creating it: {:#}",
-                            e
-                        ))
-                    } else {
-                        e
-                    }
-                })?;
+                .map_err(DataStore::sql_error_not_missing)?;
 
         bail_unless!(
             disk.runtime.disk_state == ApiDiskState::Creating,
