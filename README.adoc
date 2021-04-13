@@ -132,7 +132,7 @@ listening: http://127.0.0.1:12220
 ----
 
 3. `sled_agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
-
++
 [source,text]
 ----
 $ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
@@ -140,7 +140,7 @@ $ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
 
-You can use `curl` directly to hit either of these servers, but it's easier to use the `oxapi_demo` wrapper (see below).
+Once everything is up and running, you can use `curl` directly to hit either of the servers.  But it's easier to use the `oxapi_demo` wrapper (see below).
 
 == Quick demo
 
