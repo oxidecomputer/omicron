@@ -119,6 +119,13 @@ impl<'a> SqlString<'a> {
  * Like the other interfaces here, the names here must be `&'static str` to make
  * it harder to accidentally supply user input here.  That's important because
  * column names cannot be passed as parameters for the query.
+ *
+ * There's nothing that ensures that the types of the values correspond to
+ * their types in the database.  Even if we statically checked this, we would
+ * only be checking that the values correspond with some Rust representation of
+ * the database schema that we've built into this program.  That does not
+ * eliminate the runtime possibility that the types do not, in fact, match the
+ * types in the database.
  */
 pub struct SqlValueSet {
     names: Vec<&'static str>,

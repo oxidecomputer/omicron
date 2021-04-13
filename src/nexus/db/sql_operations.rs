@@ -9,7 +9,6 @@ use crate::api_model::ListResult;
 use crate::api_model::LookupResult;
 use futures::StreamExt;
 use std::convert::TryFrom;
-use std::future::Future;
 
 use super::operations::sql_error_generic;
 use super::operations::sql_execute;
@@ -88,16 +87,12 @@ where
 
 /// Like `fetch_page_from_table`, but the caller can specify which columns
 /// to select and how to interpret the row
-/*
- * The explicit desugaring of "async fn" here is due to rust-lang/rust#63033.
- * TODO-cleanup review the lifetimes and bounds on fetch_page_by()
- */
-pub fn sql_fetch_page_by<'a, L, T, R>(
+pub async fn sql_fetch_page_by<'a, L, T, R>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
     pagparams: &'a DataPageParams<'a, L::ItemKey>,
     columns: &'static [&'static str],
-) -> impl Future<Output = ListResult<R>> + 'a
+) -> ListResult<R>
 where
     L: LookupKey<'a>,
     T: Table,
@@ -105,48 +100,74 @@ where
         + Send
         + 'static,
 {
-    async move {
-        let mut page_cond_sql = SqlString::new();
-        L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
-        let limit = i64::from(pagparams.limit.get());
-        let limit_clause =
-            format!("LIMIT {}", page_cond_sql.next_param(&limit));
-        page_cond_sql.push_str(limit_clause.as_str());
+    let mut page_cond_sql = SqlString::new();
+    L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
+    let limit = i64::from(pagparams.limit.get());
+    let limit_clause = format!("LIMIT {}", page_cond_sql.next_param(&limit));
+    page_cond_sql.push_str(limit_clause.as_str());
 
-        let sql = format!(
-            "SELECT {} FROM {} WHERE ({}) {}",
-            columns.join(", "),
-            T::TABLE_NAME,
-            T::LIVE_CONDITIONS,
-            &page_cond_sql.sql_fragment(),
-        );
-        let query_params = page_cond_sql.sql_params();
-        let rows = sql_query(client, sql.as_str(), query_params)
-            .await
-            .map_err(sql_error_generic)?;
-        let list =
-            rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
-        Ok(futures::stream::iter(list).boxed())
-    }
+    let sql = format!(
+        "SELECT {} FROM {} WHERE ({}) {}",
+        columns.join(", "),
+        T::TABLE_NAME,
+        T::LIVE_CONDITIONS,
+        &page_cond_sql.sql_fragment(),
+    );
+    let query_params = page_cond_sql.sql_params();
+    let rows = sql_query(client, sql.as_str(), query_params)
+        .await
+        .map_err(sql_error_generic)?;
+    let list =
+        rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
+    Ok(futures::stream::iter(list).boxed())
 }
 
-// XXX document, refactor, etc.
+///
+/// Describes a successful result of [`sql_update_precond`]
+///
 pub struct UpdatePrecond {
+    /// Information about the requested row.  This includes a number of columns
+    /// "found_$c" and "updated_$c" where "$c" is a column from the table.
+    /// These columns will include any columns required to find the row in the
+    /// first place (typically the "id") and any columns requested by the caller
+    /// in `precond_columns`.
     pub found_state: tokio_postgres::Row,
+
+    /// If true, the row was updated (the preconditions held).  If not, the
+    /// preconditions were not true.
     pub updated: bool,
 }
 
-/// Conditionally update a row
-// TODO-doc more details needed here
-// TODO-coverage -- and check the SQL by hand
+///
+/// Conditionally update a row in table `T`
+///
+/// The row is identified using lookup `L` and the `scope_key` and `item_key`.
+/// The values to be updated are provided by `update_values`.  The preconditions
+/// are specified by the SQL fragment `precond_sql`.
+///
+/// Besides the usual database errors, there are a few common cases here:
+///
+/// * The specified row was not found.  In this case, a suitable
+///   [`ApiObject::ObjectNotFound`] error is returned.
+///
+/// * The specified row was found and updated.  In this case, an
+///   [`UpdatePrecond`] is returned with `updated = true`.
+///
+/// * The specified row was found, but it was not updated because the
+///   preconditions did not hold.  In this case, an [`UpdatePrecond`] is
+///   returned with `updated = false`.
+///
+/// On success (which includes the case where the row was not updated because
+/// the precondition failed), the returned [`UpdatePrecond`] includes
+/// information about the row that was found.
+///
+/// ## Returns
+///
+/// An [`UpdatePrecond`] that describes whether the row was updated and what
+/// state was found, if any.
+///
+// XXX TODO-coverage -- and check the SQL by hand
 // XXX TODO-log log for both cases here
-/*
- * We want to update the instance row to indicate it's being deleted
- * only if it's in a state where that's possible.  While complicated,
- * the SQL below allows us to atomically distinguish the cases we're
- * interested in: successful update, failure because the row was in the
- * wrong state, failure because the row doesn't exist.
- */
 pub async fn sql_update_precond<'a, 'b, T, L>(
     client: &'b tokio_postgres::Client,
     scope_key: L::ScopeKey,
@@ -160,10 +181,43 @@ where
     L: LookupKey<'a>,
 {
     /*
-     * The first CTE will be a SELECT that finds the row we're going to
-     * update and includes the identifying columns plus any extra columns
-     * that the caller asked for.  (These are usually the columns associated
-     * with the preconditions.)  For example:
+     * We want to update a row only if it meets some preconditions.  One
+     * traditional way to do that is to begin a transaction, SELECT [the row]
+     * FOR UPDATE, examine it here in the client, then decide whether to UPDATE
+     * it.  The SELECT FOR UPDATE locks the row in the database until the
+     * transaction commits or aborts.  This causes other clients that want to
+     * modify the row to block.  This works okay, but it means locks are held
+     * and clients blocked for an entire round-trip to the database, plus
+     * processing time here.
+     *
+     * Another approach is to simply UPDATE the row and include the
+     * preconditions directly in the WHERE clause.  This keeps database lock
+     * hold time to a minimum (no round trip with locks held).  However, all you
+     * know after that is whether the row was updated.  If it wasn't, you don't
+     * know if it's because the row wasn't present or it didn't meet the
+     * preconditions.
+     *
+     * One could begin a transaction, perform the UPDATE with preconditions in
+     * the WHERE clause, then SELECT the row, then COMMIT.  If we could convince
+     * ourselves that the UPDATE and SELECT see the same snapshot of the data,
+     * this would be an improvement -- provided that we can send all four
+     * statements (BEGIN, UPDATE, SELECT, COMMIT) as a single batch and still
+     * see the results of the UPDATE and SELECT.  It's not clear if this is
+     * possible using the PostgreSQL wire protocol, but it doesn't seem to be
+     * exposed from the tokio_postgres client.  If these aren't sent in one
+     * batch, you have the same problem as above: locks held for an entire
+     * round-trip.
+     *
+     * While somewhat complicated at first glance, the SQL below allows us to
+     * correctly perform the update, minimize lock hold time, and still
+     * distinguish the cases we're interested in: successful update, failure
+     * because the row was in the wrong state, failure because the row doesn't
+     * exist
+     *
+     * The query starts with a CTE that SELECTs the row we're going to update.
+     * This includes the identifying columns plus any extra columns that the
+     * caller asked for.  (These are usually the columns associated with the
+     * preconditions.)  For example:
      *
      *     SELECT  id, state FROM Instance WHERE id = $1
      *             ^^^  ^^^                      ^^
@@ -210,13 +264,14 @@ where
     );
 
     /*
-     * The second CTE will be an UPDATE that _may_ update the row that we
-     * found with the SELECT.  In our example, it would look like this:
+     * The second CTE will be an UPDATE that conditionally updates the row that
+     * we found with the SELECT.  In our example, it would look like this:
      *
      *        UPDATE Instance
      *   +-->     SET state = "running"
      *   |        WHERE id = $1 AND state = "starting"
      *   |              ^^^^^^^     ^^^^^^^^^^^^^^^^^
+     *   |                 |          |
      *   |                 |          +--- caller-provided precondition SQL
      *   |                 |               (may include parameters!)
      *   |                 |
@@ -303,25 +358,28 @@ where
     );
 
     /*
-     * XXX TODO update these docs
-     * There are only three expected cases here:
+     * There are only three expected results of this query:
      *
-     * (1) The Instance does not exist, which is true iff there were zero
-     *     returned rows.
+     * (1) The row that we tried to update does not exist, which is true iff
+     *     there were zero returned rows.  In this case, our `mkzerror` function
+     *     will be used to generate an ObjectNotFound error.
      *
-     * (2) There was exactly one Instance, and we updated it.  This is true
-     *     iff there is one row with a non-null "deleted_id".
+     * (2) We found exactly one row and updated it.  This is true iff there is
+     *     one row with a non-null "updated_id" (where "id" is actually any of
+     *     the identifying columns above).
      *
      * (3) There was exactly one Instance, but we did not update it because
-     *     it was not in a valid state for this update.  This is true iff
-     *     there is one row with a null "deleted_id".
+     *     it failed the precondition.  This is true iff there is one row and
+     *     its "updated_id" is null.  (Again, "id" here can be any of the
+     *     identifying columns.)
      *
-     * A lot of other things are operationally conceivable (i.e., more than
-     * one returned row), but they should not happen.  We treat these as
+     * A lot of other things are operationally conceivable (like more than one
+     * returned row), but they should not be possible.  We treat these as
      * internal errors.
      */
     // XXX Is this the right place to produce the NotFound error?  Might
-    // the caller have already done a name-to-id translation?
+    // the caller have already done a name-to-id translation, in which case this
+    // error will be misleading?
     let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
     let row = sql_query_maybe_one(
         &client,
@@ -330,6 +388,7 @@ where
         mkzerror,
     )
     .await?;
+
     /*
      * We successfully updated the row iff the "updated_*" columns for the
      * identifying columns are non-NULL.  We pick the lookup_key column,
@@ -343,7 +402,11 @@ where
 
 /**
  * Given a [`DbError`] while creating an instance of type `rtype`, produce an
- * appropriate [`ApiError`].
+ * appropriate [`ApiError`]
+ *
+ * This looks for the specific case of a uniqueness constraint violation and
+ * reports a suitable [`ApiError::ObjectAlreadyExists`] for it.  Otherwise, we
+ * fall back to [`sql_error_generic`].
  */
 fn sql_error_on_create(
     rtype: ApiResourceType,
@@ -367,22 +430,11 @@ fn sql_error_on_create(
 }
 
 /**
- * Using database connection `client`, insert a row into table `T` having values
- * `values`.
- */
-/* XXX TODO-doc document better */
-/*
- * This is not as statically type-safe an API as you might think by looking at
- * it.  There's nothing that ensures that the types of the values correspond to
- * the right columns.  It's worth noting, however, that even if we statically
- * checked this, we would only be checking that the values correspond with some
- * Rust representation of the database schema that we've built into this
- * program.  That does not eliminate the runtime possibility that the types do
- * not, in fact, match the types in the database.
+ * Insert a row into table `T` and return the resulting row
  *
- * The use of `'static` lifetimes here is just to make it harder to accidentally
- * insert untrusted input here.  Using the `async fn` syntax here runs afoul of
- * rust-lang/rust#63033.  So we desugar the `async` explicitly.
+ * This function expects any conflict error is on the name.  The caller should
+ * provide this in `unique_value` and it will be returned with an
+ * [`ApiError::ObjectAlreadyExists`] error.
  */
 pub async fn sql_insert_unique<T>(
     client: &tokio_postgres::Client,
@@ -400,7 +452,6 @@ where
         .collect::<Vec<String>>();
     let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
 
-    // XXX Could assert that the specified columns are a subset of allowed ones?
     sql.push_str(
         format!(
             "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
@@ -422,18 +473,33 @@ where
     T::ModelType::try_from(&row)
 }
 
-/*
- * The use of `'static` lifetimes here is just to make it harder to accidentally
- * insert untrusted input here.  Using the `async fn` syntax here runs afoul of
- * rust-lang/rust#63033.  So we desugar the `async` explicitly.
- */
-/* XXX TODO-doc and commonize with above */
-pub fn sql_insert_unique_idempotent<'a, T>(
+///
+/// Idempotently insert a database record.  This is intended for cases where the
+/// record may conflict with an existing record with the same id, which should
+/// be ignored, or with an existing record with the same name, which should
+/// produce an [`ApiError::ObjectAlreadyExists`] error.
+///
+/// This function is intended for use (indirectly) by sagas that want to create
+/// a record.  Most sagas also want the contents of the record they inserted.
+/// For that, see [`sql_insert_unique_idempotent_and_fetch`].
+///
+/// The contents of the row are given by the key-value pairs in `values`.
+///
+/// The name of the column on which conflicts should be ignored is given by
+/// `ignore_conflicts_on`.  Typically, `ignore_conflicts_on` would be `"id"`.
+/// It must be a `&'static str` to make it hard to accidentally provide
+/// untrusted input here.
+///
+/// In the event of a conflict on name, `unique_value` should contain the name
+/// that the caller is trying to insert.  This is provided in the returned
+/// [`ApiError::ObjectAlreadyExists`] error.
+///
+pub async fn sql_insert_unique_idempotent<'a, T>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
-) -> impl Future<Output = Result<(), ApiError>> + 'a
+) -> Result<(), ApiError>
 where
     T: Table,
 {
@@ -456,145 +522,138 @@ where
         .as_str(),
     );
 
-    async move {
-        sql_execute(client, sql.sql_fragment(), sql.sql_params())
-            .await
-            .map_err(|e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e))
-            .map(|_| ())
-    }
+    sql_execute(client, sql.sql_fragment(), sql.sql_params())
+        .await
+        .map_err(|e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e))
+        .map(|_| ())
 }
 
-/**
- * Idempotently insert a database record and fetch it back
- *
- * This function is intended for use (indirectly) by sagas that want to create a
- * record.  It first attempts to insert the specified record.  If the record is
- * successfully inserted, the record is fetched again (using `scope_key` and
- * `item_key`) and returned.  If the insert fails because a record exists with
- * the same id (whatever column is identified by `ignore_conflicts_on`), no
- * changes are made and the existing record is returned.
- *
- * The insert + fetch sequence is not atomic.  It's conceivable that another
- * client could modify the record in between.  The caller is responsible for
- * ensuring that doesn't happen or does not matter for their purposes.  In
- * practice, the surrounding saga framework should ensure that this doesn't
- * happen.
- *
- * Generally, this function might fail because of a constraint violation --
- * namely, that there's another object with the same name in the same collection
- * (e.g., another Instance with the same "name" in the same Project).  The
- * caller provides `unique_value` -- the "name", in this example -- and this
- * function will return an [`ApiError::ObjectAlreadyExists`] error reflecting
- * what happened.
- */
-/*
- * It's worth describing this process in more detail from the perspective of our
- * caller.  We'll consider the case of a saga that creates a new Instance.
- * TODO This might belong in docs for the saga instead.
- *
- *
- * EASY CASE
- *
- * If we do a simple INSERT, and that succeeds -- great.  That's the common case
- * and it's easy.
- *
- *
- * ERROR: CONFLICT ON INSTANCE ID
- *
- * What if we get a conflict error on the instance id?  Since the id is unique
- * to this saga, we must assume that means that we're being invoked a second
- * time after a previous one successfully updated the database.  That means one
- * of two things: (1) a previous database update succeeded, but something went
- * wrong (e.g., the SEC crashed) before the saga could persistently record that
- * fact; or (2) a second instance of the action is concurrently running with
- * this one and already completed its database update.  ((2) is only possible
- * if, after evaluating use cases like this, we decide that it's okay to _allow_
- * two instances of the same action to run concurrently in the case of a
- * partition among SECs or the like.  We would only do that if it's clear that
- * the action implementations can always handle this.)
- *
- * We opt to handle this by ignoring the conflict and always fetching the
- * corresponding row in the table.  In the common case, we'll find our own row.
- * In the conflict case, we'll find the pre-existing row.  In that latter case,
- * the caller will verify that it looks the way we expect it to look (same
- * "name", parameters, generation number, etc.).  It should always match what we
- * would have inserted.  Having verified that, we can simply act as though we
- * inserted it ourselves.  In both cases (1) and (2) above, this action will
- * complete successfully and the saga can proceed.  In (2), the SEC may have to
- * deal with the fact that the same action completed twice, but it doesn't have
- * to _do_ anything about it (i.e., invoke an undo action).  That said, if a
- * second SEC did decide to unwind the saga and undo this action, things get
- * more complicated.  It would be nice if the framework guaranteed that (2)
- * wasn't the case.
- *
- *
- * ERROR: CONFLICT ON INSTANCE ID, MISSING ROW
- *
- * What if we get a conflict, fetch the corresponding row, and find none?  We
- * should make this impossible in a correct system.  The only two things that
- * might plausibly do this are (A) the undo action for this action, and (B) an
- * actual instance delete operation.  We can disallow (B) by not allowing
- * anything to delete an instance whose create saga never finished (indicated by
- * the state in the Instance row).  Is there any implementation of sagas that
- * would allow us to wind up in case (A)?  Again, if SECs went split-brain
- * because one of them got to this point in the saga, hit the easy case, then
- * became partitioned from the rest of the world, and then a second SEC picked
- * up the saga and reran this action, and then the first saga encountered some
- * _other_ failure that triggered a saga unwind, resulting in the undo action
- * for this step completing, and then the second SEC winds up in this state.
- * One way to avoid this would be to have the undo action, rather than deleting
- * the instance record, marking the row with a state indicating it is dead (or
- * maybe never even alive).  Something needs to clean these records up, but
- * that's needed anyway for any sort of deleted record.
- *
- *
- * COMBINING THE TWO QUERIES
- *
- * Since the case where we successfully insert the record is expected to be so
- * common, we could use a RETURNING clause and only do a subsequent SELECT on
- * conflict.  This would bifurcate the code paths in a way that means we'll
- * almost never wind up testing the conflict path.  We could add this
- * optimization if/when we find that the extra query is a problem.
- *
- * Relatedly, we could put the INSERT and SELECT queries into a transaction.
- * This isn't necessary for our purposes.
- *
- *
- * PROPOSED APPROACH
- *
- * Putting this all together, we arrive at the approach here:
- *
- *   ACTION:
- *   - INSERT INTO Instance ... ON CONFLICT (id) DO NOTHING.
- *   - SELECT * from Instance WHERE id = ...
- *
- *   UNDO ACTION:
- *   - UPDATE Instance SET state = deleted AND time_deleted = ... WHERE
- *     id = ...;
- *     (this will update 0 or 1 row, and it doesn't matter to us which)
- *
- * There are two more considerations:
- *
- * Does this work?  Recall that sagas say that the effect of the sequence:
- *
- *   start action (1)
- *   start + finish action (2)
- *   start + finish undo action
- *   finish action (1)
- *
- * must be the same as if action (1) had never happened.  This is true of the
- * proposed approach.  That is, no matter what parts of the "action (1)" happen
- * before or after the undo action finishes, the net result on the _database_
- * will be as if "action (1)" had never occurred.
- *
- *
- * ERROR: CONFLICT ON NAME
- *
- * All of the above describes what happens when there's a conflict on "id",
- * which is unique to this saga.  It's also possible that there would be a
- * conflict on the unique (project_id, name) index.  In that case, we just want
- * to fail right away -- the whole saga is going to fail with a user error.
- */
+///
+/// Idempotently insert a database record and fetch it back
+///
+/// This function is intended for use (indirectly) by sagas that want to create a
+/// record.  It's essentially [`sql_insert_unique_idempotent`] followed by
+/// [`sql_fetch_row_by`].  This first attempts to insert the specified record.
+/// If the record is successfully inserted, the record is fetched again (using
+/// `scope_key` and `item_key`) and returned.  If the insert fails because a
+/// record exists with the same id (whatever column is identified by
+/// `ignore_conflicts_on`), no changes are made and the existing record is
+/// returned.
+///
+/// The insert + fetch sequence is not atomic.  It's conceivable that another
+/// client could modify the record in between.  The caller is responsible for
+/// ensuring that doesn't happen or does not matter for their purposes.  In
+/// practice, the surrounding saga framework should ensure that this doesn't
+/// happen.
+///
+//
+// It's worth describing this process in more detail from the perspective of our
+// caller.  We'll consider the case of a saga that creates a new Instance.
+// TODO This might belong in docs for the saga instead.
+//
+//
+// EASY CASE
+//
+// If we do a simple INSERT, and that succeeds -- great.  That's the common case
+// and it's easy.
+//
+//
+// ERROR: CONFLICT ON INSTANCE ID
+//
+// What if we get a conflict error on the instance id?  Since the id is unique
+// to this saga, we must assume that means that we're being invoked a second
+// time after a previous one successfully updated the database.  That means one
+// of two things: (1) a previous database update succeeded, but something went
+// wrong (e.g., the SEC crashed) before the saga could persistently record that
+// fact; or (2) a second instance of the action is concurrently running with
+// this one and already completed its database update.  ((2) is only possible
+// if, after evaluating use cases like this, we decide that it's okay to _allow_
+// two instances of the same action to run concurrently in the case of a
+// partition among SECs or the like.  We would only do that if it's clear that
+// the action implementations can always handle this.)
+//
+// We opt to handle this by ignoring the conflict and always fetching the
+// corresponding row in the table.  In the common case, we'll find our own row.
+// In the conflict case, we'll find the pre-existing row.  In that latter case,
+// the caller will verify that it looks the way we expect it to look (same
+// "name", parameters, generation number, etc.).  It should always match what we
+// would have inserted.  Having verified that, we can simply act as though we
+// inserted it ourselves.  In both cases (1) and (2) above, this action will
+// complete successfully and the saga can proceed.  In (2), the SEC may have to
+// deal with the fact that the same action completed twice, but it doesn't have
+// to _do_ anything about it (i.e., invoke an undo action).  That said, if a
+// second SEC did decide to unwind the saga and undo this action, things get
+// more complicated.  It would be nice if the framework guaranteed that (2)
+// wasn't the case.
+//
+//
+// ERROR: CONFLICT ON INSTANCE ID, MISSING ROW
+//
+// What if we get a conflict, fetch the corresponding row, and find none?  We
+// should make this impossible in a correct system.  The only two things that
+// might plausibly do this are (A) the undo action for this action, and (B) an
+// actual instance delete operation.  We can disallow (B) by not allowing
+// anything to delete an instance whose create saga never finished (indicated by
+// the state in the Instance row).  Is there any implementation of sagas that
+// would allow us to wind up in case (A)?  Again, if SECs went split-brain
+// because one of them got to this point in the saga, hit the easy case, then
+// became partitioned from the rest of the world, and then a second SEC picked
+// up the saga and reran this action, and then the first saga encountered some
+// _other_ failure that triggered a saga unwind, resulting in the undo action
+// for this step completing, and then the second SEC winds up in this state.
+// One way to avoid this would be to have the undo action, rather than deleting
+// the instance record, marking the row with a state indicating it is dead (or
+// maybe never even alive).  Something needs to clean these records up, but
+// that's needed anyway for any sort of deleted record.
+//
+//
+// COMBINING THE TWO QUERIES
+//
+// Since the case where we successfully insert the record is expected to be so
+// common, we could use a RETURNING clause and only do a subsequent SELECT on
+// conflict.  This would bifurcate the code paths in a way that means we'll
+// almost never wind up testing the conflict path.  We could add this
+// optimization if/when we find that the extra query is a problem.
+//
+// Relatedly, we could put the INSERT and SELECT queries into a transaction.
+// This isn't necessary for our purposes.
+//
+//
+// PROPOSED APPROACH
+//
+// Putting this all together, we arrive at the approach here:
+//
+//   ACTION:
+//   - INSERT INTO Instance ... ON CONFLICT (id) DO NOTHING.
+//   - SELECT * from Instance WHERE id = ...
+//
+//   UNDO ACTION:
+//   - UPDATE Instance SET state = deleted AND time_deleted = ... WHERE
+//     id = ...;
+//     (this will update 0 or 1 row, and it doesn't matter to us which)
+//
+// There are two more considerations:
+//
+// Does this work?  Recall that sagas say that the effect of the sequence:
+//
+//   start action (1)
+//   start + finish action (2)
+//   start + finish undo action
+//   finish action (1)
+//
+// must be the same as if action (1) had never happened.  This is true of the
+// proposed approach.  That is, no matter what parts of the "action (1)" happen
+// before or after the undo action finishes, the net result on the _database_
+// will be as if "action (1)" had never occurred.
+//
+//
+// ERROR: CONFLICT ON NAME
+//
+// All of the above describes what happens when there's a conflict on "id",
+// which is unique to this saga.  It's also possible that there would be a
+// conflict on the unique (project_id, name) index.  In that case, we just want
+// to fail right away -- the whole saga is going to fail with a user error.
+//
 pub async fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
