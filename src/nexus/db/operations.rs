@@ -80,7 +80,7 @@ pub fn sql_error_generic(e: DbError) -> ApiError {
  * that include the SQL.
  */
 /*
- * XXX TODO-debugging It would be really, really valuable to include the
+ * TODO-debugging It would be really, really valuable to include the
  * query parameters here as well.  However, the only thing we can do with
  * ToSql is to serialize it to a PostgreSQL type (as a string of bytes).
  * We could require that these impl some trait that also provides Debug, and
@@ -116,10 +116,10 @@ pub async fn sql_query_always_one(
     })
 }
 
-/**
- * XXX?
+/*
+ * XXX TODO-doc
+ * TODO-debugging can we include the SQL in the ApiError
  */
-/* XXX TODO-debugging can we include the SQL in the ApiError */
 pub async fn sql_query_maybe_one(
     client: &tokio_postgres::Client,
     sql: &str,
@@ -142,7 +142,7 @@ pub async fn sql_query_maybe_one(
  * Wrapper around [`tokio_postgres::Client::execute`] that produces errors
  * that include the SQL.
  */
-/* XXX TODO-debugging See sql_query(). */
+/* TODO-debugging See sql_query(). */
 pub async fn sql_execute(
     client: &tokio_postgres::Client,
     sql: &str,
@@ -154,10 +154,8 @@ pub async fn sql_execute(
         .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
 }
 
-/**
- * XXX?
- */
-/* XXX TODO-debugging can we include the SQL in the ApiError */
+/* XXX TODO-doc */
+/* TODO-debugging can we include the SQL in the ApiError */
 pub async fn sql_execute_maybe_one(
     client: &tokio_postgres::Client,
     sql: &str,

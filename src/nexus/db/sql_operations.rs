@@ -166,8 +166,8 @@ pub struct UpdatePrecond {
 /// An [`UpdatePrecond`] that describes whether the row was updated and what
 /// state was found, if any.
 ///
-// XXX TODO-coverage -- and check the SQL by hand
-// XXX TODO-log log for both cases here
+// TODO-coverage
+// TODO-log log for both cases here
 pub async fn sql_update_precond<'a, 'b, T, L>(
     client: &'b tokio_postgres::Client,
     scope_key: L::ScopeKey,

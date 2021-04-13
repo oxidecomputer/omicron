@@ -19,3 +19,4 @@ pub use pool::Pool;
 /* These are exposed only so that we can write examples that use them. */
 pub use sql::where_cond;
 pub use sql::SqlString;
+pub use sql::SqlValueSet;
