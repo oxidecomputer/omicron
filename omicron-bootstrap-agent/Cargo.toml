@@ -1,0 +1,58 @@
+[package]
+name = "omicron-bootstrap-agent"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+http = "0.2.0"
+hyper = "0.14"
+smf = "0.1"
+structopt = "0.3"
+tar = "0.4"
+thiserror = "1.0"
+toml = "0.5.6"
+
+[dependencies.dropshot]
+git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
+
+[dependencies.omicron-common]
+path = "../omicron-common"
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.tokio]
+version = "1.0"
+features = [ "full" ]
+
+[dependencies.uuid]
+version = "0.8"
+features = [ "serde", "v4" ]
+
+#
+# It's common during development to use a local copy of dropshot or steno in the
+# parent directory.  If you want to use those, uncomment one of these blocks.
+#
+#[patch."https://github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot/dropshot" }
+#
+
+#
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+#
+[[bin]]
+name = "bootstrap-agent"
+doc = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

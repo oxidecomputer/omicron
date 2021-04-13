@@ -2,7 +2,7 @@
  * HTTP entrypoint functions for the bootstrap agent's exposed API
  */
 
-use crate::api_model::{
+use omicron_common::model::{
     BootstrapAgentShareRequest, BootstrapAgentShareResponse,
 };
 use dropshot::endpoint;
@@ -13,7 +13,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use std::sync::Arc;
 
-use crate::bootstrap_agent::bootstrap_agent::BootstrapAgent;
+use omicron_bootstrap_agent::bootstrap_agent::BootstrapAgent;
 
 /**
  * Returns a description of the bootstrap agent API

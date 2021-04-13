@@ -1,6 +1,6 @@
-use crate::bootstrap_agent::bootstrap_agent::BootstrapAgent;
-use crate::bootstrap_agent::http_entrypoints;
-use crate::bootstrap_agent::Config;
+use omicron_bootstrap_agent::bootstrap_agent::BootstrapAgent;
+use omicron_bootstrap_agent::http_entrypoints;
+use omicron_bootstrap_agent::Config;
 use std::sync::Arc;
 
 /// Wraps a [BootstrapAgent] object, and provides helper methods for exposing it

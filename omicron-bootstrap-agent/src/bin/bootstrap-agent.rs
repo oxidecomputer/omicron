@@ -5,10 +5,10 @@
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use omicron::bootstrap_agent::Config;
-use omicron::bootstrap_agent::Server;
-use omicron::cmd::fatal;
-use omicron::cmd::CmdError;
+use omicron_bootstrap_agent::Config;
+use omicron_bootstrap_agent::Server;
+use omicron_common::cmd::fatal;
+use omicron_common::cmd::CmdError;
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
