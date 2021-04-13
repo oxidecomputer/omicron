@@ -2,7 +2,7 @@
  * Quick-and-dirty polling within a test suite
  */
 
-use core::future::Future;
+use std::future::Future;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
