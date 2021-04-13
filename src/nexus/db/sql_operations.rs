@@ -464,53 +464,180 @@ where
     }
 }
 
-/* XXX TODO-doc + disclaimer about async desugaring */
-/*
- * XXX working here -- want to replace callers of sql_insert_unique_idempotent
- * with this one to commonize just a bit more
+/**
+ * Idempotently insert a database record and fetch it back
+ *
+ * This function is intended for use (indirectly) by sagas that want to create a
+ * record.  It first attempts to insert the specified record.  If the record is
+ * successfully inserted, the record is fetched again (using `scope_key` and
+ * `item_key`) and returned.  If the insert fails because a record exists with
+ * the same id (whatever column is identified by `ignore_conflicts_on`), no
+ * changes are made and the existing record is returned.
+ *
+ * The insert + fetch sequence is not atomic.  It's conceivable that another
+ * client could modify the record in between.  The caller is responsible for
+ * ensuring that doesn't happen or does not matter for their purposes.  In
+ * practice, the surrounding saga framework should ensure that this doesn't
+ * happen.
+ *
+ * Generally, this function might fail because of a constraint violation --
+ * namely, that there's another object with the same name in the same collection
+ * (e.g., another Instance with the same "name" in the same Project).  The
+ * caller provides `unique_value` -- the "name", in this example -- and this
+ * function will return an [`ApiError::ObjectAlreadyExists`] error reflecting
+ * what happened.
  */
-pub fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
+/*
+ * It's worth describing this process in more detail from the perspective of our
+ * caller.  We'll consider the case of a saga that creates a new Instance.
+ * TODO This might belong in docs for the saga instead.
+ *
+ *
+ * EASY CASE
+ *
+ * If we do a simple INSERT, and that succeeds -- great.  That's the common case
+ * and it's easy.
+ *
+ *
+ * ERROR: CONFLICT ON INSTANCE ID
+ *
+ * What if we get a conflict error on the instance id?  Since the id is unique
+ * to this saga, we must assume that means that we're being invoked a second
+ * time after a previous one successfully updated the database.  That means one
+ * of two things: (1) a previous database update succeeded, but something went
+ * wrong (e.g., the SEC crashed) before the saga could persistently record that
+ * fact; or (2) a second instance of the action is concurrently running with
+ * this one and already completed its database update.  ((2) is only possible
+ * if, after evaluating use cases like this, we decide that it's okay to _allow_
+ * two instances of the same action to run concurrently in the case of a
+ * partition among SECs or the like.  We would only do that if it's clear that
+ * the action implementations can always handle this.)
+ *
+ * We opt to handle this by ignoring the conflict and always fetching the
+ * corresponding row in the table.  In the common case, we'll find our own row.
+ * In the conflict case, we'll find the pre-existing row.  In that latter case,
+ * the caller will verify that it looks the way we expect it to look (same
+ * "name", parameters, generation number, etc.).  It should always match what we
+ * would have inserted.  Having verified that, we can simply act as though we
+ * inserted it ourselves.  In both cases (1) and (2) above, this action will
+ * complete successfully and the saga can proceed.  In (2), the SEC may have to
+ * deal with the fact that the same action completed twice, but it doesn't have
+ * to _do_ anything about it (i.e., invoke an undo action).  That said, if a
+ * second SEC did decide to unwind the saga and undo this action, things get
+ * more complicated.  It would be nice if the framework guaranteed that (2)
+ * wasn't the case.
+ *
+ *
+ * ERROR: CONFLICT ON INSTANCE ID, MISSING ROW
+ *
+ * What if we get a conflict, fetch the corresponding row, and find none?  We
+ * should make this impossible in a correct system.  The only two things that
+ * might plausibly do this are (A) the undo action for this action, and (B) an
+ * actual instance delete operation.  We can disallow (B) by not allowing
+ * anything to delete an instance whose create saga never finished (indicated by
+ * the state in the Instance row).  Is there any implementation of sagas that
+ * would allow us to wind up in case (A)?  Again, if SECs went split-brain
+ * because one of them got to this point in the saga, hit the easy case, then
+ * became partitioned from the rest of the world, and then a second SEC picked
+ * up the saga and reran this action, and then the first saga encountered some
+ * _other_ failure that triggered a saga unwind, resulting in the undo action
+ * for this step completing, and then the second SEC winds up in this state.
+ * One way to avoid this would be to have the undo action, rather than deleting
+ * the instance record, marking the row with a state indicating it is dead (or
+ * maybe never even alive).  Something needs to clean these records up, but
+ * that's needed anyway for any sort of deleted record.
+ *
+ *
+ * COMBINING THE TWO QUERIES
+ *
+ * Since the case where we successfully insert the record is expected to be so
+ * common, we could use a RETURNING clause and only do a subsequent SELECT on
+ * conflict.  This would bifurcate the code paths in a way that means we'll
+ * almost never wind up testing the conflict path.  We could add this
+ * optimization if/when we find that the extra query is a problem.
+ *
+ * Relatedly, we could put the INSERT and SELECT queries into a transaction.
+ * This isn't necessary for our purposes.
+ *
+ *
+ * PROPOSED APPROACH
+ *
+ * Putting this all together, we arrive at the approach here:
+ *
+ *   ACTION:
+ *   - INSERT INTO Instance ... ON CONFLICT (id) DO NOTHING.
+ *   - SELECT * from Instance WHERE id = ...
+ *
+ *   UNDO ACTION:
+ *   - UPDATE Instance SET state = deleted AND time_deleted = ... WHERE
+ *     id = ...;
+ *     (this will update 0 or 1 row, and it doesn't matter to us which)
+ *
+ * There are two more considerations:
+ *
+ * Does this work?  Recall that sagas say that the effect of the sequence:
+ *
+ *   start action (1)
+ *   start + finish action (2)
+ *   start + finish undo action
+ *   finish action (1)
+ *
+ * must be the same as if action (1) had never happened.  This is true of the
+ * proposed approach.  That is, no matter what parts of the "action (1)" happen
+ * before or after the undo action finishes, the net result on the _database_
+ * will be as if "action (1)" had never occurred.
+ *
+ *
+ * ERROR: CONFLICT ON NAME
+ *
+ * All of the above describes what happens when there's a conflict on "id",
+ * which is unique to this saga.  It's also possible that there would be a
+ * conflict on the unique (project_id, name) index.  In that case, we just want
+ * to fail right away -- the whole saga is going to fail with a user error.
+ */
+pub async fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> impl Future<Output = LookupResult<T::ModelType>> + 'a
+) -> LookupResult<T::ModelType>
 where
     T: Table,
     L: LookupKey<'a>,
 {
-    async move {
-        sql_insert_unique_idempotent::<T>(
-            client,
-            values,
-            unique_value,
-            ignore_conflicts_on,
-        )
-        .await?;
+    sql_insert_unique_idempotent::<T>(
+        client,
+        values,
+        unique_value,
+        ignore_conflicts_on,
+    )
+    .await?;
 
-        /*
-         * If we get here, then we successfully inserted the record.  It would
-         * be a bug if something else were to remove that record before we have
-         * a chance to fetch it.  (That's not generally true -- just something
-         * that must be true for this function to be correct, and is true in the
-         * cases of our callers.)
-         */
-        sql_fetch_row_by::<L, T>(client, scope_key, item_key)
-            .await
-            .map_err(sql_error_not_missing)
-    }
+    /*
+     * If we get here, then we successfully inserted the record.  It would
+     * be a bug if something else were to remove that record before we have
+     * a chance to fetch it.  (That's not generally true -- just something
+     * that must be true for this function to be correct, and is true in the
+     * cases of our callers.)
+     */
+    sql_fetch_row_by::<L, T>(client, scope_key, item_key)
+        .await
+        .map_err(sql_error_not_missing)
 }
 
+///
 /// Verifies that the given error is _not_ an `ApiObject::ObjectNotFound`.
 /// If it is, then it's converted to an `ApiError::InternalError` instead,
 /// on the assumption that an `ObjectNotFound` in this context is neither
 /// expected nor appropriate for the caller.
+///
 fn sql_error_not_missing(e: ApiError) -> ApiError {
-    if matches!(e, ApiError::ObjectNotFound { .. }) {
-        ApiError::internal_error(&format!("unexpected ObjectNotFound: {:#}", e))
-    } else {
-        e
+    match e {
+        e @ ApiError::ObjectNotFound { .. } => ApiError::internal_error(
+            &format!("unexpected ObjectNotFound: {:#}", e),
+        ),
+        e => e,
     }
 }
