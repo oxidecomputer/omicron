@@ -1,7 +1,7 @@
 //! Facilities for managing a local database for development
 
+use crate::config::PostgresConfigWithUrl;
 use crate::dev::poll;
-use crate::nexus::PostgresConfigWithUrl;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;

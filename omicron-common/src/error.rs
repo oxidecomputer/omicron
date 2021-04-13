@@ -4,8 +4,8 @@
  * For HTTP-level error handling, see Dropshot.
  */
 
-use crate::api_model::ApiName;
-use crate::api_model::ApiResourceType;
+use crate::model::ApiName;
+use crate::model::ApiResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;

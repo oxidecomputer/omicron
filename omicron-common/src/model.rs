@@ -5,7 +5,7 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
-use crate::api_error::ApiError;
+use crate::error::ApiError;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ApiObjectIdentity;

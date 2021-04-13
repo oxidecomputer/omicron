@@ -5,9 +5,9 @@
 use anyhow::bail;
 use anyhow::Context;
 use futures::stream::StreamExt;
-use omicron::cmd::fatal;
-use omicron::cmd::CmdError;
-use omicron::dev;
+use omicron_common::cmd::fatal;
+use omicron_common::cmd::CmdError;
+use omicron_common::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
 use std::path::PathBuf;
