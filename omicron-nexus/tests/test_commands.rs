@@ -5,25 +5,28 @@
  */
 
 /*
- * TODO-coverage: test success cases of nexus and sled-agent
+ * TODO-coverage: test success cases of nexus
  */
 
 use expectorate::assert_contents;
+use omicron_common::dev::test_cmds::assert_exit_code;
+use omicron_common::dev::test_cmds::error_for_enoent;
+use omicron_common::dev::test_cmds::path_to_executable;
+use omicron_common::dev::test_cmds::run_command;
+use omicron_common::dev::test_cmds::temp_file_path;
+use omicron_common::dev::test_cmds::EXIT_FAILURE;
+use omicron_common::dev::test_cmds::EXIT_SUCCESS;
+use omicron_common::dev::test_cmds::EXIT_USAGE;
+use openapiv3::OpenAPI;
 use std::fs;
 use std::path::PathBuf;
 use subprocess::Exec;
 
 /** name of the "nexus" executable */
 const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
-/** name of the "sled-agent" executable */
-const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 
 fn path_to_nexus() -> PathBuf {
     path_to_executable(CMD_NEXUS)
-}
-
-fn path_to_sled_agent() -> PathBuf {
-    path_to_executable(CMD_SLED_AGENT)
 }
 
 /**
@@ -48,15 +51,6 @@ fn test_nexus_no_args() {
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents("tests/output/cmd-nexus-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-nexus-noargs-stderr", &stderr_text);
-}
-
-#[test]
-fn test_sled_agent_no_args() {
-    let exec = Exec::cmd(path_to_sled_agent());
-    let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
-    assert_contents("tests/output/cmd-sled-agent-noargs-stdout", &stdout_text);
-    assert_contents("tests/output/cmd-sled-agent-noargs-stderr", &stderr_text);
 }
 
 #[test]

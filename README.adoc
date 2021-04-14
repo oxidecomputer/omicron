@@ -122,11 +122,11 @@ omicron-dev: populated database
 +
 Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
 
-2. `nexus` requires a configuration file to run.  You can use `examples/config.toml` to start with.  Build and run it like this:
+2. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
-$ cargo run --bin=nexus -- examples/config.toml
+$ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
 ...
 listening: http://127.0.0.1:12220
 ----
@@ -408,11 +408,11 @@ $ tail -f $(svcs -L oxide_controller)
 == Configuration reference
 
 `nexus` requires a TOML configuration file.  There's an example in
-`examples/config.toml`:
+`omicron-nexus/examples/config.toml`:
 
 [source,toml]
 ----
-include::examples/config.toml[]
+include::omicron-nexus/examples/config.toml[]
 ----
 
 Supported config properties include:

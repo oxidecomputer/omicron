@@ -42,6 +42,10 @@ features = [ "full" ]
 version = "0.8"
 features = [ "serde", "v4" ]
 
+[dev-dependencies]
+expectorate = "1.0.1"
+subprocess = "0.2.4"
+
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

@@ -110,7 +110,7 @@ static FILE_COUNTER: AtomicU32 = AtomicU32::new(0);
 /**
  * Create a new temporary file name.
  */
-fn temp_file_path(label: &str) -> PathBuf {
+pub fn temp_file_path(label: &str) -> PathBuf {
     let mut file_path = temp_dir();
     let file_name = format!(
         "{}.{}.{}",

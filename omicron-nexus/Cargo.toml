@@ -61,6 +61,9 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 bytes = "1.0.1"
+expectorate = "1.0.1"
+openapiv3 = "0.3.0"
+subprocess = "0.2.4"
 
 #
 # Disable doc builds by default for our binaries to work around issue

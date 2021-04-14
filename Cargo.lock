@@ -294,7 +294,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3",
+ "openapiv3 0.4.0",
  "paste",
  "schemars",
  "serde",
@@ -867,12 +867,14 @@ dependencies = [
  "bytes",
  "chrono",
  "dropshot",
+ "expectorate",
  "futures",
  "http",
  "hyper",
  "libc",
  "omicron-common",
  "omicron-sled-agent",
+ "openapiv3 0.3.2",
  "schemars",
  "serde",
  "serde_json",
@@ -880,6 +882,7 @@ dependencies = [
  "slog",
  "steno",
  "structopt",
+ "subprocess",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -894,6 +897,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dropshot",
+ "expectorate",
  "futures",
  "http",
  "hyper",
@@ -903,6 +907,7 @@ dependencies = [
  "serde_json",
  "slog",
  "structopt",
+ "subprocess",
  "tokio",
  "uuid",
 ]
@@ -918,6 +923,18 @@ name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
+
+[[package]]
+name = "openapiv3"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ee9a17eebdd923c4cf74145cd31b2b1d3aa019262c9e8669a843b1d629a9a3c"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
 
 [[package]]
 name = "openapiv3"
