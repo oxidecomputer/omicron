@@ -365,7 +365,7 @@ in a format which lets them be transferred to a Helios machine.
 [source,text]
 ----
 $ cargo build
-$ cargo run --bin=omicron_package
+$ cargo run --bin=omicron-package
 ...
 # Your ./out directory should now be populated.
 ----
