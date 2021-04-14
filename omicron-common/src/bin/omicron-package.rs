@@ -58,7 +58,8 @@ fn main() -> Result<()> {
         &Package::new("sled-agent"),
     ];
 
-    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let root = manifest_dir.parent().unwrap();
     env::set_current_dir(&root)?;
     let output_directory = root.join("out");
     create_dir_all(&output_directory)
