@@ -10,6 +10,7 @@
 
 pub mod db;
 pub mod poll;
+pub mod test_cmds;
 
 use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;

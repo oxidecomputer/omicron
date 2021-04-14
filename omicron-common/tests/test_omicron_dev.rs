@@ -2,8 +2,13 @@
  * Smoke tests for the omicron-dev command-line tool
  */
 
+use expectorate::assert_contents;
 use omicron_common::dev::db::has_omicron_schema;
 use omicron_common::dev::process_running;
+use omicron_common::dev::test_cmds::assert_exit_code;
+use omicron_common::dev::test_cmds::path_to_executable;
+use omicron_common::dev::test_cmds::run_command;
+use omicron_common::dev::test_cmds::EXIT_USAGE;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,6 +21,10 @@ const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
 /** timeout used for various things that should be pretty quick */
 const TIMEOUT: Duration = Duration::from_secs(10);
+
+fn path_to_omicron_dev() -> PathBuf {
+    path_to_executable(CMD_OMICRON_DEV)
+}
 
 /**
  * Encapsulates the information we need from a running `omicron-dev db-run`
@@ -153,6 +162,8 @@ fn verify_graceful_exit(mut dbrun: DbRun) -> subprocess::ExitStatus {
  */
 #[tokio::test]
 async fn test_db_run() {
+    let cmd_path = path_to_omicron_dev();
+
     /*
      * Rather than invoke the command directly, we'll use the shell to run the
      * command in a subshell with monitor mode active.  This puts the child
@@ -179,7 +190,7 @@ async fn test_db_run() {
      */
     let cmdstr = format!(
         "( set -o monitor; {} db-run --listen-port 0)",
-        CMD_OMICRON_DEV
+        cmd_path.display()
     );
     let exec =
         Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
@@ -198,7 +209,7 @@ async fn test_db_run() {
      * populated.
      */
     eprintln!("running db-populate");
-    let populate_result = Exec::cmd(CMD_OMICRON_DEV)
+    let populate_result = Exec::cmd(&cmd_path)
         .arg("db-populate")
         .arg("--database-url")
         .arg(&dbrun.listen_config_url)
@@ -217,7 +228,7 @@ async fn test_db_run() {
 
     /* Try again, but with the --wipe flag. */
     eprintln!("running db-populate --wipe");
-    let populate_result = Exec::cmd(CMD_OMICRON_DEV)
+    let populate_result = Exec::cmd(&cmd_path)
         .arg("db-populate")
         .arg("--wipe")
         .arg("--database-url")
@@ -229,7 +240,7 @@ async fn test_db_run() {
 
     /* Now run db-wipe.  This should work. */
     eprintln!("running db-wipe");
-    let wipe_result = Exec::cmd(CMD_OMICRON_DEV)
+    let wipe_result = Exec::cmd(&cmd_path)
         .arg("db-wipe")
         .arg("--database-url")
         .arg(&dbrun.listen_config_url)
@@ -279,7 +290,7 @@ async fn test_db_killed() {
      * Redirect stderr to stdout just so that it doesn't get dumped to the
      * user's terminal during regular `cargo test` runs.
      */
-    let exec = Exec::cmd(CMD_OMICRON_DEV)
+    let exec = Exec::cmd(&path_to_omicron_dev())
         .arg("db-run")
         .arg("--listen-port=0")
         .stderr(Redirection::Merge);
@@ -300,4 +311,58 @@ async fn test_db_killed() {
     let wait = verify_graceful_exit(dbrun);
     eprintln!("wait result: {:?}", wait);
     assert!(matches!(wait, subprocess::ExitStatus::Exited(1),));
+}
+
+#[test]
+fn test_omicron_dev_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev());
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents("tests/output/cmd-omicron-dev-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-omicron-dev-noargs-stderr", &stderr_text);
+}
+
+#[test]
+fn test_omicron_dev_bad_cmd() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("bogus-command");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron-dev-bad-cmd-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron-dev-bad-cmd-stderr",
+        &stderr_text,
+    );
+}
+
+#[test]
+fn test_omicron_dev_db_populate_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("db-populate");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron-dev-db-populate-noargs-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron-dev-db-populate-noargs-stderr",
+        &stderr_text,
+    );
+}
+
+#[test]
+fn test_omicron_dev_db_wipe_no_args() {
+    let exec = Exec::cmd(path_to_omicron_dev()).arg("db-wipe");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-omicron-dev-db-wipe-noargs-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-omicron-dev-db-wipe-noargs-stderr",
+        &stderr_text,
+    );
 }
