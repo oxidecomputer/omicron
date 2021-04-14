@@ -34,5 +34,12 @@ pub mod http_pagination;
 pub mod model;
 pub mod packaging;
 
+// XXX naming here needs work
+mod sled_agent_client;
+pub use sled_agent_client::Client as SledAgentClient;
+pub use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
+mod nexus_client;
+pub use nexus_client::Client as NexusClient;
+
 #[macro_use]
 extern crate slog;

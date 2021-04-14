@@ -2,10 +2,10 @@
  * HTTP entrypoint functions for the sled agent's exposed API
  */
 
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::DiskEnsureBody;
-use crate::api_model::InstanceEnsureBody;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::DiskEnsureBody;
+use omicron_common::model::InstanceEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;

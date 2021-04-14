@@ -4,11 +4,10 @@
 
 use super::Simulatable;
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateRequested;
-use crate::api_model::ApiInstanceState;
-use crate::nexus;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::model::ApiInstanceState;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
@@ -223,7 +222,7 @@ impl Simulatable for SimInstance {
     }
 
     async fn notify(
-        csc: &Arc<nexus::Client>,
+        csc: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

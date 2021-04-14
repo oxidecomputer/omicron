@@ -9,11 +9,11 @@
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use omicron::cmd::fatal;
-use omicron::cmd::CmdError;
-use omicron::sled_agent::run_server;
-use omicron::sled_agent::Config;
-use omicron::sled_agent::SimMode;
+use omicron_common::cmd::fatal;
+use omicron_common::cmd::CmdError;
+use omicron_sled_agent::run_server;
+use omicron_sled_agent::Config;
+use omicron_sled_agent::SimMode;
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;

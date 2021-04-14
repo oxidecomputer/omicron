@@ -8,11 +8,11 @@
 
 use http::Method;
 use hyper::Body;
-use omicron_common::error::ApiError;
-use omicron_common::http_client::HttpClient;
-use omicron_common::model::ApiDiskRuntimeState;
-use omicron_common::model::ApiInstanceRuntimeState;
-use omicron_common::model::ApiSledAgentStartupInfo;
+use crate::error::ApiError;
+use crate::http_client::HttpClient;
+use crate::model::ApiDiskRuntimeState;
+use crate::model::ApiInstanceRuntimeState;
+use crate::model::ApiSledAgentStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;

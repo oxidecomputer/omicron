@@ -1,5 +1,4 @@
-use crate::api_error::ApiError;
-use crate::nexus;
+use omicron_common::error::ApiError;
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
@@ -136,7 +135,7 @@ pub trait Simulatable: fmt::Debug {
      * identified by `id`.
      */
     async fn notify(
-        csc: &Arc<nexus::Client>,
+        csc: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;

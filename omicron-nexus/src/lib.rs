@@ -2,7 +2,6 @@
  * Library interface to the Nexus, the heart of the control plane
  */
 
-mod client;
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
@@ -12,7 +11,6 @@ mod nexus;
 mod saga_interface;
 mod sagas;
 
-pub use client::Client;
 pub use config::Config;
 pub use context::ServerContext;
 pub use db::PostgresConfigWithUrl;

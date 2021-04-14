@@ -2,12 +2,11 @@
  * Simulated sled agent implementation
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiDiskState;
-use crate::api_model::ApiDiskStateRequested;
-use crate::nexus;
-use crate::sled_agent::sim::simulatable::Simulatable;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiDiskState;
+use omicron_common::model::ApiDiskStateRequested;
+use omicron_sled_agent::sim::simulatable::Simulatable;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
@@ -217,7 +216,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        csc: &Arc<nexus::Client>,
+        csc: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {

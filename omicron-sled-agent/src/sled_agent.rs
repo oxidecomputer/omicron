@@ -4,12 +4,11 @@
 
 use super::config::SimMode;
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiDiskStateRequested;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateRequested;
-use crate::nexus;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiDiskStateRequested;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,7 +36,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /*
-     * TODO-cleanup should this instantiate the nexus::Client it needs?
+     * TODO-cleanup should this instantiate the NexusClient it needs?
      * Should it take a Config object instead of separate id, sim_mode, etc?
      */
     /** Constructs a simulated SledAgent with the given uuid. */
@@ -45,7 +44,7 @@ impl SledAgent {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: Arc<nexus::Client>,
+        ctlsc: Arc<NexusClient>,
     ) -> SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 

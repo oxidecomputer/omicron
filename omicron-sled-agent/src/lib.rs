@@ -2,22 +2,19 @@
 * Library interface to the sled agent
  */
 
-mod client;
 mod config;
 mod http_entrypoints;
 mod sim;
-#[allow(clippy::module_inception)]
 mod sled_agent;
 
-pub use client::Client;
-pub use client::TestInterfaces;
 pub use config::Config;
 pub use config::SimMode;
 
-use crate::api_model::ApiSledAgentStartupInfo;
-use crate::backoff::{internal_service_policy, retry_notify, BackoffError};
-use crate::nexus;
-use sled_agent::SledAgent;
+use omicron_common::backoff::{
+    internal_service_policy, retry_notify, BackoffError,
+};
+use omicron_common::model::ApiSledAgentStartupInfo;
+use omicron_sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
 
@@ -42,9 +39,9 @@ impl Server {
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
-        let client_log = log.new(o!("component" => "nexus::Client"));
+        let client_log = log.new(o!("component" => "NexusClient"));
         let nexus_client =
-            Arc::new(nexus::Client::new(config.nexus_address, client_log));
+            Arc::new(NexusClient::new(config.nexus_address, client_log));
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
