@@ -15,8 +15,8 @@
  */
 
 use super::Config as DbConfig;
-use omicron_common::error::ApiError;
 use bb8_postgres::PostgresConnectionManager;
+use omicron_common::error::ApiError;
 use std::ops::Deref;
 
 pub struct Pool {

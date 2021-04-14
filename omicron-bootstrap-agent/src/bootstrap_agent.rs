@@ -1,7 +1,7 @@
+use crate::bootstrap_agent_client::Client as BootstrapClient;
 use omicron_common::error::ApiError;
 use omicron_common::model::BootstrapAgentShareResponse;
 use omicron_common::packaging::sha256_digest;
-use crate::bootstrap_agent_client::Client as BootstrapClient;
 
 use slog::Logger;
 use std::collections::HashMap;

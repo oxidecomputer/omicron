@@ -1,6 +1,6 @@
+use async_trait::async_trait;
 use omicron_common::error::ApiError;
 use omicron_common::NexusClient;
-use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;

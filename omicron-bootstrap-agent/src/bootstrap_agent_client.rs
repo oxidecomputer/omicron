@@ -6,9 +6,9 @@
  */
 
 use omicron_common::error::ApiError;
+use omicron_common::http_client::HttpClient;
 use omicron_common::model::BootstrapAgentShareRequest;
 use omicron_common::model::BootstrapAgentShareResponse;
-use omicron_common::http_client::HttpClient;
 
 use http::Method;
 use hyper::Body;

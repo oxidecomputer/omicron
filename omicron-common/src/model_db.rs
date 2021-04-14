@@ -48,6 +48,7 @@
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
+use super::db::sql_row_value;
 use crate::bail_unless;
 use crate::error::ApiError;
 use crate::model::ApiByteCount;
@@ -69,7 +70,6 @@ use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
-use super::db::sql_row_value;
 
 /*
  * FromSql/ToSql impls used for simple Rust types

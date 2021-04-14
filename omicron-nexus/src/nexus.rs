@@ -2,6 +2,15 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::db;
+use crate::saga_interface::SagaContext;
+use crate::sagas;
+use async_trait::async_trait;
+use chrono::Utc;
+use futures::future::ready;
+use futures::lock::Mutex;
+use futures::StreamExt;
+use omicron_common::bail_unless;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiDiskAttachment;
@@ -31,16 +40,7 @@ use omicron_common::model::LookupResult;
 use omicron_common::model::PaginationOrder::Ascending;
 use omicron_common::model::PaginationOrder::Descending;
 use omicron_common::model::UpdateResult;
-use omicron_common::bail_unless;
-use crate::db;
-use crate::saga_interface::SagaContext;
-use crate::sagas;
 use omicron_common::SledAgentClient;
-use async_trait::async_trait;
-use chrono::Utc;
-use futures::future::ready;
-use futures::lock::Mutex;
-use futures::StreamExt;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;

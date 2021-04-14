@@ -19,6 +19,9 @@
  */
 
 use super::Pool;
+use chrono::Utc;
+use omicron_common::bail_unless;
+use omicron_common::db::sql_row_value;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiDiskAttachment;
@@ -40,9 +43,6 @@ use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
 use omicron_common::model::UpdateResult;
-use omicron_common::db::sql_row_value;
-use omicron_common::bail_unless;
-use chrono::Utc;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use tokio_postgres::types::ToSql;

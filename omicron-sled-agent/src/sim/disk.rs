@@ -2,14 +2,14 @@
  * Simulated sled agent implementation
  */
 
+use crate::sim::simulatable::Simulatable;
+use async_trait::async_trait;
+use chrono::Utc;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskState;
 use omicron_common::model::ApiDiskStateRequested;
 use omicron_common::NexusClient;
-use crate::sim::simulatable::Simulatable;
-use async_trait::async_trait;
-use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
 

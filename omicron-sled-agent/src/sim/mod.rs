@@ -8,12 +8,12 @@ mod simulatable;
 
 use super::config::SimMode;
 
-use omicron_common::error::ApiError;
-use omicron_common::NexusClient;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
+use omicron_common::error::ApiError;
+use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -376,6 +376,10 @@ mod test {
     use super::SimDisk;
     use super::SimInstance;
     use super::SimObject;
+    use chrono::Utc;
+    use dropshot::test_util::LogContext;
+    use futures::channel::mpsc::Receiver;
+    use omicron_common::dev::test_setup_log;
     use omicron_common::error::ApiError;
     use omicron_common::model::ApiDiskRuntimeState;
     use omicron_common::model::ApiDiskState;
@@ -384,10 +388,6 @@ mod test {
     use omicron_common::model::ApiInstanceRuntimeState;
     use omicron_common::model::ApiInstanceRuntimeStateRequested;
     use omicron_common::model::ApiInstanceState;
-    use omicron_common::dev::test_setup_log;
-    use chrono::Utc;
-    use dropshot::test_util::LogContext;
-    use futures::channel::mpsc::Receiver;
 
     fn make_instance(
         logctx: &LogContext,

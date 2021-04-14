@@ -2,10 +2,6 @@
  * HTTP entrypoint functions for the sled agent's exposed API
  */
 
-use omicron_common::model::ApiDiskRuntimeState;
-use omicron_common::model::ApiInstanceRuntimeState;
-use omicron_common::model::DiskEnsureBody;
-use omicron_common::model::InstanceEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -14,6 +10,10 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::DiskEnsureBody;
+use omicron_common::model::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;

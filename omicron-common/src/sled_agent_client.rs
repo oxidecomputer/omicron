@@ -6,13 +6,13 @@
  */
 
 use crate::error::ApiError;
+use crate::http_client::HttpClient;
 use crate::model::ApiDiskRuntimeState;
 use crate::model::ApiDiskStateRequested;
 use crate::model::ApiInstanceRuntimeState;
 use crate::model::ApiInstanceRuntimeStateRequested;
 use crate::model::DiskEnsureBody;
 use crate::model::InstanceEnsureBody;
-use crate::http_client::HttpClient;
 use async_trait::async_trait;
 use http::Method;
 use hyper::Body;
