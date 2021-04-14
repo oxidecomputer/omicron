@@ -7,9 +7,9 @@
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='bootstrap_agent' grouping='require_all' restart_on='none'
+  <dependency name='bootstrap-agent' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/bootstrap_agent' />
+  <service_fmri value='svc:/system/illumos/bootstrap-agent' />
   </dependency>
 
   <exec_method type='method' name='start'

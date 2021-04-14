@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='bootstrap_agent'>
+<service_bundle type='manifest' name='bootstrap-agent'>
 
-<service name='system/illumos/bootstrap_agent' type='service' version='1'>
+<service name='system/illumos/bootstrap-agent' type='service' version='1'>
   <create_default_instance enabled='true' />
   <single_instance />
 
@@ -30,7 +30,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/bootstrap_agent/bootstrap_agent %{config/server_id} %{config/server_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/bootstrap-agent/bootstrap-agent %{config/server_id} %{config/server_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 

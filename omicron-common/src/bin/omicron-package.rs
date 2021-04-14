@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
 
     let packages = &[
-        &Package::new("bootstrap_agent"),
+        &Package::new("bootstrap-agent"),
         &Package::new("nexus"),
         &Package::new("sled-agent"),
     ];

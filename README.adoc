@@ -391,8 +391,8 @@ Once this is complete, we can unpack and initialize the bootstrap agent.  This s
 
 [source,text]
 ----
-$ tar -xvzf /opt/oxide/bootstrap_agent.tar -C /opt/oxide/bootstrap_agent
-$ svccfg import -V /opt/oxide/bootstrap_agent/smf/bootstrap_agent/manifest.xml
+$ tar -xvzf /opt/oxide/bootstrap-agent.tar -C /opt/oxide/bootstrap-agent
+$ svccfg import -V /opt/oxide/bootstrap-agent/smf/bootstrap-agent/manifest.xml
 ----
 
 You can verify which services are running with the following commands:
