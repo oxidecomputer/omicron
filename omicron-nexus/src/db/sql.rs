@@ -30,7 +30,7 @@ use tokio_postgres::types::ToSql;
  * ```no_run
  * # #[tokio::main]
  * # async fn main() {
- * # use omicron::nexus::db::sql::SqlString;
+ * # use omicron_nexus::db::sql::SqlString;
  * let mut sql = SqlString::new();
  * let param = sql.next_param(&"Robert'); DROP TABLE Students;--");
  * sql.push_str(&format!("SELECT * FROM Students WHERE name = {}", param));
@@ -174,8 +174,8 @@ impl SqlValueSet {
     /// set.  For example:
     ///
     /// ```
-    /// # use omicron::nexus::db::SqlValueSet;
-    /// # use omicron::nexus::db::SqlString;
+    /// # use omicron_nexus::db::SqlValueSet;
+    /// # use omicron_nexus::db::SqlString;
     /// let mut values = SqlValueSet::new();
     /// values.set("name", &"hello");
     /// values.set("gen", &123i64);
@@ -495,8 +495,8 @@ where
  * ## Example
  *
  * ```
- * # use omicron::nexus::db::sql::SqlString;
- * # use omicron::nexus::db::sql::where_cond;
+ * # use omicron_nexus::db::sql::SqlString;
+ * # use omicron_nexus::db::sql::where_cond;
  * use tokio_postgres::types::FromSql;
  * # use tokio_postgres::types::IsNull;
  * use tokio_postgres::types::ToSql;
