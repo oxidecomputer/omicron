@@ -42,11 +42,10 @@ features = [ "full" ]
 version = "0.8"
 features = [ "serde", "v4" ]
 
+#
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+#
 [[bin]]
 name = "sled-agent"
 doc = false
-
-[profile.dev]
-panic = "abort"
-[profile.release]
-panic = "abort"

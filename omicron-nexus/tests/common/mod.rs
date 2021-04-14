@@ -7,9 +7,8 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use omicron_common::dev;
 use omicron_common::model::ApiIdentityMetadata;
-use omicron_nexus::dev;
-use omicron_nexus::nexus;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -64,8 +63,9 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let database = dev::test_setup_database(log).await;
 
     config.database.url = database.pg_config().clone();
-    let server =
-        omicron_nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
+    let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
+        .await
+        .unwrap();
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),
         logctx.log.new(o!("component" => "external client test context")),

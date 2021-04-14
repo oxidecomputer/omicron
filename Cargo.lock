@@ -294,7 +294,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3 0.4.0",
+ "openapiv3",
  "paste",
  "schemars",
  "serde",
@@ -803,16 +803,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron"
+name = "omicron-bootstrap-agent"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "http",
+ "hyper",
+ "omicron-common",
+ "serde",
+ "serde_json",
+ "slog",
+ "smf",
+ "structopt",
+ "tar",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
  "async-trait",
  "backoff",
- "bb8",
- "bb8-postgres",
- "bytes",
  "chrono",
  "dropshot",
  "expectorate",
@@ -820,19 +837,14 @@ dependencies = [
  "http",
  "hyper",
  "libc",
- "newline-converter",
- "openapiv3 0.3.2",
  "ring",
  "schemars",
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
- "serde_with",
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "smf",
- "steno",
  "structopt",
  "subprocess",
  "tar",
@@ -846,6 +858,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-nexus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "bb8-postgres",
+ "bytes",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "libc",
+ "omicron-common",
+ "omicron-sled-agent",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "slog",
+ "steno",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-sled-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "omicron-common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -856,18 +918,6 @@ name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
-
-[[package]]
-name = "openapiv3"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee9a17eebdd923c4cf74145cd31b2b1d3aa019262c9e8669a843b1d629a9a3c"
-dependencies = [
- "indexmap",
- "serde",
- "serde_json",
- "serde_yaml",
-]
 
 [[package]]
 name = "openapiv3"

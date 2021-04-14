@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "omicron-bootstrap-agent",
+    "omicron-common",
+    "omicron-nexus",
+    "omicron-sled-agent"
+]
+
+default-members = [
+    "omicron-bootstrap-agent",
+    "omicron-common",
+    "omicron-nexus",
+    "omicron-sled-agent"
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

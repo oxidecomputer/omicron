@@ -43,8 +43,3 @@ features = [ "serde", "v4" ]
 [[bin]]
 name = "bootstrap-agent"
 doc = false
-
-[profile.dev]
-panic = "abort"
-[profile.release]
-panic = "abort"

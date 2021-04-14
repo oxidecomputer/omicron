@@ -69,8 +69,3 @@ bytes = "1.0.1"
 [[bin]]
 name = "nexus"
 doc = false
-
-[profile.dev]
-panic = "abort"
-[profile.release]
-panic = "abort"

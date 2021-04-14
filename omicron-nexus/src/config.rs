@@ -95,7 +95,7 @@ impl Config {
 mod test {
     use super::Config;
     use super::{LoadError, LoadErrorKind};
-    use crate::nexus::db;
+    use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;

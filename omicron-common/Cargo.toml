@@ -78,8 +78,3 @@ doc = false
 [[bin]]
 name = "omicron-package"
 doc = false
-
-[profile.dev]
-panic = "abort"
-[profile.release]
-panic = "abort"
