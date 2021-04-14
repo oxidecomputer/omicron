@@ -15,7 +15,7 @@
  */
 
 use super::Config as DbConfig;
-use crate::api_error::ApiError;
+use omicron_common::error::ApiError;
 use bb8_postgres::PostgresConnectionManager;
 use std::ops::Deref;
 

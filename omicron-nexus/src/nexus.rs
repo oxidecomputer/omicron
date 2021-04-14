@@ -2,40 +2,40 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiDisk;
-use crate::api_model::ApiDiskAttachment;
-use crate::api_model::ApiDiskCreateParams;
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiDiskState;
-use crate::api_model::ApiDiskStateRequested;
-use crate::api_model::ApiGeneration;
-use crate::api_model::ApiIdentityMetadata;
-use crate::api_model::ApiInstance;
-use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateRequested;
-use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiName;
-use crate::api_model::ApiProject;
-use crate::api_model::ApiProjectCreateParams;
-use crate::api_model::ApiProjectUpdateParams;
-use crate::api_model::ApiRack;
-use crate::api_model::ApiResourceType;
-use crate::api_model::ApiSled;
-use crate::api_model::CreateResult;
-use crate::api_model::DataPageParams;
-use crate::api_model::DeleteResult;
-use crate::api_model::ListResult;
-use crate::api_model::LookupResult;
-use crate::api_model::PaginationOrder::Ascending;
-use crate::api_model::PaginationOrder::Descending;
-use crate::api_model::UpdateResult;
-use crate::bail_unless;
-use crate::nexus::db;
-use crate::nexus::saga_interface::SagaContext;
-use crate::nexus::sagas;
-use crate::sled_agent;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiDisk;
+use omicron_common::model::ApiDiskAttachment;
+use omicron_common::model::ApiDiskCreateParams;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiDiskState;
+use omicron_common::model::ApiDiskStateRequested;
+use omicron_common::model::ApiGeneration;
+use omicron_common::model::ApiIdentityMetadata;
+use omicron_common::model::ApiInstance;
+use omicron_common::model::ApiInstanceCreateParams;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::model::ApiInstanceState;
+use omicron_common::model::ApiName;
+use omicron_common::model::ApiProject;
+use omicron_common::model::ApiProjectCreateParams;
+use omicron_common::model::ApiProjectUpdateParams;
+use omicron_common::model::ApiRack;
+use omicron_common::model::ApiResourceType;
+use omicron_common::model::ApiSled;
+use omicron_common::model::CreateResult;
+use omicron_common::model::DataPageParams;
+use omicron_common::model::DeleteResult;
+use omicron_common::model::ListResult;
+use omicron_common::model::LookupResult;
+use omicron_common::model::PaginationOrder::Ascending;
+use omicron_common::model::PaginationOrder::Descending;
+use omicron_common::model::UpdateResult;
+use omicron_common::bail_unless;
+use crate::db;
+use crate::saga_interface::SagaContext;
+use crate::sagas;
+use omicron_common::clients::SledAgentClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
@@ -59,22 +59,22 @@ use uuid::Uuid;
 #[async_trait]
 pub trait TestInterfaces {
     /**
-     * Returns the sled_agent::Client for an Instance from its id.  We may also
+     * Returns the SledAgentClient for an Instance from its id.  We may also
      * want to split this up into instance_lookup_by_id() and instance_sled(),
      * but after all it's a test suite special to begin with.
      */
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, ApiError>;
 
     /**
-     * Returns the sled_agent::Client for a Disk from its id.
+     * Returns the SledAgentClient for a Disk from its id.
      */
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, ApiError>;
 }
 
 /**
@@ -101,7 +101,7 @@ pub struct Nexus {
      * how we discover them, both when they initially show up and when we come
      * up.
      */
-    sled_agents: Mutex<BTreeMap<Uuid, Arc<sled_agent::Client>>>,
+    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 }
 
 /*
@@ -140,7 +140,7 @@ impl Nexus {
      * TODO-robustness we should have a limit on how many sled agents there can
      * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_sled_agent(&self, sa: Arc<sled_agent::Client>) {
+    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
         let mut scs = self.sled_agents.lock().await;
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
@@ -526,7 +526,7 @@ impl Nexus {
     pub async fn sled_client(
         &self,
         sled_uuid: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let sled_agents = self.sled_agents.lock().await;
         Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
             let message =
@@ -536,13 +536,12 @@ impl Nexus {
     }
 
     /**
-     * Returns the sled_agent::Client for the host where this Instance is
-     * running.
+     * Returns the SledAgentClient for the host where this Instance is running.
      */
     async fn instance_sled(
         &self,
         instance: &ApiInstance,
-    ) -> Result<Arc<sled_agent::Client>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
     }
@@ -639,7 +638,7 @@ impl Nexus {
     async fn instance_set_runtime(
         &self,
         instance: &ApiInstance,
-        sa: Arc<sled_agent::Client>,
+        sa: Arc<SledAgentClient>,
         requested: ApiInstanceRuntimeStateRequested,
     ) -> Result<(), ApiError> {
         /*
@@ -895,7 +894,7 @@ impl Nexus {
     async fn disk_set_runtime(
         &self,
         disk: &ApiDisk,
-        sa: Arc<sled_agent::Client>,
+        sa: Arc<SledAgentClient>,
         requested: ApiDiskStateRequested,
     ) -> Result<(), ApiError> {
         /*
@@ -944,7 +943,7 @@ impl Nexus {
      * Sleds.
      * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiSled for each sled_agent::Client
+     * them, etc.  For now, we expose an ApiSled for each SledAgentClient
      * that we've got.
      */
     pub async fn sleds_list(
@@ -1118,7 +1117,7 @@ impl TestInterfaces for Nexus {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let instance = self.db_datastore.instance_fetch(id).await?;
         self.instance_sled(&instance).await
     }
@@ -1126,7 +1125,7 @@ impl TestInterfaces for Nexus {
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         let disk = self.db_datastore.disk_fetch(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();

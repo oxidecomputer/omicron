@@ -3,7 +3,7 @@
  * configuration
  */
 
-use crate::nexus::db;
+use omicron_common::db;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;

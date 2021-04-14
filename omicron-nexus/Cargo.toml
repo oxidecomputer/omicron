@@ -1,27 +1,21 @@
 [package]
-name = "omicron-common"
+name = "omicron-nexus"
 version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0"
+async-trait = "0.1.24"
+bb8 = "0.7.0"
+bb8-postgres = "0.7.0"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
 libc = "0.2.71"
-ring = "0.16"
 serde_json = "1.0"
-signal-hook = "0.3"
+serde_with = "1.6.4"
 structopt = "0.3"
-tar = "0.4"
-tempfile = "3.0"
 thiserror = "1.0"
 toml = "0.5.6"
-walkdir = "2.3"
-
-[dependencies.backoff]
-version = "0.3.0"
-features = [ "tokio" ]
 
 [dependencies.chrono]
 version = "0.4"
@@ -31,6 +25,12 @@ features = [ "serde" ]
 git = "https://github.com/oxidecomputer/dropshot"
 branch = "main"
 
+[dependencies.omicron-common]
+path = "../omicron-common"
+
+[dependencies.omicron-sled-agent]
+path = "../omicron-sled-agent"
+
 [dependencies.schemars]
 version = "0.8"
 features = [ "chrono", "uuid" ]
@@ -39,13 +39,13 @@ features = [ "chrono", "uuid" ]
 version = "1.0"
 features = [ "derive" ]
 
-[dependencies.signal-hook-tokio]
-version = "0.3"
-features = [ "futures-v0_3" ]
-
 [dependencies.slog]
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.steno]
+git = "https://github.com/oxidecomputer/steno"
+branch = "main"
 
 [dependencies.tokio]
 version = "1.0"
@@ -60,19 +60,14 @@ version = "0.8"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
-expectorate = "1.0.1"
-serde_urlencoded = "0.6.1"
-subprocess = "0.2.4"
+bytes = "1.0.1"
 
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 #
 [[bin]]
-name = "omicron-dev"
-doc = false
-[[bin]]
-name = "omicron-package"
+name = "nexus"
 doc = false
 
 [profile.dev]

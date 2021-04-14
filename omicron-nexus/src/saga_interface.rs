@@ -2,11 +2,11 @@
  * Interfaces available to saga actions and undo actions
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiInstanceCreateParams;
-use crate::nexus::db;
-use crate::nexus::Nexus;
-use crate::sled_agent;
+use crate::db;
+use crate::Nexus;
+use omicron_common::clients::SledAgentClient;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiInstanceCreateParams;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -52,7 +52,7 @@ impl SagaContext {
     pub async fn sled_client(
         &self,
         sled_id: &Uuid,
-    ) -> Result<Arc<sled_agent::Client>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, ApiError> {
         self.nexus.sled_client(sled_id).await
     }
 }

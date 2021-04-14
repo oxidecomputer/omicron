@@ -7,10 +7,9 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use omicron::api_model::ApiIdentityMetadata;
-use omicron::dev;
-use omicron::nexus;
-use omicron::sled_agent;
+use omicron_common::model::ApiIdentityMetadata;
+use omicron_nexus::dev;
+use omicron_nexus::nexus;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -22,10 +21,10 @@ const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub server: nexus::Server,
+    pub server: omicron_nexus::Server,
     pub database: dev::db::CockroachInstance,
     pub logctx: LogContext,
-    sled_agent: sled_agent::Server,
+    sled_agent: omicron_sled_agent::Server,
 }
 
 impl ControlPlaneTestContext {
@@ -55,7 +54,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * (and reconfigured) for the test suite.
      */
     let config_file_path = Path::new("tests/config.test.toml");
-    let mut config = nexus::Config::from_file(config_file_path)
+    let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
@@ -66,7 +65,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
 
     config.database.url = database.pg_config().clone();
     let server =
-        nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
+        omicron_nexus::Server::start(&config, &rack_id, &logctx.log).await.unwrap();
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),
         logctx.log.new(o!("component" => "external client test context")),
@@ -80,7 +79,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sa = start_sled_agent(
         logctx.log.new(o!(
-            "component" => "sled_agent::Server",
+            "component" => "omicron_sled_agent::Server",
             "sled_id" => sa_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
@@ -103,10 +102,10 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
-) -> Result<sled_agent::Server, String> {
-    let config = sled_agent::Config {
+) -> Result<omicron_sled_agent::Server, String> {
+    let config = omicron_sled_agent::Config {
         id,
-        sim_mode: sled_agent::SimMode::Explicit,
+        sim_mode: omicron_sled_agent::SimMode::Explicit,
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
@@ -116,7 +115,7 @@ pub async fn start_sled_agent(
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
     };
 
-    sled_agent::Server::start(&config, &log).await
+    omicron_sled_agent::Server::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

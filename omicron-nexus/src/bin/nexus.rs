@@ -13,11 +13,11 @@
  *   timeout)
  */
 
-use omicron::cmd::fatal;
-use omicron::cmd::CmdError;
-use omicron::nexus::run_openapi_external;
-use omicron::nexus::run_server;
-use omicron::nexus::Config;
+use omicron_common::cmd::fatal;
+use omicron_common::cmd::CmdError;
+use omicron_nexus::run_openapi_external;
+use omicron_nexus::run_server;
+use omicron_nexus::Config;
 use std::path::PathBuf;
 use structopt::StructOpt;
 

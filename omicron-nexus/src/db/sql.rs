@@ -5,9 +5,9 @@
  * agnostic to the control plane.  There is a bit of leakage in a few places.
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiResourceType;
-use crate::api_model::DataPageParams;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiResourceType;
+use omicron_common::model::DataPageParams;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;

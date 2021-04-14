@@ -2,11 +2,11 @@
  * Facilities for executing complete SQL queries
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiResourceType;
-use crate::api_model::DataPageParams;
-use crate::api_model::ListResult;
-use crate::api_model::LookupResult;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiResourceType;
+use omicron_common::model::DataPageParams;
+use omicron_common::model::ListResult;
+use omicron_common::model::LookupResult;
 use futures::StreamExt;
 use std::convert::TryFrom;
 

@@ -5,12 +5,12 @@
  * ./sql.rs.
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiDisk;
-use crate::api_model::ApiInstance;
-use crate::api_model::ApiName;
-use crate::api_model::ApiProject;
-use crate::api_model::ApiResourceType;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiDisk;
+use omicron_common::model::ApiInstance;
+use omicron_common::model::ApiName;
+use omicron_common::model::ApiProject;
+use omicron_common::model::ApiResourceType;
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -86,7 +86,7 @@ mod test {
     use super::Instance;
     use super::Project;
     use super::Table;
-    use crate::dev;
+    use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
 

@@ -4,10 +4,6 @@
 
 use super::ServerContext;
 
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiSledAgentStartupInfo;
-use crate::sled_agent;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -15,6 +11,10 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::clients::SledAgentClient;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiSledAgentStartupInfo;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -68,7 +68,7 @@ async fn cpapi_sled_agents_post(
     let client_log =
         apictx.log.new(o!("SledAgent" => sled_id.clone().to_string()));
     let client =
-        Arc::new(sled_agent::Client::new(&sled_id, si.sa_address, client_log));
+        Arc::new(SledAgentClient::new(&sled_id, si.sa_address, client_log));
     nexus.upsert_sled_agent(client).await;
     Ok(HttpResponseUpdatedNoContent())
 }

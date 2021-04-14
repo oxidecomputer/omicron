@@ -9,13 +9,13 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
-use crate::api_model::ApiGeneration;
-use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceRuntimeStateRequested;
-use crate::api_model::ApiInstanceState;
-use crate::nexus::saga_interface::SagaContext;
+use crate::saga_interface::SagaContext;
 use chrono::Utc;
+use omicron_common::model::ApiGeneration;
+use omicron_common::model::ApiInstanceCreateParams;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::model::ApiInstanceState;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;

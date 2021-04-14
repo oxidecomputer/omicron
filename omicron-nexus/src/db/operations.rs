@@ -3,7 +3,7 @@
  * and extract values
  */
 
-use crate::api_error::ApiError;
+use omicron_common::error::ApiError;
 use std::convert::TryFrom;
 use std::fmt;
 use thiserror::Error;

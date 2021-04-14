@@ -40,25 +40,25 @@
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
-use crate::api_error::ApiError;
-use crate::api_model::ApiByteCount;
-use crate::api_model::ApiDisk;
-use crate::api_model::ApiDiskAttachment;
-use crate::api_model::ApiDiskCreateParams;
-use crate::api_model::ApiDiskRuntimeState;
-use crate::api_model::ApiDiskState;
-use crate::api_model::ApiGeneration;
-use crate::api_model::ApiIdentityMetadata;
-use crate::api_model::ApiIdentityMetadataCreateParams;
-use crate::api_model::ApiInstance;
-use crate::api_model::ApiInstanceCpuCount;
-use crate::api_model::ApiInstanceCreateParams;
-use crate::api_model::ApiInstanceRuntimeState;
-use crate::api_model::ApiInstanceState;
-use crate::api_model::ApiName;
-use crate::api_model::ApiProject;
-use crate::api_model::ApiProjectCreateParams;
-use crate::bail_unless;
+use omicron_common::error::ApiError;
+use omicron_common::model::ApiByteCount;
+use omicron_common::model::ApiDisk;
+use omicron_common::model::ApiDiskAttachment;
+use omicron_common::model::ApiDiskCreateParams;
+use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiDiskState;
+use omicron_common::model::ApiGeneration;
+use omicron_common::model::ApiIdentityMetadata;
+use omicron_common::model::ApiIdentityMetadataCreateParams;
+use omicron_common::model::ApiInstance;
+use omicron_common::model::ApiInstanceCpuCount;
+use omicron_common::model::ApiInstanceCreateParams;
+use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceState;
+use omicron_common::model::ApiName;
+use omicron_common::model::ApiProject;
+use omicron_common::model::ApiProjectCreateParams;
+use omicron_common::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
 use std::convert::TryFrom;

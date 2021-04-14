@@ -8,7 +8,6 @@ mod context;
 pub mod db; // Public only for some documentation examples
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
-#[allow(clippy::module_inception)]
 mod nexus;
 mod saga_interface;
 mod sagas;
