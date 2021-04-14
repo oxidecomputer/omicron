@@ -32,7 +32,6 @@ pub mod model;
 pub mod model_db;
 pub mod packaging;
 
-// XXX naming here needs work
 mod sled_agent_client;
 pub use sled_agent_client::Client as SledAgentClient;
 pub use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
