@@ -27,8 +27,8 @@ use subprocess::Redirection;
 const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
 /** name of the "sled_agent" executable */
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
-/** name of the "omicron_dev" executable */
-const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron_dev");
+/** name of the "omicron-dev" executable */
+const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
 /**
  * maximum time to wait for any command
@@ -195,8 +195,8 @@ fn test_omicron_dev_no_args() {
     let exec = Exec::cmd(path_to_omicron_dev());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_contents("tests/output/cmd-omicron_dev-noargs-stdout", &stdout_text);
-    assert_contents("tests/output/cmd-omicron_dev-noargs-stderr", &stderr_text);
+    assert_contents("tests/output/cmd-omicron-dev-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-omicron-dev-noargs-stderr", &stderr_text);
 }
 
 #[test]
@@ -205,11 +205,11 @@ fn test_omicron_dev_db_populate_no_args() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents(
-        "tests/output/cmd-omicron_dev-db-populate-noargs-stdout",
+        "tests/output/cmd-omicron-dev-db-populate-noargs-stdout",
         &stdout_text,
     );
     assert_contents(
-        "tests/output/cmd-omicron_dev-db-populate-noargs-stderr",
+        "tests/output/cmd-omicron-dev-db-populate-noargs-stderr",
         &stderr_text,
     );
 }
@@ -220,11 +220,11 @@ fn test_omicron_dev_db_wipe_no_args() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents(
-        "tests/output/cmd-omicron_dev-db-wipe-noargs-stdout",
+        "tests/output/cmd-omicron-dev-db-wipe-noargs-stdout",
         &stdout_text,
     );
     assert_contents(
-        "tests/output/cmd-omicron_dev-db-wipe-noargs-stderr",
+        "tests/output/cmd-omicron-dev-db-wipe-noargs-stderr",
         &stderr_text,
     );
 }
@@ -268,11 +268,11 @@ fn test_omicron_dev_bad_cmd() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents(
-        "tests/output/cmd-omicron_dev-bad-cmd-stdout",
+        "tests/output/cmd-omicron-dev-bad-cmd-stdout",
         &stdout_text,
     );
     assert_contents(
-        "tests/output/cmd-omicron_dev-bad-cmd-stderr",
+        "tests/output/cmd-omicron-dev-bad-cmd-stderr",
         &stderr_text,
     );
 }

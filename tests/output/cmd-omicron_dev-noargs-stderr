@@ -1,8 +1,8 @@
-omicron_dev: parsing arguments: omicron 0.1.0
+omicron-dev: parsing arguments: omicron 0.1.0
 Manage a local CockroachDB database for Omicron development
 
 USAGE:
-    omicron_dev <SUBCOMMAND>
+    omicron-dev <SUBCOMMAND>
 
 FLAGS:
     -h, --help       Prints help information

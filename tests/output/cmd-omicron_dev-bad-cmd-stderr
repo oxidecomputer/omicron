@@ -1,6 +1,6 @@
-omicron_dev: parsing arguments: error: Found argument 'bogus-command' which wasn't expected, or isn't valid in this context
+omicron-dev: parsing arguments: error: Found argument 'bogus-command' which wasn't expected, or isn't valid in this context
 
 USAGE:
-    omicron_dev <SUBCOMMAND>
+    omicron-dev <SUBCOMMAND>
 
 For more information try --help

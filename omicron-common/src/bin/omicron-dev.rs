@@ -101,31 +101,31 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
 
     if let Some(store_dir) = &args.store_dir {
         println!(
-            "omicron_dev: using user-provided path for database store: {}",
+            "omicron-dev: using user-provided path for database store: {}",
             store_dir.display()
         );
         db_arg_builder = db_arg_builder.store_dir(store_dir);
     } else {
         println!(
-            "omicron_dev: using temporary directory for database store \
+            "omicron-dev: using temporary directory for database store \
             (cleaned up on clean exit)"
         );
     }
 
     let db_starter = db_arg_builder.build()?;
     println!(
-        "omicron_dev: will run this to start CockroachDB:\n{}",
+        "omicron-dev: will run this to start CockroachDB:\n{}",
         db_starter.cmdline()
     );
     println!(
-        "omicron_dev: temporary directory: {}",
+        "omicron-dev: temporary directory: {}",
         db_starter.temp_dir().display()
     );
 
     let mut db_instance = db_starter.start().await?;
-    println!("\nomicron_dev: child process: pid {}", db_instance.pid());
+    println!("\nomicron-dev: child process: pid {}", db_instance.pid());
     println!(
-        "omicron_dev: CockroachDB listening at: {}",
+        "omicron-dev: CockroachDB listening at: {}",
         db_instance.listen_url()
     );
 
@@ -133,9 +133,9 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
         /*
          * Populate the database with our schema.
          */
-        println!("omicron_dev: populating database");
+        println!("omicron-dev: populating database");
         db_instance.populate().await.context("populating database")?;
-        println!("omicron_dev: populated database");
+        println!("omicron-dev: populated database");
     }
 
     /*
@@ -146,7 +146,7 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
         _ = db_instance.wait_for_shutdown() => {
             db_instance.cleanup().await.context("clean up after shutdown")?;
             bail!(
-                "omicron_dev: database shut down unexpectedly \
+                "omicron-dev: database shut down unexpectedly \
                 (see error output above)"
             );
         }
@@ -159,7 +159,7 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
              * cockroach process as well.
              */
             eprintln!(
-                "omicron_dev: caught signal, shutting down and removing \
+                "omicron-dev: caught signal, shutting down and removing \
                 temporary directory"
             );
 
@@ -194,13 +194,13 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
         .with_context(|| format!("connecting to {:?}", args.database_url))?;
 
     if args.wipe {
-        println!("omicron_dev: wiping any existing database");
+        println!("omicron-dev: wiping any existing database");
         dev::db::wipe(&client).await?;
     }
 
-    println!("omicron_dev: populating database");
+    println!("omicron-dev: populating database");
     dev::db::populate(&client).await?;
-    println!("omicron_dev: populated database");
+    println!("omicron-dev: populated database");
     client.cleanup().await.expect("connection failed");
     Ok(())
 }
@@ -221,9 +221,9 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
         .await
         .with_context(|| format!("connecting to {:?}", args.database_url))?;
 
-    println!("omicron_dev: wiping any existing database");
+    println!("omicron-dev: wiping any existing database");
     dev::db::wipe(&client).await?;
-    println!("omicron_dev: wiped");
+    println!("omicron-dev: wiped");
     client.cleanup().await.expect("connection failed");
     Ok(())
 }

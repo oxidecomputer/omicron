@@ -1,5 +1,5 @@
 /*!
- * Smoke tests for the omicron_dev command-line tool
+ * Smoke tests for the omicron-dev command-line tool
  */
 
 use omicron_common::dev::db::has_omicron_schema;
@@ -11,14 +11,14 @@ use subprocess::Exec;
 use subprocess::ExitStatus;
 use subprocess::Redirection;
 
-/** name of the "omicron_dev" executable */
+/** name of the "omicron-dev" executable */
 const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
 /** timeout used for various things that should be pretty quick */
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /**
- * Encapsulates the information we need from a running `omicron_dev db-run`
+ * Encapsulates the information we need from a running `omicron-dev db-run`
  * command.
  */
 #[derive(Debug)]
@@ -32,7 +32,7 @@ struct DbRun {
 }
 
 /**
- * Starts the "omicron_dev db-run" command and runs it for long enough to parse
+ * Starts the "omicron-dev db-run" command and runs it for long enough to parse
  * the child pid, listen URL, and temporary directory.  Returns these, along
  * with a handle to the child process.
  * TODO-robustness It would be great to put a timeout on this.
@@ -68,14 +68,14 @@ fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
             _ => (),
         }
 
-        if let Some(s) = buf.strip_prefix("omicron_dev: temporary directory: ")
+        if let Some(s) = buf.strip_prefix("omicron-dev: temporary directory: ")
         {
             eprint!("found temporary directory: {}", s);
             temp_dir = Some(PathBuf::from(s.trim_end().to_string()));
             continue;
         }
 
-        if let Some(s) = buf.strip_prefix("omicron_dev: child process: pid ") {
+        if let Some(s) = buf.strip_prefix("omicron-dev: child process: pid ") {
             eprint!("found database pid: {}", s);
             db_pid = Some(
                 s.trim_end().to_string().parse().expect("pid was not a u32"),
@@ -84,14 +84,14 @@ fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
         }
 
         if let Some(s) =
-            buf.strip_prefix("omicron_dev: CockroachDB listening at: ")
+            buf.strip_prefix("omicron-dev: CockroachDB listening at: ")
         {
             eprint!("found postgres listen URL: {}", s);
             listen_config_url = Some(s.trim_end().to_string());
             continue;
         }
 
-        if buf.contains("omicron_dev: populated database") {
+        if buf.contains("omicron-dev: populated database") {
             eprintln!("found database populated");
             populated = true;
             continue;
@@ -121,7 +121,7 @@ fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
  * Waits for the subprocess to exit and returns status information
  *
  * This assumes the caller has arranged for the processes to terminate.  This
- * function verifies that both the omicron_dev and CockroachDB processes are
+ * function verifies that both the omicron-dev and CockroachDB processes are
  * gone and that the temporary directory has been cleaned up.
  */
 fn verify_graceful_exit(mut dbrun: DbRun) -> subprocess::ExitStatus {
@@ -147,7 +147,7 @@ fn verify_graceful_exit(mut dbrun: DbRun) -> subprocess::ExitStatus {
 }
 
 /*
- * Exercises the normal use case of `omicron_dev db-run`: the database starts
+ * Exercises the normal use case of `omicron-dev db-run`: the database starts
  * up, we can connect to it and query it, then we simulate the user typing ^C at
  * the shell, and then it cleans up its temporary directory.
  */
@@ -165,10 +165,10 @@ async fn test_db_run() {
      * crate to do this?)
      *
      * Note that it's not a good test to just send SIGINT to the CockroachDB
-     * process.  In the real-world case we're trying to test, omicron_dev gets
+     * process.  In the real-world case we're trying to test, omicron-dev gets
      * SIGINT as well.  If it doesn't handle it explicitly, the process will be
      * terminated and temporary directories will be leaked.  However, the test
-     * would pass because in the test case omicron_dev would never have gotten
+     * would pass because in the test case omicron-dev would never have gotten
      * the SIGINT.
      *
      * We also redirect stderr to stdout just so that it doesn't get dumped to
@@ -252,7 +252,7 @@ async fn test_db_run() {
     /*
      * Figure out what process group our child processes are in.  (That won't be
      * the child's pid because the immediate shell will be in our process group,
-     * and its the omicron_dev command that's the process group leader.)
+     * and its the omicron-dev command that's the process group leader.)
      */
     let pgid = unsafe { libc::getpgid(dbrun.db_pid as libc::pid_t) };
     assert_ne!(pgid, -1);
@@ -270,7 +270,7 @@ async fn test_db_run() {
 }
 
 /*
- * Exercises the unusual case of `omicron_dev db-run` where the database shuts
+ * Exercises the unusual case of `omicron-dev db-run` where the database shuts
  * down unexpectedly.
  */
 #[tokio::test]

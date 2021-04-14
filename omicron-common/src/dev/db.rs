@@ -24,7 +24,7 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 /*
  * A default listen port of 0 allows the system to choose any available port.
  * This is appropriate for the test suite and may be useful in some cases for
- * omicron_dev.  However, omicron_dev by default chooses a specific port so that
+ * omicron-dev.  However, omicron-dev by default chooses a specific port so that
  * we can ship a Nexus configuration that will use the same port.
  */
 const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;

@@ -3,7 +3,7 @@
  *
  * It's not clear what the long-term story for managing the database schema will
  * be.  For now, this file can be used by the test suite and by developers (via
- * the "omicron_dev" program) to set up a local database with which to run the
+ * the "omicron-dev" program) to set up a local database with which to run the
  * system.
  */
 
