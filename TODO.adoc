@@ -12,10 +12,7 @@ Work queue (see also: existing GitHub issues):
 
 * use CARGO_BIN_EXE for paths to binaries
 https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
-* rename sled agent back to serveragent? Ugh.
 * dropshot: allow consumers to provide error codes for dropshot errors
-* deferred cleanup / polish up for more help
-* decide on a code name for the whole control plane and rename the repo
 * general maintenance and cleanup
 ** replace &Arc<T> with &T, and some instances of Arc<T> as well
 ** all identifiers could be newtypes, with a prefix for the type (like AWS
@@ -42,7 +39,6 @@ https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment
 * implement hardening in RFD 10
 * implement ETag / If-Match / If-None-Match
 * implement limits for all types of resources
-* integrate a real data storage backend
 * implement scheme for API versioning
 ** how to identify the requested version -- header or URI?
 ** translators for older versions?
@@ -87,7 +83,6 @@ External dependencies / open questions:
 ** How will we do TLS termination?
 ** How will we manage server certificates?
 ** How will we manage client certificates?
-* what data storage backend will we use?
 * what does bootstrapping / key management look like?
 * what does internal authorization look like?
 
