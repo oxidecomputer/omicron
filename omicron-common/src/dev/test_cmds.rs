@@ -76,11 +76,13 @@ pub fn run_command(exec: Exec) -> (ExitStatus, String, String) {
     let exit_status = subproc
         .wait_timeout(TIMEOUT)
         .unwrap_or_else(|_| panic!("failed to wait for command: {}", cmdline))
-        .unwrap_or_else(|| panic!(
-            "timed out waiting for command for {} ms: {}",
-            timeout.as_millis(),
-            cmdline
-        ));
+        .unwrap_or_else(|| {
+            panic!(
+                "timed out waiting for command for {} ms: {}",
+                timeout.as_millis(),
+                cmdline
+            )
+        });
 
     let stdout_text =
         fs::read_to_string(&stdout_path).expect("failed to read stdout file");
