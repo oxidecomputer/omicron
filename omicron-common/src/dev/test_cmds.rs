@@ -71,12 +71,12 @@ pub fn run_command(exec: Exec) -> (ExitStatus, String, String) {
         .stderr(Redirection::File(stderr_file))
         .detached()
         .popen()
-        .expect(&format!("failed to start command: {}", cmdline));
+        .unwrap_or_else(|_| panic!("failed to start command: {}", cmdline));
 
     let exit_status = subproc
         .wait_timeout(TIMEOUT)
-        .expect(&format!("failed to wait for command: {}", cmdline))
-        .expect(&format!(
+        .unwrap_or_else(|_| panic!("failed to wait for command: {}", cmdline))
+        .unwrap_or_else(|| panic!(
             "timed out waiting for command for {} ms: {}",
             timeout.as_millis(),
             cmdline
