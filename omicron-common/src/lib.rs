@@ -19,10 +19,6 @@
 #![allow(private_intra_doc_links)]
 /* TODO(#32): Remove this exception once resolved. */
 #![allow(clippy::field_reassign_with_default)]
-/* TODO(#40): Remove this exception once resolved. */
-#![allow(clippy::unnecessary_wraps)]
-/* Clippy's style lints are useful, but not worth running automatically. */
-#![allow(clippy::style)]
 
 pub mod backoff;
 pub mod cmd;

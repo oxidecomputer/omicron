@@ -2,6 +2,16 @@
  * Library interface to the Nexus, the heart of the control plane
  */
 
+/*
+ * We only use rustdoc for internal documentation, including private items, so
+ * it's expected that we'll have links to private items in the docs.
+ */
+#![allow(private_intra_doc_links)]
+/* TODO(#40): Remove this exception once resolved. */
+#![allow(clippy::unnecessary_wraps)]
+/* Clippy's style lints are useful, but not worth running automatically. */
+#![allow(clippy::style)]
+
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
