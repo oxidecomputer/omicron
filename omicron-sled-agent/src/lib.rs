@@ -14,9 +14,13 @@ use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use omicron_common::model::ApiSledAgentStartupInfo;
-use omicron_sled_agent::SledAgent;
+use omicron_common::NexusClient;
+use sled_agent::SledAgent;
 use slog::Logger;
 use std::sync::Arc;
+
+#[macro_use]
+extern crate slog;
 
 /**
  * Packages up a [`SledAgent`], running the sled agent API under a Dropshot

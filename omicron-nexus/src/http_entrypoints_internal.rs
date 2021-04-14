@@ -11,7 +11,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::clients::SledAgentClient;
+use omicron_common::SledAgentClient;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;

@@ -8,6 +8,7 @@ use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
+use omicron_common::NexusClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;

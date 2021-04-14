@@ -9,11 +9,12 @@ use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskStateRequested;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::sled_agent::sim::{SimCollection, SimDisk, SimInstance};
+use crate::sim::{SimCollection, SimDisk, SimInstance};
 
 /**
  * Simulates management of the control plane on a sled

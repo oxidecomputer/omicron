@@ -12,7 +12,6 @@ pub mod sql; /* public for examples only */
 mod sql_operations;
 
 pub use config::Config;
-pub use config::PostgresConfigWithUrl;
 pub use datastore::DataStore;
 pub use pool::Pool;
 

@@ -184,12 +184,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "difference"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
-
-[[package]]
 name = "digest"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -239,7 +233,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_urlencoded 0.7.0",
+ "serde_urlencoded",
  "slog",
  "slog-async",
  "slog-bunyan",
@@ -273,16 +267,6 @@ name = "dyn-clone"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee2626afccd7561a06cf1367e2950c4718ea04565e20fb5029b6c7d8ad09abcf"
-
-[[package]]
-name = "expectorate"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc7a1eb23216a82fca86676be57073bee21565cef1f7a85ac7e1c634204f4d0"
-dependencies = [
- "difference",
- "newline-converter",
-]
 
 [[package]]
 name = "fallible-iterator"
@@ -554,17 +538,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "idna"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89829a5d69c23d348314a7ac337fe39173b61149a9864deabd260983aed48c21"
-dependencies = [
- "matches",
- "unicode-bidi",
- "unicode-normalization",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -687,12 +660,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "newline-converter"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff9ae3574d1a57e937b8789201c223501e8178b4b42849d7b1a40d2cb2592a51"
-
-[[package]]
 name = "ntapi"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -740,7 +707,6 @@ dependencies = [
  "backoff",
  "chrono",
  "dropshot",
- "expectorate",
  "futures",
  "http",
  "hyper",
@@ -749,12 +715,10 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_urlencoded 0.6.1",
  "signal-hook",
  "signal-hook-tokio",
  "slog",
  "structopt",
- "subprocess",
  "tar",
  "tempfile",
  "thiserror",
@@ -763,6 +727,26 @@ dependencies = [
  "toml",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "omicron-sled-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "omicron-common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1009,9 +993,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94341e4e44e24f6b591b59e47a8a027df12e008d73fd5672dbea9cc22f4507d9"
+checksum = "8270314b5ccceb518e7e578952f0b72b88222d02e8f77f5ecf7abbb673539041"
 dependencies = [
  "bitflags",
 ]
@@ -1154,18 +1138,6 @@ dependencies = [
  "proc-macro2",
  "serde",
  "syn",
-]
-
-[[package]]
-name = "serde_urlencoded"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ec5d77e2d4c73717816afac02670d5c4f534ea95ed430442cad02e7a6e32c97"
-dependencies = [
- "dtoa",
- "itoa",
- "serde",
- "url",
 ]
 
 [[package]]
@@ -1363,16 +1335,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "subprocess"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b9ad6c3e1b525a55872a4d2f2d404b3c959b7bbcbfd83c364580f68ed157bd"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -1653,18 +1615,6 @@ name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
-
-[[package]]
-name = "url"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ccd964113622c8e9322cfac19eb1004a07e636c545f325da085d5cdde6f1f8b"
-dependencies = [
- "form_urlencoded",
- "idna",
- "matches",
- "percent-encoding",
-]
 
 [[package]]
 name = "uuid"

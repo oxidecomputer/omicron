@@ -40,6 +40,7 @@ use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
 use omicron_common::model::UpdateResult;
+use omicron_common::db::sql_row_value;
 use omicron_common::bail_unless;
 use chrono::Utc;
 use std::convert::TryFrom;
@@ -49,7 +50,6 @@ use uuid::Uuid;
 
 use super::operations::sql_execute_maybe_one;
 use super::operations::sql_query_maybe_one;
-use super::operations::sql_row_value;
 use super::schema::Disk;
 use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;

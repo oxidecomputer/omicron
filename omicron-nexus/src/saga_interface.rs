@@ -4,7 +4,7 @@
 
 use crate::db;
 use crate::Nexus;
-use omicron_common::clients::SledAgentClient;
+use omicron_common::SledAgentClient;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceCreateParams;
 use std::sync::Arc;

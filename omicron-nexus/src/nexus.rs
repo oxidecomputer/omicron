@@ -35,7 +35,7 @@ use omicron_common::bail_unless;
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
-use omicron_common::clients::SledAgentClient;
+use omicron_common::SledAgentClient;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;

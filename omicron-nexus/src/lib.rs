@@ -13,7 +13,6 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
-pub use db::PostgresConfigWithUrl;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 
@@ -23,6 +22,9 @@ use http_entrypoints_internal::internal_api;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[macro_use]
+extern crate slog;
 
 /**
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec

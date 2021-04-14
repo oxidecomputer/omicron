@@ -7,9 +7,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
-use std::fmt;
-use std::ops::Deref;
-use std::str::FromStr;
 
 /**
  * Nexus database configuration

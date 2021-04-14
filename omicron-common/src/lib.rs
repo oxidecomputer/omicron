@@ -25,13 +25,15 @@
 #![allow(clippy::style)]
 
 pub mod backoff;
-pub mod config;
 pub mod cmd;
+pub mod config;
+pub mod db;
 pub mod dev;
 pub mod error;
 pub mod http_client;
 pub mod http_pagination;
 pub mod model;
+pub mod model_db;
 pub mod packaging;
 
 // XXX naming here needs work

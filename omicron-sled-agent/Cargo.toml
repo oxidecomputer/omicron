@@ -19,6 +19,9 @@ features = [ "serde" ]
 git = "https://github.com/oxidecomputer/dropshot"
 branch = "main"
 
+[dependencies.omicron-common]
+path = "../omicron-common"
+
 [dependencies.schemars]
 version = "0.8"
 features = [ "chrono", "uuid" ]
@@ -40,7 +43,7 @@ version = "0.8"
 features = [ "serde", "v4" ]
 
 [[bin]]
-name = "sled_agent"
+name = "sled-agent"
 doc = false
 
 [profile.dev]
