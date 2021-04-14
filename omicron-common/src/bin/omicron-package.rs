@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let packages = &[
         &Package::new("bootstrap_agent"),
         &Package::new("nexus"),
-        &Package::new("sled_agent"),
+        &Package::new("sled-agent"),
     ];
 
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);

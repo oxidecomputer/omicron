@@ -5,7 +5,7 @@
  */
 
 /*
- * TODO-coverage: test success cases of nexus and sled_agent
+ * TODO-coverage: test success cases of nexus and sled-agent
  */
 
 use expectorate::assert_contents;
@@ -25,8 +25,8 @@ use subprocess::Redirection;
 
 /** name of the "nexus" executable */
 const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
-/** name of the "sled_agent" executable */
-const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled_agent");
+/** name of the "sled-agent" executable */
+const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 /** name of the "omicron-dev" executable */
 const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
@@ -186,8 +186,8 @@ fn test_sled_agent_no_args() {
     let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_USAGE);
-    assert_contents("tests/output/cmd-sled_agent-noargs-stdout", &stdout_text);
-    assert_contents("tests/output/cmd-sled_agent-noargs-stderr", &stderr_text);
+    assert_contents("tests/output/cmd-sled-agent-noargs-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-sled-agent-noargs-stderr", &stderr_text);
 }
 
 #[test]

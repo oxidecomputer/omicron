@@ -100,7 +100,7 @@ impl BootstrapAgent {
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
         )?;
 
-        self.launch(&digests, &tar_source, &destination, "sled_agent")?;
+        self.launch(&digests, &tar_source, &destination, "sled-agent")?;
 
         // TODO-correctness: Nexus may not be enabled on all racks.
         // Some decision-making logic should be used here to make this
