@@ -803,16 +803,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron"
+name = "omicron-bootstrap-agent"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "http",
+ "hyper",
+ "omicron-common",
+ "serde",
+ "serde_json",
+ "slog",
+ "smf",
+ "structopt",
+ "tar",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
  "async-trait",
  "backoff",
- "bb8",
- "bb8-postgres",
- "bytes",
  "chrono",
  "dropshot",
  "expectorate",
@@ -820,19 +837,14 @@ dependencies = [
  "http",
  "hyper",
  "libc",
- "newline-converter",
- "openapiv3 0.3.2",
  "ring",
  "schemars",
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
- "serde_with",
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "smf",
- "steno",
  "structopt",
  "subprocess",
  "tar",
@@ -843,6 +855,61 @@ dependencies = [
  "toml",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "omicron-nexus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "bb8-postgres",
+ "bytes",
+ "chrono",
+ "dropshot",
+ "expectorate",
+ "futures",
+ "http",
+ "hyper",
+ "libc",
+ "omicron-common",
+ "omicron-sled-agent",
+ "openapiv3 0.3.2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "slog",
+ "steno",
+ "structopt",
+ "subprocess",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-sled-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dropshot",
+ "expectorate",
+ "futures",
+ "http",
+ "hyper",
+ "omicron-common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "subprocess",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

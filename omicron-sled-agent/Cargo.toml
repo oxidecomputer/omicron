@@ -1,0 +1,55 @@
+[package]
+name = "omicron-sled-agent"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+async-trait = "0.1.24"
+futures = "0.3.1"
+http = "0.2.0"
+hyper = "0.14"
+serde_json = "1.0"
+structopt = "0.3"
+
+[dependencies.chrono]
+version = "0.4"
+features = [ "serde" ]
+
+[dependencies.dropshot]
+git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
+
+[dependencies.omicron-common]
+path = "../omicron-common"
+
+[dependencies.schemars]
+version = "0.8"
+features = [ "chrono", "uuid" ]
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.tokio]
+version = "1.0"
+features = [ "full" ]
+
+[dependencies.uuid]
+version = "0.8"
+features = [ "serde", "v4" ]
+
+[dev-dependencies]
+expectorate = "1.0.1"
+subprocess = "0.2.4"
+
+#
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+#
+[[bin]]
+name = "sled-agent"
+doc = false

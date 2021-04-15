@@ -32,10 +32,10 @@ RUN apt-get update && apt-get install -y \
 	&& rm -rf /var/lib/apt/lists/*
 
 
-COPY --from=cargo-build /usr/src/omicron/target/release/bootstrap_agent /usr/bin/bootstrap_agent
+COPY --from=cargo-build /usr/src/omicron/target/release/bootstrap-agent /usr/bin/bootstrap-agent
 COPY --from=cargo-build /usr/src/omicron/target/release/nexus /usr/bin/nexus
-COPY --from=cargo-build /usr/src/omicron/target/release/omicron_dev /usr/bin/omicron_dev
-COPY --from=cargo-build /usr/src/omicron/target/release/omicron_package /usr/bin/omicron_package
-COPY --from=cargo-build /usr/src/omicron/target/release/sled_agent /usr/bin/sled_agent
+COPY --from=cargo-build /usr/src/omicron/target/release/omicron-dev /usr/bin/omicron-dev
+COPY --from=cargo-build /usr/src/omicron/target/release/omicron-package /usr/bin/omicron-package
+COPY --from=cargo-build /usr/src/omicron/target/release/sled-agent /usr/bin/sled-agent
 
-CMD ["sled_agent"]
+CMD ["sled-agent"]

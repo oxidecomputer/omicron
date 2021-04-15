@@ -61,23 +61,23 @@ You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** usin
 
 To **run Omicron** you need to run three programs:
 
-* a CockroachDB cluster.  For development, you can use the `omicron_dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
+* a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * `nexus`: the guts of the control plane
-* `sled_agent`: a simulator for the component that manages a single sled
+* `sled-agent`: a simulator for the component that manages a single sled
 
-The easiest way to start a CockroachDB cluster is to use the built in `omicron_dev` tool.  This tool assumes that the `cockroach` executable on your PATH comes from CockroachDB v20.2.5.
+The easiest way to start a CockroachDB cluster is to use the built in `omicron-dev` tool.  This tool assumes that the `cockroach` executable on your PATH comes from CockroachDB v20.2.5.
 
-1. Start CockroachDB using `omicron_dev db-run`:
+1. Start CockroachDB using `omicron-dev db-run`:
 +
 [source,text]
 ----
-$ cargo run --bin=omicron_dev -- db-run
+$ cargo run --bin=omicron-dev -- db-run
     Finished dev [unoptimized + debuginfo] target(s) in 0.15s
-     Running `target/debug/omicron_dev db-run`
-omicron_dev: using temporary directory for database store (cleaned up on clean exit)
-omicron_dev: will run this to start CockroachDB:
+     Running `target/debug/omicron-dev db-run`
+omicron-dev: using temporary directory for database store (cleaned up on clean exit)
+omicron-dev: will run this to start CockroachDB:
 cockroach start-single-node --insecure --http-addr=:0 --store /var/tmp/omicron_tmp/.tmpM8KpTf/data --listen-addr 127.0.0.1:32221 --listening-url-file /var/tmp/omicron_tmp/.tmpM8KpTf/listen-url
-omicron_dev: temporary directory: /var/tmp/omicron_tmp/.tmpM8KpTf
+omicron-dev: temporary directory: /var/tmp/omicron_tmp/.tmpM8KpTf
 *
 * WARNING: ALL SECURITY CONTROLS HAVE BEEN DISABLED!
 *
@@ -97,9 +97,9 @@ omicron_dev: temporary directory: /var/tmp/omicron_tmp/.tmpM8KpTf
 * - https://www.cockroachlabs.com/docs/v20.2/secure-a-cluster.html
 *
 
-omicron_dev: child process: pid 3815
-omicron_dev: CockroachDB listening at: postgresql://root@127.0.0.1:32221/omicron?sslmode=disable
-omicron_dev: populating database
+omicron-dev: child process: pid 3815
+omicron-dev: CockroachDB listening at: postgresql://root@127.0.0.1:32221/omicron?sslmode=disable
+omicron-dev: populating database
 *
 * INFO: Replication was disabled for this cluster.
 * When/if adding nodes in the future, update zone configurations to increase the replication factor.
@@ -117,25 +117,25 @@ storage engine:      pebble
 status:              initialized new cluster
 clusterID:           8ab646f0-67f0-484d-8010-e4444fb86336
 nodeID:              1
-omicron_dev: populated database
+omicron-dev: populated database
 ----
 +
 Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
 
-2. `nexus` requires a configuration file to run.  You can use `examples/config.toml` to start with.  Build and run it like this:
+2. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
-$ cargo run --bin=nexus -- examples/config.toml
+$ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
 ...
 listening: http://127.0.0.1:12220
 ----
 
-3. `sled_agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
+3. `sled-agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 +
 [source,text]
 ----
-$ cargo run --bin=sled_agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
@@ -365,7 +365,7 @@ in a format which lets them be transferred to a Helios machine.
 [source,text]
 ----
 $ cargo build
-$ cargo run --bin=omicron_package
+$ cargo run --bin=omicron-package
 ...
 # Your ./out directory should now be populated.
 ----
@@ -391,8 +391,8 @@ Once this is complete, we can unpack and initialize the bootstrap agent.  This s
 
 [source,text]
 ----
-$ tar -xvzf /opt/oxide/bootstrap_agent.tar -C /opt/oxide/bootstrap_agent
-$ svccfg import -V /opt/oxide/bootstrap_agent/smf/bootstrap_agent/manifest.xml
+$ tar -xvzf /opt/oxide/bootstrap-agent.tar -C /opt/oxide/bootstrap-agent
+$ svccfg import -V /opt/oxide/bootstrap-agent/smf/bootstrap-agent/manifest.xml
 ----
 
 You can verify which services are running with the following commands:
@@ -408,11 +408,11 @@ $ tail -f $(svcs -L oxide_controller)
 == Configuration reference
 
 `nexus` requires a TOML configuration file.  There's an example in
-`examples/config.toml`:
+`omicron-nexus/examples/config.toml`:
 
 [source,toml]
 ----
-include::examples/config.toml[]
+include::omicron-nexus/examples/config.toml[]
 ----
 
 Supported config properties include:
