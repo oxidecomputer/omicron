@@ -7,9 +7,10 @@ mod conversions;
 mod datastore;
 mod operations;
 mod pool;
-mod schema;
+
+pub mod schema;
 pub mod sql; /* public for examples only */
-mod sql_operations;
+pub mod sql_operations;
 
 pub use config::Config;
 pub use datastore::DataStore;

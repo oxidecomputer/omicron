@@ -11,6 +11,7 @@ use omicron_common::model::ApiInstance;
 use omicron_common::model::ApiName;
 use omicron_common::model::ApiProject;
 use omicron_common::model::ApiResourceType;
+use crate::sec;
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -80,11 +81,53 @@ impl Table for Disk {
     ];
 }
 
+/** Describes the "SagaNodeEvent" table */
+pub struct Saga;
+impl Table for Saga {
+    type ModelType = sec::log::Saga;
+    /*
+     * XXX RESOURCE_TYPE maybe should be in another trait that depends on this
+     * trait and provides whatever stuff RESOURCE_TYPE is used for?
+     */
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Saga;
+    const TABLE_NAME: &'static str = "Saga";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "creator",
+        "template_name",
+        "time_created",
+        "saga_params",
+        "saga_state",
+        "current_sec",
+        "sec_generation",
+    ];
+}
+
+/** Describes the "Saga" table */
+pub struct SagaNodeEvent;
+impl Table for SagaNodeEvent {
+    type ModelType = sec::log::SagaNodeEventDeserializer;
+    /*
+     * XXX RESOURCE_TYPE maybe should be in another trait that depends on this
+     * trait and provides whatever stuff RESOURCE_TYPE is used for?
+     */
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::NA;
+    const TABLE_NAME: &'static str = "SagaNodeEvent";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "saga_id",
+        "node_id",
+        "event_type",
+        "data",
+    ];
+}
+
+
 #[cfg(test)]
 mod test {
     use super::Disk;
     use super::Instance;
     use super::Project;
+    use super::Saga;
     use super::Table;
     use omicron_common::dev;
     use std::collections::BTreeSet;
@@ -109,6 +152,8 @@ mod test {
         check_table_schema::<Project>(&client).await;
         check_table_schema::<Disk>(&client).await;
         check_table_schema::<Instance>(&client).await;
+        check_table_schema::<Saga>(&client).await;
+        check_table_schema::<SagaNodeEvent>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();

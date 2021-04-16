@@ -19,6 +19,7 @@ use bb8_postgres::PostgresConnectionManager;
 use omicron_common::error::ApiError;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct Pool {
     pool: bb8::Pool<PostgresConnectionManager<tokio_postgres::NoTls>>,
 }

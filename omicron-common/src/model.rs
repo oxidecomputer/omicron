@@ -433,7 +433,9 @@ pub enum ApiResourceType {
     DiskAttachment,
     Instance,
     Rack,
+    Saga,
     Sled,
+    NA, /* XXX XXX */
 }
 
 impl Display for ApiResourceType {
@@ -448,6 +450,8 @@ impl Display for ApiResourceType {
                 ApiResourceType::Instance => "instance",
                 ApiResourceType::Rack => "rack",
                 ApiResourceType::Sled => "sled",
+                ApiResourceType::Saga => "saga",
+                ApiResourceType::NA => "<invalid resource type>",
             }
         )
     }

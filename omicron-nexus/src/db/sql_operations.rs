@@ -479,6 +479,44 @@ where
 }
 
 ///
+/// Insert a database record, not necessarily idempotently
+///
+/// This is used when the caller wants to explicitly handle the case of a
+/// conflict or else expects that a conflict will never happen and wants to
+/// treat it as an unhandleable operational error.
+///
+pub async fn sql_insert<T>(
+    client: &tokio_postgres::Client,
+    values: &SqlValueSet,
+) -> Result<(), ApiError>
+where
+    T: Table,
+{
+    let mut sql = SqlString::new();
+    let param_names = values
+        .values()
+        .iter()
+        .map(|value| sql.next_param(*value))
+        .collect::<Vec<String>>();
+    let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
+
+    sql.push_str(
+        format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            T::TABLE_NAME,
+            column_names.join(", "),
+            param_names.join(", "),
+        )
+        .as_str(),
+    );
+
+    sql_execute(client, sql.sql_fragment(), sql.sql_params())
+        .await
+        .map(|_| ())
+        .map_err(sql_error_generic)
+}
+
+///
 /// Idempotently insert a database record.  This is intended for cases where the
 /// record may conflict with an existing record with the same id, which should
 /// be ignored, or with an existing record with the same name, which should

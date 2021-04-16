@@ -93,6 +93,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: db::DataStore,
 
+    /** steno saga log sink */
+    saga_sink: Arc<dyn steno::SagaLogSink>,
+
     /**
      * List of sled agents known by this nexus.
      * TODO This ought to have some representation in the data store as well so
@@ -121,6 +124,8 @@ impl Nexus {
      */
     /* TODO-polish revisit rack metadata */
     pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
+        let pool = Arc::new(pool);
+        let sink_log = log.new(o!("component" => "LogSink"));
         Nexus {
             id: *id,
             log,
@@ -131,8 +136,12 @@ impl Nexus {
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
             },
-            db_datastore: db::DataStore::new(Arc::new(pool)),
+            db_datastore: db::DataStore::new(Arc::clone(&pool)),
             sled_agents: Mutex::new(BTreeMap::new()),
+            saga_sink: Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
+                Arc::clone(&pool),
+                sink_log,
+            )),
         }
     }
 
@@ -179,6 +188,7 @@ impl Nexus {
             &self.id.to_string(),
             Arc::new(saga_context),
             Arc::new(saga_params),
+            Arc::clone(&self.saga_sink),
         )
         .map_err(|e| {
             /* TODO-error more context would be useful */
