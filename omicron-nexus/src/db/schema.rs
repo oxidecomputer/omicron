@@ -5,23 +5,23 @@
  * ./sql.rs.
  */
 
+use crate::sec;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiInstance;
 use omicron_common::model::ApiName;
 use omicron_common::model::ApiProject;
 use omicron_common::model::ApiResourceType;
-use crate::sec;
 use uuid::Uuid;
 
 use super::sql::LookupKey;
+use super::sql::ResourceTable;
 use super::sql::Table;
 
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
     type ModelType = ApiProject;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -33,11 +33,14 @@ impl Table for Project {
     ];
 }
 
+impl ResourceTable for Project {
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Project;
+}
+
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
     type ModelType = ApiInstance;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -58,11 +61,14 @@ impl Table for Instance {
     ];
 }
 
+impl ResourceTable for Instance {
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Instance;
+}
+
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
     type ModelType = ApiDisk;
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -81,15 +87,14 @@ impl Table for Disk {
     ];
 }
 
+impl ResourceTable for Disk {
+    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
+}
+
 /** Describes the "SagaNodeEvent" table */
 pub struct Saga;
 impl Table for Saga {
     type ModelType = sec::log::Saga;
-    /*
-     * XXX RESOURCE_TYPE maybe should be in another trait that depends on this
-     * trait and provides whatever stuff RESOURCE_TYPE is used for?
-     */
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Saga;
     const TABLE_NAME: &'static str = "Saga";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -107,20 +112,10 @@ impl Table for Saga {
 pub struct SagaNodeEvent;
 impl Table for SagaNodeEvent {
     type ModelType = sec::log::SagaNodeEventDeserializer;
-    /*
-     * XXX RESOURCE_TYPE maybe should be in another trait that depends on this
-     * trait and provides whatever stuff RESOURCE_TYPE is used for?
-     */
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::NA;
     const TABLE_NAME: &'static str = "SagaNodeEvent";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "saga_id",
-        "node_id",
-        "event_type",
-        "data",
-    ];
+    const ALL_COLUMNS: &'static [&'static str] =
+        &["saga_id", "node_id", "event_type", "data"];
 }
-
 
 #[cfg(test)]
 mod test {
@@ -128,6 +123,7 @@ mod test {
     use super::Instance;
     use super::Project;
     use super::Saga;
+    use super::SagaNodeEvent;
     use super::Table;
     use omicron_common::dev;
     use std::collections::BTreeSet;
@@ -223,17 +219,17 @@ mod test {
  * unique id
  */
 pub struct LookupByUniqueId;
-impl<'a> LookupKey<'a> for LookupByUniqueId {
+impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueId {
     type ScopeKey = ();
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &[];
     type ItemKey = Uuid;
     const ITEM_KEY_COLUMN_NAME: &'static str = "id";
 
-    fn where_select_error<T: Table>(
+    fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
     ) -> ApiError {
-        ApiError::not_found_by_id(T::RESOURCE_TYPE, item_key)
+        ApiError::not_found_by_id(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -245,17 +241,17 @@ impl<'a> LookupKey<'a> for LookupByUniqueId {
  * type having a given name, but it's not clear that would be useful.)
  */
 pub struct LookupByUniqueName;
-impl<'a> LookupKey<'a> for LookupByUniqueName {
+impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueName {
     type ScopeKey = ();
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &[];
     type ItemKey = ApiName;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
-    fn where_select_error<T: Table>(
+    fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
     ) -> ApiError {
-        ApiError::not_found_by_name(T::RESOURCE_TYPE, item_key)
+        ApiError::not_found_by_name(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -264,17 +260,17 @@ impl<'a> LookupKey<'a> for LookupByUniqueName {
  * the project_id and the object's name
  */
 pub struct LookupByUniqueNameInProject;
-impl<'a> LookupKey<'a> for LookupByUniqueNameInProject {
+impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueNameInProject {
     type ScopeKey = (&'a Uuid,);
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &["project_id"];
     type ItemKey = ApiName;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
-    fn where_select_error<T: Table>(
+    fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
     ) -> ApiError {
-        ApiError::not_found_by_name(T::RESOURCE_TYPE, item_key)
+        ApiError::not_found_by_name(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -284,7 +280,7 @@ impl<'a> LookupKey<'a> for LookupByUniqueNameInProject {
  * intended for finding attached disks.
  */
 pub struct LookupByAttachedInstance;
-impl<'a> LookupKey<'a> for LookupByAttachedInstance {
+impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByAttachedInstance {
     /*
      * TODO-design What if we want an additional filter here (like disk_state in
      * ('attaching', 'attached', 'detaching'))?  This would almost work using
@@ -297,7 +293,7 @@ impl<'a> LookupKey<'a> for LookupByAttachedInstance {
     type ItemKey = ApiName;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
-    fn where_select_error<T: Table>(
+    fn where_select_error(
         _scope_key: Self::ScopeKey,
         _item_key: &Self::ItemKey,
     ) -> ApiError {

@@ -19,20 +19,21 @@ use super::operations::sql_query_always_one;
 use super::operations::sql_query_maybe_one;
 use super::sql;
 use super::sql::LookupKey;
+use super::sql::ResourceTable;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
 use super::sql::Table;
 
 /// Fetch parts of a row using the specified lookup
-pub async fn sql_fetch_row_raw<'a, L, T>(
+pub async fn sql_fetch_row_raw<'a, L, R>(
     client: &tokio_postgres::Client,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
     columns: &[&'static str],
 ) -> LookupResult<tokio_postgres::Row>
 where
-    L: LookupKey<'a>,
-    T: Table,
+    L: LookupKey<'a, R>,
+    R: ResourceTable,
 {
     let mut lookup_cond_sql = SqlString::new();
     L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
@@ -40,29 +41,29 @@ where
     let sql = format!(
         "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
         columns.join(", "),
-        T::TABLE_NAME,
-        T::LIVE_CONDITIONS,
+        R::TABLE_NAME,
+        R::LIVE_CONDITIONS,
         &lookup_cond_sql.sql_fragment(),
     );
     let query_params = lookup_cond_sql.sql_params();
-    let mkzerror = move || L::where_select_error::<T>(scope_key, item_key);
+    let mkzerror = move || L::where_select_error(scope_key, item_key);
     sql_query_maybe_one(client, &sql, query_params, mkzerror).await
 }
 
 /// Fetch an entire row using the specified lookup
-pub async fn sql_fetch_row_by<'a, L, T>(
+pub async fn sql_fetch_row_by<'a, L, R>(
     client: &tokio_postgres::Client,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<T::ModelType>
+) -> LookupResult<R::ModelType>
 where
-    L: LookupKey<'a>,
-    T: Table,
+    L: LookupKey<'a, R>,
+    R: ResourceTable,
 {
     let row =
-        sql_fetch_row_raw::<L, T>(client, scope_key, item_key, T::ALL_COLUMNS)
+        sql_fetch_row_raw::<L, R>(client, scope_key, item_key, R::ALL_COLUMNS)
             .await?;
-    T::ModelType::try_from(&row)
+    R::ModelType::try_from(&row)
 }
 
 /// Fetch a page of rows from a table using the specified lookup
@@ -72,7 +73,7 @@ pub async fn sql_fetch_page_from_table<'a, L, T>(
     pagparams: &'a DataPageParams<'a, L::ItemKey>,
 ) -> ListResult<T::ModelType>
 where
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
     L::ScopeKey: 'a,
     T: Table,
 {
@@ -94,7 +95,7 @@ pub async fn sql_fetch_page_by<'a, L, T, R>(
     columns: &'static [&'static str],
 ) -> ListResult<R>
 where
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
     T: Table,
     R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
         + Send
@@ -178,7 +179,7 @@ pub async fn sql_update_precond<'a, 'b, T, L>(
 ) -> Result<UpdatePrecond, ApiError>
 where
     T: Table,
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
 {
     /*
      * We want to update a row only if it meets some preconditions.  One
@@ -385,7 +386,7 @@ where
      * NotFound-by-name if they get this error.  It sounds kind of cheesy but
      * only the caller knows this translation has been done.
      */
-    let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
+    let mkzerror = || L::where_select_error(scope_key, item_key);
     let row = sql_query_maybe_one(
         &client,
         sql.as_str(),
@@ -441,13 +442,13 @@ fn sql_error_on_create(
  * provide this in `unique_value` and it will be returned with an
  * [`ApiError::ObjectAlreadyExists`] error.
  */
-pub async fn sql_insert_unique<T>(
+pub async fn sql_insert_unique<R>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,
     unique_value: &str,
-) -> Result<T::ModelType, ApiError>
+) -> Result<R::ModelType, ApiError>
 where
-    T: Table,
+    R: ResourceTable,
 {
     let mut sql = SqlString::new();
     let param_names = values
@@ -460,10 +461,10 @@ where
     sql.push_str(
         format!(
             "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
-            T::TABLE_NAME,
+            R::TABLE_NAME,
             column_names.join(", "),
             param_names.join(", "),
-            T::ALL_COLUMNS.join(", "),
+            R::ALL_COLUMNS.join(", "),
         )
         .as_str(),
     );
@@ -472,10 +473,10 @@ where
         sql_query_always_one(client, sql.sql_fragment(), sql.sql_params())
             .await
             .map_err(|e| {
-                sql_error_on_create(T::RESOURCE_TYPE, unique_value, e)
+                sql_error_on_create(R::RESOURCE_TYPE, unique_value, e)
             })?;
 
-    T::ModelType::try_from(&row)
+    R::ModelType::try_from(&row)
 }
 
 ///
@@ -537,14 +538,14 @@ where
 /// that the caller is trying to insert.  This is provided in the returned
 /// [`ApiError::ObjectAlreadyExists`] error.
 ///
-pub async fn sql_insert_unique_idempotent<'a, T>(
+pub async fn sql_insert_unique_idempotent<'a, R>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
 ) -> Result<(), ApiError>
 where
-    T: Table,
+    R: ResourceTable,
 {
     let mut sql = SqlString::new();
     let param_names = values
@@ -557,7 +558,7 @@ where
     sql.push_str(
         format!(
             "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING",
-            T::TABLE_NAME,
+            R::TABLE_NAME,
             column_names.join(", "),
             param_names.join(", "),
             ignore_conflicts_on,
@@ -567,7 +568,7 @@ where
 
     sql_execute(client, sql.sql_fragment(), sql.sql_params())
         .await
-        .map_err(|e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e))
+        .map_err(|e| sql_error_on_create(R::RESOURCE_TYPE, unique_value, e))
         .map(|_| ())
 }
 
@@ -697,19 +698,19 @@ where
 // conflict on the unique (project_id, name) index.  In that case, we just want
 // to fail right away -- the whole saga is going to fail with a user error.
 //
-pub async fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
+pub async fn sql_insert_unique_idempotent_and_fetch<'a, R, L>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<T::ModelType>
+) -> LookupResult<R::ModelType>
 where
-    T: Table,
-    L: LookupKey<'a>,
+    R: ResourceTable,
+    L: LookupKey<'a, R>,
 {
-    sql_insert_unique_idempotent::<T>(
+    sql_insert_unique_idempotent::<R>(
         client,
         values,
         unique_value,
@@ -724,7 +725,7 @@ where
      * that must be true for this function to be correct, and is true in the
      * cases of our callers.)
      */
-    sql_fetch_row_by::<L, T>(client, scope_key, item_key)
+    sql_fetch_row_by::<L, R>(client, scope_key, item_key)
         .await
         .map_err(sql_error_not_missing)
 }
