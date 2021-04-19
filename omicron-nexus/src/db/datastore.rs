@@ -28,6 +28,7 @@ use omicron_common::model::ApiDiskAttachment;
 use omicron_common::model::ApiDiskCreateParams;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskState;
+use omicron_common::model::ApiGeneration;
 use omicron_common::model::ApiInstance;
 use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
@@ -50,6 +51,7 @@ use uuid::Uuid;
 
 use super::operations::sql_execute_maybe_one;
 use super::operations::sql_query_maybe_one;
+use super::schema;
 use super::schema::Disk;
 use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;
@@ -65,9 +67,11 @@ use super::sql_operations::sql_fetch_page_by;
 use super::sql_operations::sql_fetch_page_from_table;
 use super::sql_operations::sql_fetch_row_by;
 use super::sql_operations::sql_fetch_row_raw;
+use super::sql_operations::sql_insert;
 use super::sql_operations::sql_insert_unique;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
+use crate::sec;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -601,5 +605,78 @@ impl DataStore {
                 ),
             })
         }
+    }
+
+    /*
+     * Saga management
+     */
+
+    pub async fn saga_create(
+        &self,
+        saga: &sec::log::Saga,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let mut values = SqlValueSet::new();
+        saga.sql_serialize(&mut values);
+        sql_insert::<schema::Saga>(&client, &values).await
+    }
+
+    // XXX want a type here
+    pub async fn saga_update_state(
+        &self,
+        saga_id: &steno::SagaId,
+        new_state: sec::log::SagaState,
+        current_sec: &str,
+        current_adopt_generation: &ApiGeneration,
+        current_state: &sec::log::SagaState,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let mut values = SqlValueSet::new();
+        values.set("saga_state", &new_state);
+        let mut precond_sql = SqlString::new();
+        let p1 = precond_sql.next_param(&current_sec);
+        let p2 = precond_sql.next_param(current_adopt_generation);
+        let p3 = precond_sql.next_param(current_state);
+        precond_sql.push_str(&format!(
+            "current_sec = {} AND adopt_generation = {} AND saga_state = {}",
+            p1, p2, p3
+        ));
+        let update = sql_update_precond::<
+            schema::Saga,
+            schema::LookupGenericByUniqueId,
+        >(
+            &client,
+            (),
+            &saga_id.0,
+            &["current_sec", "adopt_generation", "saga_state"],
+            &values,
+            precond_sql,
+        )
+        .await?;
+        let row = &update.found_state;
+        let found_sec: Option<&str> = sql_row_value(row, "found_current_sec")
+            .unwrap_or(Some("(unknown)"));
+        let found_gen =
+            sql_row_value::<_, ApiGeneration>(row, "found_adopt_generation")
+                .map(|i| i.to_string())
+                .unwrap_or("(unknown)".to_owned());
+        let found_saga_state =
+            sql_row_value::<_, sec::log::SagaState>(row, "found_saga_state")
+                .map(|i| i.to_string())
+                .unwrap_or("(unknown)".to_owned());
+        bail_unless!(update.updated,
+            "failed to update saga {:?} with state {:?}: preconditions not met: \
+            expected current_sec = {:?}, adopt_generation = {:?}, state = {:?}, \
+            but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}", 
+            saga_id,
+            new_state,
+            current_sec,
+            current_adopt_generation,
+            current_state,
+            found_sec,
+            found_gen,
+            found_saga_state,
+        );
+        Ok(())
     }
 }

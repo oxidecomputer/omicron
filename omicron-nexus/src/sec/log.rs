@@ -13,10 +13,15 @@ use chrono::Utc;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use omicron_common::error::ApiError;
+use omicron_common::impl_sql_wrapping;
+use omicron_common::model::parse_str_using_serde;
 use omicron_common::model::ApiGeneration;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use slog::Logger;
 use std::convert::TryFrom;
+use std::fmt;
 use std::sync::Arc;
 use steno::SagaLogSink;
 use steno::SagaNodeEventType;
@@ -51,17 +56,67 @@ impl SagaLogSink for CockroachDbSagaLogSink {
     }
 }
 
+/**
+ * Represents the persistent state of a whole saga
+ *
+ * This is related to steno::SagaState, but isn't the same.  This state captures
+ * the things we want to be able to tell from Nexus's perspective.
+ */
+#[derive(
+    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SagaState {
+    Running,
+    Done,
+}
+
+/*
+ * TODO much of the boilerplate below is copied from ApiInstanceState.
+ */
+
+impl fmt::Display for SagaState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl TryFrom<&str> for SagaState {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        parse_str_using_serde(value)
+    }
+}
+
+impl<'a> From<&'a SagaState> for &'a str {
+    fn from(s: &'a SagaState) -> &'a str {
+        s.label()
+    }
+}
+
+impl SagaState {
+    fn label(&self) -> &str {
+        match self {
+            SagaState::Running => "running",
+            SagaState::Done => "done",
+        }
+    }
+}
+
+impl_sql_wrapping!(SagaState, &str);
+
 /** Represents a row in the "Saga" table */
 pub struct Saga {
-    id: Uuid,
-    creator: String,
-    template_name: String, /* XXX enum? */
-    time_created: DateTime<Utc>,
-    saga_params: JsonValue,
-    saga_state: String, /* XXX enum */
-    current_sec: Option<String>,
-    adopt_generation: ApiGeneration,
-    adopt_time: DateTime<Utc>,
+    pub id: steno::SagaId,
+    pub creator: String,
+    pub template_name: String, /* XXX enum? */
+    pub time_created: DateTime<Utc>,
+    pub saga_params: JsonValue,
+    pub saga_state: SagaState,
+    pub current_sec: Option<String>,
+    pub adopt_generation: ApiGeneration,
+    pub adopt_time: DateTime<Utc>,
 }
 
 impl TryFrom<&tokio_postgres::Row> for Saga {
@@ -69,7 +124,7 @@ impl TryFrom<&tokio_postgres::Row> for Saga {
 
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(Saga {
-            id: sql_row_value(row, "id")?,
+            id: steno::SagaId(sql_row_value::<_, Uuid>(row, "id")?),
             creator: sql_row_value(row, "creator")?,
             template_name: sql_row_value(row, "template_name")?,
             time_created: sql_row_value(row, "time_created")?,
@@ -84,7 +139,7 @@ impl TryFrom<&tokio_postgres::Row> for Saga {
 
 impl SqlSerialize for Saga {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.id);
+        output.set("id", &self.id.0);
         output.set("creator", &self.creator);
         output.set("template_name", &self.template_name);
         output.set("time_created", &self.time_created);

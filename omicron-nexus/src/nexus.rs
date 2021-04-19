@@ -5,6 +5,7 @@
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use crate::sec;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
@@ -179,9 +180,22 @@ impl Nexus {
             ExecContextType = Arc<SagaContext>,
             SagaParamsType = Arc<P>,
         >,
+        /*
+         * TODO-cleanup The bound `P: Serialize` should not be necessary because
+         * SagaParamsType must already impl Serialize.
+         */
+        P: serde::Serialize,
     {
+        let now = Utc::now();
         let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
+        let saga_params_serialized = serde_json::to_value(&saga_params)
+            .map_err(|e| {
+                ApiError::internal_error(&format!(
+                    "failed to serialize saga parameters: {:#}",
+                    e
+                ))
+            })?;
         let saga_exec = SagaExecutor::new(
             &saga_id,
             Arc::new(saga_template),
@@ -194,13 +208,36 @@ impl Nexus {
             /* TODO-error more context would be useful */
             ApiError::InternalError { message: e.to_string() }
         })?;
+        let saga_record = sec::log::Saga {
+            id: saga_id,
+            creator: "myself".to_owned(), // XXX
+            template_name: "instance-provision".to_owned(), // XXX
+            time_created: now,
+            saga_params: saga_params_serialized,
+            saga_state: sec::log::SagaState::Running,
+            current_sec: Some("myself".to_owned()), // XXX
+            adopt_generation: ApiGeneration::new(),
+            adopt_time: now,
+        };
+        self.db_datastore.saga_create(&saga_record).await?;
         saga_exec.run().await;
-        saga_exec.result().kind.map_err(|saga_error| {
+        let rv = saga_exec.result().kind.map_err(|saga_error| {
             saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
                 ApiError::InternalError { message: e.to_string() }
             })
-        })
+        });
+        // XXX
+        self.db_datastore
+            .saga_update_state(
+                &saga_id,
+                sec::log::SagaState::Done,
+                &saga_record.current_sec.unwrap(), // XXX
+                &saga_record.adopt_generation,
+                &saga_record.saga_state,
+            )
+            .await?;
+        rv
     }
 
     /*

@@ -252,6 +252,9 @@ pub trait Table {
      * Parts of a WHERE clause that should be included in all queries for live
      * records
      */
+    // XXX This really ought to be a default only for ResourceTable.  As it is,
+    // it's easy to accidentally leave this on non-ResourceTable Tables.  The
+    // reverse, though, would make it easy to leave it off ResourceTables.
     const LIVE_CONDITIONS: &'static str = "time_deleted IS NULL";
 }
 

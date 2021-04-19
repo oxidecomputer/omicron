@@ -107,6 +107,7 @@ impl Table for Saga {
         "adopt_generation",
         "adopt_time",
     ];
+    const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
 /** Describes the "Saga" table */
@@ -116,6 +117,7 @@ impl Table for SagaNodeEvent {
     const TABLE_NAME: &'static str = "SagaNodeEvent";
     const ALL_COLUMNS: &'static [&'static str] =
         &["saga_id", "node_id", "event_type", "data", "event_time", "creator"];
+    const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
 #[cfg(test)]
@@ -233,6 +235,29 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueId {
         item_key: &Self::ItemKey,
     ) -> ApiError {
         ApiError::not_found_by_id(R::RESOURCE_TYPE, item_key)
+    }
+}
+
+/**
+ * Like [`LookupByUniqueId`], but for objects that are not API resources (so
+ * that "not found" error is different).
+ */
+pub struct LookupGenericByUniqueId;
+impl<'a, T: Table> LookupKey<'a, T> for LookupGenericByUniqueId {
+    type ScopeKey = ();
+    const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &[];
+    type ItemKey = Uuid;
+    const ITEM_KEY_COLUMN_NAME: &'static str = "id";
+
+    fn where_select_error(
+        _scope_key: Self::ScopeKey,
+        item_key: &Self::ItemKey,
+    ) -> ApiError {
+        ApiError::internal_error(&format!(
+            "table {:?}: expected row with id {:?}, but found none",
+            T::TABLE_NAME,
+            item_key,
+        ))
     }
 }
 

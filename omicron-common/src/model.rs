@@ -983,7 +983,7 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
     }
 }
 
-fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
+pub fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
     s: &str,
 ) -> Result<T, anyhow::Error> {
     /*

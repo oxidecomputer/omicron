@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 async-trait = "0.1.24"
 bb8 = "0.7.0"
 bb8-postgres = "0.7.0"

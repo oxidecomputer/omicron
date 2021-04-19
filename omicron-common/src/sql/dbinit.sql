@@ -262,7 +262,7 @@ CREATE TABLE omicron.public.Saga (
  */
 CREATE UNIQUE INDEX ON omicron.public.Saga (
     current_sec, id
-) WHERE saga_state IN ('running', 'unwinding');
+) WHERE saga_state != 'done';
 
 /*
  * TODO more indexes for Saga?
