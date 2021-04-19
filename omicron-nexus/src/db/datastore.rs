@@ -659,11 +659,11 @@ impl DataStore {
         let found_gen =
             sql_row_value::<_, ApiGeneration>(row, "found_adopt_generation")
                 .map(|i| i.to_string())
-                .unwrap_or("(unknown)".to_owned());
+                .unwrap_or_else(|_| "(unknown)".to_owned());
         let found_saga_state =
             sql_row_value::<_, sec::log::SagaState>(row, "found_saga_state")
                 .map(|i| i.to_string())
-                .unwrap_or("(unknown)".to_owned());
+                .unwrap_or_else(|_| "(unknown)".to_owned());
         bail_unless!(update.updated,
             "failed to update saga {:?} with state {:?}: preconditions not met: \
             expected current_sec = {:?}, adopt_generation = {:?}, state = {:?}, \
