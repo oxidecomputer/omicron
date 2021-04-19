@@ -104,7 +104,8 @@ impl Table for Saga {
         "saga_params",
         "saga_state",
         "current_sec",
-        "sec_generation",
+        "adopt_generation",
+        "adopt_time",
     ];
 }
 
@@ -114,7 +115,7 @@ impl Table for SagaNodeEvent {
     type ModelType = sec::log::SagaNodeEventDeserializer;
     const TABLE_NAME: &'static str = "SagaNodeEvent";
     const ALL_COLUMNS: &'static [&'static str] =
-        &["saga_id", "node_id", "event_type", "data"];
+        &["saga_id", "node_id", "event_type", "data", "event_time", "creator"];
 }
 
 #[cfg(test)]
@@ -201,8 +202,8 @@ mod test {
         eprintln!("TABLE: {}", T::TABLE_NAME);
         eprintln!("found in database:        {}", expected);
         eprintln!("found in Rust definition: {}", found);
-        eprintln!("missing from database:    {}", list_extra.join(", "));
-        eprintln!("missing from Rust:        {}", list_missing.join(", "));
+        eprintln!("missing from Rust:        {}", list_extra.join(", "));
+        eprintln!("missing from database:    {}", list_missing.join(", "));
 
         if !list_missing.is_empty() || !list_extra.is_empty() {
             panic!(
@@ -210,6 +211,8 @@ mod test {
                 in Rust code for table {:?}",
                 T::TABLE_NAME
             );
+        } else {
+            eprintln!("TABLE {} Rust and database fields match", T::TABLE_NAME);
         }
     }
 }

@@ -287,19 +287,17 @@ CREATE TABLE omicron.public.SagaNodeEvent (
     event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
     data JSONB,
     event_time TIMESTAMPTZ NOT NULL,
-    creator STRING(39) NOT NULL
-);
+    creator STRING(39) NOT NULL,
 
-/*
- * It's important to be able to list the nodes in a saga.  We put the node_id in
- * the saga so that we can paginate the list.
- *
- * We make it a UNIQUE index and include the event_type to prevent two SECs from
- * attempting to record the same event for the same saga.  Whether this should
- * be allowed is still TBD.
- */
-CREATE UNIQUE INDEX ON omicron.public.SagaNodeEvent (
-    saga_id, node_id, event_type
+    /*
+     * It's important to be able to list the nodes in a saga.  We put the
+     * node_id in the saga so that we can paginate the list.
+     *
+     * We make it a UNIQUE index and include the event_type to prevent two SECs
+     * from attempting to record the same event for the same saga.  Whether this
+     * should be allowed is still TBD.
+     */
+    PRIMARY KEY (saga_id, node_id, event_type)
 );
 
 /*******************************************************************/
