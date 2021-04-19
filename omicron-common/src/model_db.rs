@@ -107,7 +107,8 @@ macro_rules! impl_sql_wrapping {
                 ty: &tokio_postgres::types::Type,
                 raw: &'a [u8],
             ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-                let value: $D = <$D as tokio_postgres::types::FromSql>::from_sql(ty, raw)?;
+                let value: $D =
+                    <$D as tokio_postgres::types::FromSql>::from_sql(ty, raw)?;
                 $T::try_from(value).map_err(|e| e.into())
             }
 
