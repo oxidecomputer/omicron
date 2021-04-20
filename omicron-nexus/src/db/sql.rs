@@ -48,6 +48,7 @@ use tokio_postgres::types::ToSql;
  * `sql!(sql_str[, param...])` where `sql_str` is `&'static str` and the params
  * are all numbered params?
  */
+#[derive(Clone)]
 pub struct SqlString<'a> {
     contents: String,
     params: Vec<&'a (dyn ToSql + Sync)>,
@@ -360,13 +361,11 @@ pub trait LookupKey<'a, T: Table> {
      * most one row will match.  However, the SQL generated here neither assumes
      * nor guarantees that only one row will match.
      */
-    fn where_select_rows<'b>(
+    fn where_select_rows(
         scope_key: Self::ScopeKey,
         item_key: &'a Self::ItemKey,
-        output: &'b mut SqlString<'a>,
-    ) where
-        'a: 'b,
-    {
+        output: &mut SqlString<'a>,
+    ) {
         let mut column_names =
             Vec::with_capacity(Self::SCOPE_KEY_COLUMN_NAMES.len() + 1);
         column_names.extend_from_slice(&Self::SCOPE_KEY_COLUMN_NAMES);
@@ -387,13 +386,13 @@ pub trait LookupKey<'a, T: Table> {
      * about the ordering and expects callers to provide the item key of the row
      * they want.
      */
-    fn where_select_page<'b, 'c, 'd>(
+    fn where_select_page<'b, 'c>(
         scope_key: Self::ScopeKey,
-        pagparams: &'c DataPageParams<'c, Self::ItemKey>,
-        output: &'b mut SqlString<'d>,
+        pagparams: &DataPageParams<'b, Self::ItemKey>,
+        output: &mut SqlString<'c>,
     ) where
-        'a: 'b + 'd,
-        'c: 'a,
+        'a: 'c,
+        'b: 'c,
     {
         let (operator, order) = match pagparams.direction {
             dropshot::PaginationOrder::Ascending => (">", "ASC"),

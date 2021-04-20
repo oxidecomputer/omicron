@@ -94,6 +94,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: db::DataStore,
 
+    /** database pool */
+    db_pool: Arc<db::Pool>,
+
     /** steno saga log sink */
     saga_sink: Arc<dyn steno::SagaLogSink>,
 
@@ -130,7 +133,7 @@ impl Nexus {
     pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
         let pool = Arc::new(pool);
         let sink_log = log.new(o!("component" => "LogSink"));
-        Nexus {
+        let nexus = Nexus {
             id: *id,
             log,
             api_rack_identity: ApiIdentityMetadata {
@@ -141,13 +144,43 @@ impl Nexus {
                 time_modified: Utc::now(),
             },
             db_datastore: db::DataStore::new(Arc::clone(&pool)),
+            db_pool: Arc::clone(&pool),
             sled_agents: Mutex::new(BTreeMap::new()),
             saga_sink: Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
                 Arc::clone(&pool),
                 sink_log,
             )),
             my_sec_id: sec::log::SecId(Uuid::new_v4()), // XXX
-        }
+        };
+
+        // XXX
+        nexus.begin_recovery();
+        nexus
+    }
+
+    fn begin_recovery(&self) {
+        let pool = Arc::clone(&self.db_pool);
+        let sec_id = self.my_sec_id;
+        let log = self.log.new(o!());
+        tokio::spawn(async move {
+            let sagas = sec::recovery::list_sagas(&pool, log, &sec_id);
+            /*
+             * XXX It seems like what we really want to do here is spin up a new
+             * task that represents the SEC.  Its first order of business will
+             * be to list sagas and start recovering them.  We'll also want to
+             * update execute_saga() to send a message to this SEC and wait for
+             * one or more messages back.  The SEC will either want to avoid
+             * reading that channel (so that execute_saga() blocks) or else fail
+             * sagas before we've finished listing sagas as part of recovery.
+             *
+             * If recovery fails at this point, what do we do?  It's a little
+             * tricky: if we've not finished listing all sagas, then we probably
+             * want to just sleep for a bit and try again later.  If we've
+             * finished listing all sagas, we can in principle proceed with
+             * normal operation, even though a bunch of individual sagas may not
+             * be recovered yet.  The SEC needs to keep track of all this.
+             */
+        });
     }
 
     /*

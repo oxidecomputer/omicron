@@ -102,8 +102,10 @@ where
         + Send
         + 'static,
 {
+    let mut s = SqlString::new();
+    s.push_str("TRUE");
     let rows =
-        sql_fetch_page_raw::<L, T>(client, scope_key, pagparams, columns)
+        sql_fetch_page_raw::<L, T>(client, scope_key, pagparams, columns, s)
             .await?;
     let list =
         rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
@@ -114,27 +116,31 @@ where
 async fn sql_fetch_page_raw<'a, 'b, L, T>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
-    pagparams: &'b DataPageParams<'a, L::ItemKey>,
+    pagparams: &DataPageParams<'b, L::ItemKey>,
     columns: &'static [&'static str],
+    extra_cond_sql: SqlString<'b>,
 ) -> Result<Vec<tokio_postgres::Row>, ApiError>
 where
     L: LookupKey<'a, T>,
     T: Table,
+    'a: 'b,
 {
-    let mut page_cond_sql = SqlString::new();
-    L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
+    let (mut page_select_sql, extra_fragment) =
+        SqlString::new_with_params(extra_cond_sql);
+    L::where_select_page(scope_key, pagparams, &mut page_select_sql);
     let limit = i64::from(pagparams.limit.get());
-    let limit_clause = format!("LIMIT {}", page_cond_sql.next_param(&limit));
-    page_cond_sql.push_str(limit_clause.as_str());
+    let limit_clause = format!("LIMIT {}", page_select_sql.next_param(&limit));
+    page_select_sql.push_str(limit_clause.as_str());
 
     let sql = format!(
-        "SELECT {} FROM {} WHERE ({}) {}",
+        "SELECT {} FROM {} WHERE ({}) AND ({}) {}",
         columns.join(", "),
         T::TABLE_NAME,
+        extra_fragment,
         T::LIVE_CONDITIONS,
-        &page_cond_sql.sql_fragment(),
+        &page_select_sql.sql_fragment(),
     );
-    let query_params = page_cond_sql.sql_params();
+    let query_params = page_select_sql.sql_params();
     sql_query(client, sql.as_str(), query_params)
         .await
         .map_err(sql_error_generic)
@@ -157,30 +163,32 @@ pub async fn sql_paginate<'a, L, T, R>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
     columns: &'static [&'static str],
+    extra_cond: SqlString<'a>,
 ) -> Result<Vec<R>, ApiError>
 where
     L: LookupKey<'a, T>,
     T: Table,
-    R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
+    R: for<'b> TryFrom<&'b tokio_postgres::Row, Error = ApiError>
         + Send
         + 'static,
 {
     let mut results = Vec::new();
     let mut last_row_marker = None;
+    // XXX initial pagparams
+    let direction = dropshot::PaginationOrder::Ascending;
+    let limit = NonZeroU32::new(100).unwrap();
     loop {
-        //
-        // TODO-error It would be nice to have context here about what we were
-        // doing.
-        // XXX initial pagparams
+        /* TODO-error more context here about what we were doing */
         //
         let pagparams = DataPageParams {
             marker: last_row_marker.as_ref(),
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: NonZeroU32::new(100).unwrap(),
+            direction,
+            limit,
         };
-        let rows =
-            sql_fetch_page_raw::<L, T>(client, scope_key, &pagparams, columns)
-                .await?;
+        let rows = sql_fetch_page_raw::<L, T>(
+            client, scope_key, &pagparams, columns, extra_cond.clone(),
+        )
+        .await?;
         if rows.len() == 0 {
             return Ok(results);
         }
