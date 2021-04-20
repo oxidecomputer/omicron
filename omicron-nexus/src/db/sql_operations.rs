@@ -186,7 +186,11 @@ where
             limit,
         };
         let rows = sql_fetch_page_raw::<L, T>(
-            client, scope_key, &pagparams, columns, extra_cond.clone(),
+            client,
+            scope_key,
+            &pagparams,
+            columns,
+            extra_cond.clone(),
         )
         .await?;
         if rows.len() == 0 {
