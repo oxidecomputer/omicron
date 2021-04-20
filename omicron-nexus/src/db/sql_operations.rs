@@ -111,10 +111,10 @@ where
 }
 
 // XXX TODO-doc
-async fn sql_fetch_page_raw<'a, L, T>(
+async fn sql_fetch_page_raw<'a, 'b, L, T>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
-    pagparams: &'a DataPageParams<'a, L::ItemKey>,
+    pagparams: &'b DataPageParams<'a, L::ItemKey>,
     columns: &'static [&'static str],
 ) -> Result<Vec<tokio_postgres::Row>, ApiError>
 where
@@ -166,19 +166,18 @@ where
         + 'static,
 {
     let mut results = Vec::new();
-    // XXX initial pagparams
-    let mut pagparams = DataPageParams {
-        marker: None,
-        direction: dropshot::PaginationOrder::Ascending,
-        limit: NonZeroU32::new(100).unwrap(),
-    };
     let mut last_row_marker = None;
     loop {
         //
         // TODO-error It would be nice to have context here about what we were
         // doing.
+        // XXX initial pagparams
         //
-        pagparams.marker = last_row_marker.as_ref();
+        let pagparams = DataPageParams {
+            marker: last_row_marker.as_ref(),
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
         let rows =
             sql_fetch_page_raw::<L, T>(client, scope_key, &pagparams, columns)
                 .await?;
