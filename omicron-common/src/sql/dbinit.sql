@@ -234,8 +234,8 @@ CREATE TABLE omicron.public.Saga (
 
     /* unique identifier for this execution */
     id UUID PRIMARY KEY,
-    /* unique id of the creator (probably a uuid, but does not need to be) */
-    creator STRING(39) NOT NULL,
+    /* unique id of the creator */
+    creator UUID NOT NULL,
     /* name of the saga template name being run */
     template_name STRING(127) NOT NULL,
     /* time the saga was started */
@@ -251,7 +251,7 @@ CREATE TABLE omicron.public.Saga (
      * - number of adoptions?
      */
     saga_state STRING(31) NOT NULL, /* see SagaState above */
-    current_sec STRING(39) NOT NULL,
+    current_sec UUID NOT NULL,
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
 );
@@ -287,7 +287,7 @@ CREATE TABLE omicron.public.SagaNodeEvent (
     event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
     data JSONB,
     event_time TIMESTAMPTZ NOT NULL,
-    creator STRING(39) NOT NULL,
+    creator UUID NOT NULL,
 
     /*
      * It's important to be able to list the nodes in a saga.  We put the

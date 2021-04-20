@@ -177,7 +177,7 @@ impl SqlSerialize for steno::SagaNodeEvent {
         output.set("saga_id", &self.saga_id.0);
         output.set("node_id", &(self.node_id as i64)); // XXX
         output.set("event_time", &self.event_time);
-        output.set("creator", &self.creator);
+        output.set("creator", &self.creator.parse::<Uuid>().unwrap()); // XXX
         output.set("event_type", &self.event_type.label());
 
         let data: Option<JsonValue> = match &self.event_type {
@@ -242,7 +242,7 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEventDeserializer {
             saga_id: steno::SagaId(sql_row_value(row, "saga_id")?),
             node_id: sql_row_value::<_, i64>(row, "node_id")? as u64, // XXX
             event_time: sql_row_value(row, "event_time")?,
-            creator: sql_row_value(row, "creator")?,
+            creator: sql_row_value::<_, Uuid>(row, "creator")?.to_string(),
             event_type,
         }))
     }
