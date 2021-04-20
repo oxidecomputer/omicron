@@ -12,6 +12,7 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
 use std::convert::TryFrom;
+use std::num::NonZeroU32;
 
 use super::operations::sql_execute;
 use super::operations::sql_query;
@@ -101,6 +102,25 @@ where
         + Send
         + 'static,
 {
+    let rows =
+        sql_fetch_page_raw::<L, T>(client, scope_key, pagparams, columns)
+            .await?;
+    let list =
+        rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
+    Ok(futures::stream::iter(list).boxed())
+}
+
+// XXX TODO-doc
+async fn sql_fetch_page_raw<'a, L, T>(
+    client: &'a tokio_postgres::Client,
+    scope_key: L::ScopeKey,
+    pagparams: &'a DataPageParams<'a, L::ItemKey>,
+    columns: &'static [&'static str],
+) -> Result<Vec<tokio_postgres::Row>, ApiError>
+where
+    L: LookupKey<'a, T>,
+    T: Table,
+{
     let mut page_cond_sql = SqlString::new();
     L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
     let limit = i64::from(pagparams.limit.get());
@@ -115,12 +135,78 @@ where
         &page_cond_sql.sql_fragment(),
     );
     let query_params = page_cond_sql.sql_params();
-    let rows = sql_query(client, sql.as_str(), query_params)
+    sql_query(client, sql.as_str(), query_params)
         .await
-        .map_err(sql_error_generic)?;
-    let list =
-        rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
-    Ok(futures::stream::iter(list).boxed())
+        .map_err(sql_error_generic)
+}
+
+// XXX TODO-doc
+// XXX If we buy into Streams here, we may be able to make a bunch of this
+// simpler: the two primitives that we probably want are:
+// (1) given a sql_query(), return the rows as a Stream
+// (2) given a bunch of the above Streams, concatenate them.  This is like
+//     StreamExt::chain()...except we want to do the second query after the
+//     first one is exhausted.
+// That said, this wouldn't buy us a whole lot?  In (1), we already get back a
+// Vec of rows, so we're already buffering.
+//pub async fn sql_pagination_stream<'a, L, T, R>(
+//    client: &'a tokio_postgres::Client,
+//    scope_key: L::ScopeKey,
+//    pagparams: &'a Data
+pub async fn sql_paginate<'a, L, T, R>(
+    client: &'a tokio_postgres::Client,
+    scope_key: L::ScopeKey,
+    columns: &'static [&'static str],
+) -> Result<Vec<R>, ApiError>
+where
+    L: LookupKey<'a, T>,
+    T: Table,
+    R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
+        + Send
+        + 'static,
+{
+    let mut results = Vec::new();
+    // XXX initial pagparams
+    let mut pagparams = DataPageParams {
+        marker: None,
+        direction: dropshot::PaginationOrder::Ascending,
+        limit: NonZeroU32::new(100).unwrap(),
+    };
+    let mut last_row_marker = None;
+    loop {
+        //
+        // TODO-error It would be nice to have context here about what we were
+        // doing.
+        //
+        pagparams.marker = last_row_marker.as_ref();
+        let rows =
+            sql_fetch_page_raw::<L, T>(client, scope_key, &pagparams, columns)
+                .await?;
+        if rows.len() == 0 {
+            return Ok(results);
+        }
+
+        /*
+         * Extract the marker column and prepare pagination parameters for the
+         * next query.
+         */
+        let last_row = rows.last().unwrap();
+        last_row_marker = Some(sql_row_value::<_, L::ItemKey>(
+            last_row,
+            L::ITEM_KEY_COLUMN_NAME,
+        )?);
+
+        /*
+         * Now transform the rows we got and append them to the list we're
+         * accumulating.
+         */
+        results.append(
+            &mut rows
+                .iter()
+                .map(R::try_from)
+                .collect::<Result<Vec<R>, ApiError>>()?,
+        );
+    }
 }
 
 ///

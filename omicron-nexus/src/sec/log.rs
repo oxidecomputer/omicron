@@ -106,15 +106,36 @@ impl SagaState {
 
 impl_sql_wrapping!(SagaState, &str);
 
+/* XXX TODO-doc */
+/*
+ * XXX Do we ever want to allow these to be non-uuids?  Can we handle this
+ * smoothly?  Maybe this could be an enum with two variants.
+ */
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SecId(pub Uuid);
+impl_sql_wrapping!(SecId, Uuid);
+
+impl From<&SecId> for Uuid {
+    fn from(g: &SecId) -> Self {
+        g.0
+    }
+}
+
+impl From<Uuid> for SecId {
+    fn from(value: Uuid) -> Self {
+        SecId(value)
+    }
+}
+
 /** Represents a row in the "Saga" table */
 pub struct Saga {
     pub id: steno::SagaId,
-    pub creator: String,
+    pub creator: SecId,
     pub template_name: String, /* XXX enum? */
     pub time_created: DateTime<Utc>,
     pub saga_params: JsonValue,
     pub saga_state: SagaState,
-    pub current_sec: Option<String>,
+    pub current_sec: Option<SecId>,
     pub adopt_generation: ApiGeneration,
     pub adopt_time: DateTime<Utc>,
 }

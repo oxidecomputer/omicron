@@ -97,6 +97,9 @@ pub struct Nexus {
     /** steno saga log sink */
     saga_sink: Arc<dyn steno::SagaLogSink>,
 
+    /** unique id for this Nexus as an SEC */
+    my_sec_id: sec::log::SecId,
+
     /**
      * List of sled agents known by this nexus.
      * TODO This ought to have some representation in the data store as well so
@@ -143,6 +146,7 @@ impl Nexus {
                 Arc::clone(&pool),
                 sink_log,
             )),
+            my_sec_id: sec::log::SecId(Uuid::new_v4()), // XXX
         }
     }
 
@@ -210,12 +214,12 @@ impl Nexus {
         })?;
         let saga_record = sec::log::Saga {
             id: saga_id,
-            creator: "myself".to_owned(), // XXX
+            creator: self.my_sec_id,
             template_name: "instance-provision".to_owned(), // XXX
             time_created: now,
             saga_params: saga_params_serialized,
             saga_state: sec::log::SagaState::Running,
-            current_sec: Some("myself".to_owned()), // XXX
+            current_sec: Some(self.my_sec_id),
             adopt_generation: ApiGeneration::new(),
             adopt_time: now,
         };

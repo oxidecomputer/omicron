@@ -359,7 +359,7 @@ impl From<&ApiByteCount> for i64 {
  */
 /*
  * Because generation numbers are stored in the database, we represent them as
- * i64.  For the same reason as for
+ * i64.
  */
 #[derive(
     Copy,

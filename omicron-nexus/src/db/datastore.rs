@@ -626,7 +626,7 @@ impl DataStore {
         &self,
         saga_id: &steno::SagaId,
         new_state: sec::log::SagaState,
-        current_sec: &str,
+        current_sec: &sec::log::SecId,
         current_adopt_generation: &ApiGeneration,
         current_state: &sec::log::SagaState,
     ) -> Result<(), ApiError> {
@@ -634,7 +634,7 @@ impl DataStore {
         let mut values = SqlValueSet::new();
         values.set("saga_state", &new_state);
         let mut precond_sql = SqlString::new();
-        let p1 = precond_sql.next_param(&current_sec);
+        let p1 = precond_sql.next_param(current_sec);
         let p2 = precond_sql.next_param(current_adopt_generation);
         let p3 = precond_sql.next_param(current_state);
         precond_sql.push_str(&format!(
