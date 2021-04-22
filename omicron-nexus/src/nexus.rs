@@ -222,6 +222,7 @@ impl Nexus {
         P: serde::Serialize,
     {
         let now = Utc::now();
+        // XXX reuse saga context from elsewhere?
         let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
         let saga_params_serialized = serde_json::to_value(&saga_params)
@@ -255,12 +256,17 @@ impl Nexus {
             adopt_time: now,
         };
         self.db_datastore.saga_create(&saga_record).await?;
-        saga_exec.run().await;
-        let rv = saga_exec.result().kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
-                /* TODO-error more context would be useful */
-                ApiError::InternalError { message: e.to_string() }
-            })
+
+        let result = self.sec.saga_run(saga_id, Arc::new(saga_exec)).await;
+        let rv = result.kind.map_err(|saga_error| {
+            saga_error
+                .error_source
+                .clone()
+                .convert::<ApiError>()
+                .unwrap_or_else(|e| {
+                    /* TODO-error more context would be useful */
+                    ApiError::InternalError { message: e.to_string() }
+                })
         });
         // XXX
         self.db_datastore

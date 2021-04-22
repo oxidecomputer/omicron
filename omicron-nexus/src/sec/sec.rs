@@ -24,10 +24,10 @@ enum SagaLoadState {
     Running {
         task: tokio::task::JoinHandle<()>,
         exec: Arc<dyn steno::SagaExecManager>,
-        waiter: Option<oneshot::Sender<Arc<steno::SagaResult>>>,
+        waiter: Option<oneshot::Sender<steno::SagaResult>>,
     },
     Done {
-        result: Arc<steno::SagaResult>,
+        result: steno::SagaResult,
     },
     Abandoned {
         time: DateTime<Utc>,
@@ -62,7 +62,7 @@ enum SecMsg<T> {
     SagaAdd {
         saga_id: steno::SagaId,
         exec: Arc<dyn steno::SagaExecManager>,
-        notify_done: oneshot::Sender<Arc<steno::SagaResult>>,
+        notify_done: oneshot::Sender<steno::SagaResult>,
     },
 
     SagaDone {
@@ -176,7 +176,7 @@ impl<T> SagaExecCoordinatorHandle<T> {
         &self,
         saga_id: steno::SagaId,
         exec: Arc<dyn steno::SagaExecManager>,
-    ) -> Arc<steno::SagaResult> {
+    ) -> steno::SagaResult {
         let (notify_done, wait_done) = oneshot::channel();
         let secmsg = SecMsg::SagaAdd { saga_id, notify_done, exec };
         self.must_send(secmsg).await;
@@ -363,7 +363,7 @@ where
         &mut self,
         saga_id: steno::SagaId,
         exec: Arc<dyn steno::SagaExecManager>,
-        notify_done: oneshot::Sender<Arc<steno::SagaResult>>,
+        notify_done: oneshot::Sender<steno::SagaResult>,
     ) {
         let tx = self.msg_tx.clone();
         let mut load_state = exec_saga(saga_id, exec, tx);
@@ -380,14 +380,15 @@ where
 
     async fn msg_saga_done(&mut self, saga_id: steno::SagaId) {
         let load_state = self.sagas.remove(&saga_id);
-        let (waiter, result) = match load_state {
+        /* XXX TODO-cleanup */
+        let (waiter, result1, result2) = match load_state {
             Some(SagaLoadState::Running { task, exec, waiter }) => {
                 /*
                  * This should always be very quick, as this task should have
                  * finished as soon as it sent the SagaDone message.
                  */
                 task.await.expect("failed to wait for saga task");
-                (waiter, Arc::new(exec.result()))
+                (waiter, exec.result(), exec.result())
             }
             _ => {
                 panic!(
@@ -398,12 +399,12 @@ where
         };
 
         if let Some(w) = waiter {
-            w.send(Arc::clone(&result)).unwrap_or_else(|_| {
+            w.send(result1).unwrap_or_else(|_| {
                 panic!("waiter gone before we could send message")
             });
         }
 
-        self.sagas.insert(saga_id, SagaLoadState::Done { result });
+        self.sagas.insert(saga_id, SagaLoadState::Done { result: result2 });
     }
 
     async fn msg_saga_recovery_done(&mut self) {
@@ -503,7 +504,7 @@ async fn recover_sagas<T: Send + Sync + 'static>(recover: Recover<T>) {
 
     recover.tx.send(SecMsg::SagaRecoveryDone).await.unwrap_or_else(|error| {
         panic!("channel closed unexpectedly: {:#}", error);
-    });;
+    });
 }
 
 async fn recover_saga<T: Send + Sync + 'static>(
