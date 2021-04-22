@@ -30,6 +30,7 @@ INSTANCES
     instance_detach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_list_disks  PROJECT_NAME INSTANCE_NAME
     instance_get_disk    PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_get_metrics PROJECT_NAME INSTANCE_NAME
 
 DISKS
 
@@ -218,6 +219,12 @@ function cmd_instance_get_disk
 {
 	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
 	do_curl "/projects/$1/instances/$2/disks/$3"
+}
+
+function cmd_instance_get_metrics
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
+	do_curl "/projects/$1/instances/$2/metrics"
 }
 
 function cmd_disk_create_demo

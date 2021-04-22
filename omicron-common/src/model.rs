@@ -1240,6 +1240,175 @@ pub struct BootstrapAgentShareResponse {
     pub shared_secret: Vec<u8>,
 }
 
+/*
+ * INSTANCE METRICS
+ */
+
+/**
+ * Representation of instance metrics.
+ */
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ApiInstanceMetrics {
+    /** Instance Uuid. */
+    pub instance_id: Uuid,
+    /** Metrics for this instance. */
+    pub metrics: InstanceMetrics,
+}
+
+impl ApiObject for ApiInstanceMetrics {
+    type View = ApiInstanceMetricsView;
+    fn to_view(&self) -> ApiInstanceMetricsView {
+        ApiInstanceMetricsView {
+            instance_id: self.instance_id,
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
+impl ApiInstanceMetrics {
+    pub fn empty(instance_id: Uuid) -> Self {
+        Self { instance_id, metrics: InstanceMetrics::empty() }
+    }
+}
+
+/**
+ * Client view of [`ApiInstanceMetrics`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiInstanceMetricsView {
+    pub instance_id: Uuid,
+    pub metrics: InstanceMetrics,
+}
+
+/**
+ * Returned from requests for virtual machine instance metrics.
+ */
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceMetrics {
+    /** Timestamp for these measurements. */
+    pub timestamp: DateTime<Utc>,
+
+    /** CPU utilization, listed by vCPU for the instance. */
+    pub cpu: Vec<CpuMetrics>,
+
+    /** Mapping from a disk identifier to the metrics for that disk. */
+    pub disk: BTreeMap<Uuid, DiskMetrics>,
+
+    /** Mapping from an interface identifier to the metrics for that interface. */
+    pub network: BTreeMap<Uuid, NetworkInterfaceMetrics>,
+
+    /** Memory-utilization metrics for this instance. */
+    pub memory: MemoryMetrics,
+}
+
+impl InstanceMetrics {
+    pub(crate) fn empty() -> Self {
+        Self {
+            timestamp: Utc::now(),
+            cpu: Default::default(),
+            disk: Default::default(),
+            memory: Default::default(),
+            network: Default::default(),
+        }
+    }
+}
+
+/**
+ * Virtual machine memory utilization information.
+ */
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct MemoryMetrics {
+    /** Total available memory, in bytes. */
+    pub size: u64,
+}
+
+/**
+ * Virtual machine CPU utilization information.
+ */
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct CpuMetrics {
+    /** Cumulative nanoseconds executing in guest context. */
+    pub busy_ns: u64,
+
+    /** Cumulative nanoseconds during which the CPU is explicitly idle. */
+    pub idle_ns: u64,
+
+    /**
+     * Cumulative nanoseconds outside guest context, i.e., overhead of the
+     * hypervisor. This is not intended to be visible to external customers,
+     * but rather for internal reporting, product iteration, debugging, etc.
+     */
+    pub overhead_ns: u64,
+}
+
+/**
+ * Virtual disk utilization information.
+ */
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct DiskMetrics {
+    /** Total size of the disk, in bytes. */
+    pub size: u64,
+
+    /** Total allocated space on the disk, in bytes. */
+    pub used: u64,
+
+    /** Total free space on the disk, in bytes. */
+    pub free: u64,
+
+    /**
+     * Cumulative counts of the duration of each read operation. The bins are
+     * specified by the associated constant `DiskMetrics::IO_BIN_EDGES`.
+     */
+    pub read_duration: Vec<u64>,
+
+    /**
+     * Cumulative counts of the duration of each write operation. The bins are
+     * specified by the associated constant `DiskMetrics::IO_BIN_EDGES`.
+     */
+    pub write_duration: Vec<u64>,
+
+    /**
+     * Cumulative counts of the duration of each flush operation. The bins are
+     * specified by the associated constant `DiskMetrics::IO_BIN_EDGES`.
+     */
+    pub flush_duration: Vec<u64>,
+
+    /** Cumulative total bytes read. */
+    pub bytes_read: u64,
+
+    /** Cumulative total bytes written. */
+    pub bytes_written: u64,
+
+    /** Cumulative count of read operations. */
+    pub reads: u64,
+
+    /** Cumulative count of write operations. */
+    pub writes: u64,
+
+    /** Cumulative count of flush operations. */
+    pub flushes: u64,
+    // TODO(ben) How do we include the bins for the duration histograms?
+}
+
+/**
+ * Virtual network interface utilization information.
+ */
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct NetworkInterfaceMetrics {
+    /** Cumulative total number of bytes received. */
+    pub bytes_recv: u64,
+
+    /** Cumulative total number of bytes sent. */
+    pub bytes_sent: u64,
+
+    /** Cumulative total number of packets received. */
+    pub packets_recv: u64,
+
+    /** Cumulative total number of packets sent. */
+    pub packets_sent: u64,
+}
+
 #[cfg(test)]
 mod test {
     use super::ApiByteCount;

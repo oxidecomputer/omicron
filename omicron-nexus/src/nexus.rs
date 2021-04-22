@@ -22,6 +22,7 @@ use omicron_common::model::ApiGeneration;
 use omicron_common::model::ApiIdentityMetadata;
 use omicron_common::model::ApiInstance;
 use omicron_common::model::ApiInstanceCreateParams;
+use omicron_common::model::ApiInstanceMetrics;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
@@ -659,6 +660,22 @@ impl Nexus {
             .instance_update_runtime(&instance.identity.id, &new_runtime)
             .await
             .map(|_| ())
+    }
+
+    /**
+     * Gets the current metrics for the instance.
+     */
+    pub async fn instance_get_metrics(
+        &self,
+        project_name: &ApiName,
+        instance_name: &ApiName,
+    ) -> Result<ApiInstanceMetrics, ApiError> {
+        let instance =
+            self.project_lookup_instance(project_name, instance_name).await?;
+        self.instance_sled(&instance)
+            .await?
+            .metrics_get(instance.identity.id)
+            .await
     }
 
     /**

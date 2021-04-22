@@ -11,6 +11,7 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::model::ApiDiskRuntimeState;
+use omicron_common::model::ApiInstanceMetrics;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::DiskEnsureBody;
 use omicron_common::model::InstanceEnsureBody;
@@ -32,6 +33,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
+        api.register(instance_get_metrics)?;
         Ok(())
     }
 
@@ -128,4 +130,17 @@ async fn disk_poke_post(
     let disk_id = path_params.into_inner().disk_id;
     sa.disk_poke(disk_id).await;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/metrics",
+}]
+async fn instance_get_metrics(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<ApiInstanceMetrics>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_metrics(instance_id).await?))
 }

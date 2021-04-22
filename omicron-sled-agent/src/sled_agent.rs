@@ -7,6 +7,7 @@ use super::config::SimMode;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskStateRequested;
+use omicron_common::model::ApiInstanceMetrics;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
@@ -45,7 +46,7 @@ impl SledAgent {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: Arc<NexusClient>,
+        nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
@@ -55,12 +56,12 @@ impl SledAgent {
         SledAgent {
             id: *id,
             instances: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 instance_log,
                 sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 disk_log,
                 sim_mode,
             )),
@@ -69,7 +70,7 @@ impl SledAgent {
 
     /**
      * Idempotently ensures that the given API Instance (described by
-     * `api_instance`) exists on this server in the given runtime state
+     * `instance_id`) exists on this server in the given runtime state
      * (described by `target`).
      */
     pub async fn instance_ensure(
@@ -85,7 +86,7 @@ impl SledAgent {
     }
 
     /**
-     * Idempotently ensures that the given API Disk (described by `api_disk`)
+     * Idempotently ensures that the given API Disk (described by `disk_id`)
      * is attached (or not) as specified.  This simulates disk attach and
      * detach, similar to instance boot and halt.
      */
@@ -104,5 +105,18 @@ impl SledAgent {
 
     pub async fn disk_poke(&self, id: Uuid) {
         self.disks.sim_poke(id).await;
+    }
+
+    /**
+     * Return the current metrics associated with the given API Instance.
+     */
+    pub async fn instance_get_metrics(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+    ) -> Result<ApiInstanceMetrics, ApiError> {
+        // TODO(ben) Once we have the full state of the instance modeled
+        // in the agent, fill this out with at least empty information
+        // for each vCPU, disk, and network interface (in that order).
+        Ok(ApiInstanceMetrics::empty(instance_id))
     }
 }

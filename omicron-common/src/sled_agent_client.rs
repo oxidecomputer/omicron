@@ -9,6 +9,7 @@ use crate::error::ApiError;
 use crate::http_client::HttpClient;
 use crate::model::ApiDiskRuntimeState;
 use crate::model::ApiDiskStateRequested;
+use crate::model::ApiInstanceMetrics;
 use crate::model::ApiInstanceRuntimeState;
 use crate::model::ApiInstanceRuntimeStateRequested;
 use crate::model::DiskEnsureBody;
@@ -102,6 +103,29 @@ impl Client {
             .client
             .read_json::<ApiDiskRuntimeState>(
                 &self.client.error_message_base(&Method::PUT, path.as_str()),
+                &mut response,
+            )
+            .await?;
+        Ok(value)
+    }
+
+    /**
+     * Retrieves the current metrics associated with the given instance.
+     */
+    pub async fn metrics_get(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+    ) -> Result<ApiInstanceMetrics, ApiError> {
+        let path = format!("/instances/{}/metrics", instance_id);
+        let mut response = self
+            .client
+            .request(Method::GET, path.as_str(), Body::from(""))
+            .await?;
+        assert!(response.status().is_success());
+        let value = self
+            .client
+            .read_json::<ApiInstanceMetrics>(
+                &self.client.error_message_base(&Method::GET, path.as_str()),
                 &mut response,
             )
             .await?;

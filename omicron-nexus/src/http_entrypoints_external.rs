@@ -33,6 +33,7 @@ use omicron_common::model::ApiDiskAttachment;
 use omicron_common::model::ApiDiskCreateParams;
 use omicron_common::model::ApiDiskView;
 use omicron_common::model::ApiInstanceCreateParams;
+use omicron_common::model::ApiInstanceMetricsView;
 use omicron_common::model::ApiInstanceView;
 use omicron_common::model::ApiName;
 use omicron_common::model::ApiObject;
@@ -79,6 +80,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(api_instance_disks_get_disk)?;
         api.register(api_instance_disks_put_disk)?;
         api.register(api_instance_disks_delete_disk)?;
+        api.register(api_instance_metrics_get)?;
 
         api.register(api_hardware_racks_get)?;
         api.register(api_hardware_racks_get_rack)?;
@@ -528,6 +530,27 @@ async fn api_project_instances_instance_stop(
     let instance_name = &path.instance_name;
     let instance = nexus.instance_stop(&project_name, &instance_name).await?;
     Ok(HttpResponseAccepted(instance.to_view()))
+}
+
+/**
+ * Return the current metrics associated with this instance.
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/metrics"
+}]
+async fn api_instance_metrics_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<ApiInstanceMetricsView>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let metrics =
+        nexus.instance_get_metrics(&project_name, &instance_name).await?;
+    Ok(HttpResponseOk(metrics.to_view()))
 }
 
 /**
