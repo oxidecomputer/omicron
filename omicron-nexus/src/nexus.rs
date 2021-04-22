@@ -94,8 +94,8 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: db::DataStore,
 
-    /** database pool */
-    db_pool: Arc<db::Pool>,
+    /** saga execution coordinator */
+    sec: sec::sec::SagaExecCoordinatorHandle<Arc<SagaContext>>,
 
     /** steno saga log sink */
     saga_sink: Arc<dyn steno::SagaLogSink>,
@@ -130,10 +130,35 @@ impl Nexus {
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
+    pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let sink_log = log.new(o!("component" => "LogSink"));
-        let nexus = Nexus {
+        let my_sec_id = sec::log::SecId(Uuid::new_v4()); // XXX
+        let saga_sink = Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
+            Arc::clone(&pool),
+            sink_log,
+        )) as Arc<dyn steno::SagaLogSink>;
+        // XXX instance-provision -- it's duplicated elsewhere, too
+        let templates = vec![(
+            "instance-provision",
+            Arc::new(sagas::saga_instance_create())
+                as Arc<dyn steno::SagaTemplateGeneric<Arc<SagaContext>>>,
+        )]
+        .into_iter()
+        .collect::<BTreeMap<
+            &'static str,
+            Arc<dyn steno::SagaTemplateGeneric<Arc<SagaContext>>>,
+        >>();
+        let sec = sec::sec::SagaExecCoordinatorHandle::new(
+            Arc::clone(&pool),
+            log.new(
+                o!("component" => "SEC", "sec_id" => my_sec_id.0.to_string()),
+            ),
+            &my_sec_id,
+            Arc::clone(&saga_sink),
+            templates,
+        );
+        let mut nexus = Nexus {
             id: *id,
             log,
             api_rack_identity: ApiIdentityMetadata {
@@ -144,43 +169,16 @@ impl Nexus {
                 time_modified: Utc::now(),
             },
             db_datastore: db::DataStore::new(Arc::clone(&pool)),
-            db_pool: Arc::clone(&pool),
+            sec,
             sled_agents: Mutex::new(BTreeMap::new()),
-            saga_sink: Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
-                Arc::clone(&pool),
-                sink_log,
-            )),
-            my_sec_id: sec::log::SecId(Uuid::new_v4()), // XXX
+            saga_sink,
+            my_sec_id,
         };
-
-        // XXX
-        nexus.begin_recovery();
-        nexus
-    }
-
-    fn begin_recovery(&self) {
-        let pool = Arc::clone(&self.db_pool);
-        let sec_id = self.my_sec_id;
-        let log = self.log.new(o!());
-        tokio::spawn(async move {
-            let sagas = sec::recovery::list_sagas(&pool, log, &sec_id);
-            /*
-             * XXX It seems like what we really want to do here is spin up a new
-             * task that represents the SEC.  Its first order of business will
-             * be to list sagas and start recovering them.  We'll also want to
-             * update execute_saga() to send a message to this SEC and wait for
-             * one or more messages back.  The SEC will either want to avoid
-             * reading that channel (so that execute_saga() blocks) or else fail
-             * sagas before we've finished listing sagas as part of recovery.
-             *
-             * If recovery fails at this point, what do we do?  It's a little
-             * tricky: if we've not finished listing all sagas, then we probably
-             * want to just sleep for a bit and try again later.  If we've
-             * finished listing all sagas, we can in principle proceed with
-             * normal operation, even though a bunch of individual sagas may not
-             * be recovered yet.  The SEC needs to keep track of all this.
-             */
-        });
+        let token = nexus.sec.prepare_recovery();
+        let nexus_arc = Arc::new(nexus);
+        let saga_ctx = Arc::new(SagaContext::new(Arc::clone(&nexus_arc)));
+        nexus_arc.sec.start_recovery(token, Arc::new(saga_ctx));
+        nexus_arc
     }
 
     /*

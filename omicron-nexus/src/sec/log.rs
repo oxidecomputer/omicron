@@ -196,7 +196,7 @@ impl SqlSerialize for steno::SagaNodeEvent {
 }
 
 // This type exists only to work around the Rust orphan rules.
-pub struct SagaNodeEventDeserializer(steno::SagaNodeEvent);
+pub struct SagaNodeEventDeserializer(pub steno::SagaNodeEvent);
 impl TryFrom<&tokio_postgres::Row> for SagaNodeEventDeserializer {
     type Error = ApiError;
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
@@ -245,5 +245,11 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEventDeserializer {
             creator: sql_row_value::<_, Uuid>(row, "creator")?.to_string(),
             event_type,
         }))
+    }
+}
+
+impl From<SagaNodeEventDeserializer> for steno::SagaNodeEvent {
+    fn from(d: SagaNodeEventDeserializer) -> Self {
+        d.0
     }
 }

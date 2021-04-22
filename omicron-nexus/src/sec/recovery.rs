@@ -10,14 +10,12 @@ use crate::db::schema;
 use crate::db::sql::Table;
 use crate::db::sql_operations::sql_paginate;
 use omicron_common::error::ApiError;
-use slog::Logger;
 use std::future::Future;
 
 /* XXX TODO-doc */
 /* This is regrettably desugared due to rust-lang/rust#63033. */
 pub fn list_sagas<'a, 'b, 'c>(
     pool: &'a db::Pool,
-    log: Logger,
     sec_id: &'b log::SecId,
 ) -> impl Future<Output = Result<Vec<log::Saga>, ApiError>> + 'c
 where
@@ -35,10 +33,8 @@ where
      * consumers.  Anyway, having Nexus come up is really only blocked on this
      * step, not recovering all the individual sagas.
      */
-    let log = log.new(o!("sec_id" => sec_id.0.to_string()));
     async move {
         let client = pool.acquire().await?;
-        debug!(log, "saga list: start");
 
         let mut sql = db::sql::SqlString::new();
         let saga_state_done = log::SagaState::Done;
@@ -46,16 +42,49 @@ where
         let p2 = sql.next_param(sec_id);
         sql.push_str(&format!("saga_state != {} AND current_sec = {}", p1, p2));
 
-        let result = sql_paginate::<
+        sql_paginate::<
             schema::LookupGenericByUniqueId,
             schema::Saga,
             <schema::Saga as Table>::ModelType,
         >(&client, (), schema::Saga::ALL_COLUMNS, sql)
-        .await;
-        match &result {
-            Ok(s) => info!(log, "saga list: succeeded"; "nsagas" => s.len()),
-            Err(error) => error!(log, "saga list: failed"; "error" => #%error),
-        };
-        result
+        .await
     }
+}
+
+pub async fn load_saga_log(
+    pool: &db::Pool,
+    saga: &log::Saga,
+) -> Result<steno::SagaLog, ApiError> {
+    let client = pool.acquire().await?;
+    let mut extra_sql = db::sql::SqlString::new();
+    extra_sql.push_str("TRUE");
+    let log_records = sql_paginate::<
+        schema::LookupSagaNodeEvent,
+        schema::SagaNodeEvent,
+        <schema::SagaNodeEvent as Table>::ModelType,
+    >(
+        &client,
+        (&saga.id.0,),
+        schema::SagaNodeEvent::ALL_COLUMNS,
+        extra_sql,
+    )
+    .await?;
+    let events = log_records
+        .into_iter()
+        .map(steno::SagaNodeEvent::from)
+        .collect::<Vec<steno::SagaNodeEvent>>();
+
+    let log_serialized = steno::SagaLogSerialized {
+        saga_id: saga.id,
+        creator: saga.creator.0.to_string(),
+        params: saga.saga_params.clone(),
+        events,
+    };
+
+    steno::SagaLog::load_raw(log_serialized).map_err(|error| {
+        ApiError::internal_error(&format!(
+            "failed to load log for saga \"{}\": {:#}",
+            saga.id, error,
+        ))
+    })
 }

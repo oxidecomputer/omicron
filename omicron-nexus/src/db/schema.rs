@@ -332,3 +332,22 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByAttachedInstance {
         ApiError::internal_error("attempted lookup attached instance")
     }
 }
+
+/* XXX TODO-doc */
+pub struct LookupSagaNodeEvent;
+impl<'a> LookupKey<'a, SagaNodeEvent> for LookupSagaNodeEvent {
+    type ScopeKey = (&'a Uuid,);
+    const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &["saga_id"];
+    type ItemKey = Uuid;
+    const ITEM_KEY_COLUMN_NAME: &'static str = "node_id";
+
+    fn where_select_error(
+        _scope_key: Self::ScopeKey,
+        _item_key: &Self::ItemKey,
+    ) -> ApiError {
+        /* There's no reason to ever use this function. */
+        ApiError::internal_error(
+            "unexpected lookup for saga node unexpectedly found no rows",
+        )
+    }
+}
