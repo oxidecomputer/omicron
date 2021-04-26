@@ -45,6 +45,8 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      * - the CockroachDB TCP listen port be 0, and
      * - if the log will go to a file then the path must be the sentinel value
      *   "UNUSED".
+     * - each Nexus created for testing gets its own id so they don't see each
+     *   others sagas and try to recover them
      *
      * (See LogContext::new() for details.)  Given these restrictions, it may
      * seem barely worth reading a config file at all.  However, users can
@@ -55,6 +57,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let config_file_path = Path::new("tests/config.test.toml");
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
+    config.id = Uuid::new_v4();
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let log = &logctx.log;

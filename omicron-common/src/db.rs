@@ -77,17 +77,53 @@ impl DbError {
  * at least have to explicitly opt into a conversion.
  */
 pub fn sql_error_generic(e: DbError) -> ApiError {
-    let extra = match e.db_source().and_then(|s| s.code()) {
+    use tokio_postgres::error::SqlState;
+
+    let maybe_code = e.db_source().and_then(|s| s.code());
+    let extra = match maybe_code {
         Some(code) => format!(" (code {})", code.code()),
         None => String::new(),
     };
+    let message = format!("unexpected database error{}: {:#}", extra, e);
+
+    // XXX lots of cleanup here
+    /*
+     * TODO-cleanup Is there a better supported way to determine if the problem
+     * was transient?
+     */
+    let cons = if let Some(sqlstate) = maybe_code {
+        if sqlstate == &SqlState::CONNECTION_EXCEPTION
+            || sqlstate == &SqlState::CONNECTION_DOES_NOT_EXIST
+        {
+            ApiError::unavail
+        } else {
+            ApiError::internal_error
+        }
+    } else {
+        /*
+         * TODO-robustness Some errors without a SqlState may be transient, too
+         * (e.g., io::Error), while others might not be (e.g., TLS handshake
+         * fail).  The "kind" inside the tokio_postgres error would tell us
+         * this, but we don't have any way to get that.
+         */
+        ApiError::internal_error
+    };
+
+    //match maybe_code.map(|c| c) {
+    //    Some(SqlState::CONNECTION_EXCEPTION) => ApiError::unavail,
+    //    /*
+    //     * TODO-robustness Some errors without a SqlState may be transient, too
+    //     * (e.g., io::Error), while others might not be (e.g., TLS handshake
+    //     * fail).
+    //     */
+    //    _ => ApiError::internal_error,
+    //};
 
     /*
      * TODO-debuggability it would be nice to preserve the DbError here
      * so that the SQL is visible in the log.
+     * TODO-resilience This should produce a ServiceUnavailableError instead if
+     * the underlying error reflects a transient problem.
      */
-    ApiError::internal_error(&format!(
-        "unexpected database error{}: {:#}",
-        extra, e
-    ))
+    cons(&message)
 }

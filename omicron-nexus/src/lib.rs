@@ -73,12 +73,13 @@ impl Server {
         rack_id: &Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
+        let log = log.new(o!("name" => config.id.to_string()));
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
 
-        let apictx = ServerContext::new(rack_id, ctxlog, pool);
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config.id);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

@@ -1,5 +1,7 @@
 /*!
  * Saga Execution Coordinator (SEC)
+ * XXX consider breaking up the channel
+ * XXX consider moving recovery into a separate Future but not a separate Task
  */
 
 use super::recovery;
@@ -51,7 +53,6 @@ enum SecMsg<T> {
         saga_ctx: Arc<T>,
     },
 
-    /* XXX SagasList, SagaGet */
     SagaRecovered {
         saga_id: steno::SagaId,
         load_state: SagaLoadState,
@@ -124,7 +125,6 @@ impl<T> SagaExecCoordinatorHandle<T> {
     where
         T: Send + Sync + 'static,
     {
-        let log = log.new(o!("sec_id" => sec_id.0.to_string()));
         let hdl_log = log.new(o!());
         let (msg_tx, msg_rx) = mpsc::channel(3); // XXX
         let mut sec = SagaExecCoordinator {
@@ -398,6 +398,13 @@ where
             }
         };
 
+        info!(
+            &self.log,
+            "saga done";
+            "saga_id" => saga_id.to_string(),
+            "result" => ?result1,
+        );
+
         if let Some(w) = waiter {
             w.send(result1).unwrap_or_else(|_| {
                 panic!("waiter gone before we could send message")
@@ -416,10 +423,9 @@ where
                  */
                 task.await.expect("failed to wait for task");
             }
-            other => panic!(
-                "unexpected RecoveryDone message in state {:?}",
-                other
-            )
+            other => {
+                panic!("unexpected RecoveryDone message in state {:?}", other)
+            }
         }
 
         self.recovered = RecoverState::Done;
@@ -438,9 +444,15 @@ struct Recover<T> {
         Arc<BTreeMap<&'static str, Arc<dyn steno::SagaTemplateGeneric<T>>>>,
 }
 
+/*
+ * TODO See dtolnay/thiserror#98.  It would be nice to avoid explicitly needing
+ * to put the source into these messages.
+ */
 #[derive(Error, Debug)]
 enum RecoverError {
-    #[error("failed to recover saga \"{saga_id}\": database error")]
+    #[error(
+        "failed to recover saga \"{saga_id}\": database error: {source:#}"
+    )]
     DatabaseError { saga_id: steno::SagaId, source: ApiError },
 
     #[error(
@@ -449,19 +461,14 @@ enum RecoverError {
     )]
     MissingTemplate { saga_id: steno::SagaId, template_name: String },
 
-    #[error("failed to recover saga \"{saga_id}\": log error")]
+    #[error("failed to recover saga \"{saga_id}\": log error: {source:#}")]
     LogError { saga_id: steno::SagaId, source: anyhow::Error },
 }
 
 impl RecoverError {
     fn retryable(&self) -> bool {
         match self {
-            RecoverError::DatabaseError { source, .. } => {
-                // XXX
-                todo!(
-                    "need to pass through retryable info from database error"
-                );
-            }
+            RecoverError::DatabaseError { source, .. } => source.retryable(),
             RecoverError::MissingTemplate { .. } => false,
             RecoverError::LogError { .. } => false,
         }
@@ -481,13 +488,13 @@ async fn recover_sagas<T: Send + Sync + 'static>(recover: Recover<T>) {
             Err(error) if error.retryable() => {
                 // XXX sleep and retry -- if appropriate!
                 // XXX is this the best way to put the error in the log?
-                warn!(&log, "failed to recover saga"; "err" => #%error);
+                warn!(&log, "failed to recover saga {:#}", error);
                 panic!("failed to recover saga: {:#}", error);
             }
             Err(error) => {
-                assert!(error.retryable());
+                assert!(!error.retryable());
                 // XXX is this the best way to put the error in the log?
-                error!(&log, "failed to recover saga"; "err" => #%error);
+                error!(&log, "failed to recover saga {:#}", error);
                 SagaLoadState::Abandoned {
                     time: Utc::now(),
                     reason: anyhow!(error).context("abandoned at recovery"),
@@ -521,9 +528,13 @@ async fn recover_saga<T: Send + Sync + 'static>(
             template_name: saga.template_name.clone(),
         })?;
 
-    let sglog = recovery::load_saga_log(&recover.pool, &saga)
-        .await
-        .map_err(|source| RecoverError::DatabaseError { saga_id, source })?;
+    let sglog = recovery::load_saga_log(
+        &recover.pool,
+        &saga,
+        Arc::clone(&recover.sink),
+    )
+    .await
+    .map_err(|source| RecoverError::DatabaseError { saga_id, source })?;
 
     let exec = Arc::clone(template)
         .recover(
@@ -534,9 +545,7 @@ async fn recover_saga<T: Send + Sync + 'static>(
         )
         .map_err(|source| RecoverError::LogError { saga_id, source })?;
 
-    let exec_clone = Arc::clone(&exec);
-    let task = tokio::spawn(async move { exec_clone.run().await });
-    Ok(SagaLoadState::Running { task, exec: exec, waiter: None })
+    Ok(exec_saga(saga_id, exec, recover.tx.clone()))
 }
 
 fn exec_saga<T: Send + Sync + 'static>(

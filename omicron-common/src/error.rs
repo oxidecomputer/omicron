@@ -64,6 +64,22 @@ pub enum LookupType {
 
 impl ApiError {
     /**
+     * Returns whether the error is likely transient and could reasonably be
+     * retried
+     */
+    pub fn retryable(&self) -> bool {
+        match self {
+            ApiError::ServiceUnavailable { .. } => true,
+
+            ApiError::ObjectNotFound { .. }
+            | ApiError::ObjectAlreadyExists { .. }
+            | ApiError::InvalidRequest { .. }
+            | ApiError::InvalidValue { .. }
+            | ApiError::InternalError { .. } => false,
+        }
+    }
+
+    /**
      * Generates an [`ApiError::ObjectNotFound`] error for a lookup by object
      * name.
      */
@@ -111,6 +127,19 @@ impl ApiError {
      */
     pub fn internal_error(message: &str) -> ApiError {
         ApiError::InternalError { message: message.to_owned() }
+    }
+
+    /**
+     * Generates an [`ApiError::ServiceUnavailable`] error with the specific
+     * message
+     *
+     * This should be used for transient failures where the caller might be
+     * expected to retry.  Logic errors or other problems indicating that a
+     * retry would not work should probably be an InternalError (if it's a
+     * server problem) or InvalidRequest (if it's a client problem) instead.
+     */
+    pub fn unavail(message: &str) -> ApiError {
+        ApiError::ServiceUnavailable { message: message.to_owned() }
     }
 
     /**

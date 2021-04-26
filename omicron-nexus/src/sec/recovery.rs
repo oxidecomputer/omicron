@@ -11,6 +11,7 @@ use crate::db::sql::Table;
 use crate::db::sql_operations::sql_paginate;
 use omicron_common::error::ApiError;
 use std::future::Future;
+use std::sync::Arc;
 
 /* XXX TODO-doc */
 /* This is regrettably desugared due to rust-lang/rust#63033. */
@@ -51,40 +52,48 @@ where
     }
 }
 
-pub async fn load_saga_log(
-    pool: &db::Pool,
-    saga: &log::Saga,
-) -> Result<steno::SagaLog, ApiError> {
-    let client = pool.acquire().await?;
-    let mut extra_sql = db::sql::SqlString::new();
-    extra_sql.push_str("TRUE");
-    let log_records = sql_paginate::<
-        schema::LookupSagaNodeEvent,
-        schema::SagaNodeEvent,
-        <schema::SagaNodeEvent as Table>::ModelType,
-    >(
-        &client,
-        (&saga.id.0,),
-        schema::SagaNodeEvent::ALL_COLUMNS,
-        extra_sql,
-    )
-    .await?;
-    let events = log_records
-        .into_iter()
-        .map(steno::SagaNodeEvent::from)
-        .collect::<Vec<steno::SagaNodeEvent>>();
+// XXX desugar'd due to rust bug
+pub fn load_saga_log<'a, 'b, 'c>(
+    pool: &'a db::Pool,
+    saga: &'b log::Saga,
+    sink: Arc<dyn steno::SagaLogSink>,
+) -> impl Future<Output = Result<steno::SagaLog, ApiError>> + 'c
+where
+    'a: 'c,
+    'b: 'c,
+{
+    async move {
+        let client = pool.acquire().await?;
+        let mut extra_sql = db::sql::SqlString::new();
+        extra_sql.push_str("TRUE");
+        let log_records = sql_paginate::<
+            schema::LookupSagaNodeEvent,
+            schema::SagaNodeEvent,
+            <schema::SagaNodeEvent as Table>::ModelType,
+        >(
+            &client,
+            (&saga.id.0,),
+            schema::SagaNodeEvent::ALL_COLUMNS,
+            extra_sql,
+        )
+        .await?;
+        let events = log_records
+            .into_iter()
+            .map(steno::SagaNodeEvent::from)
+            .collect::<Vec<steno::SagaNodeEvent>>();
 
-    let log_serialized = steno::SagaLogSerialized {
-        saga_id: saga.id,
-        creator: saga.creator.0.to_string(),
-        params: saga.saga_params.clone(),
-        events,
-    };
+        let log_serialized = steno::SagaLogSerialized {
+            saga_id: saga.id,
+            creator: saga.creator.0.to_string(),
+            params: saga.saga_params.clone(),
+            events,
+        };
 
-    steno::SagaLog::load_raw(log_serialized).map_err(|error| {
-        ApiError::internal_error(&format!(
-            "failed to load log for saga \"{}\": {:#}",
-            saga.id, error,
-        ))
-    })
+        steno::SagaLog::load_raw(log_serialized, sink).map_err(|error| {
+            ApiError::internal_error(&format!(
+                "failed to load log for saga \"{}\": {:#}",
+                saga.id, error,
+            ))
+        })
+    }
 }

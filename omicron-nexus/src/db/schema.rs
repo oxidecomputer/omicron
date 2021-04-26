@@ -338,7 +338,7 @@ pub struct LookupSagaNodeEvent;
 impl<'a> LookupKey<'a, SagaNodeEvent> for LookupSagaNodeEvent {
     type ScopeKey = (&'a Uuid,);
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &["saga_id"];
-    type ItemKey = Uuid;
+    type ItemKey = i64;
     const ITEM_KEY_COLUMN_NAME: &'static str = "node_id";
 
     fn where_select_error(

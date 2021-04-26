@@ -83,7 +83,7 @@ pub trait TestInterfaces {
  */
 pub struct Nexus {
     /** uuid for this rack (TODO should also be in persistent storage) */
-    id: Uuid,
+    rack_id: Uuid,
 
     /** general server log */
     log: Logger,
@@ -124,16 +124,21 @@ pub struct Nexus {
  */
 impl Nexus {
     /**
-     * Create a new Nexus instance for the given rack id `id`
+     * Create a new Nexus instance for the given rack id `rack_id`
      *
      * The state of the system is maintained in memory, so we always start from
      * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Arc<Nexus> {
+    pub fn new_with_id(
+        rack_id: &Uuid,
+        log: Logger,
+        pool: db::Pool,
+        nexus_id: &Uuid,
+    ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let sink_log = log.new(o!("component" => "LogSink"));
-        let my_sec_id = sec::log::SecId(Uuid::new_v4()); // XXX
+        let my_sec_id = sec::log::SecId(*nexus_id);
         let saga_sink = Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
             Arc::clone(&pool),
             sink_log,
@@ -159,11 +164,11 @@ impl Nexus {
             templates,
         );
         let mut nexus = Nexus {
-            id: *id,
+            rack_id: *rack_id,
             log,
             api_rack_identity: ApiIdentityMetadata {
-                id: *id,
-                name: ApiName::try_from(format!("rack-{}", *id)).unwrap(),
+                id: *rack_id,
+                name: ApiName::try_from(format!("rack-{}", *rack_id)).unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -235,7 +240,7 @@ impl Nexus {
         let saga_exec = SagaExecutor::new(
             &saga_id,
             Arc::new(saga_template),
-            &self.id.to_string(),
+            &self.rack_id.to_string(),
             Arc::new(saga_context),
             Arc::new(saga_params),
             Arc::clone(&self.saga_sink),
@@ -1011,7 +1016,7 @@ impl Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiRack> {
         if let Some(marker) = pagparams.marker {
-            if *marker >= self.id {
+            if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
             }
         }
@@ -1020,7 +1025,7 @@ impl Nexus {
     }
 
     pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
-        if *rack_id == self.id {
+        if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
             Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
