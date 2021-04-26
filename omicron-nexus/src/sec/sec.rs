@@ -245,6 +245,8 @@ where
         info!(log, "searching for existing sagas");
 
         // XXX replace unwrap with retry loop, log on error
+        // XXX comment about it being important that we finish this before
+        // recovery
         let sagas =
             recovery::list_sagas(&self.pool, &self.sec_id).await.unwrap();
         info!(log, "found sagas"; "nsagas" => sagas.len());

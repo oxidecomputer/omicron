@@ -1,7 +1,6 @@
 /*!
  * Handles recovery of sagas
- * XXX consumer should not create new sagas until listing sagas is complete
- * because they might try to recover the one they started
+ * XXX The updating of saga rows needs to happen too, especially when done.
  */
 
 use super::log;
@@ -52,7 +51,7 @@ where
     }
 }
 
-// XXX desugar'd due to rust bug
+/* This is regrettably desugared due to rust-lang/rust#63033. */
 pub fn load_saga_log<'a, 'b, 'c>(
     pool: &'a db::Pool,
     saga: &'b log::Saga,
