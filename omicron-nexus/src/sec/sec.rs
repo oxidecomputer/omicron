@@ -11,15 +11,19 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::error::ApiError;
+use omicron_common::model;
 use slog::Logger;
 use std::any::type_name;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use steno::SagaLogSink;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 enum SagaLoadState {
     Unloaded,
@@ -70,6 +74,20 @@ enum SecMsg<T> {
         saga_id: steno::SagaId,
     },
 
+    SagasList {
+        /* TODO-cleanup This ought to be a DataPageParams. */
+        marker: Option<Uuid>,
+        limit: NonZeroU32,
+        result_channel: oneshot::Sender<
+            Result<Vec<Result<model::ApiSagaView, ApiError>>, ApiError>,
+        >,
+    },
+
+    SagaGet {
+        saga_id: Uuid,
+        result_channel: oneshot::Sender<Result<model::ApiSagaView, ApiError>>,
+    },
+
     Shutdown,
 }
 
@@ -93,6 +111,13 @@ impl<T> fmt::Debug for SecMsg<T> {
                 f.write_fmt(format_args!("Done {{ saga_id = {:?} }}", saga_id))
             }
             SecMsg::Shutdown => f.write_str("Shutdown"),
+            SecMsg::SagasList { marker, .. } => f.write_fmt(format_args!(
+                "SagasList {{ marker = {:?} }}",
+                marker
+            )),
+            SecMsg::SagaGet { saga_id, .. } => {
+                f.write_fmt(format_args!("SagaGet {{ id = {:?} }}", saga_id))
+            }
         }
     }
 }
@@ -181,6 +206,29 @@ impl<T> SagaExecCoordinatorHandle<T> {
         let secmsg = SecMsg::SagaAdd { saga_id, notify_done, exec };
         self.must_send(secmsg).await;
         wait_done.await.unwrap()
+    }
+
+    pub async fn sagas_list_page(
+        &self,
+        pagparams: &model::DataPageParams<'_, Uuid>,
+    ) -> Result<Vec<Result<model::ApiSagaView, ApiError>>, ApiError> {
+        let (tx, rx) = oneshot::channel();
+        let marker = pagparams.marker.map(|u| *u);
+        let limit = pagparams.limit;
+        assert_eq!(pagparams.direction, model::PaginationOrder::Ascending);
+        let secmsg = SecMsg::SagasList { marker, limit, result_channel: tx };
+        self.must_send(secmsg).await;
+        rx.await.unwrap()
+    }
+
+    pub async fn saga_get(
+        &self,
+        saga_id: &Uuid,
+    ) -> Result<model::ApiSagaView, ApiError> {
+        let (tx, rx) = oneshot::channel();
+        let secmsg = SecMsg::SagaGet { saga_id: *saga_id, result_channel: tx };
+        self.must_send(secmsg).await;
+        rx.await.unwrap()
     }
 
     async fn must_send(&self, msg: SecMsg<T>) {
@@ -289,18 +337,13 @@ where
                 SecMsg::Shutdown => {
                     todo!(); // XXX
                 }
+                SecMsg::SagasList { marker, limit, result_channel } => {
+                    self.msg_sagas_list_page(marker, limit, result_channel);
+                }
+                SecMsg::SagaGet { saga_id, result_channel } => {
+                    self.msg_saga_get(saga_id, result_channel);
+                }
             }
-
-            // XXX At this point, we need to wait on:
-            // - commands from the channel
-            //   - list sagas
-            //   - fetch saga status
-            //   - wait for a saga to finish
-            // - saga exec tasks to complete (could be phrased as a message on
-            //   the channel)
-            // - we could move the above saga recovery block into a separate
-            //   function, in which case we could wait for that one, too
-            //   (could be phrased as message on the channel?)
         }
 
         info!(&self.log, "shutting down");
@@ -431,6 +474,94 @@ where
         }
 
         self.recovered = RecoverState::Done;
+    }
+
+    fn msg_sagas_list_page(
+        &mut self,
+        marker: Option<Uuid>,
+        limit: NonZeroU32,
+        result_channel: oneshot::Sender<
+            Result<Vec<Result<model::ApiSagaView, ApiError>>, ApiError>,
+        >,
+    ) {
+        let marker = marker.map(|u| steno::SagaId(u));
+        let pagparams = model::DataPageParams {
+            marker: marker.as_ref(),
+            direction: model::PaginationOrder::Ascending,
+            limit,
+        };
+        let list = omicron_common::collection::collection_page_as_iter(
+            &self.sagas,
+            &pagparams,
+        )
+        .map(|(saga_id, load_state)| self.saga_view(saga_id, load_state))
+        .collect::<Vec<Result<model::ApiSagaView, ApiError>>>();
+        result_channel.send(Ok(list)).unwrap();
+    }
+
+    fn msg_saga_get(
+        &mut self,
+        saga_id: Uuid,
+        result_channel: oneshot::Sender<Result<model::ApiSagaView, ApiError>>,
+    ) {
+        let id = steno::SagaId(saga_id);
+        let rv = self
+            .sagas
+            .get(&id)
+            .ok_or_else(|| {
+                ApiError::not_found_by_id(
+                    model::ApiResourceType::SagaDbg,
+                    &saga_id,
+                )
+            })
+            .and_then(|load_state| self.saga_view(&id, load_state));
+        result_channel.send(rv).unwrap();
+    }
+
+    fn saga_view(
+        &self,
+        saga_id: &steno::SagaId,
+        load_state: &SagaLoadState,
+    ) -> Result<model::ApiSagaView, ApiError> {
+        // XXX all over this function
+        let time: DateTime<Utc> = "2021-04-28T02:18:25Z".parse().unwrap();
+        let state = match load_state {
+            SagaLoadState::Unloaded => model::ApiSagaStateView::Unloaded,
+            SagaLoadState::Running { .. } => model::ApiSagaStateView::Running,
+            SagaLoadState::Done { result } => match &result.kind {
+                Ok(_) => model::ApiSagaStateView::Done {
+                    failed: false,
+                    error_node_name: None,
+                    error_info: None,
+                },
+                Err(error) => model::ApiSagaStateView::Done {
+                    failed: true,
+                    error_node_name: Some(error.error_node_name.clone()),
+                    error_info: Some(error.error_source.clone()),
+                },
+            },
+            SagaLoadState::Abandoned { time, reason } => {
+                model::ApiSagaStateView::Abandoned {
+                    time_abandoned: *time,
+                    reason: format!("{:#}", reason),
+                }
+            }
+        };
+        Ok(model::ApiSagaView {
+            id: saga_id.0,
+            template: model::ApiSagaTemplateView {
+                name: "unknown".to_owned(), // XXX
+                nodes: vec![],              // XXX
+            },
+            state,
+            identity: model::ApiIdentityMetadata {
+                id: saga_id.0,
+                name: model::ApiName::try_from("unused".to_owned()).unwrap(),
+                description: "unused".to_owned(),
+                time_created: time,
+                time_modified: time,
+            },
+        })
     }
 }
 

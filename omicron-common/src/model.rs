@@ -434,6 +434,7 @@ pub enum ApiResourceType {
     Instance,
     Rack,
     Sled,
+    SagaDbg,
 }
 
 impl Display for ApiResourceType {
@@ -448,6 +449,7 @@ impl Display for ApiResourceType {
                 ApiResourceType::Instance => "instance",
                 ApiResourceType::Rack => "rack",
                 ApiResourceType::Sled => "sled",
+                ApiResourceType::SagaDbg => "saga_dbg",
             }
         )
     }
@@ -1175,6 +1177,70 @@ pub struct ApiSledView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
     pub service_address: SocketAddr,
+}
+
+/*
+ * Sagas
+ *
+ * These are currently only intended for observability by developers.  We will
+ * eventually want to flesh this out into something more observable for end
+ * users.
+ */
+#[derive(ApiObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+pub struct ApiSagaView {
+    pub id: Uuid,
+    pub template: ApiSagaTemplateView,
+    pub state: ApiSagaStateView,
+    /*
+     * XXX ApiObjectIdentity should not be necessary, so it should not be faked
+     * up.
+     */
+    #[serde(skip)]
+    pub identity: ApiIdentityMetadata,
+}
+
+impl ApiObject for ApiSagaView {
+    type View = Self;
+    fn to_view(&self) -> Self::View {
+        self.clone()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiSagaTemplateView {
+    pub name: String,
+    pub nodes: Vec<ApiSagaTemplateNode>,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiSagaTemplateNode {
+    pub id: u64, // XXX
+    pub name: String,
+    pub label: String,
+}
+
+/*
+ * TODO-robustness this type is unnecessarily loosey-goosey.
+ */
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiSagaStateView {
+    Unloaded,
+    Running,
+    #[serde(rename_all = "camelCase")]
+    Done {
+        // XXX time finished? outputs?
+        failed: bool,
+        error_node_name: Option<String>,
+        error_info: Option<steno::ActionError>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Abandoned {
+        time_abandoned: DateTime<Utc>,
+        reason: String,
+    },
 }
 
 /*
