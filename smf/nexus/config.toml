@@ -1,3 +1,7 @@
+[database]
+# URL for connecting to the database
+url = "postgresql://root@127.0.0.1:26257?sslmode=disable"
+
 [dropshot_external]
 bind_address = "127.0.0.1:12220"
 

@@ -94,7 +94,6 @@ impl BootstrapAgent {
 
         let tar_source = Path::new("/opt/oxide");
         let destination = Path::new("/opt/oxide");
-
         // TODO-correctness: Validation should come from ROT, not local file.
         let digests: HashMap<String, Vec<u8>> = toml::from_str(
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
@@ -109,7 +108,11 @@ impl BootstrapAgent {
         // Presumably, we'd try to contact a Nexus elsewhere
         // on the rack, or use the unlocked local storage to remember
         // a decision from the previous boot.
-        self.launch(&digests, &tar_source, &destination, "nexus")
+        self.launch(&digests, &tar_source, &destination, "nexus")?;
+
+        self.launch(&digests, &tar_source, &destination, "propolis-server")?;
+
+        Ok(())
     }
 
     // Verify, unpack, and enable a service.
@@ -188,8 +191,7 @@ impl BootstrapAgent {
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "Enabling service: {}", service.as_ref());
         let manifest = format!(
-            "/opt/oxide/{}/smf/{}/manifest.xml",
-            service.as_ref(),
+            "/opt/oxide/{}/pkg/manifest.xml",
             service.as_ref()
         );
 
