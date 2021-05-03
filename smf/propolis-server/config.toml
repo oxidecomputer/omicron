@@ -1,4 +1,4 @@
-bootrom = "/opt/oxide/propolis-server/blobOVMF_CODE.fd"
+bootrom = "/opt/oxide/propolis-server/blob/OVMF_CODE.fd"
 
 [dev.block0]
 driver = "pci-virtio-block"

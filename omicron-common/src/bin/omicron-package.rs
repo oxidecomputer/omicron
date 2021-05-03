@@ -197,7 +197,6 @@ async fn do_package(config: &Config, output_directory: &Path, release: bool) -> 
     for (package_name, package) in &config.packages {
         println!("Building {}", package_name);
         package.build(&package_name, release)?;
-        println!("Building {}: Complete", package_name);
 
         let tarfile = output_directory.join(format!("{}.tar", package.service_name));
         let file = OpenOptions::new()
@@ -298,15 +297,13 @@ async fn download(source: &str, destination: &Path) -> Result<()> {
 fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Result<()> {
     create_dir_all(&install_dir)
         .map_err(|err| anyhow!("Cannot create installation directory: {}", err))?;
-    let entries: Result<Vec<walkdir::DirEntry>, _> = walkdir::WalkDir::new(&artifact_dir)
-        .into_iter().collect();
-    entries?.into_par_iter().try_for_each(|entry| -> Result<()> {
-        if entry.path().is_file() {
-            let src = entry.path();
-            let dst = install_dir.join(entry.path().strip_prefix(artifact_dir)?);
-            println!("Installing {} -> {}", src.to_string_lossy(), dst.to_string_lossy());
-            std::fs::copy(&src, &dst)?;
-        }
+    let packages: Vec<(&String, &PackageInfo)> = config.packages.iter().collect();
+    packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
+        let tarfile = artifact_dir.join(format!("{}.tar", package.service_name));
+        let src = tarfile.as_path();
+        let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
+        println!("Installing {} -> {}", src.to_string_lossy(), dst.to_string_lossy());
+        std::fs::copy(&src, &dst)?;
         Ok(())
     })?;
 
@@ -355,12 +352,23 @@ fn uninstall_all_packages(config: &Config) -> Result<()> {
     Ok(())
 }
 
+fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
+    if let Err(e) = std::fs::remove_dir_all(path.as_ref()) {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {}
+            _ => bail!(e),
+        }
+    }
+    Ok(())
+}
+
 fn do_uninstall(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Result<()> {
+    println!("Uninstalling all packages");
     uninstall_all_packages(config)?;
     println!("Removing: {}", artifact_dir.to_string_lossy());
-    std::fs::remove_dir_all(artifact_dir)?;
+    remove_all_unless_already_removed(artifact_dir)?;
     println!("Removing: {}", install_dir.to_string_lossy());
-    std::fs::remove_dir_all(install_dir)?;
+    remove_all_unless_already_removed(install_dir)?;
     Ok(())
 }
 
