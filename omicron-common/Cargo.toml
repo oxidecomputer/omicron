@@ -10,7 +10,6 @@ futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
 libc = "0.2.71"
-propolis-client = { path = "../../propolis/propolis-client" }
 propolis-server = { path = "../../propolis/propolis-server" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }

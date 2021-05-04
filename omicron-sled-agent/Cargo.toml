@@ -8,6 +8,7 @@ async-trait = "0.1.24"
 futures = "0.3.1"
 http = "0.2.0"
 hyper = "0.14"
+propolis-client = { path = "../../propolis/propolis-client" }
 serde_json = "1.0"
 structopt = "0.3"
 
@@ -53,3 +54,5 @@ subprocess = "0.2.4"
 [[bin]]
 name = "sled-agent-sim"
 doc = false
+
+

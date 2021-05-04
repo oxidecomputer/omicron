@@ -328,6 +328,11 @@ fn do_install(
     create_dir_all(&install_dir).map_err(|err| {
         anyhow!("Cannot create installation directory: {}", err)
     })?;
+
+    // Move the digest of expected packages.
+    std::fs::copy(artifact_dir.join("digest.toml"), install_dir.join("digest.toml"))?;
+
+    // Copy all packages to the install location in parallel.
     let packages: Vec<(&String, &PackageInfo)> =
         config.packages.iter().collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
