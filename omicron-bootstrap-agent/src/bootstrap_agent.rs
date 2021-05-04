@@ -190,10 +190,8 @@ impl BootstrapAgent {
         service: S,
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "Enabling service: {}", service.as_ref());
-        let manifest = format!(
-            "/opt/oxide/{}/pkg/manifest.xml",
-            service.as_ref()
-        );
+        let manifest =
+            format!("/opt/oxide/{}/pkg/manifest.xml", service.as_ref());
 
         // Import and enable the service as distinct steps.
         //

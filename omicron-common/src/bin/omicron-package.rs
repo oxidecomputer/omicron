@@ -39,7 +39,11 @@ enum SubCommand {
         /// The binary profile to package.
         ///
         /// True: release, False: debug (default).
-        #[structopt(short, long, help = "True if bundling release-mode binaries")]
+        #[structopt(
+            short,
+            long,
+            help = "True if bundling release-mode binaries"
+        )]
         release: bool,
     },
     /// Installs the packages to a target machine.
@@ -78,26 +82,26 @@ struct Args {
     /// The path to the build manifest TOML file.
     ///
     /// Defaults to "manifest.toml".
-    #[structopt(short, long, default_value = "manifest.toml", help = "Path to manifest toml file")]
+    #[structopt(
+        short,
+        long,
+        default_value = "manifest.toml",
+        help = "Path to manifest toml file"
+    )]
     manifest: PathBuf,
 
     #[structopt(subcommand)]
     subcommand: SubCommand,
 }
 
-fn build_rust_package(
-    package: &str,
-    release: bool,
-) -> Result<()> {
+fn build_rust_package(package: &str, release: bool) -> Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.arg("+nightly")
-        .arg("build")
-        .arg("-p")
-        .arg(package);
+    cmd.arg("+nightly").arg("build").arg("-p").arg(package);
     if release {
         cmd.arg("--release");
     }
-    let status = cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
+    let status =
+        cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
         bail!("Failed to build package: {}", package);
     }
@@ -151,21 +155,19 @@ impl PackageInfo {
     // Returns the path to the compiled binary.
     fn binary_path(&self, release: bool) -> PathBuf {
         match &self.build {
-            Build::Rust => {
-                format!("target/{}/{}",
-                    if release { "release" } else { "debug" },
-                    self.binary_name()
-                ).into()
-            }
+            Build::Rust => format!(
+                "target/{}/{}",
+                if release { "release" } else { "debug" },
+                self.binary_name()
+            )
+            .into(),
         }
     }
 
     // Builds the requested package.
     fn build(&self, package_name: &str, release: bool) -> Result<()> {
         match &self.build {
-            Build::Rust => {
-                build_rust_package(package_name, release)
-            }
+            Build::Rust => build_rust_package(package_name, release),
         }
     }
 }
@@ -185,7 +187,11 @@ fn parse<P: AsRef<Path>>(path: P) -> Result<Config, ParseError> {
     Ok(cfg)
 }
 
-async fn do_package(config: &Config, output_directory: &Path, release: bool) -> Result<()> {
+async fn do_package(
+    config: &Config,
+    output_directory: &Path,
+    release: bool,
+) -> Result<()> {
     // Create the output directory, if it does not already exist.
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
@@ -198,7 +204,8 @@ async fn do_package(config: &Config, output_directory: &Path, release: bool) -> 
         println!("Building {}", package_name);
         package.build(&package_name, release)?;
 
-        let tarfile = output_directory.join(format!("{}.tar", package.service_name));
+        let tarfile =
+            output_directory.join(format!("{}.tar", package.service_name));
         let file = OpenOptions::new()
             .write(true)
             .read(true)
@@ -217,18 +224,26 @@ async fn do_package(config: &Config, output_directory: &Path, release: bool) -> 
 
         // Add binary
         archive
-            .append_path_with_name(package.binary_path(release), &package.binary_name)
+            .append_path_with_name(
+                package.binary_path(release),
+                &package.binary_name,
+            )
             .map_err(|err| {
                 anyhow!("Cannot append binary to tarfile: {}", err)
             })?;
 
         // Add SMF directory
-        let smf_path: PathBuf =
-            format!("{}/{}", config.smf.to_string_lossy(), package.service_name).into();
+        let smf_path: PathBuf = format!(
+            "{}/{}",
+            config.smf.to_string_lossy(),
+            package.service_name
+        )
+        .into();
         add_path_to_archive(&mut archive, &smf_path, Path::new(PKG))?;
 
         // Add (and possibly download) blobs
-        add_blobs(&mut archive, package_name, package, output_directory).await?;
+        add_blobs(&mut archive, package_name, package, output_directory)
+            .await?;
 
         let mut file = archive
             .into_inner()
@@ -245,30 +260,41 @@ async fn do_package(config: &Config, output_directory: &Path, release: bool) -> 
     Ok(())
 }
 
-
 // Adds all files within "path" to "archive".
 //
 // Within the archive, all files are renamed to "dst_prefix/<file_name>".
-fn add_path_to_archive(archive: &mut Builder<std::fs::File>, path: &Path, dst_prefix: &Path) -> Result<()> {
+fn add_path_to_archive(
+    archive: &mut Builder<std::fs::File>,
+    path: &Path,
+    dst_prefix: &Path,
+) -> Result<()> {
     for entry in walkdir::WalkDir::new(&path) {
         let entry =
             entry.map_err(|err| anyhow!("Cannot access entry: {}", err))?;
-        if entry.file_name().to_string_lossy().starts_with(".") {
+        if entry.file_name().to_string_lossy().starts_with('.') {
             // Omit hidden files - we don't want to include text editor
             // artifacts in the tarfile.
             continue;
         }
         let dst = dst_prefix.join(entry.path().strip_prefix(&path)?);
-        println!("Archiving {} -> {}", entry.path().to_string_lossy(), dst.to_string_lossy());
-        archive.append_path_with_name(entry.path(), dst).map_err(|err| {
-            anyhow!("Cannot append file to tarfile: {}", err)
-        })?;
+        println!(
+            "Archiving {} -> {}",
+            entry.path().to_string_lossy(),
+            dst.to_string_lossy()
+        );
+        archive
+            .append_path_with_name(entry.path(), dst)
+            .map_err(|err| anyhow!("Cannot append file to tarfile: {}", err))?;
     }
     Ok(())
 }
 
-async fn add_blobs(archive: &mut Builder<std::fs::File>, name: &String, package: &PackageInfo,
-                   output_directory: &Path) -> Result<()> {
+async fn add_blobs(
+    archive: &mut Builder<std::fs::File>,
+    name: &String,
+    package: &PackageInfo,
+    output_directory: &Path,
+) -> Result<()> {
     if let Some(blobs) = &package.blobs {
         let blobs_path = output_directory.join(name);
         std::fs::create_dir_all(&blobs_path)?;
@@ -294,31 +320,45 @@ async fn download(source: &str, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Result<()> {
-    create_dir_all(&install_dir)
-        .map_err(|err| anyhow!("Cannot create installation directory: {}", err))?;
-    let packages: Vec<(&String, &PackageInfo)> = config.packages.iter().collect();
+fn do_install(
+    config: &Config,
+    artifact_dir: &Path,
+    install_dir: &Path,
+) -> Result<()> {
+    create_dir_all(&install_dir).map_err(|err| {
+        anyhow!("Cannot create installation directory: {}", err)
+    })?;
+    let packages: Vec<(&String, &PackageInfo)> =
+        config.packages.iter().collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
-        let tarfile = artifact_dir.join(format!("{}.tar", package.service_name));
+        let tarfile =
+            artifact_dir.join(format!("{}.tar", package.service_name));
         let src = tarfile.as_path();
         let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-        println!("Installing {} -> {}", src.to_string_lossy(), dst.to_string_lossy());
+        println!(
+            "Installing {} -> {}",
+            src.to_string_lossy(),
+            dst.to_string_lossy()
+        );
         std::fs::copy(&src, &dst)?;
         Ok(())
     })?;
 
     // Ensure we start from a clean slate - remove all packages.
-    uninstall_all_packages(config)?;
+    uninstall_all_packages(config);
 
     // Extract and install the bootstrap service, which itself extracts and
     // installs other services.
     for (_, package) in &config.packages {
         if let Some(manifest) = &package.bootstrap {
-            let tar_path = install_dir.join(format!("{}.tar", package.service_name));
+            let tar_path =
+                install_dir.join(format!("{}.tar", package.service_name));
             let service_path = install_dir.join(&package.service_name);
-            println!("Unpacking {} to {}",
+            println!(
+                "Unpacking {} to {}",
                 tar_path.to_string_lossy(),
-                service_path.to_string_lossy());
+                service_path.to_string_lossy()
+            );
 
             let tar_file = std::fs::File::open(&tar_path)?;
             let _ = std::fs::remove_dir_all(&service_path);
@@ -330,7 +370,10 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Resul
             manifest_path.push(&package.service_name);
             manifest_path.push(PKG);
             manifest_path.push(manifest);
-            println!("Installing bootstrap service from {}", manifest_path.to_string_lossy());
+            println!(
+                "Installing bootstrap service from {}",
+                manifest_path.to_string_lossy()
+            );
             smf::Config::import().run(&manifest_path)?;
         }
     }
@@ -339,17 +382,14 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Resul
 }
 
 // Attempts to both disable and delete all requested packages.
-fn uninstall_all_packages(config: &Config) -> Result<()> {
-    for (_, package) in &config.packages {
+fn uninstall_all_packages(config: &Config) {
+    for package in config.packages.values() {
         let _ = smf::Adm::new()
             .disable()
             .synchronous()
             .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
-        let _ = smf::Config::delete()
-            .force()
-            .run(&package.service_name);
+        let _ = smf::Config::delete().force().run(&package.service_name);
     }
-    Ok(())
 }
 
 fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -362,9 +402,13 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn do_uninstall(config: &Config, artifact_dir: &Path, install_dir: &Path) -> Result<()> {
+fn do_uninstall(
+    config: &Config,
+    artifact_dir: &Path,
+    install_dir: &Path,
+) -> Result<()> {
     println!("Uninstalling all packages");
-    uninstall_all_packages(config)?;
+    uninstall_all_packages(config);
     println!("Removing: {}", artifact_dir.to_string_lossy());
     remove_all_unless_already_removed(artifact_dir)?;
     println!("Removing: {}", install_dir.to_string_lossy());
