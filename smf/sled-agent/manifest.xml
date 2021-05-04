@@ -13,13 +13,13 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent %{svc:/system/illumos/bootstrap-agent:default/:properties/config/server_id} %{config/server_addr} %{config/controller_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent %{svc:/system/illumos/bootstrap-agent:default/:properties/config/server_id} %{config/server_addr} %{config/nexus_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
     <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
-    <propval name='controller_addr' type='astring' value='127.0.0.1:12221' />
+    <propval name='nexus_addr' type='astring' value='127.0.0.1:12221' />
   </property_group>
 
   <property_group name='startd' type='framework'>
