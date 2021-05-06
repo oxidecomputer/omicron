@@ -5,7 +5,6 @@
  * ./sql.rs.
  */
 
-use crate::sec;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiInstance;
@@ -14,6 +13,7 @@ use omicron_common::model::ApiProject;
 use omicron_common::model::ApiResourceType;
 use uuid::Uuid;
 
+use crate::db;
 use super::sql::LookupKey;
 use super::sql::ResourceTable;
 use super::sql::Table;
@@ -94,7 +94,7 @@ impl ResourceTable for Disk {
 /** Describes the "SagaNodeEvent" table */
 pub struct Saga;
 impl Table for Saga {
-    type ModelType = sec::log::Saga;
+    type ModelType = db::saga_types::Saga;
     const TABLE_NAME: &'static str = "Saga";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -113,7 +113,7 @@ impl Table for Saga {
 /** Describes the "Saga" table */
 pub struct SagaNodeEvent;
 impl Table for SagaNodeEvent {
-    type ModelType = sec::log::SagaNodeEvent;
+    type ModelType = db::saga_types::SagaNodeEvent;
     const TABLE_NAME: &'static str = "SagaNodeEvent";
     const ALL_COLUMNS: &'static [&'static str] =
         &["saga_id", "node_id", "event_type", "data", "event_time", "creator"];

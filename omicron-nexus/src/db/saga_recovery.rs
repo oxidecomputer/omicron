@@ -3,7 +3,6 @@
  * XXX The updating of saga rows needs to happen too, especially when done.
  */
 
-use super::log;
 use crate::db;
 use crate::db::schema;
 use crate::db::sql::Table;
@@ -17,7 +16,7 @@ use steno::SagaTemplateGeneric;
 
 pub fn recover<T>(
     log: slog::Logger,
-    sec_id: log::SecId,
+    sec_id: db::SecId,
     uctx: Arc<T>,
     pool: Arc<db::Pool>,
     sec_client: Arc<steno::SecClient>,
@@ -58,8 +57,8 @@ where
 /* This is regrettably desugared due to rust-lang/rust#63033. */
 fn list_sagas<'a, 'b, 'c>(
     pool: &'a db::Pool,
-    sec_id: &'b log::SecId,
-) -> impl Future<Output = Result<Vec<log::Saga>, ApiError>> + 'c
+    sec_id: &'b db::SecId,
+) -> impl Future<Output = Result<Vec<db::saga_types::Saga>, ApiError>> + 'c
 where
     'a: 'c,
     'b: 'c,
@@ -99,7 +98,7 @@ async fn recover_saga<T>(
     pool: &db::Pool,
     sec_client: &steno::SecClient,
     templates: &BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<T>>>,
-    saga: log::Saga,
+    saga: db::saga_types::Saga,
 ) -> Result<(), ApiError>
 where
     T: Send + Sync + fmt::Debug + 'static,
@@ -152,7 +151,7 @@ where
 /* This is regrettably desugared due to rust-lang/rust#63033. */
 pub fn load_saga_log<'a, 'b, 'c>(
     pool: &'a db::Pool,
-    saga: &'b log::Saga,
+    saga: &'b db::saga_types::Saga,
 ) -> impl Future<Output = Result<Vec<steno::SagaNodeEvent>, ApiError>> + 'c
 where
     'a: 'c,

@@ -5,7 +5,6 @@
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
-use crate::sec;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -127,9 +126,9 @@ impl Nexus {
         nexus_id: &Uuid,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = sec::log::SecId::from(*nexus_id);
+        let my_sec_id = db::SecId::from(*nexus_id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
-        let sec_store = Arc::new(crate::sec::log::CockroachDbSecStore::new(
+        let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
@@ -173,7 +172,7 @@ impl Nexus {
          */
         /* XXX extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        sec::recovery::recover(
+        db::recover(
             log.new(o!("component" => "SagaRecoverer")),
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),

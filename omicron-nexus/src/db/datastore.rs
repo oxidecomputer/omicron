@@ -71,7 +71,7 @@ use super::sql_operations::sql_insert;
 use super::sql_operations::sql_insert_unique;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
-use crate::sec;
+use crate::db;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -613,7 +613,7 @@ impl DataStore {
 
     pub async fn saga_create(
         &self,
-        saga: &sec::log::Saga,
+        saga: &db::saga_types::Saga,
     ) -> Result<(), ApiError> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
@@ -623,7 +623,7 @@ impl DataStore {
 
     pub async fn saga_create_event(
         &self,
-        event: &sec::log::SagaNodeEvent,
+        event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), ApiError> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
@@ -637,7 +637,7 @@ impl DataStore {
         &self,
         saga_id: steno::SagaId,
         new_state: steno::SagaCachedState,
-        current_sec: sec::log::SecId,
+        current_sec: db::saga_types::SecId,
         current_adopt_generation: ApiGeneration,
     ) -> Result<(), ApiError> {
         let client = self.pool.acquire().await?;

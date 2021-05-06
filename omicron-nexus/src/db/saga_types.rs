@@ -1,37 +1,21 @@
 /*!
- * Saga log persistence
+ * Types used for sagas
  *
- * XXX The approach here to wrapping Steno's types is a mix.  We should probably
- * be more consistent.  There are two general approaches here:
- * - Use the most accurate type (e.g., steno::SagaId) directly.  When we need to
- *   read it from SQL or write it, we explicitly convert (e.g., read it as a
- *   Uuid, then wrap it in a steno::SagaId).  We could streamline this a bit
- *   with appropriate `From` impls.
- * - Use wrapper newtypes on which we impl ToSql/FromSql directly.  The
- *   advantage of this is that we can impl this behavior once and then have it
- *   used automatically in the various places that convert to/from SQL.  Of
- *   course, it's not really automatic: you still need to wrap the type (e.g.,
- *   SagaId) with the wrapper (e.g., SagaIdSql).  With the first approach, every
- *   place that needs to do SQL operations on a SagaId needs to
- *   marshal/unmarshal the Uuid inside it.  The downside is it becomes kind of a
- *   mess of types: we might wind up with a SagaIdSql(SagaId(Uuid)), and we _do_
- *   still need to do all those From/Into conversions where we want to use these
- *   values.
- *
- * I'm going to try option (1) for now.
+ * Just like elsewhere, we run into Rust's orphan rules here.  There are types
+ * in Steno that we want to put into the database, but we can't impl
+ * `ToSql`/`FromSql` directly on them because they're in different crates.  We
+ * could create wrapper types and impl `ToSql`/`FromSql` on those.  Instead, we
+ * use the Steno types directly in our own types, and the handful of places that
+ * actually serialize them to and from SQL take care of the necessary
+ * conversions.
  */
 
 use crate::db;
-use anyhow::Context;
-use async_trait::async_trait;
 use omicron_common::db::sql_row_value;
 use omicron_common::error::ApiError;
 use omicron_common::impl_sql_wrapping;
 use omicron_common::model::ApiGeneration;
-use serde_json::Value as JsonValue;
-use slog::Logger;
 use std::convert::TryFrom;
-use std::fmt;
 use std::sync::Arc;
 use steno::SagaId;
 use uuid::Uuid;
@@ -39,7 +23,8 @@ use uuid::Uuid;
 /**
  * Unique identifier for an SEC (saga execution coordinator) instance
  *
- * For us, these will generally be Nexus instances, and the uuids will match.
+ * For us, these will generally be Nexus instances, and the SEC id will match
+ * the Nexus id.
  */
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SecId(Uuid);
@@ -56,13 +41,15 @@ impl From<&SecId> for Uuid {
     }
 }
 
-/** Represents a row in the "Saga" table */
+/**
+ * Represents a row in the "Saga" table
+ */
 pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
     pub template_name: String, /* XXX enum? */
     pub time_created: chrono::DateTime<chrono::Utc>,
-    pub saga_params: JsonValue,
+    pub saga_params: serde_json::Value,
     pub saga_state: steno::SagaCachedState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: ApiGeneration,
@@ -111,21 +98,23 @@ impl db::sql::SqlSerialize for Saga {
     }
 }
 
-/** Represents a row in the "SagaNodeEvent" table */
+/**
+ * Represents a row in the "SagaNodeEvent" table
+ */
 #[derive(Clone, Debug)]
 pub struct SagaNodeEvent {
-    saga_id: SagaId,
-    node_id: steno::SagaNodeId,
-    event_type: steno::SagaNodeEventType,
-    event_time: chrono::DateTime<chrono::Utc>,
-    creator: SecId,
+    pub saga_id: SagaId,
+    pub node_id: steno::SagaNodeId,
+    pub event_type: steno::SagaNodeEventType,
+    pub event_time: chrono::DateTime<chrono::Utc>,
+    pub creator: SecId,
 }
 
 impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
     type Error = ApiError;
 
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let event_data: Option<JsonValue> = sql_row_value(row, "data")?;
+        let event_data: Option<serde_json::Value> = sql_row_value(row, "data")?;
         let event_name: String = sql_row_value(row, "event_type")?;
 
         let event_type = match (event_name.as_str(), event_data) {
@@ -200,100 +189,5 @@ impl From<&SagaNodeEvent> for steno::SagaNodeEvent {
             node_id: ours.node_id,
             event_type: ours.event_type.clone(),
         }
-    }
-}
-
-/*
- * SecStore
- */
-
-/**
- * Implementation of [`steno::SecStore`] backed by the Omicron CockroachDB
- * database.
- */
-pub struct CockroachDbSecStore {
-    sec_id: SecId,
-    datastore: Arc<db::DataStore>,
-    log: Logger,
-}
-
-impl fmt::Debug for CockroachDbSecStore {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("CockroachDbSecStore { ... }")
-    }
-}
-
-impl CockroachDbSecStore {
-    pub fn new(
-        sec_id: SecId,
-        datastore: Arc<db::DataStore>,
-        log: Logger,
-    ) -> Self {
-        CockroachDbSecStore { sec_id, datastore, log }
-    }
-}
-
-#[async_trait]
-impl steno::SecStore for CockroachDbSecStore {
-    async fn saga_create(
-        &self,
-        create_params: steno::SagaCreateParams,
-    ) -> Result<(), anyhow::Error> {
-        info!(&self.log, "creating saga";
-            "saga_id" => create_params.id.to_string(),
-            "template_name" => &create_params.template_name,
-        );
-
-        let now = chrono::Utc::now();
-        let saga_record = Saga {
-            id: create_params.id,
-            creator: self.sec_id,
-            template_name: create_params.template_name,
-            time_created: now,
-            saga_params: create_params.saga_params,
-            saga_state: create_params.state,
-            current_sec: Some(self.sec_id),
-            adopt_generation: ApiGeneration::new(),
-            adopt_time: now,
-        };
-
-        self.datastore
-            .saga_create(&saga_record)
-            .await
-            .context("creating saga record")
-    }
-
-    // XXX SagaId is redundant in this interface
-    async fn record_event(&self, id: SagaId, event: steno::SagaNodeEvent) {
-        debug!(&self.log, "recording saga event";
-            "saga_id" => id.to_string(),
-            "node_id" => ?event.node_id,
-            "event_type" => ?event.event_type,
-        );
-        let our_event = SagaNodeEvent {
-            saga_id: id,
-            node_id: event.node_id,
-            event_type: event.event_type,
-            creator: self.sec_id,
-            event_time: chrono::Utc::now(),
-        };
-
-        // XXX The unwrap ought to be handled and the whole operation retried.
-        self.datastore.saga_create_event(&our_event).await.unwrap();
-    }
-
-    async fn saga_update(&self, id: SagaId, update: steno::SagaCachedState) {
-        // XXX We should track the current generation of the saga and use it
-        // here.  We'll know this either from when it was created or when it was
-        // recovered.
-        // XXX retry loop instead of unwrap
-        info!(&self.log, "updating state";
-            "saga_id" => id.to_string(),
-            "new_state" => update.to_string()
-        );
-        self.datastore
-            .saga_update_state(id, update, self.sec_id, ApiGeneration::new())
-            .await
-            .unwrap();
     }
 }
