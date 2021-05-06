@@ -6,6 +6,7 @@ use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use crate::sec;
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
@@ -46,7 +47,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
-use steno::SagaExecutor;
 use steno::SagaId;
 use steno::SagaResultOk;
 use steno::SagaTemplate;
@@ -91,16 +91,10 @@ pub struct Nexus {
     api_rack_identity: ApiIdentityMetadata,
 
     /** persistent storage for resources in the control plane */
-    db_datastore: db::DataStore,
+    db_datastore: Arc<db::DataStore>,
 
     /** saga execution coordinator */
-    sec: sec::sec::SagaExecCoordinatorHandle<Arc<SagaContext>>,
-
-    /** steno saga log sink */
-    saga_sink: Arc<dyn steno::SagaLogSink>,
-
-    /** unique id for this Nexus as an SEC */
-    my_sec_id: sec::log::SecId,
+    sec_client: Arc<steno::SecClient>,
 
     /**
      * List of sled agents known by this nexus.
@@ -124,9 +118,6 @@ pub struct Nexus {
 impl Nexus {
     /**
      * Create a new Nexus instance for the given rack id `rack_id`
-     *
-     * The state of the system is maintained in memory, so we always start from
-     * a clean slate.
      */
     /* TODO-polish revisit rack metadata */
     pub fn new_with_id(
@@ -136,12 +127,13 @@ impl Nexus {
         nexus_id: &Uuid,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let sink_log = log.new(o!("component" => "LogSink"));
-        let my_sec_id = sec::log::SecId(*nexus_id);
-        let saga_sink = Arc::new(crate::sec::log::CockroachDbSagaLogSink::new(
-            Arc::clone(&pool),
-            sink_log,
-        )) as Arc<dyn steno::SagaLogSink>;
+        let my_sec_id = sec::log::SecId::from(*nexus_id);
+        let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
+        let sec_store = Arc::new(crate::sec::log::CockroachDbSecStore::new(
+            my_sec_id,
+            Arc::clone(&db_datastore),
+            log.new(o!("component" => "SecStore")),
+        )) as Arc<dyn steno::SecStore>;
         // XXX instance-provision -- it's duplicated elsewhere, too
         let templates = vec![(
             "instance-provision",
@@ -153,18 +145,16 @@ impl Nexus {
             &'static str,
             Arc<dyn steno::SagaTemplateGeneric<Arc<SagaContext>>>,
         >>();
-        let sec = sec::sec::SagaExecCoordinatorHandle::new(
-            Arc::clone(&pool),
-            log.new(
-                o!("component" => "SEC", "sec_id" => my_sec_id.0.to_string()),
-            ),
-            &my_sec_id,
-            Arc::clone(&saga_sink),
-            templates,
-        );
-        let mut nexus = Nexus {
+        let sec_client = Arc::new(steno::sec(
+            log.new(o!(
+                "component" => "SEC",
+                "sec_id" => my_sec_id.to_string()
+            )),
+            sec_store,
+        ));
+        let nexus = Nexus {
             rack_id: *rack_id,
-            log,
+            log: log.new(o!()),
             api_rack_identity: ApiIdentityMetadata {
                 id: *rack_id,
                 name: ApiName::try_from(format!("rack-{}", *rack_id)).unwrap(),
@@ -172,16 +162,26 @@ impl Nexus {
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
             },
-            db_datastore: db::DataStore::new(Arc::clone(&pool)),
-            sec,
+            db_datastore,
+            sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
-            saga_sink,
-            my_sec_id,
         };
-        let token = nexus.sec.prepare_recovery();
+
+        /*
+         * XXX Would really like to store this recovery_task, but Nexus is
+         * immutable (behind the Arc) once we've done this.
+         */
+        /* XXX extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        let saga_ctx = Arc::new(SagaContext::new(Arc::clone(&nexus_arc)));
-        nexus_arc.sec.start_recovery(token, Arc::new(saga_ctx));
+        sec::recovery::recover(
+            log.new(o!("component" => "SagaRecoverer")),
+            my_sec_id,
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::clone(&pool),
+            Arc::clone(&sec_client),
+            templates,
+        );
+
         nexus_arc
     }
 
@@ -203,16 +203,11 @@ impl Nexus {
     /**
      * Given a saga template and parameters, create a new saga and execute it.
      */
-    /*
-     * TODO-debugging It would be nice to keep a list of the outstanding sagas
-     * and maybe even provide APIs to report their status.
-     * Maybe steno could even have an interface for keeping track of a bunch of
-     * sagas, maybe as part of a SagaExecCoordinator or something.
-     */
     async fn execute_saga<P, S>(
         self: &Arc<Self>,
-        saga_template: SagaTemplate<S>,
-        saga_params: P,
+        saga_template: Arc<SagaTemplate<S>>,
+        template_name: String,
+        saga_params: Arc<P>,
     ) -> Result<SagaResultOk, ApiError>
     where
         S: SagaType<
@@ -225,44 +220,53 @@ impl Nexus {
          */
         P: serde::Serialize,
     {
-        let now = Utc::now();
-        // XXX reuse saga context from elsewhere?
-        let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
-        let saga_params_serialized = serde_json::to_value(&saga_params)
-            .map_err(|e| {
-                ApiError::internal_error(&format!(
-                    "failed to serialize saga parameters: {:#}",
-                    e
-                ))
+        // XXX reuse saga context from elsewhere?
+        let saga_context =
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+        let future = self
+            .sec_client
+            .saga_create(
+                saga_id,
+                saga_context,
+                saga_template,
+                template_name,
+                saga_params,
+            )
+            .await
+            .context("creating saga")
+            .map_err(|error| {
+                /*
+                 * TODO-error This could be a service unavailable error,
+                 * depending on the failure mode.  We need more information from
+                 * Steno.
+                 */
+                ApiError::internal_error(&format!("{:#}", error))
             })?;
-        let saga_exec = SagaExecutor::new(
-            &saga_id,
-            Arc::new(saga_template),
-            &self.rack_id.to_string(),
-            Arc::new(saga_context),
-            Arc::new(saga_params),
-            Arc::clone(&self.saga_sink),
-        )
-        .map_err(|e| {
-            /* TODO-error more context would be useful */
-            ApiError::InternalError { message: e.to_string() }
-        })?;
-        let saga_record = sec::log::Saga {
-            id: saga_id,
-            creator: self.my_sec_id,
-            template_name: "instance-provision".to_owned(), // XXX
-            time_created: now,
-            saga_params: saga_params_serialized,
-            saga_state: sec::log::SagaState::Running,
-            current_sec: Some(self.my_sec_id),
-            adopt_generation: ApiGeneration::new(),
-            adopt_time: now,
-        };
-        self.db_datastore.saga_create(&saga_record).await?;
 
-        let result = self.sec.saga_run(saga_id, Arc::new(saga_exec)).await;
-        let rv = result.kind.map_err(|saga_error| {
+        self.sec_client
+            .saga_start(saga_id)
+            .await
+            .context("starting saga")
+            .map_err(|error| {
+                ApiError::internal_error(&format!("{:#}", error))
+            })?;
+
+        future.await;
+        let saga_view =
+            self.sec_client.saga_get(saga_id).await.map_err(|_: ()| {
+                // XXX could really use a convenience function here
+                ApiError::internal_error(
+                    "saga not found immediately after creating it",
+                )
+            })?;
+        // XXX could probably use a convenience function for this, too
+        let result = match &saga_view.state {
+            steno::SagaStateView::Done { result, .. } => Ok(result.clone()),
+            _ => Err(ApiError::internal_error("saga future ended early")),
+        }?;
+
+        result.kind.map_err(|saga_error| {
             saga_error
                 .error_source
                 .clone()
@@ -271,18 +275,7 @@ impl Nexus {
                     /* TODO-error more context would be useful */
                     ApiError::InternalError { message: e.to_string() }
                 })
-        });
-        // XXX
-        self.db_datastore
-            .saga_update_state(
-                &saga_id,
-                sec::log::SagaState::Done,
-                &saga_record.current_sec.unwrap(), // XXX
-                &saga_record.adopt_generation,
-                &saga_record.saga_state,
-            )
-            .await?;
-        rv
+        })
     }
 
     /*
@@ -486,14 +479,19 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
-        let saga_template = sagas::saga_instance_create();
-        let saga_params = sagas::ParamsInstanceCreate {
+        let saga_template = Arc::new(sagas::saga_instance_create());
+        let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
             create_params: params.clone(),
-        };
+        });
 
-        let saga_outputs =
-            self.execute_saga(saga_template, saga_params).await?;
+        let saga_outputs = self
+            .execute_saga(
+                saga_template,
+                "instance-provision".to_string(),
+                saga_params,
+            )
+            .await?;
         /* TODO-error more context would be useful  */
         let instance_id = saga_outputs
             .lookup_output::<Uuid>("instance_id")
@@ -1092,12 +1090,14 @@ impl Nexus {
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiSagaView> {
-        let saga_list = self.sec.sagas_list_page(pagparams).await?;
-        Ok(futures::stream::iter(saga_list).boxed())
+        todo!(); // XXX
+                 // let saga_list = self.sec.sagas_list_page(pagparams).await?;
+                 // Ok(futures::stream::iter(saga_list).boxed())
     }
 
     pub async fn saga_get(&self, id: &Uuid) -> LookupResult<ApiSagaView> {
-        Ok(self.sec.saga_get(id).await?)
+        // Ok(self.sec.saga_get(id).await?)
+        todo!(); // XXX
     }
 
     /*

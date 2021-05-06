@@ -36,6 +36,8 @@ use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
+#[macro_use]
+extern crate newtype_derive;
 
 /**
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec

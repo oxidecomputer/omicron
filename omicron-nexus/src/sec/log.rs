@@ -1,119 +1,54 @@
 /*!
  * Saga log persistence
+ *
+ * XXX The approach here to wrapping Steno's types is a mix.  We should probably
+ * be more consistent.  There are two general approaches here:
+ * - Use the most accurate type (e.g., steno::SagaId) directly.  When we need to
+ *   read it from SQL or write it, we explicitly convert (e.g., read it as a
+ *   Uuid, then wrap it in a steno::SagaId).  We could streamline this a bit
+ *   with appropriate `From` impls.
+ * - Use wrapper newtypes on which we impl ToSql/FromSql directly.  The
+ *   advantage of this is that we can impl this behavior once and then have it
+ *   used automatically in the various places that convert to/from SQL.  Of
+ *   course, it's not really automatic: you still need to wrap the type (e.g.,
+ *   SagaId) with the wrapper (e.g., SagaIdSql).  With the first approach, every
+ *   place that needs to do SQL operations on a SagaId needs to
+ *   marshal/unmarshal the Uuid inside it.  The downside is it becomes kind of a
+ *   mess of types: we might wind up with a SagaIdSql(SagaId(Uuid)), and we _do_
+ *   still need to do all those From/Into conversions where we want to use these
+ *   values.
+ *
+ * I'm going to try option (1) for now.
  */
 
-use crate::db::schema;
-use crate::db::sql::SqlSerialize;
-use crate::db::sql_operations::sql_insert;
-use crate::db::Pool;
-use crate::db::SqlValueSet;
+use crate::db;
+use anyhow::Context;
 use async_trait::async_trait;
-use chrono::DateTime;
-use chrono::Utc;
-use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use omicron_common::error::ApiError;
 use omicron_common::impl_sql_wrapping;
-use omicron_common::model::parse_str_using_serde;
 use omicron_common::model::ApiGeneration;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::Value as JsonValue;
 use slog::Logger;
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
-use steno::SagaLogSink;
-use steno::SagaNodeEventType;
+use steno::SagaId;
 use uuid::Uuid;
 
-#[derive(Debug)]
-pub struct CockroachDbSagaLogSink {
-    pool: Arc<Pool>,
-    log: Logger,
-}
-
-impl CockroachDbSagaLogSink {
-    pub fn new(pool: Arc<Pool>, log: Logger) -> Self {
-        CockroachDbSagaLogSink { pool, log }
-    }
-}
-
-#[async_trait]
-impl SagaLogSink for CockroachDbSagaLogSink {
-    async fn record(&self, event: &steno::SagaNodeEvent) {
-        let mut values = SqlValueSet::new();
-        event.sql_serialize(&mut values);
-        // XXX unwrap
-        let client = self.pool.acquire().await.unwrap();
-
-        // TODO-robustness This INSERT ought to be conditional on this SEC still
-        // owning this saga.
-        let result =
-            sql_insert::<schema::SagaNodeEvent>(&client, &values).await;
-        // XXX unwrap
-        result.unwrap();
-    }
-}
-
 /**
- * Represents the persistent state of a whole saga
+ * Unique identifier for an SEC (saga execution coordinator) instance
  *
- * This is related to steno::SagaState, but isn't the same.  This state captures
- * the things we want to be able to tell from Nexus's perspective.
+ * For us, these will generally be Nexus instances, and the uuids will match.
  */
-#[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum SagaState {
-    Running,
-    Done,
-}
-
-/*
- * TODO much of the boilerplate below is copied from ApiInstanceState.
- */
-
-impl fmt::Display for SagaState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.label())
-    }
-}
-
-impl TryFrom<&str> for SagaState {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        parse_str_using_serde(value)
-    }
-}
-
-impl<'a> From<&'a SagaState> for &'a str {
-    fn from(s: &'a SagaState) -> &'a str {
-        s.label()
-    }
-}
-
-impl SagaState {
-    fn label(&self) -> &str {
-        match self {
-            SagaState::Running => "running",
-            SagaState::Done => "done",
-        }
-    }
-}
-
-impl_sql_wrapping!(SagaState, &str);
-
-/* XXX TODO-doc */
-/*
- * XXX Do we ever want to allow these to be non-uuids?  Can we handle this
- * smoothly?  Maybe this could be an enum with two variants.
- */
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct SecId(pub Uuid);
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SecId(Uuid);
 impl_sql_wrapping!(SecId, Uuid);
+
+// TODO-cleanup figure out how to use custom_derive here?
+NewtypeDebug! { () pub struct SecId(Uuid); }
+NewtypeDisplay! { () pub struct SecId(Uuid); }
+NewtypeFrom! { () pub struct SecId(Uuid); }
 
 impl From<&SecId> for Uuid {
     fn from(g: &SecId) -> Self {
@@ -121,36 +56,47 @@ impl From<&SecId> for Uuid {
     }
 }
 
-impl From<Uuid> for SecId {
-    fn from(value: Uuid) -> Self {
-        SecId(value)
-    }
-}
+// XXX
+//impl From<Uuid> for SecId {
+//    fn from(value: Uuid) -> Self {
+//        SecId(value)
+//    }
+//}
 
 /** Represents a row in the "Saga" table */
 pub struct Saga {
-    pub id: steno::SagaId,
+    pub id: SagaId,
     pub creator: SecId,
     pub template_name: String, /* XXX enum? */
-    pub time_created: DateTime<Utc>,
+    pub time_created: chrono::DateTime<chrono::Utc>,
     pub saga_params: JsonValue,
-    pub saga_state: SagaState,
+    pub saga_state: steno::SagaCachedState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: ApiGeneration,
-    pub adopt_time: DateTime<Utc>,
+    pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl TryFrom<&tokio_postgres::Row> for Saga {
     type Error = ApiError;
 
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let saga_state_str: String = sql_row_value(row, "saga_state")?;
+        let saga_state = steno::SagaCachedState::try_from(
+            saga_state_str.as_str(),
+        )
+        .map_err(|e| {
+            ApiError::internal_error(&format!(
+                "failed to parse saga state {:?}: {:#}",
+                saga_state_str, e
+            ))
+        })?;
         Ok(Saga {
-            id: steno::SagaId(sql_row_value::<_, Uuid>(row, "id")?),
+            id: SagaId(sql_row_value::<_, Uuid>(row, "id")?),
             creator: sql_row_value(row, "creator")?,
             template_name: sql_row_value(row, "template_name")?,
             time_created: sql_row_value(row, "time_created")?,
             saga_params: sql_row_value(row, "saga_params")?,
-            saga_state: sql_row_value(row, "saga_state")?,
+            saga_state: saga_state,
             current_sec: sql_row_value(row, "current_sec")?,
             adopt_generation: sql_row_value(row, "adopt_generation")?,
             adopt_time: sql_row_value(row, "adopt_time")?,
@@ -158,98 +104,203 @@ impl TryFrom<&tokio_postgres::Row> for Saga {
     }
 }
 
-impl SqlSerialize for Saga {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
+impl db::sql::SqlSerialize for Saga {
+    fn sql_serialize(&self, output: &mut db::SqlValueSet) {
         output.set("id", &self.id.0);
         output.set("creator", &self.creator);
         output.set("template_name", &self.template_name);
         output.set("time_created", &self.time_created);
         output.set("saga_params", &self.saga_params);
-        output.set("saga_state", &self.saga_state);
+        output.set("saga_state", &self.saga_state.to_string());
         output.set("current_sec", &self.current_sec);
         output.set("adopt_generation", &self.adopt_generation);
         output.set("adopt_time", &self.adopt_time);
     }
 }
 
-impl SqlSerialize for steno::SagaNodeEvent {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("saga_id", &self.saga_id.0);
-        output.set("node_id", &(self.node_id as i64)); // XXX
-        output.set("event_time", &self.event_time);
-        output.set("creator", &self.creator.parse::<Uuid>().unwrap()); // XXX
-        output.set("event_type", &self.event_type.label());
-
-        let data: Option<JsonValue> = match &self.event_type {
-            SagaNodeEventType::Succeeded(output) => Some((**output).clone()),
-            SagaNodeEventType::Failed(error) => {
-                // XXX unwrap
-                Some(serde_json::to_value(error).unwrap())
-            }
-            SagaNodeEventType::Started => None,
-            SagaNodeEventType::UndoStarted => None,
-            SagaNodeEventType::UndoFinished => None,
-        };
-
-        output.set("data", &data);
-    }
+/** Represents a row in the "SagaNodeEvent" table */
+#[derive(Clone, Debug)]
+pub struct SagaNodeEvent {
+    saga_id: SagaId,
+    node_id: steno::SagaNodeId,
+    event_type: steno::SagaNodeEventType,
+    event_time: chrono::DateTime<chrono::Utc>,
+    creator: SecId,
 }
 
-// This type exists only to work around the Rust orphan rules.
-pub struct SagaNodeEventDeserializer(pub steno::SagaNodeEvent);
-impl TryFrom<&tokio_postgres::Row> for SagaNodeEventDeserializer {
+impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
     type Error = ApiError;
+
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let event_type_str: &str = sql_row_value(row, "event_type")?;
-        let data: Option<JsonValue> = sql_row_value(row, "data")?;
-        let event_type = match event_type_str {
-            "started" => {
-                bail_unless!(data.is_none());
-                SagaNodeEventType::Started
+        let event_data: Option<JsonValue> = sql_row_value(row, "data")?;
+        let event_name: String = sql_row_value(row, "event_type")?;
+
+        let event_type = match (event_name.as_str(), event_data) {
+            ("started", None) => steno::SagaNodeEventType::Started,
+            ("succeeded", Some(d)) => {
+                steno::SagaNodeEventType::Succeeded(Arc::new(d))
             }
-            "undo_started" => {
-                bail_unless!(data.is_none());
-                SagaNodeEventType::UndoStarted
-            }
-            "undo_finished" => {
-                bail_unless!(data.is_none());
-                SagaNodeEventType::UndoFinished
-            }
-            "succeeded" => {
-                bail_unless!(data.is_some());
-                SagaNodeEventType::Succeeded(Arc::new(data.unwrap()))
-            }
-            "failed" => {
-                bail_unless!(data.is_some());
-                let error: steno::ActionError =
-                    serde_json::from_value(data.unwrap()).map_err(|e| {
+            ("failed", Some(d)) => {
+                let error: steno::ActionError = serde_json::from_value(d)
+                    .map_err(|error| {
                         ApiError::internal_error(&format!(
-                            "error extracting steno::ActionError: {:#}",
-                            e
+                            "failed to parse ActionError for \"failed\" \
+                            SagaNodeEvent: {:#}",
+                            error
                         ))
                     })?;
-                SagaNodeEventType::Failed(error)
+                steno::SagaNodeEventType::Failed(error)
             }
-            s => {
+            ("undo_started", None) => steno::SagaNodeEventType::UndoStarted,
+            ("undo_finished", None) => steno::SagaNodeEventType::UndoFinished,
+            (name, data) => {
                 return Err(ApiError::internal_error(&format!(
-                    "unsupported saga node event type: {}",
-                    s
-                )))
+                    "bad SagaNodeEventRow: event_type = {:?}, data = {:?}",
+                    name, data
+                )));
             }
         };
 
-        Ok(SagaNodeEventDeserializer(steno::SagaNodeEvent {
-            saga_id: steno::SagaId(sql_row_value(row, "saga_id")?),
-            node_id: sql_row_value::<_, i64>(row, "node_id")? as u64, // XXX
-            event_time: sql_row_value(row, "event_time")?,
-            creator: sql_row_value::<_, Uuid>(row, "creator")?.to_string(),
+        let node_id_i64: i64 = sql_row_value(row, "node_id")?;
+        let node_id_u32 = u32::try_from(node_id_i64)
+            .map_err(|_| ApiError::internal_error("node id out of range"))?;
+        let node_id = steno::SagaNodeId::from(node_id_u32);
+
+        Ok(SagaNodeEvent {
+            saga_id: SagaId(sql_row_value::<_, Uuid>(row, "saga_id")?),
+            node_id,
             event_type,
-        }))
+            event_time: sql_row_value(row, "event_time")?,
+            creator: sql_row_value(row, "creator")?,
+        })
     }
 }
 
-impl From<SagaNodeEventDeserializer> for steno::SagaNodeEvent {
-    fn from(d: SagaNodeEventDeserializer) -> Self {
-        d.0
+impl db::sql::SqlSerialize for SagaNodeEvent {
+    fn sql_serialize(&self, output: &mut db::SqlValueSet) {
+        let (event_name, event_data) = match self.event_type {
+            steno::SagaNodeEventType::Started => ("started", None),
+            steno::SagaNodeEventType::Succeeded(ref d) => {
+                ("succeeded", Some((**d).clone()))
+            }
+            steno::SagaNodeEventType::Failed(ref d) => {
+                let json = serde_json::to_value(d).unwrap(); // XXX unwrap
+                ("failed", Some(json))
+            }
+            steno::SagaNodeEventType::UndoStarted => ("undo_started", None),
+            steno::SagaNodeEventType::UndoFinished => ("undo_finished", None),
+        };
+
+        output.set("saga_id", &Uuid::from(self.saga_id));
+        output.set("node_id", &i64::from(u32::from(self.node_id)));
+        output.set("event_type", &event_name);
+        output.set("data", &event_data);
+        output.set("event_time", &self.event_time);
+        output.set("creator", &self.creator);
+    }
+}
+
+impl From<&SagaNodeEvent> for steno::SagaNodeEvent {
+    fn from(ours: &SagaNodeEvent) -> Self {
+        steno::SagaNodeEvent {
+            saga_id: ours.saga_id,
+            node_id: ours.node_id,
+            event_type: ours.event_type.clone(),
+        }
+    }
+}
+
+/*
+ * SecStore
+ */
+
+/**
+ * Implementation of [`steno::SecStore`] backed by the Omicron CockroachDB
+ * database.
+ */
+pub struct CockroachDbSecStore {
+    sec_id: SecId,
+    datastore: Arc<db::DataStore>,
+    log: Logger,
+}
+
+impl fmt::Debug for CockroachDbSecStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CockroachDbSecStore { ... }")
+    }
+}
+
+impl CockroachDbSecStore {
+    pub fn new(
+        sec_id: SecId,
+        datastore: Arc<db::DataStore>,
+        log: Logger,
+    ) -> Self {
+        CockroachDbSecStore { sec_id, datastore, log }
+    }
+}
+
+#[async_trait]
+impl steno::SecStore for CockroachDbSecStore {
+    async fn saga_create(
+        &self,
+        create_params: steno::SagaCreateParams,
+    ) -> Result<(), anyhow::Error> {
+        info!(&self.log, "creating saga";
+            "saga_id" => create_params.id.to_string(),
+            "template_name" => &create_params.template_name,
+        );
+
+        let now = chrono::Utc::now();
+        let saga_record = Saga {
+            id: create_params.id,
+            creator: self.sec_id,
+            template_name: create_params.template_name,
+            time_created: now,
+            saga_params: create_params.saga_params,
+            saga_state: create_params.state,
+            current_sec: Some(self.sec_id),
+            adopt_generation: ApiGeneration::new(),
+            adopt_time: now,
+        };
+
+        self.datastore
+            .saga_create(&saga_record)
+            .await
+            .context("creating saga record")
+    }
+
+    // XXX SagaId is redundant in this interface
+    async fn record_event(&self, id: SagaId, event: steno::SagaNodeEvent) {
+        debug!(&self.log, "recording saga event";
+            "saga_id" => id.to_string(),
+            "node_id" => ?event.node_id,
+            "event_type" => ?event.event_type,
+        );
+        let our_event = SagaNodeEvent {
+            saga_id: id,
+            node_id: event.node_id,
+            event_type: event.event_type,
+            creator: self.sec_id,
+            event_time: chrono::Utc::now(),
+        };
+
+        // XXX The unwrap ought to be handled and the whole operation retried.
+        self.datastore.saga_create_event(&our_event).await.unwrap();
+    }
+
+    async fn saga_update(&self, id: SagaId, update: steno::SagaCachedState) {
+        // XXX We should track the current generation of the saga and use it
+        // here.  We'll know this either from when it was created or when it was
+        // recovered.
+        // XXX retry loop instead of unwrap
+        info!(&self.log, "updating state";
+            "saga_id" => id.to_string(),
+            "new_state" => update.to_string()
+        );
+        self.datastore
+            .saga_update_state(id, update, self.sec_id, ApiGeneration::new())
+            .await
+            .unwrap();
     }
 }

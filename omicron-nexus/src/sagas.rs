@@ -33,6 +33,7 @@ pub struct ParamsInstanceCreate {
     pub create_params: ApiInstanceCreateParams,
 }
 
+#[derive(Debug)]
 pub struct SagaInstanceCreate;
 impl SagaType for SagaInstanceCreate {
     type SagaParamsType = Arc<ParamsInstanceCreate>;

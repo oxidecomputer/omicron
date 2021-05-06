@@ -113,7 +113,7 @@ impl Table for Saga {
 /** Describes the "Saga" table */
 pub struct SagaNodeEvent;
 impl Table for SagaNodeEvent {
-    type ModelType = sec::log::SagaNodeEventDeserializer;
+    type ModelType = sec::log::SagaNodeEvent;
     const TABLE_NAME: &'static str = "SagaNodeEvent";
     const ALL_COLUMNS: &'static [&'static str] =
         &["saga_id", "node_id", "event_type", "data", "event_time", "creator"];

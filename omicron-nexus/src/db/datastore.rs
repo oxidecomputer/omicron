@@ -621,25 +621,34 @@ impl DataStore {
         sql_insert::<schema::Saga>(&client, &values).await
     }
 
-    // XXX want a type here
-    pub async fn saga_update_state(
+    pub async fn saga_create_event(
         &self,
-        saga_id: &steno::SagaId,
-        new_state: sec::log::SagaState,
-        current_sec: &sec::log::SecId,
-        current_adopt_generation: &ApiGeneration,
-        current_state: &sec::log::SagaState,
+        event: &sec::log::SagaNodeEvent,
     ) -> Result<(), ApiError> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
-        values.set("saga_state", &new_state);
+        event.sql_serialize(&mut values);
+        // TODO-robustness This INSERT ought to be conditional on this SEC still
+        // owning this saga.
+        sql_insert::<schema::SagaNodeEvent>(&client, &values).await
+    }
+
+    pub async fn saga_update_state(
+        &self,
+        saga_id: steno::SagaId,
+        new_state: steno::SagaCachedState,
+        current_sec: sec::log::SecId,
+        current_adopt_generation: ApiGeneration,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let mut values = SqlValueSet::new();
+        values.set("saga_state", &new_state.to_string());
         let mut precond_sql = SqlString::new();
-        let p1 = precond_sql.next_param(current_sec);
-        let p2 = precond_sql.next_param(current_adopt_generation);
-        let p3 = precond_sql.next_param(current_state);
+        let p1 = precond_sql.next_param(&current_sec);
+        let p2 = precond_sql.next_param(&current_adopt_generation);
         precond_sql.push_str(&format!(
-            "current_sec = {} AND adopt_generation = {} AND saga_state = {}",
-            p1, p2, p3
+            "current_sec = {} AND adopt_generation = {}",
+            p1, p2
         ));
         let update = sql_update_precond::<
             schema::Saga,
@@ -661,18 +670,17 @@ impl DataStore {
                 .map(|i| i.to_string())
                 .unwrap_or_else(|_| "(unknown)".to_owned());
         let found_saga_state =
-            sql_row_value::<_, sec::log::SagaState>(row, "found_saga_state")
+            sql_row_value::<_, String>(row, "found_saga_state")
                 .map(|i| i.to_string())
                 .unwrap_or_else(|_| "(unknown)".to_owned());
         bail_unless!(update.updated,
             "failed to update saga {:?} with state {:?}: preconditions not met: \
-            expected current_sec = {:?}, adopt_generation = {:?}, state = {:?}, \
+            expected current_sec = {:?}, adopt_generation = {:?}, \
             but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}", 
             saga_id,
             new_state,
             current_sec,
             current_adopt_generation,
-            current_state,
             found_sec,
             found_gen,
             found_saga_state,
