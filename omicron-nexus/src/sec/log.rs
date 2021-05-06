@@ -56,13 +56,6 @@ impl From<&SecId> for Uuid {
     }
 }
 
-// XXX
-//impl From<Uuid> for SecId {
-//    fn from(value: Uuid) -> Self {
-//        SecId(value)
-//    }
-//}
-
 /** Represents a row in the "Saga" table */
 pub struct Saga {
     pub id: SagaId,

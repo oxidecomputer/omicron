@@ -1216,7 +1216,7 @@ pub struct ApiSagaTemplateView {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiSagaTemplateNode {
-    pub id: u64, // XXX
+    pub id: u32, // XXX
     pub name: String,
     pub label: String,
 }
