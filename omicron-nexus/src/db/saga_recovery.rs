@@ -6,12 +6,27 @@ use crate::db;
 use crate::db::schema;
 use crate::db::sql::Table;
 use crate::db::sql_operations::sql_paginate;
+use omicron_common::backoff::internal_service_policy;
+use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::BackoffError;
 use omicron_common::error::ApiError;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use steno::SagaTemplateGeneric;
 
+/**
+ * Starts an asynchronous task to recover sagas (as after a crash or restart)
+ *
+ * More specifically, this task queries the database to list all uncompleted
+ * sagas that are assigned to SEC `sec_id` and for each one:
+ *
+ * * finds the appropriate template in `templates`
+ * * loads the saga log from the database
+ * * uses `sec_client.saga_resume()` to prepare to resume execution of the saga
+ *   using the persistent saga log
+ * * resumes execution of each saga
+ */
 pub fn recover<T>(
     log: slog::Logger,
     sec_id: db::SecId,
@@ -25,20 +40,58 @@ where
 {
     tokio::spawn(async move {
         info!(&log, "start saga recovery");
-        /* TODO-robustness retry loop */
-        let found_sagas = match list_sagas(&pool, &sec_id).await {
-            Ok(found) => {
-                info!(&log, "listed sagas ({} total)", found.len());
-                found
-            }
-            Err(error) => {
-                error!(&log, "failed to list sagas: {:#}", error);
-                Vec::new()
-            }
-        };
+
+        /*
+         * We perform the initial list of sagas using a standard retry policy.
+         * We treat all errors as transient because there's nothing we can do
+         * about any of them except try forever.  As a result, we never expect
+         * an error from the overall operation.
+         * TODO-monitoring we definitely want a way to raise a big red flag if
+         * saga recovery is not completing.
+         * TODO-robustness It would be better to retry the individual database
+         * operations within this operation than retrying the overall operation.
+         * As this is written today, if the listing requires a bunch of pages
+         * and the operation fails partway through, we'll re-fetch all the pages
+         * we successfully fetched before.  If the database is overloaded and
+         * only N% of requests are completing, the probability of this operation
+         * succeeding decreases considerably as the number of separate queries
+         * (pages) goes up.  We'd be much more likely to finish the overall
+         * operation if we didn't throw away the results we did get each time.
+         */
+        let found_sagas = retry_notify(
+            internal_service_policy(),
+            || async {
+                list_unfinished_sagas(&log, &pool, &sec_id)
+                    .await
+                    .map_err(BackoffError::Transient)
+            },
+            |error, duration| {
+                warn!(
+                    &log,
+                    "failed to list sagas (will retry after {:?}): {:#}",
+                    duration,
+                    error
+                )
+            },
+        )
+        .await
+        .unwrap();
+
+        info!(&log, "listed sagas ({} total)", found_sagas.len());
 
         for saga in found_sagas {
-            /* TODO-robustness retry loop */
+            /*
+             * TODO-robustness We should put this into a retry loop.  We may
+             * also want to take any failed sagas and put them at the end of the
+             * queue.  It shouldn't really matter, in that the transient
+             * failures here are likely to affect recovery of all sagas.
+             * However, it's conceivable we misclassify a permanent failure as a
+             * transient failure, or that a transient failure is more likely to
+             * affect some sagas than others (e.g, data on a different node, or
+             * it has a larger log that rqeuires more queries).  To avoid one
+             * bad saga ruining the rest, we should try to recover the rest
+             * before we go back to one that's failed.
+             */
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id = saga.id;
             if let Err(error) =
@@ -51,8 +104,12 @@ where
     })
 }
 
-/* XXX TODO-doc */
-async fn list_sagas(
+/**
+ * Queries the database to return a list of uncompleted sagas assigned to SEC
+ * `sec_id`
+ */
+async fn list_unfinished_sagas(
+    log: &slog::Logger,
     pool: &db::Pool,
     sec_id: &db::SecId,
 ) -> Result<Vec<db::saga_types::Saga>, ApiError> {
@@ -67,6 +124,7 @@ async fn list_sagas(
      * consumers.  Anyway, having Nexus come up is really only blocked on this
      * step, not recovering all the individual sagas.
      */
+    trace!(&log, "listing sagas");
     let client = pool.acquire().await?;
 
     let mut sql = db::sql::SqlString::new();
@@ -83,6 +141,11 @@ async fn list_sagas(
     .await
 }
 
+/**
+ * Recovers an individual saga
+ *
+ * This function loads the saga log and uses `sec_client` to resume execution.
+ */
 async fn recover_saga<T>(
     log: &slog::Logger,
     uctx: &Arc<T>,
@@ -126,7 +189,10 @@ where
         )
         .await
         .map_err(|error| {
-            /* XXX We want to differentiate between retryable and not here */
+            /*
+             * TODO-robustness We want to differentiate between retryable and
+             * not here
+             */
             ApiError::internal_error(&format!(
                 "failed to resume saga: {:#}",
                 error
@@ -139,6 +205,9 @@ where
     Ok(())
 }
 
+/**
+ * Queries the database to load the full log for the specified saga
+ */
 pub async fn load_saga_log(
     pool: &db::Pool,
     saga: &db::saga_types::Saga,
