@@ -161,6 +161,12 @@ impl Collector {
             producer.setup_collection()?;
             let measurements = producer.collect()?;
             for i in 0..measurements.len() {
+                if collection.metrics[i].metric_type() != measurements[i].metric_type() {
+                    return Err(Error::ProducerTypeMismatch(
+                        collection.metrics[i].metric_type(),
+                        measurements[i].metric_type(),
+                    ));
+                }
                 let sample = Sample::new(
                     &collection.targets[i],
                     &collection.metrics[i],

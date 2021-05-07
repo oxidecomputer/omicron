@@ -41,6 +41,20 @@ pub enum Measurement {
     DistributionF64(distribution::Distribution<f64>),
 }
 
+impl Measurement {
+    pub fn metric_type(&self) -> MetricType {
+        match self {
+            Measurement::Bool(_) => MetricType::Bool,
+            Measurement::I64(_) => MetricType::I64,
+            Measurement::F64(_) => MetricType::F64,
+            Measurement::String(_) => MetricType::String,
+            Measurement::Bytes(_) => MetricType::Bytes,
+            Measurement::DistributionI64(_) => MetricType::DistributionI64,
+            Measurement::DistributionF64(_) => MetricType::DistributionF64,
+        }
+    }
+}
+
 impl From<i64> for Measurement {
     fn from(value: i64) -> Self {
         Measurement::I64(value)

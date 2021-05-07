@@ -58,3 +58,18 @@ fn test_collection() {
     assert!(collector.deregister(token).is_ok());
     assert!(collector.deregister(token).is_err());
 }
+
+#[test]
+fn test_collection_type_mismatch() {
+    let sled = common::Sled::new();
+    let cpu = common::CpuBusy::new();
+    let mut collector = Collector::new();
+    let bad_producer = oximeter::Distribution::<f64>::new(&[0f64, 1.0, 2.0]).unwrap();
+    let _ = collector
+        .register(&sled, &cpu, &bad_producer)
+        .expect("Failed to register single metric");
+    assert!(matches!(
+        collector.collect(),
+        Err(oximeter::Error::ProducerTypeMismatch(_, _))
+    ));
+}

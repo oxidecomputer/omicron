@@ -8,7 +8,7 @@ mod producer;
 mod types;
 
 pub use collector::Collector;
-pub use producer::{Counter, Producer};
+pub use producer::{Counter, Distribution, Producer};
 pub use types::{Error, FieldType, FieldValue, Measurement, Sample};
 
 /// The `Target` trait identifies a metric source by a sequence of fields.
