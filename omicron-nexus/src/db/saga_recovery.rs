@@ -33,7 +33,10 @@ pub fn recover<T>(
     uctx: Arc<T>,
     pool: Arc<db::Pool>,
     sec_client: Arc<steno::SecClient>,
-    templates: BTreeMap<&'static str, Arc<dyn steno::SagaTemplateGeneric<T>>>,
+    templates: &'static BTreeMap<
+        &'static str,
+        Arc<dyn steno::SagaTemplateGeneric<T>>,
+    >,
 ) -> tokio::task::JoinHandle<()>
 where
     T: Send + Sync + fmt::Debug + 'static,
@@ -95,7 +98,7 @@ where
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id = saga.id;
             if let Err(error) =
-                recover_saga(&log, &uctx, &pool, &sec_client, &templates, saga)
+                recover_saga(&log, &uctx, &pool, &sec_client, templates, saga)
                     .await
             {
                 warn!(&log, "failed to recover saga {}: {:#}", saga_id, error);

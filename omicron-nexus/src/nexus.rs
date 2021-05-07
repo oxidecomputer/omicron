@@ -133,17 +133,6 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
-        // XXX instance-provision -- it's duplicated elsewhere, too
-        let templates = vec![(
-            "instance-provision",
-            Arc::new(sagas::saga_instance_create())
-                as Arc<dyn steno::SagaTemplateGeneric<Arc<SagaContext>>>,
-        )]
-        .into_iter()
-        .collect::<BTreeMap<
-            &'static str,
-            Arc<dyn steno::SagaTemplateGeneric<Arc<SagaContext>>>,
-        >>();
         let sec_client = Arc::new(steno::sec(
             log.new(o!(
                 "component" => "SEC",
@@ -178,7 +167,7 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
             Arc::clone(&pool),
             Arc::clone(&sec_client),
-            templates,
+            &sagas::ALL_TEMPLATES,
         );
 
         nexus_arc
@@ -205,7 +194,7 @@ impl Nexus {
     async fn execute_saga<P, S>(
         self: &Arc<Self>,
         saga_template: Arc<SagaTemplate<S>>,
-        template_name: String,
+        template_name: &str,
         saga_params: Arc<P>,
     ) -> Result<SagaResultOk, ApiError>
     where
@@ -229,7 +218,7 @@ impl Nexus {
                 saga_id,
                 saga_context,
                 saga_template,
-                template_name,
+                template_name.to_owned(),
                 saga_params,
             )
             .await
@@ -478,7 +467,6 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
-        let saga_template = Arc::new(sagas::saga_instance_create());
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
             create_params: params.clone(),
@@ -486,8 +474,8 @@ impl Nexus {
 
         let saga_outputs = self
             .execute_saga(
-                saga_template,
-                "instance-provision".to_string(),
+                Arc::clone(&sagas::SAGA_INSTANCE_CREATE_TEMPLATE),
+                sagas::SAGA_INSTANCE_CREATE_NAME,
                 saga_params,
             )
             .await?;
