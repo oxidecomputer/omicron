@@ -1,3 +1,6 @@
+//! Tools for producing metrics that may be collected by `oximeter`.
+// Copyright 2021 Oxide Computer Company
+
 use std::sync::{
     atomic::{AtomicI64, Ordering},
     Arc, RwLock,
@@ -6,8 +9,37 @@ use std::sync::{
 use crate::distribution;
 use crate::{Error, Measurement};
 
+/// A trait used to generate measurements for one or metrics on demand.
+///
+/// The `Producer` trait provides a callback-like mechanism for client code to control how metrics
+/// are generated when a [`Collector`](crate::Collector) attempts to scrape them. Metrics are
+/// registered as a "collection", which is one or more target and metric pairs. When the
+/// [`Collector::collect`](crate::Collector::collect) method is called, the
+/// [`Producer::setup_collection`] method is called _once_ for the entire collection. Then the
+/// [`Producer::collect`] method is called, which is expected to produce the measurements for each
+/// metric in the collection (in order).
+///
+/// Users may implement this trait on custom structs, or use some of the convenience types such as
+/// the [`Counter`]. This affords some flexibility, allowing the user to decide how to actually
+/// generate the metric data, which may be at a different time than the `Collector` requests it.
+///
+/// For example, if a collection requires an expensive system or network call, but a single such
+/// call returns a measurement for each metric in the collection, performing that operation for
+/// each measurement is inefficient (and possibly incorrect). Instead, an implementor of this trait
+/// can perform that expensive operation in the `setup_collection` method, and then report all
+/// generated measurements as a batch via the `collect` method.
 pub trait Producer {
+    /// Perform any initialization required for a single metric collection
     fn setup_collection(&mut self) -> Result<(), Error>;
+
+    /// Return all metrics for a collection, in order.
+    ///
+    /// Note that this method currently expects that the metrics themselves are returned in the
+    /// order in which they are registered with the `Collector`. This means clients must maintain
+    /// that order themselves.
+    ///
+    /// This method also verifies that the type of each measurement matches the expected type of
+    /// the metric it corresponds to. An [`Error`] is returned if the types don't match.
     fn collect(&mut self) -> Result<Vec<Measurement>, Error>;
 }
 

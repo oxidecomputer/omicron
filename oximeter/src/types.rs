@@ -1,3 +1,6 @@
+//! Types used to describe targets, metrics, and measurements.
+// Copyright 2021 Oxide Computer Company
+
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -12,6 +15,7 @@ use uuid::Uuid;
 use crate::distribution;
 use crate::{Metric, MetricKind, MetricType, Target};
 
+/// The `FieldType` identifies the type of a target or metric field.
 #[derive(Clone, Copy, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub enum FieldType {
     String,
@@ -21,6 +25,7 @@ pub enum FieldType {
     Bool,
 }
 
+/// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub enum FieldValue {
     String(String),
@@ -30,6 +35,7 @@ pub enum FieldValue {
     Bool(bool),
 }
 
+/// A measurement is a single sample of a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub enum Measurement {
     Bool(bool),
@@ -42,6 +48,7 @@ pub enum Measurement {
 }
 
 impl Measurement {
+    /// Return the [`MetricType`] for this measurement.
     pub fn metric_type(&self) -> MetricType {
         match self {
             Measurement::Bool(_) => MetricType::Bool,
@@ -97,33 +104,64 @@ impl From<distribution::Distribution<f64>> for Measurement {
     }
 }
 
+/// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error)]
 pub enum Error {
+    /// An error occurred registering or building a collection of metrics.
     #[error("Error building metric collection: {0}")]
     InvalidCollection(String),
+    /// A collection of metrics is already registered.
     #[error("The metric collection is already registered")]
     CollectionAlreadyRegistered,
+    /// A collection of metrics is not registered.
     #[error("The collection is not registered")]
     CollectionNotRegistered,
+    /// An error occurred calling the registered
+    /// [`Producer::setup_collection`](crate::producer::Producer::setup_collection) method.
     #[error("Failed to set up collection of metric: {0}")]
     CollectionSetupFailed(String),
+    /// An error occurred calling the registered
+    /// [`Producer::collect`](crate::producer::Producer::collect) method.
     #[error("Error collecting measurement: {0}")]
     MeasurementError(String),
+    /// The [`Producer::collect`](crate::producer::Producer::collect) method return an unexpected
+    /// type for a metric.
     #[error("The producer function returned an unexpected type, expected {0:?}, found {1:?})")]
     ProducerTypeMismatch(MetricType, MetricType),
+    /// An error related to creating or sampling a [`distribution::Distribution`] metric.
     #[error("{0}")]
     DistributionError(#[from] distribution::DistributionError),
 }
 
+/// Complete information about a single sample for a metric.
+///
+/// The `Sample` struct contains all information about a single sample from a target and metric,
+/// including the field names, types, and values; the timestamp; and the actual measurement itself.
+/// This is the main type used to report metrics from a client to the `oximeter` server.
 #[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 pub struct Sample {
+    /// The timestamp at which the measurement was taken.
     pub timestamp: DateTime<Utc>,
+
+    /// The name of the target for this sample.
     pub target_name: String,
+
+    /// The sequence of target fields, including their names and values.
     pub target_fields: BTreeMap<String, FieldValue>,
+
+    /// The name of the metric for this sample.
     pub metric_name: String,
+
+    /// The sequence of metric fields, including their names and values.
     pub metric_fields: BTreeMap<String, FieldValue>,
+
+    /// The kind of metric this sample corresponds to.
     pub metric_kind: MetricKind,
+
+    /// The type of this measurement.
     pub metric_type: MetricType,
+
+    /// The measurement or data point itself.
     pub measurement: Measurement,
 }
 
@@ -132,9 +170,10 @@ impl Sample {
         target: &Box<dyn Target>,
         metric: &Box<dyn Metric>,
         measurement: &Measurement,
+        timestamp: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: timestamp.unwrap_or_else(Utc::now),
             target_name: target.name().to_string(),
             target_fields: target
                 .field_names()
