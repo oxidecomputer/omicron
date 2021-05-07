@@ -112,7 +112,10 @@ where
     Ok(futures::stream::iter(list).boxed())
 }
 
-// XXX TODO-doc
+/// Fetches a page of rows from a table `T` using the specified lookup `L`.  The
+/// page is identified by `pagparams`, which contains a marker value, a scan
+/// direction, and a limit of rows to fetch.  The caller can provide additional
+/// constraints in SQL using `extra_cond_sql`.
 async fn sql_fetch_page_raw<'a, 'b, L, T>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
@@ -146,19 +149,9 @@ where
         .map_err(sql_error_generic)
 }
 
-// XXX TODO-doc
-// XXX If we buy into Streams here, we may be able to make a bunch of this
-// simpler: the two primitives that we probably want are:
-// (1) given a sql_query(), return the rows as a Stream
-// (2) given a bunch of the above Streams, concatenate them.  This is like
-//     StreamExt::chain()...except we want to do the second query after the
-//     first one is exhausted.
-// That said, this wouldn't buy us a whole lot?  In (1), we already get back a
-// Vec of rows, so we're already buffering.
-//pub async fn sql_pagination_stream<'a, L, T, R>(
-//    client: &'a tokio_postgres::Client,
-//    scope_key: L::ScopeKey,
-//    pagparams: &'a Data
+/// Fetch _all_ rows from table `T` that match SQL conditions `extra_cond`.
+/// This function makes paginated requests using lookup `L`.  Rows are returned
+/// as a Vec of type `R`.
 pub async fn sql_paginate<'a, L, T, R>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
@@ -174,12 +167,10 @@ where
 {
     let mut results = Vec::new();
     let mut last_row_marker = None;
-    // XXX initial pagparams
     let direction = dropshot::PaginationOrder::Ascending;
     let limit = NonZeroU32::new(100).unwrap();
     loop {
         /* TODO-error more context here about what we were doing */
-        //
         let pagparams = DataPageParams {
             marker: last_row_marker.as_ref(),
             direction,

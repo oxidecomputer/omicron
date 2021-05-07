@@ -1216,13 +1216,13 @@ pub struct ApiSagaTemplateView {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiSagaTemplateNode {
-    pub id: u32, // XXX
+    pub id: steno::SagaNodeId,
     pub name: String,
     pub label: String,
 }
 
 /*
- * TODO-robustness this type is unnecessarily loosey-goosey.
+ * TODO-robustness This type is unnecessarily loosey-goosey.
  */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1231,7 +1231,6 @@ pub enum ApiSagaStateView {
     Running,
     #[serde(rename_all = "camelCase")]
     Done {
-        // XXX time finished? outputs?
         failed: bool,
         error_node_name: Option<String>,
         error_info: Option<steno::ActionError>,

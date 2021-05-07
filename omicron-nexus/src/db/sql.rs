@@ -253,16 +253,25 @@ pub trait Table {
      * Parts of a WHERE clause that should be included in all queries for live
      * records
      */
-    // XXX This really ought to be a default only for ResourceTable.  As it is,
-    // it's easy to accidentally leave this on non-ResourceTable Tables.  The
-    // reverse, though, would make it easy to leave it off ResourceTables.
+    /*
+     * TODO-design This really ought to be a default only for ResourceTable.  As
+     * it is, it's easy to accidentally leave this on non-ResourceTable Tables.
+     * The reverse, though, would make it easy to leave it off ResourceTables.
+     */
     const LIVE_CONDITIONS: &'static str = "time_deleted IS NULL";
 }
 
-/* XXX TODO-doc */
+/**
+ * Describes a [`Table`] whose rows represent HTTP resources in the public API
+ *
+ * Among other things, lookups from these tables produces suitable `ApiError`s
+ * when an object is not found.
+ */
 pub trait ResourceTable: Table {
-    // TODO-cleanup can we remove the RESOURCE_TYPE here?  And if so, can we
-    // make this totally agnostic to the control plane?
+    /*
+     * TODO-cleanup can we remove the RESOURCE_TYPE here?  And if so, can we
+     * make this totally agnostic to the control plane?
+     */
     /** [`ApiResourceType`] that corresponds to rows of this table */
     const RESOURCE_TYPE: ApiResourceType;
 }

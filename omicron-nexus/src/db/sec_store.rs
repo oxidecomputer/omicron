@@ -67,10 +67,9 @@ impl steno::SecStore for CockroachDbSecStore {
             .context("creating saga record")
     }
 
-    // XXX SagaId is redundant in this interface
-    async fn record_event(&self, id: SagaId, event: steno::SagaNodeEvent) {
+    async fn record_event(&self, event: steno::SagaNodeEvent) {
         debug!(&self.log, "recording saga event";
-            "saga_id" => id.to_string(),
+            "saga_id" => event.saga_id.to_string(),
             "node_id" => ?event.node_id,
             "event_type" => ?event.event_type,
         );
@@ -82,19 +81,28 @@ impl steno::SecStore for CockroachDbSecStore {
             event_time: chrono::Utc::now(),
         };
 
-        // XXX The unwrap ought to be handled and the whole operation retried.
+        /*
+         * TODO-robustness This should be wrapped with a retry loop rather than
+         * unwrapping the result.
+         */
         self.datastore.saga_create_event(&our_event).await.unwrap();
     }
 
     async fn saga_update(&self, id: SagaId, update: steno::SagaCachedState) {
-        // XXX We should track the current generation of the saga and use it
-        // here.  We'll know this either from when it was created or when it was
-        // recovered.
-        // XXX retry loop instead of unwrap
+        /*
+         * TODO-robustness We should track the current generation of the saga
+         * and use it.  We'll know this either from when it was created or when
+         * it was recovered.
+         */
         info!(&self.log, "updating state";
             "saga_id" => id.to_string(),
             "new_state" => update.to_string()
         );
+
+        /*
+         * TODO-robustness This should be wrapped with a retry loop rather than
+         * unwrapping the result.
+         */
         self.datastore
             .saga_update_state(id, update, self.sec_id, ApiGeneration::new())
             .await

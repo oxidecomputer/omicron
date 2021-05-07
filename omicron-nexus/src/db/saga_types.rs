@@ -47,7 +47,7 @@ impl From<&SecId> for Uuid {
 pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
-    pub template_name: String, /* XXX enum? */
+    pub template_name: String,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub saga_params: serde_json::Value,
     pub saga_state: steno::SagaCachedState,
@@ -166,7 +166,14 @@ impl db::sql::SqlSerialize for SagaNodeEvent {
                 ("succeeded", Some((**d).clone()))
             }
             steno::SagaNodeEventType::Failed(ref d) => {
-                let json = serde_json::to_value(d).unwrap(); // XXX unwrap
+                /*
+                 * It's hard to imagine how this serialize step could fail.  If
+                 * we're worried that it could, we could instead store the
+                 * serialized value directly in the `SagaNodeEvent`.  We'd be
+                 * forced to construct it in a context where failure could be
+                 * handled.
+                 */
+                let json = serde_json::to_value(d).unwrap();
                 ("failed", Some(json))
             }
             steno::SagaNodeEventType::UndoStarted => ("undo_started", None),

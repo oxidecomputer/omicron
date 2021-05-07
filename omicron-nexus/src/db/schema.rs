@@ -13,10 +13,10 @@ use omicron_common::model::ApiProject;
 use omicron_common::model::ApiResourceType;
 use uuid::Uuid;
 
-use crate::db;
 use super::sql::LookupKey;
 use super::sql::ResourceTable;
 use super::sql::Table;
+use crate::db;
 
 /** Describes the "Project" table */
 pub struct Project;
@@ -333,7 +333,11 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByAttachedInstance {
     }
 }
 
-/* XXX TODO-doc */
+/**
+ * Implementation of [`LookupKey`] specifically for listing pages from the
+ * "SagaNodeEvent" table.  We're always filtering on a specific `saga_id` and
+ * paginating by `node_id`.
+ */
 pub struct LookupSagaNodeEvent;
 impl<'a> LookupKey<'a, SagaNodeEvent> for LookupSagaNodeEvent {
     type ScopeKey = (&'a Uuid,);
