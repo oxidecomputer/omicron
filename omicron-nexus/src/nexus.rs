@@ -156,10 +156,10 @@ impl Nexus {
         };
 
         /*
-         * XXX Would really like to store this recovery_task, but Nexus is
-         * immutable (behind the Arc) once we've done this.
+         * TODO-design Would really like to store this recovery_task, but Nexus
+         * is immutable (behind the Arc) once we've done this.
          */
-        /* XXX extra Arcs here seems wrong */
+        /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
         db::recover(
             log.new(o!("component" => "SagaRecoverer")),
@@ -209,7 +209,6 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
-        // XXX reuse saga context from elsewhere?
         let saga_context =
             Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
         let future = self
@@ -240,20 +239,7 @@ impl Nexus {
                 ApiError::internal_error(&format!("{:#}", error))
             })?;
 
-        future.await;
-        let saga_view =
-            self.sec_client.saga_get(saga_id).await.map_err(|_: ()| {
-                // XXX could really use a convenience function here
-                ApiError::internal_error(
-                    "saga not found immediately after creating it",
-                )
-            })?;
-        // XXX could probably use a convenience function for this, too
-        let result = match &saga_view.state {
-            steno::SagaStateView::Done { result, .. } => Ok(result.clone()),
-            _ => Err(ApiError::internal_error("saga future ended early")),
-        }?;
-
+        let result = future.await;
         result.kind.map_err(|saga_error| {
             saga_error
                 .error_source
