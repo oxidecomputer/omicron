@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "oximeter",
+    "oximeter-target",
+    "oximeter-metric",
+    "oximeter-macro-impl",
+]
