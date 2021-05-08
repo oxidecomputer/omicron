@@ -671,7 +671,6 @@ impl DataStore {
                 .unwrap_or_else(|_| "(unknown)".to_owned());
         let found_saga_state =
             sql_row_value::<_, String>(row, "found_saga_state")
-                .map(|i| i.to_string())
                 .unwrap_or_else(|_| "(unknown)".to_owned());
         bail_unless!(update.updated,
             "failed to update saga {:?} with state {:?}: preconditions not met: \

@@ -243,7 +243,6 @@ impl Nexus {
         result.kind.map_err(|saga_error| {
             saga_error
                 .error_source
-                .clone()
                 .convert::<ApiError>()
                 .unwrap_or_else(|e| {
                     /* TODO-error more context would be useful */
