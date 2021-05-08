@@ -739,26 +739,6 @@ impl Display for ApiInstanceStateRequested {
     }
 }
 
-/*
- * TODO-cleanup why is this error type different from the one for ApiName?  The
- * reason is probably that ApiName can be provided by the user, so we want a
- * good validation error.  ApiInstanceState cannot.  Still, is there a way to
- * unify these?
- */
-impl TryFrom<&str> for ApiInstanceStateRequested {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        parse_str_using_serde(value)
-    }
-}
-
-impl<'a> From<&'a ApiInstanceStateRequested> for &'a str {
-    fn from(s: &'a ApiInstanceStateRequested) -> &'a str {
-        s.label()
-    }
-}
-
 impl ApiInstanceStateRequested {
     fn label(&self) -> &str {
         match self {
@@ -774,7 +754,6 @@ impl ApiInstanceStateRequested {
     pub fn is_stopped(&self) -> bool {
         match self {
             ApiInstanceStateRequested::Running => false,
-
             ApiInstanceStateRequested::Stopped => true,
             ApiInstanceStateRequested::Destroyed => true,
         }
