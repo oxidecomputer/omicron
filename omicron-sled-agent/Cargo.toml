@@ -53,5 +53,3 @@ subprocess = "0.2.4"
 [[bin]]
 name = "sled-agent-sim"
 doc = false
-
-
