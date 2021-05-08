@@ -1,14 +1,8 @@
-// definition of major traits
-// 
-// Target
-// Metric
-// Sample - the supported data types for samples of a timeseries
-// Producer
-
 use bytes::Bytes;
 
-use crate::{FieldType, FieldValue, MetricKind, MetricType};
 use crate::distribution::Distribution;
+use crate::types::Cumulative;
+use crate::{FieldType, FieldValue, MeasurementType};
 
 /// The `Target` trait identifies a metric source by a sequence of fields.
 ///
@@ -73,36 +67,8 @@ pub trait Target {
     fn key(&self) -> String;
 }
 
-/// The `Metric` trait identifies a measured feature of a target.
-///
-/// Metrics provide data about a single feature of a target resource. Similar to targets, metrics
-/// conform to a simple schema, defined by their fields. In addition, a metric has a _kind_. A
-/// _gauge_ is an instantaneous measurement of a metric, and may be a numeric or string, or a blob
-/// of uninterpreted bytes. A _cumulative_ metric reflects a value that accumulates over time, and
-/// must be numeric. It can be of either integer (`i64`) or floating-point type (`f64`) or a
-/// distribution over either. See the [`distribution::Distribution`] type for more
-/// details.
-///
-/// Example
-/// -------
-///
-/// The struct below might be used to accumulate the total number of requests handled by a server.
-/// Those requests may be broken out in several different ways, in this case by path or endpoint,
-/// request method, and the status code with which the server responded.
-///
-/// ```rust
-/// #[oximeter::metric("cumulative", "i64")]
-/// struct RequestCount {
-///     path: String,
-///     method: String,
-///     response_code: i64
-/// }
-/// ```
-///
-/// The `Metric` trait provides the same methods for introspection as the [`Target`] trait, such as
-/// listing the field names and values. Additionally, it specifies the kind and type of the metric.
 pub trait Metric {
-    //type DataPoint: DataPoint;
+    type Measurement: DataPoint;
 
     /// Return the name of the metric, which is the snake_case form of the struct's name.
     fn name(&self) -> &'static str;
@@ -123,11 +89,8 @@ pub trait Metric {
     /// occurs _last_.
     fn key(&self) -> String;
 
-    /// Return the kind of this metric.
-    fn metric_kind(&self) -> MetricKind;
-
-    /// Return the data type of this metric.
-    fn metric_type(&self) -> MetricType;
+    /// Return the data type of a measurement for this this metric.
+    fn measurement_type(&self) -> MeasurementType;
 }
 
 /// The `DataPoint` trait identifies types that may be used as measurements or samples for a
@@ -139,5 +102,7 @@ impl DataPoint for i64 {}
 impl DataPoint for f64 {}
 impl DataPoint for String {}
 impl DataPoint for Bytes {}
+impl DataPoint for Cumulative<i64> {}
+impl DataPoint for Cumulative<f64> {}
 impl DataPoint for Distribution<i64> {}
 impl DataPoint for Distribution<f64> {}

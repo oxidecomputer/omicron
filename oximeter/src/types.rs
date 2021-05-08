@@ -2,18 +2,19 @@
 // Copyright 2021 Oxide Computer Company
 
 use std::boxed::Box;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::ops::{Add, AddAssign};
 
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use num_traits::identities::{One, Zero};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::distribution;
-use crate::{Metric, MetricKind, MetricType, Target};
+use crate::traits::DataPoint;
+use crate::MeasurementType;
 
 /// The `FieldType` identifies the type of a target or metric field.
 #[derive(Clone, Copy, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -43,21 +44,25 @@ pub enum Measurement {
     F64(f64),
     String(String),
     Bytes(Bytes),
+    CumulativeI64(Cumulative<i64>),
+    CumulativeF64(Cumulative<f64>),
     DistributionI64(distribution::Distribution<i64>),
     DistributionF64(distribution::Distribution<f64>),
 }
 
 impl Measurement {
-    /// Return the [`MetricType`] for this measurement.
-    pub fn metric_type(&self) -> MetricType {
+    /// Return the [`MeasurementType`] for this measurement.
+    pub fn measurement_type(&self) -> MeasurementType {
         match self {
-            Measurement::Bool(_) => MetricType::Bool,
-            Measurement::I64(_) => MetricType::I64,
-            Measurement::F64(_) => MetricType::F64,
-            Measurement::String(_) => MetricType::String,
-            Measurement::Bytes(_) => MetricType::Bytes,
-            Measurement::DistributionI64(_) => MetricType::DistributionI64,
-            Measurement::DistributionF64(_) => MetricType::DistributionF64,
+            Measurement::Bool(_) => MeasurementType::Bool,
+            Measurement::I64(_) => MeasurementType::I64,
+            Measurement::F64(_) => MeasurementType::F64,
+            Measurement::String(_) => MeasurementType::String,
+            Measurement::Bytes(_) => MeasurementType::Bytes,
+            Measurement::CumulativeI64(_) => MeasurementType::CumulativeI64,
+            Measurement::CumulativeF64(_) => MeasurementType::CumulativeF64,
+            Measurement::DistributionI64(_) => MeasurementType::DistributionI64,
+            Measurement::DistributionF64(_) => MeasurementType::DistributionF64,
         }
     }
 }
@@ -89,6 +94,18 @@ impl From<&str> for Measurement {
 impl From<&Bytes> for Measurement {
     fn from(value: &Bytes) -> Self {
         Measurement::Bytes(value.clone())
+    }
+}
+
+impl From<Cumulative<i64>> for Measurement {
+    fn from(value: Cumulative<i64>) -> Self {
+        Measurement::CumulativeI64(value)
+    }
+}
+
+impl From<Cumulative<f64>> for Measurement {
+    fn from(value: Cumulative<f64>) -> Self {
+        Measurement::CumulativeF64(value)
     }
 }
 
@@ -125,72 +142,88 @@ pub enum Error {
     #[error("Error collecting measurement: {0}")]
     MeasurementError(String),
     /// The [`Producer::collect`](crate::producer::Producer::collect) method return an unexpected
-    /// type for a metric.
+    /// measurement type for a metric.
     #[error("The producer function returned an unexpected type, expected {0:?}, found {1:?})")]
-    ProducerTypeMismatch(MetricType, MetricType),
+    ProducerTypeMismatch(MeasurementType, MeasurementType),
     /// An error related to creating or sampling a [`distribution::Distribution`] metric.
     #[error("{0}")]
     DistributionError(#[from] distribution::DistributionError),
 }
 
-/// Complete information about a single sample for a metric.
-///
-/// The `Sample` struct contains all information about a single sample from a target and metric,
-/// including the field names, types, and values; the timestamp; and the actual measurement itself.
-/// This is the main type used to report metrics from a client to the `oximeter` server.
-#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
-pub struct Sample {
-    /// The timestamp at which the measurement was taken.
-    pub timestamp: DateTime<Utc>,
+#[derive(Debug, Clone, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct Cumulative<T>(T);
 
-    /// The name of the target for this sample.
-    pub target_name: String,
+impl<T> Cumulative<T>
+where
+    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+{
+    pub fn new(value: T) -> Self {
+        Self(value)
+    }
 
-    /// The sequence of target fields, including their names and values.
-    pub target_fields: BTreeMap<String, FieldValue>,
+    pub fn increment(&mut self) {
+        self.0 += One::one();
+    }
 
-    /// The name of the metric for this sample.
-    pub metric_name: String,
-
-    /// The sequence of metric fields, including their names and values.
-    pub metric_fields: BTreeMap<String, FieldValue>,
-
-    /// The kind of metric this sample corresponds to.
-    pub metric_kind: MetricKind,
-
-    /// The type of this measurement.
-    pub metric_type: MetricType,
-
-    /// The measurement or data point itself.
-    pub measurement: Measurement,
+    pub fn value(&self) -> T {
+        self.0
+    }
 }
 
-impl Sample {
-    pub(crate) fn new(
-        target: &Box<dyn Target>,
-        metric: &Box<dyn Metric>,
-        measurement: &Measurement,
-        timestamp: Option<DateTime<Utc>>,
-    ) -> Self {
-        Self {
-            timestamp: timestamp.unwrap_or_else(Utc::now),
-            target_name: target.name().to_string(),
-            target_fields: target
-                .field_names()
-                .iter()
-                .map(|s| s.to_string())
-                .zip(target.field_values())
-                .collect(),
-            metric_name: metric.name().to_string(),
-            metric_fields: metric
-                .field_names()
-                .iter()
-                .map(|s| s.to_string())
-                .zip(metric.field_values())
-                .collect(),
-            metric_kind: metric.metric_kind(),
-            metric_type: metric.metric_type(),
-            measurement: measurement.clone(),
-        }
+impl<T> Add<T> for Cumulative<T>
+where
+    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+{
+    type Output = Self;
+
+    fn add(self, other: T) -> Self {
+        Self(self.0 + other)
+    }
+}
+
+impl<T> AddAssign<T> for Cumulative<T>
+where
+    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+{
+    fn add_assign(&mut self, other: T) {
+        self.0 += other;
+    }
+}
+
+impl<T> Default for Cumulative<T>
+where
+    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+{
+    fn default() -> Self {
+        Self(Zero::zero())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cumulative_i64() {
+        let mut x = Cumulative::<i64>::default();
+        assert_eq!(x.value(), 0);
+        x.increment();
+        assert_eq!(x.value(), 1);
+        x += 10;
+        assert_eq!(x.value(), 11);
+        x = x + 4;
+        assert_eq!(x.value(), 15);
+    }
+
+    #[test]
+    fn test_cumulative_f64() {
+        let mut x = Cumulative::<f64>::new(0.0);
+        assert_eq!(x.value(), 0.0);
+        x.increment();
+        assert_eq!(x.value(), 1.0);
+        x += 1.0;
+        assert_eq!(x.value(), 2.0);
+        x = x + 0.5;
+        assert_eq!(x.value(), 2.5);
     }
 }
