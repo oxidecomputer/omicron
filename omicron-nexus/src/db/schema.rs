@@ -91,7 +91,7 @@ impl ResourceTable for Disk {
     const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
 }
 
-/** Describes the "SagaNodeEvent" table */
+/** Describes the "Saga" table */
 pub struct Saga;
 impl Table for Saga {
     type ModelType = db::saga_types::Saga;
@@ -110,7 +110,7 @@ impl Table for Saga {
     const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
-/** Describes the "Saga" table */
+/** Describes the "SagaNodeEvent" table */
 pub struct SagaNodeEvent;
 impl Table for SagaNodeEvent {
     type ModelType = db::saga_types::SagaNodeEvent;

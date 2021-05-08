@@ -10,10 +10,10 @@ mod pool;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
+mod sql_operations;
 
 pub mod schema;
 pub mod sql; /* public for examples only */
-pub mod sql_operations;
 
 pub use config::Config;
 pub use datastore::DataStore;
