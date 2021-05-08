@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use subprocess::Exec;
 
 /** name of the "sled-agent" executable */
-const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
+const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent-sim");
 
 fn path_to_sled_agent() -> PathBuf {
     path_to_executable(CMD_SLED_AGENT)

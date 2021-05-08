@@ -63,7 +63,7 @@ To **run Omicron** you need to run three programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * `nexus`: the guts of the control plane
-* `sled-agent`: a simulator for the component that manages a single sled
+* `sled-agent-sim`: a simulator for the component that manages a single sled
 
 The easiest way to start a CockroachDB cluster is to use the built in `omicron-dev` tool.  This tool assumes that the `cockroach` executable on your PATH comes from CockroachDB v20.2.5.
 
@@ -131,11 +131,11 @@ $ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
 listening: http://127.0.0.1:12220
 ----
 
-3. `sled-agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
+3. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
@@ -152,7 +152,7 @@ There's a small demo tool called `./tools/oxapi_demo` that provides a slightly f
 
 [source,text]
 ----
-$ ./tools/oxapi_demo 
+$ ./tools/oxapi_demo
 oxapi_demo: command not specified
 
 PROJECTS
@@ -362,48 +362,50 @@ The control plane repository contains a packaging tool which bundles binaries
 and SMF manifests. After building the expected binaries, they can be packaged
 in a format which lets them be transferred to a Helios machine.
 
+This tool acts on a `manifest.toml` file which describes the packages to be
+bundled in the build.
+
 [source,text]
 ----
 $ cargo build
-$ cargo run --bin=omicron-package
-...
-# Your ./out directory should now be populated.
+$ ./target/debug/omicron-package package
 ----
 
-The manifests are currently hardcoded to expect installation within the
-`/opt/oxide` directory. We can copy them to their expected location with
-the following:
+The aforementioned package command fills a target directory of choice
+(by default, `out/` within the omicron repository) with tarballs ready
+to be unpacked as services.
+
+To install the services on a target machine, the following command
+may be executed:
 
 [source,text]
 ----
-$ mkdir -p /opt/oxide
-$ cp -r ./out/* /opt/oxide
+# Note that "sudo" is required to install SMF services; an appropriate pfexec
+# profile may also be used.
+$ sudo ./target/debug/omicron-package install
 ----
 
-[NOTE]
-====
-Running some commands on Helios may require privileged access.  If any subsequent commands result in "access denied", try the same command, but prefixed with `pfexec`.
-
-For Linux users, this is the Helios equivalent of `sudo`.
-====
-
-Once this is complete, we can unpack and initialize the bootstrap agent.  This should unpack and initialize all other services.
-
-[source,text]
-----
-$ tar -xvzf /opt/oxide/bootstrap-agent.tar -C /opt/oxide/bootstrap-agent
-$ svccfg import -V /opt/oxide/bootstrap-agent/smf/bootstrap-agent/manifest.xml
-----
-
-You can verify which services are running with the following commands:
+This service installs a bootstrap service, which itself loads other
+requested services. The bootstrap service is currently the only
+service which is "persistent" across reboots - although it will
+initialize other service as part of its setup sequence anyway.
 
 [source,text]
 ----
 # List all services:
 $ svcs
 # View logs for a service:
-$ tail -f $(svcs -L oxide_controller)
+$ tail -f $(svcs -L nexus)
 ----
+
+To uninstall all Omicron services from a machine, the following may be
+executed:
+
+[source,text]
+----
+$ sudo ./target/debug/omicron-package uninstall
+----
+
 
 == Configuration reference
 

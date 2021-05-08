@@ -23,7 +23,7 @@ pub struct ControlPlaneTestContext {
     pub server: omicron_nexus::Server,
     pub database: dev::db::CockroachInstance,
     pub logctx: LogContext,
-    sled_agent: omicron_sled_agent::Server,
+    sled_agent: omicron_sled_agent::sim::Server,
 }
 
 impl ControlPlaneTestContext {
@@ -79,7 +79,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sa = start_sled_agent(
         logctx.log.new(o!(
-            "component" => "omicron_sled_agent::Server",
+            "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
         )),
         server.http_server_internal.local_addr(),
@@ -102,10 +102,10 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
-) -> Result<omicron_sled_agent::Server, String> {
-    let config = omicron_sled_agent::Config {
+) -> Result<omicron_sled_agent::sim::Server, String> {
+    let config = omicron_sled_agent::sim::Config {
         id,
-        sim_mode: omicron_sled_agent::SimMode::Explicit,
+        sim_mode: omicron_sled_agent::sim::SimMode::Explicit,
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
@@ -115,7 +115,7 @@ pub async fn start_sled_agent(
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
     };
 
-    omicron_sled_agent::Server::start(&config, &log).await
+    omicron_sled_agent::sim::Server::start(&config, &log).await
 }
 
 /** Returns whether the two identity metadata objects are identical. */

@@ -2,7 +2,7 @@
  * Simulated sled agent implementation
  */
 
-use super::Simulatable;
+use super::simulatable::Simulatable;
 
 use async_trait::async_trait;
 use chrono::Utc;
