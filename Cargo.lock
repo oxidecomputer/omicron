@@ -1017,7 +1017,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "smf",
+ "smf 0.1.1",
  "structopt",
  "tar",
  "thiserror",
@@ -1053,7 +1053,7 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "smf",
+ "smf 0.2.0",
  "structopt",
  "subprocess",
  "tar",
@@ -1116,6 +1116,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "smf 0.2.0",
  "structopt",
  "subprocess",
  "tokio",
@@ -1927,6 +1928,15 @@ name = "smf"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82d3e8846949a0eab4b74c2b1f83e2eb50232beb5d64382e2ecfa889f8c6daca"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "smf"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "836e990d5a6ca0b31510a9405692ea8a90666f6f3d5fd5c7a26c4bc71874ebe0"
 dependencies = [
  "thiserror",
 ]

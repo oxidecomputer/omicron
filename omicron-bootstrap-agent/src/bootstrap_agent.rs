@@ -110,13 +110,32 @@ impl BootstrapAgent {
         // a decision from the previous boot.
         self.launch(&digests, &tar_source, &destination, "nexus")?;
 
-        self.launch(&digests, &tar_source, &destination, "propolis-server")?;
+        // Note that we extract the propolis-server, but do not launch it.
+        // This is the responsibility of the sled agent in response to requests
+        // from Nexus.
+        self.extract(&digests, &tar_source, &destination, "propolis-server")?;
 
         Ok(())
     }
 
-    // Verify, unpack, and enable a service.
     fn launch<S, P1, P2>(
+        &self,
+        digests: &HashMap<String, Vec<u8>>,
+        tar_source: P1,
+        destination: P2,
+        service: S,
+    ) -> Result<(), BootstrapError>
+    where
+        S: AsRef<str>,
+        P1: AsRef<Path>,
+        P2: AsRef<Path>,
+    {
+        self.extract(digests, tar_source, destination, &service)?;
+        self.enable_service(service)
+    }
+
+    // Verify, unpack, and enable a service.
+    fn extract<S, P1, P2>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
         tar_source: P1,
@@ -155,8 +174,7 @@ impl BootstrapAgent {
         }
 
         info!(&self.log, "Verified {} Service", service);
-        self.extract_archive(&mut tar_file, destination.join(service))?;
-        self.enable_service(service)
+        self.extract_archive(&mut tar_file, destination.join(service))
     }
 
     // Given a verified archive file, unpack it to a location.

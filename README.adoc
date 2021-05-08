@@ -152,7 +152,7 @@ There's a small demo tool called `./tools/oxapi_demo` that provides a slightly f
 
 [source,text]
 ----
-$ ./tools/oxapi_demo 
+$ ./tools/oxapi_demo
 oxapi_demo: command not specified
 
 PROJECTS
