@@ -25,6 +25,7 @@ use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
+use omicron_common::model::ApiInstanceStateRequested;
 use omicron_common::model::ApiName;
 use omicron_common::model::ApiProject;
 use omicron_common::model::ApiProjectCreateParams;
@@ -575,7 +576,7 @@ impl Nexus {
             &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             },
         )
@@ -599,7 +600,7 @@ impl Nexus {
             &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             },
         )
@@ -623,7 +624,7 @@ impl Nexus {
             &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Stopped,
+                run_state: ApiInstanceStateRequested::Stopped,
                 reboot_wanted: false,
             },
         )

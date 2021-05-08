@@ -10,6 +10,7 @@ use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
+use omicron_common::model::ApiInstanceStateRequested;
 use omicron_common::NexusClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -36,7 +37,7 @@ impl Simulatable for SimInstance {
          * requested instance state did not allow you to even express this
          * value.
          */
-        if target.reboot_wanted && target.run_state != ApiInstanceState::Running
+        if target.reboot_wanted && target.run_state != ApiInstanceStateRequested::Running
         {
             return Err(ApiError::InvalidRequest {
                 message: String::from(
@@ -65,19 +66,7 @@ impl Simulatable for SimInstance {
             });
         }
 
-        let mut state_after = match target.run_state {
-            /*
-             * For intermediate states (which don't really make sense to
-             * request), just try to do the closest reasonable thing.
-             * TODO-cleanup Use a different type here.
-             */
-            ApiInstanceState::Creating => &ApiInstanceState::Running,
-            ApiInstanceState::Starting => &ApiInstanceState::Running,
-            ApiInstanceState::Stopping => &ApiInstanceState::Stopped,
-
-            /* This is the most common interesting case. */
-            ref target_run_state => target_run_state,
-        };
+        let mut state_after = target.run_state.clone();
 
         /*
          * There's nothing to do if the current and target states are the same
@@ -100,8 +89,8 @@ impl Simulatable for SimInstance {
          */
         let reb_pending = current.reboot_in_progress;
         let reb_wanted =
-            *state_after == ApiInstanceState::Running && target.reboot_wanted;
-        if *state_after == state_before
+            state_after == ApiInstanceStateRequested::Running && target.reboot_wanted;
+        if state_before == state_after.clone().into()
             && ((!reb_pending && !reb_wanted)
                 || (reb_pending
                     && reb_wanted
@@ -119,7 +108,7 @@ impl Simulatable for SimInstance {
          * to transition again to Running).
          */
         if reb_wanted {
-            state_after = &ApiInstanceState::Stopped;
+            state_after = ApiInstanceStateRequested::Stopped;
         }
 
         /*
@@ -130,11 +119,11 @@ impl Simulatable for SimInstance {
          */
         let (immed_next_state, need_async) =
             if state_before.is_stopped() && !state_after.is_stopped() {
-                (&ApiInstanceState::Starting, true)
+                (ApiInstanceState::Starting, true)
             } else if !state_before.is_stopped() && state_after.is_stopped() {
-                (&ApiInstanceState::Stopping, true)
+                (ApiInstanceState::Stopping, true)
             } else {
-                (state_after, false)
+                (state_after.clone().into(), false)
             };
 
         let next_state = ApiInstanceRuntimeState {
@@ -170,10 +159,10 @@ impl Simulatable for SimInstance {
          * these two transitions and assert that here.
          */
         let run_state_before = current.run_state.clone();
-        let run_state_after = &pending.run_state;
+        let run_state_after = pending.run_state.clone();
         match run_state_before {
             ApiInstanceState::Starting => {
-                assert_eq!(*run_state_after, ApiInstanceState::Running);
+                assert_eq!(run_state_after, ApiInstanceStateRequested::Running);
                 assert!(!pending.reboot_wanted);
             }
             ApiInstanceState::Stopping => {
@@ -181,7 +170,7 @@ impl Simulatable for SimInstance {
                 assert_eq!(pending.reboot_wanted, current.reboot_in_progress);
                 assert!(
                     !pending.reboot_wanted
-                        || *run_state_after == ApiInstanceState::Stopped
+                        || run_state_after == ApiInstanceStateRequested::Stopped
                 );
             }
             _ => panic!("async transition started for unexpected state"),
@@ -191,7 +180,7 @@ impl Simulatable for SimInstance {
          * Having verified all that, we can update the Instance's state.
          */
         let next_state = ApiInstanceRuntimeState {
-            run_state: run_state_after.clone(),
+            run_state: run_state_after.clone().into(),
             reboot_in_progress: pending.reboot_wanted,
             sled_uuid: current.sled_uuid,
             gen: current.gen.next(),
@@ -199,9 +188,9 @@ impl Simulatable for SimInstance {
         };
 
         let next_async = if next_state.reboot_in_progress {
-            assert_eq!(*run_state_after, ApiInstanceState::Stopped);
+            assert_eq!(run_state_after, ApiInstanceStateRequested::Stopped);
             Some(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
         } else {
