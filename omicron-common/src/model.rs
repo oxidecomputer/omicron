@@ -1189,11 +1189,24 @@ pub struct ApiSledView {
 #[derive(ApiObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
 pub struct ApiSagaView {
     pub id: Uuid,
-    pub template: ApiSagaTemplateView,
     pub state: ApiSagaStateView,
     /*
-     * XXX ApiObjectIdentity should not be necessary, so it should not be faked
-     * up.
+     * TODO-cleanup This object contains a fake `ApiIdentityMetadata`.  Why?  We
+     * want to paginate these objects.  http_pagination.rs provides a bunch of
+     * useful facilities -- notably `ApiPaginatedById`.  `ApiPaginatedById`
+     * requires being able to take an arbitrary object in the result set and get
+     * its id.  To do that, it uses the `ApiObjectIdentity` trait, which expects
+     * to be able to return an `ApiIdentityMetadata` reference from an object.
+     * Finally, the pagination facilities just pull the `id` out of that.
+     *
+     * In this case (as well as others, like sleds and racks), we have ids, and
+     * we want to be able to paginate by id, but we don't have full identity
+     * metadata.  (Or we do, but it's similarly faked up.)  What we should
+     * probably do is create a new trait, say `ApiObjectId`, that returns _just_
+     * an id.  We can provide a blanket impl for anything that impls
+     * ApiIdentityMetadata.  We can define one-off impls for structs like this
+     * one.  Then the id-only pagination interfaces can require just
+     * `ApiObjectId`.
      */
     #[serde(skip)]
     pub identity: ApiIdentityMetadata,
@@ -1206,28 +1219,30 @@ impl ApiObject for ApiSagaView {
     }
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiSagaTemplateView {
-    pub name: String,
-    pub nodes: Vec<ApiSagaTemplateNode>,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiSagaTemplateNode {
-    pub id: steno::SagaNodeId,
-    pub name: String,
-    pub label: String,
+impl From<steno::SagaView> for ApiSagaView {
+    fn from(s: steno::SagaView) -> Self {
+        ApiSagaView {
+            id: Uuid::from(s.id),
+            state: ApiSagaStateView::from(s.state),
+            identity: ApiIdentityMetadata {
+                /* TODO-cleanup See the note in ApiSagaView above. */
+                id: Uuid::from(s.id),
+                name: ApiName::try_from(format!("saga-{}", s.id)).unwrap(),
+                description: format!("saga {}", s.id),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
+        }
+    }
 }
 
 /*
- * TODO-robustness This type is unnecessarily loosey-goosey.
+ * TODO-robustness This type is unnecessarily loosey-goosey.  For example, see
+ * the use of Options in the "Done" variant.
  */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiSagaStateView {
-    Unloaded,
     Running,
     #[serde(rename_all = "camelCase")]
     Done {
@@ -1235,11 +1250,27 @@ pub enum ApiSagaStateView {
         error_node_name: Option<String>,
         error_info: Option<steno::ActionError>,
     },
-    #[serde(rename_all = "camelCase")]
-    Abandoned {
-        time_abandoned: DateTime<Utc>,
-        reason: String,
-    },
+}
+
+impl From<steno::SagaStateView> for ApiSagaStateView {
+    fn from(st: steno::SagaStateView) -> Self {
+        match st {
+            steno::SagaStateView::Ready { .. } => ApiSagaStateView::Running,
+            steno::SagaStateView::Running { .. } => ApiSagaStateView::Running,
+            steno::SagaStateView::Done { result, .. } => match result.kind {
+                Ok(_) => ApiSagaStateView::Done {
+                    failed: false,
+                    error_node_name: None,
+                    error_info: None,
+                },
+                Err(e) => ApiSagaStateView::Done {
+                    failed: true,
+                    error_node_name: Some(e.error_node_name),
+                    error_info: Some(e.error_source),
+                },
+            },
+        }
+    }
 }
 
 /*

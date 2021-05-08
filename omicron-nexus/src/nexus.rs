@@ -1063,14 +1063,33 @@ impl Nexus {
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiSagaView> {
-        todo!(); // XXX
-                 // let saga_list = self.sec.sagas_list_page(pagparams).await?;
-                 // Ok(futures::stream::iter(saga_list).boxed())
+        /*
+         * The endpoint we're serving only supports `ApiScanById`, which only
+         * supports an ascending scan.
+         */
+        bail_unless!(
+            pagparams.direction == dropshot::PaginationOrder::Ascending
+        );
+        let marker = pagparams.marker.map(|s| SagaId::from(*s));
+        let saga_list = self
+            .sec_client
+            .saga_list(marker, pagparams.limit)
+            .await
+            .into_iter()
+            .map(ApiSagaView::from)
+            .map(Ok);
+        Ok(futures::stream::iter(saga_list).boxed())
     }
 
-    pub async fn saga_get(&self, id: &Uuid) -> LookupResult<ApiSagaView> {
-        // Ok(self.sec.saga_get(id).await?)
-        todo!(); // XXX
+    pub async fn saga_get(&self, id: Uuid) -> LookupResult<ApiSagaView> {
+        self.sec_client
+            .saga_get(steno::SagaId::from(id))
+            .await
+            .map(ApiSagaView::from)
+            .map(Ok)
+            .map_err(|_: ()| {
+                ApiError::not_found_by_id(ApiResourceType::SagaDbg, &id)
+            })?
     }
 
     /*

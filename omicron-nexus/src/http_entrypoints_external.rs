@@ -790,6 +790,6 @@ async fn api_sagas_get_saga(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let saga = nexus.saga_get(&path.saga_id).await?;
+    let saga = nexus.saga_get(path.saga_id).await?;
     Ok(HttpResponseOk(saga))
 }

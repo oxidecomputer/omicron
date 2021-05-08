@@ -74,7 +74,7 @@ impl steno::SecStore for CockroachDbSecStore {
             "event_type" => ?event.event_type,
         );
         let our_event = db::saga_types::SagaNodeEvent {
-            saga_id: id,
+            saga_id: event.saga_id,
             node_id: event.node_id,
             event_type: event.event_type,
             creator: self.sec_id,
