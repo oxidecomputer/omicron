@@ -241,13 +241,10 @@ impl Nexus {
 
         let result = future.await;
         result.kind.map_err(|saga_error| {
-            saga_error
-                .error_source
-                .convert::<ApiError>()
-                .unwrap_or_else(|e| {
-                    /* TODO-error more context would be useful */
-                    ApiError::InternalError { message: e.to_string() }
-                })
+            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
+                /* TODO-error more context would be useful */
+                ApiError::InternalError { message: e.to_string() }
+            })
         })
     }
 
