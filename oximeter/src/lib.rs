@@ -6,8 +6,8 @@ pub use oximeter_metric::*;
 pub use oximeter_target::*;
 
 pub mod distribution;
-mod traits;
-mod types;
+pub mod traits;
+pub mod types;
 
 pub use traits::{Metric, Target};
 pub use types::{Error, FieldType, FieldValue};

@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::ops::{Add, AddAssign};
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use num_traits::identities::{One, Zero};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::distribution;
-use crate::traits::DataPoint;
+use crate::traits;
 use crate::MeasurementType;
 
 /// The `FieldType` identifies the type of a target or metric field.
@@ -150,12 +151,13 @@ pub enum Error {
     DistributionError(#[from] distribution::DistributionError),
 }
 
+/// A cumulative or counter data type.
 #[derive(Debug, Clone, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Cumulative<T>(T);
 
 impl<T> Cumulative<T>
 where
-    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
 {
     pub fn new(value: T) -> Self {
         Self(value)
@@ -172,7 +174,7 @@ where
 
 impl<T> Add<T> for Cumulative<T>
 where
-    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
 {
     type Output = Self;
 
@@ -183,7 +185,7 @@ where
 
 impl<T> AddAssign<T> for Cumulative<T>
 where
-    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
 {
     fn add_assign(&mut self, other: T) {
         self.0 += other;
@@ -192,10 +194,102 @@ where
 
 impl<T> Default for Cumulative<T>
 where
-    T: DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
 {
     fn default() -> Self {
         Self(Zero::zero())
+    }
+}
+
+impl<T> Add for Cumulative<T>
+where
+    T: traits::DataPoint + Add<Output = T> + AddAssign + Copy,
+{
+    type Output = Self;
+    fn add(self, other: Cumulative<T>) -> Self {
+        Self(self.0 + other.0)
+    }
+}
+
+/// A concrete type carrying information about a target.
+#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+pub struct Target {
+    pub name: String,
+    pub key: String,
+    pub field_names: Vec<String>,
+    pub field_types: Vec<FieldType>,
+    pub field_values: Vec<FieldValue>,
+}
+
+impl<T> From<T> for Target
+where
+    T: traits::Target,
+{
+    fn from(target: T) -> Self {
+        Self {
+            name: target.name().to_string(),
+            key: target.key(),
+            field_names: target.field_names().iter().map(|x| x.to_string()).collect(),
+            field_types: target.field_types().to_vec(),
+            field_values: target.field_values(),
+        }
+    }
+}
+
+/// A concrete type carrying information about a metric.
+#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+pub struct Metric {
+    pub name: String,
+    pub key: String,
+    pub field_names: Vec<String>,
+    pub field_types: Vec<FieldType>,
+    pub field_values: Vec<FieldValue>,
+    pub measurement_type: MeasurementType,
+}
+
+impl<M> From<M> for Metric
+where
+    M: traits::Metric,
+{
+    fn from(metric: M) -> Self {
+        Self {
+            name: metric.name().to_string(),
+            key: metric.key().clone(),
+            field_names: metric.field_names().iter().map(|x| x.to_string()).collect(),
+            field_types: metric.field_types().to_vec(),
+            field_values: metric.field_values(),
+            measurement_type: metric.measurement_type(),
+        }
+    }
+}
+
+/// A concrete type representing a single, timestamped measurement from a timeseries.
+#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+pub struct Sample {
+    pub timestamp: DateTime<Utc>,
+    pub target: Target,
+    pub metric: Metric,
+    pub measurement: Measurement,
+}
+
+impl Sample {
+    pub fn new<T, M, Meas>(
+        target: T,
+        metric: M,
+        measurement: Meas,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Self
+    where
+        T: traits::Target,
+        M: traits::Metric<Measurement = Meas>,
+        Meas: traits::DataPoint + Into<Measurement>,
+    {
+        Self {
+            timestamp: timestamp.unwrap_or_else(Utc::now),
+            target: target.into(),
+            metric: metric.into(),
+            measurement: measurement.into(),
+        }
     }
 }
 

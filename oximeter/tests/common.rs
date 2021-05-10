@@ -34,6 +34,7 @@ impl Disk {
 }
 
 #[metric(i64)]
+#[derive(Debug, Clone)]
 pub struct SimpleGauge {
     field: bool,
 }

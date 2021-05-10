@@ -1,7 +1,7 @@
 use bytes::Bytes;
 
 use crate::distribution::Distribution;
-use crate::types::Cumulative;
+use crate::types::{Cumulative, Sample};
 use crate::{FieldType, FieldValue, MeasurementType};
 
 /// The `Target` trait identifies a metric source by a sequence of fields.
@@ -106,3 +106,7 @@ impl DataPoint for Cumulative<i64> {}
 impl DataPoint for Cumulative<f64> {}
 impl DataPoint for Distribution<i64> {}
 impl DataPoint for Distribution<f64> {}
+
+pub trait Producer {
+    fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>>;
+}
