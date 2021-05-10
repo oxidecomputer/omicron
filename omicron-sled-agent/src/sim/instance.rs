@@ -32,6 +32,30 @@ impl Simulatable for SimInstance {
         target: &Self::RequestedState,
     ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>
     {
+
+        /*
+        match current.run_state {
+            ApiInstanceState::Creating,
+            ApiInstanceState::Starting,
+            ApiInstanceState::Running,
+            ApiInstanceState::Stopping,
+            ApiInstanceState::Stopped,
+            ApiInstanceState::Repairing,
+            ApiInstanceState::Failed,
+            ApiInstanceState::Destroyed,
+        }
+        */
+
+        // - Can only reboot TO running.
+        // - Can only reboot FROM starting, running, stopping.
+        // - If current state == target...
+        //      - ... AND no reboots are pending+requested
+        //      - ... OR a reboot is pending+requested but our current state is
+        //      stopping...
+        //   -> Then exit early with "OK".
+        // - If a reboot is requested, set the target state to stopped.
+        //
+
         /*
          * TODO-cleanup it would be better if the type used to represent a
          * requested instance state did not allow you to even express this
@@ -89,12 +113,10 @@ impl Simulatable for SimInstance {
          * is requested first.
          */
         let reb_pending = current.reboot_in_progress;
-        let reb_wanted = *state_after == ApiInstanceStateRequested::Running
-            && target.reboot_wanted;
         if state_before == state_after.clone().into()
-            && ((!reb_pending && !reb_wanted)
+            && ((!reb_pending && !target.reboot_wanted)
                 || (reb_pending
-                    && reb_wanted
+                    && target.reboot_wanted
                     && state_before == ApiInstanceState::Stopping))
         {
             let next_state = current.clone();
@@ -108,7 +130,7 @@ impl Simulatable for SimInstance {
          * it like a transition to "Stopped" (with an extra bit telling us later
          * to transition again to Running).
          */
-        if reb_wanted {
+        if target.reboot_wanted {
             state_after = &ApiInstanceStateRequested::Stopped;
         }
 
@@ -129,7 +151,7 @@ impl Simulatable for SimInstance {
 
         let next_state = ApiInstanceRuntimeState {
             run_state: immed_next_state.clone(),
-            reboot_in_progress: reb_wanted,
+            reboot_in_progress: target.reboot_wanted,
             sled_uuid: current.sled_uuid,
             gen: current.gen.next(),
             time_updated: Utc::now(),
@@ -138,7 +160,7 @@ impl Simulatable for SimInstance {
         let next_async = if need_async {
             Some(ApiInstanceRuntimeStateRequested {
                 run_state: state_after.clone(),
-                reboot_wanted: reb_wanted,
+                reboot_wanted: target.reboot_wanted,
             })
         } else {
             None
