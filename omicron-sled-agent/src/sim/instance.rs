@@ -128,7 +128,7 @@ impl Simulatable for SimInstance {
             };
 
         let next_state = ApiInstanceRuntimeState {
-            run_state: immed_next_state.clone(),
+            run_state: immed_next_state,
             reboot_in_progress: reb_wanted,
             sled_uuid: current.sled_uuid,
             gen: current.gen.next(),
