@@ -68,6 +68,12 @@ impl Measurement {
     }
 }
 
+impl From<bool> for Measurement {
+    fn from(value: bool) -> Self {
+        Measurement::Bool(value)
+    }
+}
+
 impl From<i64> for Measurement {
     fn from(value: i64) -> Self {
         Measurement::I64(value)
@@ -221,11 +227,11 @@ pub struct Target {
     pub field_values: Vec<FieldValue>,
 }
 
-impl<T> From<T> for Target
+impl<T> From<&T> for Target
 where
     T: traits::Target,
 {
-    fn from(target: T) -> Self {
+    fn from(target: &T) -> Self {
         Self {
             name: target.name().to_string(),
             key: target.key(),
@@ -247,11 +253,11 @@ pub struct Metric {
     pub measurement_type: MeasurementType,
 }
 
-impl<M> From<M> for Metric
+impl<M> From<&M> for Metric
 where
     M: traits::Metric,
 {
-    fn from(metric: M) -> Self {
+    fn from(metric: &M) -> Self {
         Self {
             name: metric.name().to_string(),
             key: metric.key().clone(),
@@ -274,8 +280,8 @@ pub struct Sample {
 
 impl Sample {
     pub fn new<T, M, Meas>(
-        target: T,
-        metric: M,
+        target: &T,
+        metric: &M,
         measurement: Meas,
         timestamp: Option<DateTime<Utc>>,
     ) -> Self
@@ -295,7 +301,26 @@ impl Sample {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use bytes::Bytes;
+    use chrono::Utc;
+
+    use super::distribution::Distribution;
+    use super::{Cumulative, Measurement};
+    use crate::{Target, Metric};
+    use crate::types;
+
+    #[derive(Clone, Target)]
+    struct Targ {
+        pub good: bool,
+        pub id: i64,
+    }
+
+    #[crate::metric(i64)]
+    #[derive(Clone)]
+    struct Met {
+        pub good: bool,
+        pub id: i64,
+    }
 
     #[test]
     fn test_cumulative_i64() {
@@ -319,5 +344,69 @@ mod tests {
         assert_eq!(x.value(), 2.0);
         x = x + 0.5;
         assert_eq!(x.value(), 2.5);
+    }
+
+    #[test]
+    fn test_measurement() {
+        assert!(matches!(Measurement::from(false), Measurement::Bool(_)));
+        assert!(matches!(Measurement::from(0i64), Measurement::I64(_)));
+        assert!(matches!(Measurement::from(0f64), Measurement::F64(_)));
+        assert!(matches!(Measurement::from("foo"), Measurement::String(_)));
+        assert!(matches!(
+            Measurement::from(&Bytes::new()),
+            Measurement::Bytes(_)
+        ));
+        assert!(matches!(
+            Measurement::from(Cumulative::new(0i64)),
+            Measurement::CumulativeI64(_)
+        ));
+        assert!(matches!(
+            Measurement::from(Cumulative::new(0f64)),
+            Measurement::CumulativeF64(_)
+        ));
+        assert!(matches!(
+            Measurement::from(Distribution::new(&[0i64, 10]).unwrap()),
+            Measurement::DistributionI64(_)
+        ));
+        assert!(matches!(
+            Measurement::from(Distribution::new(&[0f64, 10.0]).unwrap()),
+            Measurement::DistributionF64(_)
+        ));
+    }
+
+    #[test]
+    fn test_target_struct() {
+        let t = Targ { good: false, id: 2 };
+        let t2 = types::Target::from(&t);
+        assert_eq!(t.name(), t2.name);
+        assert_eq!(t.key(), t2.key);
+        assert_eq!(t.field_names(), t2.field_names);
+        assert_eq!(t.field_types(), t2.field_types);
+        assert_eq!(t.field_values(), t2.field_values);
+    }
+
+    #[test]
+    fn test_metric_struct() {
+        let m = Met { good: false, id: 2 };
+        let m2 = types::Metric::from(&m);
+        assert_eq!(m.name(), m2.name);
+        assert_eq!(m.key(), m2.key);
+        assert_eq!(m.field_names(), m2.field_names);
+        assert_eq!(m.field_types(), m2.field_types);
+        assert_eq!(m.field_values(), m2.field_values);
+        assert_eq!(m.measurement_type(), m2.measurement_type);
+    }
+
+    #[test]
+    fn test_sample_struct() {
+        let t = Targ { good: false, id: 2 };
+        let m = Met { good: false, id: 2 };
+        let measurement: i64 = 1;
+        let timestamp = Utc::now();
+        let sample = types::Sample::new(&t, &m, measurement, Some(timestamp));
+        assert_eq!(sample.target.key, t.key());
+        assert_eq!(sample.metric.key, m.key());
+        assert_eq!(sample.timestamp, timestamp);
+        assert_eq!(sample.measurement, Measurement::I64(measurement));
     }
 }

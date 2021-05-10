@@ -110,3 +110,90 @@ impl DataPoint for Distribution<f64> {}
 pub trait Producer {
     fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>>;
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::types;
+    use crate::{metric, FieldType, FieldValue, MeasurementType, Metric, Producer, Target};
+    use std::boxed::Box;
+
+    #[derive(Clone, Target)]
+    struct Targ {
+        pub good: bool,
+        pub id: i64,
+    }
+
+    #[metric(i64)]
+    #[derive(Clone)]
+    struct Met {
+        pub good: bool,
+        pub id: i64,
+    }
+
+    struct Prod {
+        pub target: Targ,
+        pub metric: Met,
+        pub value: i64,
+    }
+
+    impl Producer for Prod {
+        fn produce(&mut self) -> Box<dyn Iterator<Item = types::Sample>> {
+            Box::new(
+                vec![types::Sample::new(
+                    &self.target,
+                    &self.metric,
+                    self.value,
+                    None,
+                )]
+                .into_iter(),
+            )
+        }
+    }
+
+    #[test]
+    fn test_target_trait() {
+        let t = Targ { good: false, id: 2 };
+
+        assert_eq!(t.name(), "targ");
+        assert_eq!(t.key(), "targ:false:2");
+        assert_eq!(t.field_names(), &["good", "id"]);
+        assert_eq!(t.field_types(), &[FieldType::Bool, FieldType::I64]);
+        assert_eq!(
+            t.field_values(),
+            &[FieldValue::Bool(false), FieldValue::I64(2)]
+        );
+    }
+
+    #[test]
+    fn test_metric_trait() {
+        let m = Met { good: false, id: 2 };
+
+        assert_eq!(m.name(), "met");
+        assert_eq!(m.key(), "false:2:met");
+        assert_eq!(m.field_names(), &["good", "id"]);
+        assert_eq!(m.field_types(), &[FieldType::Bool, FieldType::I64]);
+        assert_eq!(
+            m.field_values(),
+            &[FieldValue::Bool(false), FieldValue::I64(2)]
+        );
+        assert_eq!(m.measurement_type(), MeasurementType::I64);
+    }
+
+    #[test]
+    fn test_producer_trait() {
+        let t = Targ { good: false, id: 2 };
+        let m = Met { good: false, id: 2 };
+        let mut p = Prod {
+            target: t.clone(),
+            metric: m.clone(),
+            value: 0,
+        };
+        let sample = p.produce().next().unwrap();
+        assert_eq!(sample.target.key, t.key());
+        assert_eq!(sample.metric.key, m.key());
+        assert_eq!(sample.measurement, types::Measurement::I64(0));
+        p.value += 10;
+        let sample = p.produce().next().unwrap();
+        assert_eq!(sample.measurement, types::Measurement::I64(10));
+    }
+}
