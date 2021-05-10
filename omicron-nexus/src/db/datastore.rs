@@ -391,7 +391,7 @@ impl DataStore {
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
-        let p1 = cond_sql.next_param(&ApiInstanceState::Stopped);
+        let p1 = cond_sql.next_param(&ApiInstanceState::Stopped { rebooting: false });
         let p2 = cond_sql.next_param(&ApiInstanceState::Failed);
         cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
 

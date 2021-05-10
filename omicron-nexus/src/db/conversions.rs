@@ -46,7 +46,6 @@ impl SqlSerialize for ApiInstanceRuntimeState {
         output.set("active_server_id", &self.sled_uuid);
         output.set("state_generation", &self.gen);
         output.set("time_state_updated", &self.time_updated);
-        output.set("reboot_in_progress", &self.reboot_in_progress);
     }
 }
 

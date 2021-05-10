@@ -504,8 +504,8 @@ impl Nexus {
             ApiInstanceState::Creating => true,
             ApiInstanceState::Starting => true,
             ApiInstanceState::Running => true,
-            ApiInstanceState::Stopping => true,
-            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Stopping { rebooting: _ } => true,
+            ApiInstanceState::Stopped { rebooting: _ } => true,
 
             ApiInstanceState::Repairing => false,
             ApiInstanceState::Failed => false,
@@ -557,11 +557,11 @@ impl Nexus {
     ) -> UpdateResult<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
-         * runtime state with "reboot_wanted".  We cannot simply stop the
+         * runtime state with "rebooting = true".  We cannot simply stop the
          * Instance and start it again here because if we crash in the meantime,
          * we might leave it stopped.
          *
-         * When an instance is rebooted, the "reboot_in_progress" remains set on
+         * When an instance is rebooted, the "rebooting" remains set on
          * the runtime state as it transitions to "Stopping" and "Stopped".
          * This flag is cleared when the state goes to "Starting".  This way,
          * even if the whole rack powered off while this was going on, we would
@@ -576,8 +576,7 @@ impl Nexus {
             &instance,
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
-                reboot_wanted: true,
+                run_state: ApiInstanceStateRequested::Reboot,
             },
         )
         .await?;
@@ -601,7 +600,6 @@ impl Nexus {
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceStateRequested::Running,
-                reboot_wanted: false,
             },
         )
         .await?;
@@ -625,7 +623,6 @@ impl Nexus {
             self.instance_sled(&instance).await?,
             ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceStateRequested::Stopped,
-                reboot_wanted: false,
             },
         )
         .await?;

@@ -633,8 +633,8 @@ pub enum ApiInstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
-    Stopping,
-    Stopped,
+    Stopping { rebooting: bool },
+    Stopped { rebooting: bool },
     Repairing,
     Failed,
     Destroyed,
@@ -670,7 +670,8 @@ impl From<ApiInstanceStateRequested> for ApiInstanceState {
     fn from(requested: ApiInstanceStateRequested) -> Self {
         match requested {
             ApiInstanceStateRequested::Running => ApiInstanceState::Running,
-            ApiInstanceStateRequested::Stopped => ApiInstanceState::Stopped,
+            ApiInstanceStateRequested::Stopped => ApiInstanceState::Stopped { rebooting: false },
+            ApiInstanceStateRequested::Reboot => ApiInstanceState::Stopping { rebooting: true },
             ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
         }
     }
@@ -682,8 +683,8 @@ impl ApiInstanceState {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
-            ApiInstanceState::Stopping => "stopping",
-            ApiInstanceState::Stopped => "stopped",
+            ApiInstanceState::Stopping {rebooting: _} => "stopping",
+            ApiInstanceState::Stopped {rebooting: _} => "stopped",
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
@@ -699,13 +700,24 @@ impl ApiInstanceState {
         match self {
             ApiInstanceState::Starting => false,
             ApiInstanceState::Running => false,
-            ApiInstanceState::Stopping => false,
+            ApiInstanceState::Stopping {rebooting: _} => false,
 
             ApiInstanceState::Creating => true,
-            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Stopped {rebooting: _} => true,
             ApiInstanceState::Repairing => true,
             ApiInstanceState::Failed => true,
             ApiInstanceState::Destroyed => true,
+        }
+    }
+
+    /**
+     * Returns true if the given state represents an in-progress reboot.
+     */
+    pub fn is_rebooting(&self) -> bool {
+        match self {
+            ApiInstanceState::Stopped { rebooting } => *rebooting,
+            ApiInstanceState::Stopping { rebooting } => *rebooting,
+            _ => false,
         }
     }
 }
@@ -730,6 +742,8 @@ impl ApiInstanceState {
 pub enum ApiInstanceStateRequested {
     Running,
     Stopped,
+    // Implies a transition to "Stopped", then to "Running".
+    Reboot,
     Destroyed,
 }
 
@@ -744,6 +758,7 @@ impl ApiInstanceStateRequested {
         match self {
             ApiInstanceStateRequested::Running => "running",
             ApiInstanceStateRequested::Stopped => "stopped",
+            ApiInstanceStateRequested::Reboot => "reboot",
             ApiInstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -755,6 +770,7 @@ impl ApiInstanceStateRequested {
         match self {
             ApiInstanceStateRequested::Running => false,
             ApiInstanceStateRequested::Stopped => true,
+            ApiInstanceStateRequested::Reboot => false, // XXX
             ApiInstanceStateRequested::Destroyed => true,
         }
     }
@@ -827,8 +843,6 @@ impl ApiObject for ApiInstance {
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the Instance */
     pub run_state: ApiInstanceState,
-    /** indicates whether a reboot is currently in progress */
-    pub reboot_in_progress: bool,
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
     /** generation number for this state */
@@ -846,7 +860,6 @@ pub struct ApiInstanceRuntimeState {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceStateRequested,
-    pub reboot_wanted: bool,
 }
 
 /**
