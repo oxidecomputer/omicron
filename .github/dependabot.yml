@@ -1,0 +1,23 @@
+#
+# Dependabot configuration file
+#
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "omicron-bootstrap-agent"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "cargo"
+    directory: "omicron-common"
+    schedule:
+      interval: "weekly"
+      interval: "weekly"
+  - package-ecosystem: "cargo"
+    directory: "omicron-nexus"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "cargo"
+    directory: "omicron-sled-agent"
+    schedule:
+      interval: "weekly"
