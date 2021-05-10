@@ -77,17 +77,47 @@ impl DbError {
  * at least have to explicitly opt into a conversion.
  */
 pub fn sql_error_generic(e: DbError) -> ApiError {
-    let extra = match e.db_source().and_then(|s| s.code()) {
+    use tokio_postgres::error::SqlState;
+
+    /*
+     * Construct a message that includes the error code if there was one.
+     */
+    let maybe_code = e.db_source().and_then(|s| s.code());
+    let extra = match maybe_code {
         Some(code) => format!(" (code {})", code.code()),
         None => String::new(),
+    };
+    let message = format!("unexpected database error{}: {:#}", extra, e);
+
+    /*
+     * Determine whether the problem was transient or not and construct an
+     * appropriate ApiError.
+     * TODO-cleanup Is there a better supported way to determine if the problem
+     * was transient?
+     * TODO-resilience need to audit the list below to see what other ones we've
+     * missed.
+     */
+    let cons = if let Some(sqlstate) = maybe_code {
+        if sqlstate == &SqlState::CONNECTION_EXCEPTION
+            || sqlstate == &SqlState::CONNECTION_DOES_NOT_EXIST
+        {
+            ApiError::unavail
+        } else {
+            ApiError::internal_error
+        }
+    } else {
+        /*
+         * TODO-robustness Some errors without a SqlState may be transient, too
+         * (e.g., io::Error), while others might not be (e.g., TLS handshake
+         * fail).  The "kind" inside the tokio_postgres error would tell us
+         * this, but we don't have any way to get that.
+         */
+        ApiError::internal_error
     };
 
     /*
      * TODO-debuggability it would be nice to preserve the DbError here
      * so that the SQL is visible in the log.
      */
-    ApiError::internal_error(&format!(
-        "unexpected database error{}: {:#}",
-        extra, e
-    ))
+    cons(&message)
 }
