@@ -765,6 +765,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff9ae3574d1a57e937b8789201c223501e8178b4b42849d7b1a40d2cb2592a51"
 
 [[package]]
+name = "newtype_derive"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8cd24d9f185bb7223958d8c1ff7a961b74b1953fd05dba7cc568a63b3861ec"
+dependencies = [
+ "rustc_version",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -845,6 +854,7 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "slog",
+ "steno",
  "structopt",
  "subprocess",
  "tar",
@@ -861,6 +871,7 @@ dependencies = [
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bb8",
  "bb8-postgres",
@@ -871,7 +882,9 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "lazy_static",
  "libc",
+ "newtype_derive",
  "omicron-common",
  "omicron-sled-agent",
  "openapiv3 0.3.2",
@@ -1073,6 +1086,8 @@ dependencies = [
  "chrono",
  "fallible-iterator",
  "postgres-protocol",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -1220,6 +1235,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc_version"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5f5376ea5e30ce23c03eb77cbe4962b988deead10910c372b226388b594c084"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1271,6 +1295,12 @@ name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
+
+[[package]]
+name = "semver"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "serde"
@@ -1529,13 +1559,15 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#3647a3c2aa14721afcb54e67a63388d2df783e7a"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#a79255a4cf54debf7b9d0853df84b5abb14a9ee7"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "futures",
+ "newtype_derive",
  "petgraph",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -1724,9 +1756,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134af885d758d645f0f0505c9a8b3f9bf8a348fd822e112ab5248138348f1722"
+checksum = "83f0c8e7c0addab50b663055baf787d0af7f413a46e6e7fb9559a4e4db7137a5"
 dependencies = [
  "autocfg",
  "bytes",
