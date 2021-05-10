@@ -37,7 +37,43 @@ pub enum FieldValue {
     Bool(bool),
 }
 
-/// A measurement is a single sample of a metric.
+impl From<i64> for FieldValue {
+    fn from(value: i64) -> Self {
+        FieldValue::I64(value)
+    }
+}
+
+impl From<String> for FieldValue {
+    fn from(value: String) -> Self {
+        FieldValue::String(value)
+    }
+}
+
+impl From<&str> for FieldValue {
+    fn from(value: &str) -> Self {
+        FieldValue::String(String::from(value))
+    }
+}
+
+impl From<IpAddr> for FieldValue {
+    fn from(value: IpAddr) -> Self {
+        FieldValue::IpAddr(value)
+    }
+}
+
+impl From<Uuid> for FieldValue {
+    fn from(value: Uuid) -> Self {
+        FieldValue::Uuid(value)
+    }
+}
+
+impl From<bool> for FieldValue {
+    fn from(value: bool) -> Self {
+        FieldValue::Bool(value)
+    }
+}
+
+/// A measurement is a single sampled data point from a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub enum Measurement {
     Bool(bool),
@@ -131,48 +167,30 @@ impl From<distribution::Distribution<f64>> for Measurement {
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error)]
 pub enum Error {
-    /// An error occurred registering or building a collection of metrics.
-    #[error("Error building metric collection: {0}")]
-    InvalidCollection(String),
-    /// A collection of metrics is already registered.
-    #[error("The metric collection is already registered")]
-    CollectionAlreadyRegistered,
-    /// A collection of metrics is not registered.
-    #[error("The collection is not registered")]
-    CollectionNotRegistered,
-    /// An error occurred calling the registered
-    /// [`Producer::setup_collection`](crate::producer::Producer::setup_collection) method.
-    #[error("Failed to set up collection of metric: {0}")]
-    CollectionSetupFailed(String),
-    /// An error occurred calling the registered
-    /// [`Producer::collect`](crate::producer::Producer::collect) method.
-    #[error("Error collecting measurement: {0}")]
-    MeasurementError(String),
-    /// The [`Producer::collect`](crate::producer::Producer::collect) method return an unexpected
-    /// measurement type for a metric.
-    #[error("The producer function returned an unexpected type, expected {0:?}, found {1:?})")]
-    ProducerTypeMismatch(MeasurementType, MeasurementType),
     /// An error related to creating or sampling a [`distribution::Distribution`] metric.
     #[error("{0}")]
     DistributionError(#[from] distribution::DistributionError),
 }
 
 /// A cumulative or counter data type.
-#[derive(Debug, Clone, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Cumulative<T>(T);
 
 impl<T> Cumulative<T>
 where
     T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
 {
+    /// Construct a new counter with the given initial value.
     pub fn new(value: T) -> Self {
         Self(value)
     }
 
+    /// Add 1 to the internal counter.
     pub fn increment(&mut self) {
         self.0 += One::one();
     }
 
+    /// Return the current value of the counter.
     pub fn value(&self) -> T {
         self.0
     }
@@ -218,12 +236,28 @@ where
 }
 
 /// A concrete type carrying information about a target.
+///
+/// This type is used to "materialize" the information from the [`Target`](crate::traits::Target)
+/// interface. It can only be constructed from a type that implements that trait, generally when a
+/// [`Producer`](traits::Producer) generates [`Sample`]s for its monitored resources.
+///
+/// See the [`Target`](crate::traits::Target) trait for more details on each field.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Target {
+    /// The name of target.
     pub name: String,
+
+    /// The key for this target, which its name and the value of each field, concatenated with a
+    /// `':'` character.
     pub key: String,
+
+    /// The names of this target's fields.
     pub field_names: Vec<String>,
+
+    /// The types of this target's fields.
     pub field_types: Vec<FieldType>,
+
+    /// The values of this target's fields.
     pub field_values: Vec<FieldValue>,
 }
 
@@ -243,13 +277,31 @@ where
 }
 
 /// A concrete type carrying information about a metric.
+///
+/// This type is used to "materialize" the information from the [`Metric`](crate::traits::Metric)
+/// interface. It can only be constructed from a type that implements that trait, generally when a
+/// [`Producer`](traits::Producer) generates [`Sample`]s for its monitored resources.
+///
+/// See the [`Metric`](crate::traits::Metric) trait for more details on each field.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Metric {
+    /// The name of target.
     pub name: String,
+
+    /// The key for this metric, which its value of each field and its name, concatenated with a
+    /// `':'` character.
     pub key: String,
+
+    /// The names of this metric's fields.
     pub field_names: Vec<String>,
+
+    /// The types of this metric's fields.
     pub field_types: Vec<FieldType>,
+
+    /// The values of this metric's fields.
     pub field_values: Vec<FieldValue>,
+
+    /// The data type of a measurement from this metric.
     pub measurement_type: MeasurementType,
 }
 
@@ -272,13 +324,25 @@ where
 /// A concrete type representing a single, timestamped measurement from a timeseries.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Sample {
+    /// The timestamp for this sample
     pub timestamp: DateTime<Utc>,
+
+    /// The `Target` this sample is derived from.
     pub target: Target,
+
+    /// The `Metric` this sample is derived from.
     pub metric: Metric,
+
+    /// The actual measured data point for this sample.
     pub measurement: Measurement,
 }
 
 impl Sample {
+    /// Construct a new sample.
+    ///
+    /// This materializes the data from the target and metric, and stores that information along
+    /// with the measurement data itself. Users may optionally specify a timestamp, which defaults
+    /// to the current time if `None` is passed.
     pub fn new<T, M, Meas>(
         target: &T,
         metric: &M,
@@ -306,8 +370,8 @@ mod tests {
 
     use super::distribution::Distribution;
     use super::{Cumulative, Measurement};
-    use crate::{Target, Metric};
     use crate::types;
+    use crate::{Metric, Target};
 
     #[derive(Clone, Target)]
     struct Targ {

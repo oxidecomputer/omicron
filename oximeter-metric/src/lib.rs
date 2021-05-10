@@ -1,3 +1,4 @@
+/// Derive the `Metric` trait for a struct.
 #[proc_macro_attribute]
 pub fn metric(
     attr: proc_macro::TokenStream,

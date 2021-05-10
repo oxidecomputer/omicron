@@ -1,10 +1,13 @@
+//! Traits used to describe metric data and its sources.
+// Copyright 2021 Oxide Computer Company
+
 use bytes::Bytes;
 
 use crate::distribution::Distribution;
 use crate::types::{Cumulative, Sample};
 use crate::{FieldType, FieldValue, MeasurementType};
 
-/// The `Target` trait identifies a metric source by a sequence of fields.
+/// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
 /// A target is a single source of metric data, identified by a sequence of named and typed field
 /// values. Users can write a single struct definition and derive this trait. The methods here
@@ -12,8 +15,8 @@ use crate::{FieldType, FieldValue, MeasurementType};
 /// definition can be thought of as a schema, and an instance of that struct as identifying an
 /// individual target.
 ///
-/// Target fields may have one of a set of supported types: bool, i64, String, IpAddr, or Uuid. Any
-/// number of fields greater than zero is supported.
+/// Target fields may have one of a set of supported types: `bool`, `i64`, `String`, `IpAddr`, or
+/// `Uuid`. Any number of fields greater than zero is supported.
 ///
 /// Examples
 /// --------
@@ -30,9 +33,16 @@ use crate::{FieldType, FieldValue, MeasurementType};
 ///
 /// fn main() {
 ///     let vm = VirtualMachine { name: String::from("a-name"), id: Uuid::new_v4() };
+///
+///     // The "name" of the target is the struct name in snake_case.
 ///     assert_eq!(vm.name(), "virtual_machine");
+///
+///     // The field names are the names of the struct field, in order.
 ///     assert_eq!(vm.field_names()[0], "name");
+///
+///     // Each field has a specified type and value
 ///     assert_eq!(vm.field_types()[1], FieldType::Uuid);
+///     assert_eq!(vm.field_values()[0], "a-name".into());
 /// }
 /// ```
 ///
@@ -45,8 +55,6 @@ use crate::{FieldType, FieldValue, MeasurementType};
 ///     bad: f64,
 /// }
 /// ```
-///
-/// See the [tests](./tests) directory for many examples of how to use the type.
 pub trait Target {
     /// Return the name of the target, which is the snake_case form of the struct's name.
     fn name(&self) -> &'static str;
@@ -67,6 +75,12 @@ pub trait Target {
     fn key(&self) -> String;
 }
 
+/// The `Metric` trait identifies a measured feature of a target.
+///
+/// The trait is similar to the `Target` trait, providing metadata about the metric's name and
+/// fields. In addition, a `Metric` has an associated measurement type, which must be one of the
+/// supported [`DataPoint`] types. This provides type safety, ensuring that the produced
+/// measurements are of the correct type for a metric.
 pub trait Metric {
     type Measurement: DataPoint;
 
@@ -95,6 +109,9 @@ pub trait Metric {
 
 /// The `DataPoint` trait identifies types that may be used as measurements or samples for a
 /// timeseries.
+///
+/// Individual samples are produced by client code, and associated with a target and metric by
+/// constructing a [`Sample`](crate::types::Sample).
 pub trait DataPoint {}
 
 impl DataPoint for bool {}
@@ -107,7 +124,100 @@ impl DataPoint for Cumulative<f64> {}
 impl DataPoint for Distribution<i64> {}
 impl DataPoint for Distribution<f64> {}
 
+/// A trait for generating samples from a target and metric.
+///
+/// The `Producer` trait connects a target and metric with actual measurements from them. Types
+/// that implement this trait are expected to collect data from their targets, and return that in
+/// the [`Producer::produce`] function.
+///
+/// Measurements can be generated on-demand, when the `produce` method is called, or types may
+/// choose to collect the data at another time, cache it, and report it via that function. Types
+/// may produce any number of measurements, from any number of targets and metrics. The targets and
+/// metrics need not have the same type, either. Data is returned as an iterator over [`Sample`]s,
+/// which can be constructed from any [`Target`] or [`Metric`].
+///
+/// Example
+/// -------
+/// ```rust
+/// use oximeter::{metric, Metric, Producer, Target};
+/// use oximeter::types::{Measurement, Sample, Cumulative};
+///
+/// #[derive(Clone, Target)]
+/// pub struct Server {
+///     pub name: String,
+/// }
+///
+/// #[metric(CumulativeI64)]
+/// #[derive(Clone)]
+/// pub struct RequestCount {
+///     pub route: String,
+///     pub method: String,
+///     pub response_code: i64
+/// }
+///
+/// fn route_handler(_route: &str, _method: &str) -> i64 {
+///     // Actually handle the request
+///     200
+/// }
+///
+/// pub struct RequestCounter {
+///     target: Server,
+///     metric: RequestCount,
+///     counter: Cumulative<i64>,
+/// }
+///
+/// impl RequestCounter {
+///     pub fn new(target: &Server, metric: &RequestCount) -> Self {
+///         Self {
+///             target: target.clone(),
+///             metric: metric.clone(),
+///             counter: Cumulative::new(0),
+///         }
+///     }
+///
+///     pub fn bump(&mut self) {
+///         self.counter.increment();
+///     }
+/// }
+///
+/// impl Producer for RequestCounter {
+///     fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>> {
+///         let sample = Sample::new(
+///             &self.target,
+///             &self.metric,
+///             self.counter,
+///             None, // Use current timestamp
+///         );
+///         Box::new(vec![sample].into_iter())
+///     }
+/// }
+///
+/// fn main() {
+///     let server = Server { name: "Nexus".to_string() };
+///     let request_count = RequestCount {
+///         route: "/".to_string(),
+///         method: "HEAD".to_string(),
+///         response_code: 200,
+///     };
+///     let mut producer = RequestCounter::new(&server, &request_count);
+///
+///     // No requests yet, there should be zero samples
+///     let sample = producer.produce().next().unwrap();
+///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
+///
+///     // await some request..
+///     let response_code = route_handler("/", "GET");
+///     if response_code == 200 {
+///         producer.bump();
+///     } // Handle other responses
+///
+///     // The incremented counter is reflected in the new sample.
+///     let sample = producer.produce().next().unwrap();
+///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
+/// }
+/// ```
 pub trait Producer {
+    /// Return the currently available samples from the monitored targets and metrics.
     fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>>;
 }
 
