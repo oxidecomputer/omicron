@@ -70,7 +70,7 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 expectorate = "1.0.1"
-serde_urlencoded = "0.6.1"
+serde_urlencoded = "0.7.0"
 
 #
 # Disable doc builds by default for our binaries to work around issue
