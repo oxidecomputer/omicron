@@ -36,6 +36,6 @@ COPY --from=cargo-build /usr/src/omicron/target/release/bootstrap-agent /usr/bin
 COPY --from=cargo-build /usr/src/omicron/target/release/nexus /usr/bin/nexus
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-dev /usr/bin/omicron-dev
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-package /usr/bin/omicron-package
-COPY --from=cargo-build /usr/src/omicron/target/release/sled-agent /usr/bin/sled-agent
+COPY --from=cargo-build /usr/src/omicron/target/release/sled-agent-sim /usr/bin/sled-agent-sim
 
-CMD ["sled-agent"]
+CMD ["sled-agent-sim"]

@@ -382,6 +382,7 @@ mod test {
     use omicron_common::model::ApiInstanceRuntimeState;
     use omicron_common::model::ApiInstanceRuntimeStateRequested;
     use omicron_common::model::ApiInstanceState;
+    use omicron_common::model::ApiInstanceStateRequested;
 
     fn make_instance(
         logctx: &LogContext,
@@ -448,10 +449,8 @@ mod test {
          * that as a transition to "Running".
          */
         let stopped_states = vec![
-            ApiInstanceState::Stopped,
-            ApiInstanceState::Repairing,
-            ApiInstanceState::Failed,
-            ApiInstanceState::Destroyed,
+            ApiInstanceStateRequested::Stopped,
+            ApiInstanceStateRequested::Destroyed,
         ];
         let mut rprev = r1;
         for state in stopped_states {
@@ -467,7 +466,7 @@ mod test {
             let rnext = instance.current_state.clone();
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
-            assert_eq!(rnext.run_state, state);
+            assert_eq!(rnext.run_state, state.into());
             assert!(rx.try_next().is_err());
             rprev = rnext;
         }
@@ -480,7 +479,7 @@ mod test {
         assert!(rx.try_next().is_err());
         let dropped = instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
             .unwrap();
@@ -514,7 +513,7 @@ mod test {
         assert!(!rprev.run_state.is_stopped());
         let dropped = instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
             .unwrap();
@@ -535,7 +534,7 @@ mod test {
         assert!(rx.try_next().is_err());
         let dropped = instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Destroyed,
+                run_state: ApiInstanceStateRequested::Destroyed,
                 reboot_wanted: false,
             })
             .unwrap();
@@ -570,7 +569,7 @@ mod test {
         assert!(rprev.run_state.is_stopped());
         let dropped = instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
             .unwrap();
@@ -588,11 +587,14 @@ mod test {
          */
         let dropped = instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Destroyed,
+                run_state: ApiInstanceStateRequested::Destroyed,
                 reboot_wanted: false,
             })
             .unwrap();
-        assert_eq!(dropped.unwrap().run_state, ApiInstanceState::Running);
+        assert_eq!(
+            dropped.unwrap().run_state,
+            ApiInstanceStateRequested::Running
+        );
         let rnext = instance.current_state.clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
@@ -636,7 +638,7 @@ mod test {
         assert_eq!(r1.gen, ApiGeneration::new());
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
             .unwrap()
@@ -655,7 +657,7 @@ mod test {
          */
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
@@ -699,7 +701,7 @@ mod test {
          */
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
@@ -708,7 +710,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
@@ -733,7 +735,7 @@ mod test {
          */
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
@@ -745,7 +747,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
@@ -772,7 +774,7 @@ mod test {
          */
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Stopped,
+                run_state: ApiInstanceStateRequested::Stopped,
                 reboot_wanted: false,
             })
             .unwrap()
@@ -782,7 +784,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: false,
             })
             .unwrap()
@@ -791,7 +793,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceState::Running,
+                run_state: ApiInstanceStateRequested::Running,
                 reboot_wanted: true,
             })
             .unwrap()
