@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e04241c9eb6a19bd9b0b42718adad8b6d7bab29c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#bdbda2f970d83bf85c84318e61bf3eaa9638d2a4"
 dependencies = [
  "async-trait",
  "base64",
@@ -294,7 +294,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3 0.4.0",
+ "openapiv3 0.5.0",
  "paste",
  "schemars",
  "serde",
@@ -313,7 +313,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e04241c9eb6a19bd9b0b42718adad8b6d7bab29c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#bdbda2f970d83bf85c84318e61bf3eaa9638d2a4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -951,9 +951,9 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b3c622a8249a19c1b9730e6b3127cf2b0d42f47fbdf2e5ba43c43cfd48eb5ee"
+checksum = "90228d34f20d9fff3174d19b0d41e67f52711045270b540a2a2c2dc41ccb4085"
 dependencies = [
  "indexmap",
  "serde",
