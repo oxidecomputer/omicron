@@ -20,8 +20,8 @@ pub enum MeasurementType {
     Bytes,
     CumulativeI64,
     CumulativeF64,
-    DistributionI64,
-    DistributionF64,
+    HistogramI64,
+    HistogramF64,
 }
 
 impl FromStr for MeasurementType {
@@ -35,13 +35,13 @@ impl FromStr for MeasurementType {
             "Bytes" => Ok(MeasurementType::Bytes),
             "CumulativeI64" => Ok(MeasurementType::CumulativeI64),
             "CumulativeF64" => Ok(MeasurementType::CumulativeF64),
-            "DistributionI64" => Ok(MeasurementType::DistributionI64),
-            "DistributionF64" => Ok(MeasurementType::DistributionF64),
+            "HistogramI64" => Ok(MeasurementType::HistogramI64),
+            "HistogramF64" => Ok(MeasurementType::HistogramF64),
             _ => Err(String::from(
                 "Invalid measurement type, must be one of
                 \"bool\", \"i64\", \"f64\", \"String\", \"Bytes\"
                 \"CumulativeI64\" or \"CumulativeF64\"
-                \"DistributionI64\" or \"DistributionF64\"",
+                \"HistogramI64\" or \"HistogramF64\"",
             )),
         }
     }
@@ -49,6 +49,8 @@ impl FromStr for MeasurementType {
 
 impl ToTokens for MeasurementType {
     fn to_tokens(&self, stream: &mut TokenStream) {
+        stream.append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Joint));
+        stream.append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Alone));
         let mod_name = proc_macro2::Ident::new("oximeter", Span::call_site());
         stream.append(mod_name);
 
@@ -130,7 +132,7 @@ fn build_target_trait_impl(
     let fmt = format!("{{}}{}", ":{}".repeat(values.len()));
     let key_formatter = quote! { format!(#fmt, #name, #(self.#refs),*) };
     quote! {
-        impl oximeter::Target for #item_name {
+        impl ::oximeter::Target for #item_name {
             fn name(&self) -> &'static str {
                 #name
             }
@@ -139,11 +141,11 @@ fn build_target_trait_impl(
                 &[#(#names),*]
             }
 
-            fn field_types(&self) -> &'static [oximeter::FieldType] {
+            fn field_types(&self) -> &'static [::oximeter::FieldType] {
                 &[#(#types,)*]
             }
 
-            fn field_values(&self) -> Vec<oximeter::FieldValue> {
+            fn field_values(&self) -> Vec<::oximeter::FieldValue> {
                 vec![#(#values,)*]
             }
 
@@ -161,10 +163,10 @@ fn type_name_for_measurement_type(measurement_type: MeasurementType) -> TokenStr
         MeasurementType::F64 => quote! { f64 },
         MeasurementType::String => quote! { String },
         MeasurementType::Bytes => quote! { bytes::Bytes },
-        MeasurementType::CumulativeI64 => quote! { oximeter::types::Cumulative<i64> },
-        MeasurementType::CumulativeF64 => quote! { oximeter::types::Cumulative<f64> },
-        MeasurementType::DistributionI64 => quote! { oximeter::distribution::Distribution<i64> },
-        MeasurementType::DistributionF64 => quote! { oximeter::distribution::Distribution<f64> },
+        MeasurementType::CumulativeI64 => quote! { ::oximeter::types::Cumulative<i64> },
+        MeasurementType::CumulativeF64 => quote! { ::oximeter::types::Cumulative<f64> },
+        MeasurementType::HistogramI64 => quote! { ::oximeter::histogram::Histogram<i64> },
+        MeasurementType::HistogramF64 => quote! { ::oximeter::histogram::Histogram<f64> },
     }
 }
 
@@ -182,7 +184,7 @@ fn build_metric_trait_impl(
     let key_formatter = quote! { format!(#fmt, #(self.#refs),*, #name) };
     let meas_type = type_name_for_measurement_type(measurement_type);
     quote! {
-        impl oximeter::Metric for #item_name {
+        impl ::oximeter::Metric for #item_name {
             type Measurement = #meas_type;
 
             fn name(&self) -> &'static str {
@@ -193,11 +195,11 @@ fn build_metric_trait_impl(
                 &[#(#names),*]
             }
 
-            fn field_types(&self) -> &'static [oximeter::FieldType] {
+            fn field_types(&self) -> &'static [::oximeter::FieldType] {
                 &[#(#types,)*]
             }
 
-            fn field_values(&self) -> Vec<oximeter::FieldValue> {
+            fn field_values(&self) -> Vec<::oximeter::FieldValue> {
                 vec![#(#values,)*]
             }
 
@@ -205,7 +207,7 @@ fn build_metric_trait_impl(
                 #key_formatter
             }
 
-            fn measurement_type(&self) -> oximeter::MeasurementType {
+            fn measurement_type(&self) -> ::oximeter::MeasurementType {
                 #measurement_type
             }
         }
@@ -373,8 +375,8 @@ mod tests {
             "Bytes",
             "CumulativeI64",
             "CumulativeF64",
-            "DistributionI64",
-            "DistributionF64",
+            "HistogramI64",
+            "HistogramF64",
         ];
         for type_ in valid_types.iter() {
             let ident = syn::parse_str::<Type>(type_).unwrap();

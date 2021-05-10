@@ -13,7 +13,7 @@ pub use oximeter_target::*;
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
-pub mod distribution;
+pub mod histogram;
 pub mod traits;
 pub mod types;
 

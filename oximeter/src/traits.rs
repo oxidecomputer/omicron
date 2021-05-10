@@ -3,7 +3,7 @@
 
 use bytes::Bytes;
 
-use crate::distribution::Distribution;
+use crate::histogram::Histogram;
 use crate::types::{Cumulative, Sample};
 use crate::{FieldType, FieldValue, MeasurementType};
 
@@ -121,8 +121,8 @@ impl DataPoint for String {}
 impl DataPoint for Bytes {}
 impl DataPoint for Cumulative<i64> {}
 impl DataPoint for Cumulative<f64> {}
-impl DataPoint for Distribution<i64> {}
-impl DataPoint for Distribution<f64> {}
+impl DataPoint for Histogram<i64> {}
+impl DataPoint for Histogram<f64> {}
 
 /// A trait for generating samples from a target and metric.
 ///

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::distribution;
+use crate::histogram;
 use crate::traits;
 use crate::MeasurementType;
 
@@ -83,8 +83,8 @@ pub enum Measurement {
     Bytes(Bytes),
     CumulativeI64(Cumulative<i64>),
     CumulativeF64(Cumulative<f64>),
-    DistributionI64(distribution::Distribution<i64>),
-    DistributionF64(distribution::Distribution<f64>),
+    HistogramI64(histogram::Histogram<i64>),
+    HistogramF64(histogram::Histogram<f64>),
 }
 
 impl Measurement {
@@ -98,8 +98,8 @@ impl Measurement {
             Measurement::Bytes(_) => MeasurementType::Bytes,
             Measurement::CumulativeI64(_) => MeasurementType::CumulativeI64,
             Measurement::CumulativeF64(_) => MeasurementType::CumulativeF64,
-            Measurement::DistributionI64(_) => MeasurementType::DistributionI64,
-            Measurement::DistributionF64(_) => MeasurementType::DistributionF64,
+            Measurement::HistogramI64(_) => MeasurementType::HistogramI64,
+            Measurement::HistogramF64(_) => MeasurementType::HistogramF64,
         }
     }
 }
@@ -152,24 +152,24 @@ impl From<Cumulative<f64>> for Measurement {
     }
 }
 
-impl From<distribution::Distribution<i64>> for Measurement {
-    fn from(value: distribution::Distribution<i64>) -> Measurement {
-        Measurement::DistributionI64(value)
+impl From<histogram::Histogram<i64>> for Measurement {
+    fn from(value: histogram::Histogram<i64>) -> Measurement {
+        Measurement::HistogramI64(value)
     }
 }
 
-impl From<distribution::Distribution<f64>> for Measurement {
-    fn from(value: distribution::Distribution<f64>) -> Measurement {
-        Measurement::DistributionF64(value)
+impl From<histogram::Histogram<f64>> for Measurement {
+    fn from(value: histogram::Histogram<f64>) -> Measurement {
+        Measurement::HistogramF64(value)
     }
 }
 
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error)]
 pub enum Error {
-    /// An error related to creating or sampling a [`distribution::Distribution`] metric.
+    /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
-    DistributionError(#[from] distribution::DistributionError),
+    HistogramError(#[from] histogram::HistogramError),
 }
 
 /// A cumulative or counter data type.
@@ -368,7 +368,7 @@ mod tests {
     use bytes::Bytes;
     use chrono::Utc;
 
-    use super::distribution::Distribution;
+    use super::histogram::Histogram;
     use super::{Cumulative, Measurement};
     use crate::types;
     use crate::{Metric, Target};
@@ -429,12 +429,12 @@ mod tests {
             Measurement::CumulativeF64(_)
         ));
         assert!(matches!(
-            Measurement::from(Distribution::new(&[0i64, 10]).unwrap()),
-            Measurement::DistributionI64(_)
+            Measurement::from(Histogram::new(&[0i64, 10]).unwrap()),
+            Measurement::HistogramI64(_)
         ));
         assert!(matches!(
-            Measurement::from(Distribution::new(&[0f64, 10.0]).unwrap()),
-            Measurement::DistributionF64(_)
+            Measurement::from(Histogram::new(&[0f64, 10.0]).unwrap()),
+            Measurement::HistogramF64(_)
         ));
     }
 
