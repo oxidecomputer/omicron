@@ -31,19 +31,17 @@ use crate::{Error, FieldType, FieldValue, MeasurementType};
 ///     id: Uuid,
 /// }
 ///
-/// fn main() {
-///     let vm = VirtualMachine { name: String::from("a-name"), id: Uuid::new_v4() };
+/// let vm = VirtualMachine { name: String::from("a-name"), id: Uuid::new_v4() };
 ///
-///     // The "name" of the target is the struct name in snake_case.
-///     assert_eq!(vm.name(), "virtual_machine");
+/// // The "name" of the target is the struct name in snake_case.
+/// assert_eq!(vm.name(), "virtual_machine");
 ///
-///     // The field names are the names of the struct field, in order.
-///     assert_eq!(vm.field_names()[0], "name");
+/// // The field names are the names of the struct field, in order.
+/// assert_eq!(vm.field_names()[0], "name");
 ///
-///     // Each field has a specified type and value
-///     assert_eq!(vm.field_types()[1], FieldType::Uuid);
-///     assert_eq!(vm.field_values()[0], "a-name".into());
-/// }
+/// // Each field has a specified type and value
+/// assert_eq!(vm.field_types()[1], FieldType::Uuid);
+/// assert_eq!(vm.field_values()[0], "a-name".into());
 /// ```
 ///
 /// Targets may implement other methods, if the user wishes, but the fields must be one of the

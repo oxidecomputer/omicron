@@ -72,21 +72,19 @@ pub enum HistogramError {
 /// ```rust
 /// use oximeter::histogram::Histogram;
 ///
-/// fn main() {
-///     let edges = [0i64, 10, 20];
-///     let mut dist = Histogram::new(&edges).unwrap();
-///     assert_eq!(dist.n_bins(), 4); // One additional bin for the range (20..)
-///     assert_eq!(dist.n_samples(), 0);
-///     dist.sample(4);
-///     dist.sample(100);
-///     assert_eq!(dist.n_samples(), 2);
+/// let edges = [0i64, 10, 20];
+/// let mut dist = Histogram::new(&edges).unwrap();
+/// assert_eq!(dist.n_bins(), 4); // One additional bin for the range (20..)
+/// assert_eq!(dist.n_samples(), 0);
+/// dist.sample(4);
+/// dist.sample(100);
+/// assert_eq!(dist.n_samples(), 2);
 ///
-///     let data = dist.iter().collect::<Vec<_>>();
-///     assert_eq!(data[0].1, &0);
-///     assert_eq!(data[1].1, &1); // 4
-///     assert_eq!(data[2].1, &0);
-///     assert_eq!(data[3].1, &1); // 100
-/// }
+/// let data = dist.iter().collect::<Vec<_>>();
+/// assert_eq!(data[0].1, &0);
+/// assert_eq!(data[1].1, &1); // 4
+/// assert_eq!(data[2].1, &0);
+/// assert_eq!(data[3].1, &1); // 100
 /// ```
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Histogram<T> {

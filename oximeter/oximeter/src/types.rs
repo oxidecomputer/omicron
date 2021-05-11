@@ -331,7 +331,7 @@ where
     fn from(metric: &M) -> Self {
         Self {
             name: metric.name().to_string(),
-            key: metric.key().clone(),
+            key: metric.key(),
             field_names: metric
                 .field_names()
                 .iter()

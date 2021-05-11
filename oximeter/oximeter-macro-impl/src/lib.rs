@@ -98,19 +98,17 @@ pub fn target(tokens: TokenStream) -> syn::Result<TokenStream> {
                     "Structs must have at least one field",
                 ));
             }
-            return Ok(
-                build_target_trait_impl(&name, &names, &types, &values).into()
-            );
+            return Ok(build_target_trait_impl(&name, &names, &types, &values));
         }
         return Err(Error::new(
             item.span(),
             "Can only be derived for structs with named fields",
         ));
     }
-    return Err(Error::new(
+    Err(Error::new(
         item.span(),
         "Can only be derived for structs with named fields",
-    ));
+    ))
 }
 
 // Implementation of the `[oximeter::metric]` procedural macro attribute.
@@ -143,10 +141,10 @@ pub fn metric(
             #metric_impl
         });
     }
-    return Err(Error::new(
+    Err(Error::new(
         item.span(),
         "Can only be derived for structs with named fields",
-    ));
+    ))
 }
 
 // Build the derived implementation for the Target trait
@@ -255,6 +253,7 @@ fn build_metric_trait_impl(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn extract_struct_fields<
     'a,
     F: std::iter::ExactSizeIterator<Item = &'a syn::Field>,
