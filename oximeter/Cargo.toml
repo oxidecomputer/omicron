@@ -55,6 +55,3 @@ version = "*"
 [dependencies.uuid]
 version = "0.8.2"
 features = [ "v4", "serde" ]
-
-[dev-dependencies]
-trybuild = "1.0.42"

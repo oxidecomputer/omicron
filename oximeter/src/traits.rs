@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::histogram::Histogram;
 use crate::types::{Cumulative, Sample};
-use crate::{FieldType, FieldValue, MeasurementType};
+use crate::{Error, FieldType, FieldValue, MeasurementType};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -139,7 +139,7 @@ impl DataPoint for Histogram<f64> {}
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::{metric, Metric, Producer, Target};
+/// use oximeter::{metric, Error, Metric, Producer, Target};
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
 /// #[derive(Clone, Target)]
@@ -181,14 +181,14 @@ impl DataPoint for Histogram<f64> {}
 /// }
 ///
 /// impl Producer for RequestCounter {
-///     fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>> {
+///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error> {
 ///         let sample = Sample::new(
 ///             &self.target,
 ///             &self.metric,
 ///             self.counter,
 ///             None, // Use current timestamp
 ///         );
-///         Box::new(vec![sample].into_iter())
+///         Ok(Box::new(vec![sample].into_iter()))
 ///     }
 /// }
 ///
@@ -202,7 +202,7 @@ impl DataPoint for Histogram<f64> {}
 ///     let mut producer = RequestCounter::new(&server, &request_count);
 ///
 ///     // No requests yet, there should be zero samples
-///     let sample = producer.produce().next().unwrap();
+///     let sample = producer.produce().unwrap().next().unwrap();
 ///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
 ///
 ///     // await some request..
@@ -212,19 +212,19 @@ impl DataPoint for Histogram<f64> {}
 ///     } // Handle other responses
 ///
 ///     // The incremented counter is reflected in the new sample.
-///     let sample = producer.produce().next().unwrap();
+///     let sample = producer.produce().unwrap().next().unwrap();
 ///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
 /// }
 /// ```
 pub trait Producer {
     /// Return the currently available samples from the monitored targets and metrics.
-    fn produce(&mut self) -> Box<dyn Iterator<Item = Sample>>;
+    fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error>;
 }
 
 #[cfg(test)]
 mod tests {
     use crate::types;
-    use crate::{metric, FieldType, FieldValue, MeasurementType, Metric, Producer, Target};
+    use crate::{metric, Error, FieldType, FieldValue, MeasurementType, Metric, Producer, Target};
     use std::boxed::Box;
 
     #[derive(Clone, Target)]
@@ -247,8 +247,8 @@ mod tests {
     }
 
     impl Producer for Prod {
-        fn produce(&mut self) -> Box<dyn Iterator<Item = types::Sample>> {
-            Box::new(
+        fn produce(&mut self) -> Result<Box<dyn Iterator<Item = types::Sample>>, Error> {
+            Ok(Box::new(
                 vec![types::Sample::new(
                     &self.target,
                     &self.metric,
@@ -256,7 +256,7 @@ mod tests {
                     None,
                 )]
                 .into_iter(),
-            )
+            ))
         }
     }
 
@@ -298,12 +298,12 @@ mod tests {
             metric: m.clone(),
             value: 0,
         };
-        let sample = p.produce().next().unwrap();
+        let sample = p.produce().unwrap().next().unwrap();
         assert_eq!(sample.target.key, t.key());
         assert_eq!(sample.metric.key, m.key());
         assert_eq!(sample.measurement, types::Measurement::I64(0));
         p.value += 10;
-        let sample = p.produce().next().unwrap();
+        let sample = p.produce().unwrap().next().unwrap();
         assert_eq!(sample.measurement, types::Measurement::I64(10));
     }
 }

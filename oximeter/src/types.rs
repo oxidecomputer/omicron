@@ -2,6 +2,7 @@
 // Copyright 2021 Oxide Computer Company
 
 use std::boxed::Box;
+use std::cmp::Ordering;
 use std::net::IpAddr;
 use std::ops::{Add, AddAssign};
 
@@ -18,7 +19,7 @@ use crate::traits;
 use crate::MeasurementType;
 
 /// The `FieldType` identifies the type of a target or metric field.
-#[derive(Clone, Copy, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub enum FieldType {
     String,
     I64,
@@ -28,7 +29,7 @@ pub enum FieldType {
 }
 
 /// The `FieldValue` contains the value of a target or metric field.
-#[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -167,6 +168,10 @@ impl From<histogram::Histogram<f64>> for Measurement {
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error)]
 pub enum Error {
+    /// An error occurred during the production of metric samples.
+    #[error("Error during sample production: {0}")]
+    ProductionError(String),
+
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
@@ -242,7 +247,7 @@ where
 /// [`Producer`](traits::Producer) generates [`Sample`]s for its monitored resources.
 ///
 /// See the [`Target`](crate::traits::Target) trait for more details on each field.
-#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
 pub struct Target {
     /// The name of target.
     pub name: String,
@@ -305,6 +310,14 @@ pub struct Metric {
     pub measurement_type: MeasurementType,
 }
 
+impl PartialEq for Metric {
+    fn eq(&self, other: &Metric) -> bool {
+        self.key == other.key && self.measurement_type == other.measurement_type
+    }
+}
+
+impl Eq for Metric {}
+
 impl<M> From<&M> for Metric
 where
     M: traits::Metric,
@@ -324,6 +337,9 @@ where
 /// A concrete type representing a single, timestamped measurement from a timeseries.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Sample {
+    /// The key for this sample, which is the contatenation of the target and metric keys.
+    pub key: String,
+
     /// The timestamp for this sample
     pub timestamp: DateTime<Utc>,
 
@@ -335,6 +351,38 @@ pub struct Sample {
 
     /// The actual measured data point for this sample.
     pub measurement: Measurement,
+}
+
+impl PartialEq for Sample {
+    /// Compare two Samples for equality.
+    ///
+    /// Two samples are considered equal if they have equal targets and metrics, and occur at the
+    /// same time. Importantly, the _data_ is not used during comparison.
+    fn eq(&self, other: &Sample) -> bool {
+        self.target.eq(&other.target)
+            && self.metric.eq(&other.metric)
+            && self.timestamp.eq(&other.timestamp)
+    }
+}
+
+impl Eq for Sample {}
+
+impl Ord for Sample {
+    /// Order two Samples.
+    ///
+    /// Samples are ordered by their target and metric keys, which include the field values of
+    /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
+    fn cmp(&self, other: &Sample) -> Ordering {
+        self.key
+            .cmp(&other.key)
+            .then(self.timestamp.cmp(&other.timestamp))
+    }
+}
+
+impl PartialOrd for Sample {
+    fn partial_cmp(&self, other: &Sample) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl Sample {
@@ -355,6 +403,7 @@ impl Sample {
         Meas: traits::DataPoint + Into<Measurement>,
     {
         Self {
+            key: format!("{}:{}", target.key(), metric.key()),
             timestamp: timestamp.unwrap_or_else(Utc::now),
             target: target.into(),
             metric: metric.into(),
