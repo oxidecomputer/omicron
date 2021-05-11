@@ -15,7 +15,8 @@ default-members = [
     "omicron-common",
     "omicron-nexus",
     "omicron-sled-agent",
-    "oximeter/oximeter"
+    "oximeter/oximeter",
+    "oximeter/oximeter-macro-impl",
 ]
 
 [profile.dev]
