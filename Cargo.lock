@@ -129,6 +129,9 @@ name = "bytes"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b700ce4376041dcd0a327fd0097c41095743c4c8af8887265942faf1100bd040"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cc"
@@ -585,21 +588,21 @@ dependencies = [
 
 [[package]]
 name = "httparse"
-version = "1.3.6"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc35c995b9d93ec174cf9a27d425c7892722101e14993cd227fdb51d70cf9589"
+checksum = "f3a87b616e37e93c22fb19bcd386f02f3af5ea98a25670ad0fce773de23c5e68"
 
 [[package]]
 name = "httpdate"
-version = "0.3.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494b4d60369511e7dea41cf646832512a94e542f68bb9c49e54518e0f468eb47"
+checksum = "05842d0d43232b23ccb7060ecb0f0626922c21f30012e97b767b30afd4a5d4b9"
 
 [[package]]
 name = "hyper"
-version = "0.14.5"
+version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bf09f61b52cfcf4c00de50df88ae423d6c02354e385a86341133b5338630ad1"
+checksum = "1e5f105c494081baa3bf9e200b279e27ec1623895cd504c7dbef8d0b080fcf54"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -962,6 +965,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "dropshot",
+ "hyper",
+ "num-traits",
+ "oximeter-macro-impl",
+ "oximeter-metric",
+ "oximeter-target",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-macro-impl"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "proc-macro2",
+ "quote",
+ "schemars",
+ "serde",
+ "syn",
+]
+
+[[package]]
+name = "oximeter-metric"
+version = "0.1.0"
+dependencies = [
+ "oximeter-macro-impl",
+]
+
+[[package]]
+name = "oximeter-target"
+version = "0.1.0"
+dependencies = [
+ "oximeter-macro-impl",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,6 +1319,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc6ab463ae35acccb5cba66c0084c985257b797d288b6050cc2f6ac1b266cb78"
 dependencies = [
+ "bytes",
  "chrono",
  "dyn-clone",
  "schemars_derive",
@@ -1640,9 +1690,9 @@ checksum = "1e81da0851ada1f3e9d4312c704aa4f8806f0f9d69faaf8df2f3464b4a9437c2"
 
 [[package]]
 name = "syn"
-version = "1.0.69"
+version = "1.0.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48fe99c6bd8b1cc636890bcc071842de909d902c81ac7dab53ba33c421ab8ffb"
+checksum = "a1e8cdbefb79a9a5a65e0db8b47b723ee907b7c7f8496c76a1770b5c310bab82"
 dependencies = [
  "proc-macro2",
  "quote",
