@@ -16,7 +16,6 @@ use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -655,7 +654,9 @@ impl Display for ApiInstanceState {
 impl TryFrom<(&str, bool)> for ApiInstanceState {
     type Error = String;
 
-    fn try_from((variant, rebooting): (&str, bool)) -> Result<Self, Self::Error> {
+    fn try_from(
+        (variant, rebooting): (&str, bool),
+    ) -> Result<Self, Self::Error> {
         println!("ApiInstanceState::try_from: ({}, {})", variant, rebooting);
         let r = match variant {
             "creating" => ApiInstanceState::Creating,
@@ -669,34 +670,6 @@ impl TryFrom<(&str, bool)> for ApiInstanceState {
             _ => return Err(format!("Unexpected variant {}", variant)),
         };
         Ok(r)
-    }
-}
-
-/*
- * XXX We should not need this; it should be derivable from Serde.
- */
-/*
-impl<'a> From<&'a ApiInstanceState> for &'a str {
-    fn from(s: &'a ApiInstanceState) -> &'a str {
-        println!("ApiInstanceState to string: {}", s.label());
-        s.label()
-    }
-}
-*/
-
-// TODO: Remove me?
-impl From<ApiInstanceStateRequested> for ApiInstanceState {
-    fn from(requested: ApiInstanceStateRequested) -> Self {
-        match requested {
-            ApiInstanceStateRequested::Running => ApiInstanceState::Running,
-            ApiInstanceStateRequested::Stopped => {
-                ApiInstanceState::Stopped { rebooting: false }
-            }
-            ApiInstanceStateRequested::Reboot => {
-                ApiInstanceState::Stopping { rebooting: true }
-            }
-            ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
-        }
     }
 }
 
@@ -773,14 +746,6 @@ pub enum ApiInstanceStateRequested {
 impl Display for ApiInstanceStateRequested {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
-    }
-}
-
-impl TryFrom<&str> for ApiInstanceStateRequested {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        parse_str_using_serde(value)
     }
 }
 
@@ -1085,19 +1050,6 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
             )),
         }
     }
-}
-
-fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
-    s: &str,
-) -> Result<T, anyhow::Error> {
-    /*
-     * Round-tripping through serde is a little absurd, but has the benefit
-     * of always staying in sync with the real definition.  (The initial
-     * serialization is necessary to correctly handle any quotes or the like
-     * in the input string.)
-     */
-    let json = serde_json::to_string(s).unwrap();
-    serde_json::from_str(&json).context("parsing instance state")
 }
 
 impl ApiDiskState {

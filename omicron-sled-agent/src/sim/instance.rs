@@ -32,32 +32,23 @@ impl Simulatable for SimInstance {
         target: &Self::RequestedState,
     ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>
     {
-        println!("SIM SA: Calculating next state ({:#?} -> {:#?}, but pending: {:#?})", current, target, pending);
-        // TODO: Is this necessary?
-        // Early exit if the current state matches the requested state.
-        if current.run_state == target.run_state.clone().into() {
-            return Ok((current.clone(), pending.clone()));
-        }
-
         // Validate the state transition and return the next state.
         // This may differ from the "final" state if the transition requires
         // multiple stages (i.e., running -> stopping -> stopped).
         let (next_state, final_state) = match target.run_state {
             ApiInstanceStateRequested::Running => {
-                println!("Target State: Running");
                 match current.run_state {
+                    // Early exit: Running request is no-op
+                    ApiInstanceState::Running
+                    | ApiInstanceState::Stopping { rebooting: true }
+                    | ApiInstanceState::Stopped { rebooting: true } => {
+                        return Ok((current.clone(), pending.clone()));
+                    }
                     // Valid states for a running request
                     ApiInstanceState::Creating
                     | ApiInstanceState::Starting
-                    | ApiInstanceState::Running
-                    | ApiInstanceState::Stopping { rebooting: _ }
-                    | ApiInstanceState::Stopped { rebooting: _ } => {
-                        if current.run_state.is_rebooting() {
-                            // Early exit: We're already rebooting, which should
-                            // end up running anyway.
-                            return Ok((current.clone(), pending.clone()));
-                        }
-
+                    | ApiInstanceState::Stopping { rebooting: false }
+                    | ApiInstanceState::Stopped { rebooting: false } => {
                         if current.run_state.is_stopped() {
                             (
                                 ApiInstanceState::Starting,
@@ -81,14 +72,18 @@ impl Simulatable for SimInstance {
                 }
             }
             ApiInstanceStateRequested::Stopped => {
-                println!("Target State: Stopped");
                 match current.run_state {
+                    // Early exit: Stop request is a no-op
+                    ApiInstanceState::Stopped { rebooting: false }
+                    | ApiInstanceState::Stopping { rebooting: false } => {
+                        return Ok((current.clone(), pending.clone()));
+                    }
                     // Valid states for a stop request
                     ApiInstanceState::Creating
                     | ApiInstanceState::Starting
                     | ApiInstanceState::Running
-                    | ApiInstanceState::Stopping { rebooting: _ }
-                    | ApiInstanceState::Stopped { rebooting: _ } => {
+                    | ApiInstanceState::Stopping { rebooting: true }
+                    | ApiInstanceState::Stopped { rebooting: true } => {
                         // Note that if we were rebooting, a request to enter
                         // the stopped state effectively cancels the reboot.
                         if current.run_state.is_stopped() {
@@ -117,29 +112,20 @@ impl Simulatable for SimInstance {
                 }
             }
             ApiInstanceStateRequested::Reboot => {
-                println!("Target State: Reboot");
                 match current.run_state {
-                    // Valid states for a reboot request
-                    ApiInstanceState::Starting
-                    | ApiInstanceState::Running
-                    | ApiInstanceState::Stopping { rebooting: true }
+                    // Early exit: Reboot request is a no-op
+                    ApiInstanceState::Stopping { rebooting: true }
                     | ApiInstanceState::Stopped { rebooting: true } => {
-                        if current.run_state.is_rebooting() {
-                            // Early exit: We're already rebooting.
-                            println!("SIM SA: Already rebooting. Early exit");
-                            return Ok((current.clone(), pending.clone()));
-                        }
-
+                        return Ok((current.clone(), pending.clone()));
+                    }
+                    // Valid states for a reboot request
+                    ApiInstanceState::Starting | ApiInstanceState::Running => {
                         if current.run_state.is_stopped() {
-                            println!("SIM SA: Currently stopped");
                             (
                                 ApiInstanceState::Stopped { rebooting: true },
                                 Some(ApiInstanceStateRequested::Stopped),
                             )
                         } else {
-                            println!(
-                                "SIM SA: Currently not stopped. Stopping."
-                            );
                             (
                                 ApiInstanceState::Stopping { rebooting: true },
                                 Some(ApiInstanceStateRequested::Stopped),
@@ -190,10 +176,6 @@ impl Simulatable for SimInstance {
         current: &Self::CurrentState,
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
-        println!(
-            "SIM SA: Next state for async finish ({:#?} -> {:#?})",
-            current, pending
-        );
         /*
          * As documented above, `self.requested_state` is only non-None when
          * there's an asynchronous (simulated) transition in progress, and the
@@ -215,11 +197,19 @@ impl Simulatable for SimInstance {
             _ => panic!("async transition started for unexpected state"),
         };
 
+        let run_state = match run_state_after {
+            ApiInstanceStateRequested::Running => ApiInstanceState::Running,
+            ApiInstanceStateRequested::Stopped => {
+                ApiInstanceState::Stopped { rebooting: false }
+            }
+            ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
+            _ => panic!("unexpected async transition: {}", run_state_after),
+        };
         /*
          * Having verified all that, we can update the Instance's state.
          */
         let next_state = ApiInstanceRuntimeState {
-            run_state: run_state_after.clone().into(),
+            run_state,
             sled_uuid: current.sled_uuid,
             gen: current.gen.next(),
             time_updated: Utc::now(),

@@ -391,7 +391,8 @@ impl DataStore {
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
-        let stopped = ApiInstanceState::Stopped { rebooting: false }.to_string();
+        let stopped =
+            ApiInstanceState::Stopped { rebooting: false }.to_string();
         let p1 = cond_sql.next_param(&stopped);
         let failed = ApiInstanceState::Failed.to_string();
         let p2 = cond_sql.next_param(&failed);
@@ -408,13 +409,9 @@ impl DataStore {
         .await?;
 
         let row = &update.found_state;
-        println!("Lookup up 'found_id'...");
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        println!("Lookup up 'found_instance_state'...");
         let variant = sql_row_value(&row, "found_instance_state")?;
-        println!("Lookup up 'found_rebooting'...");
         let rebooting = sql_row_value(&row, "found_rebooting")?;
-        println!("Converting to instance_state");
         let instance_state = ApiInstanceState::try_from((variant, rebooting))
             .map_err(|e| ApiError::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);

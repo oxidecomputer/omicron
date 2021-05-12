@@ -62,7 +62,6 @@ where
     let row =
         sql_fetch_row_raw::<L, T>(client, scope_key, item_key, T::ALL_COLUMNS)
             .await?;
-    println!("sql_fetch_row_by: OK. Now converting from row...");
     T::ModelType::try_from(&row)
 }
 

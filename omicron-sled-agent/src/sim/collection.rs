@@ -117,7 +117,6 @@ impl<S: Simulatable> SimObject<S> {
             S::next_state_for_new_target(&state_before, &dropped, &target)?;
 
         if S::state_unchanged(&state_before, &state_after) {
-            println!("Unchanged state");
             info!(self.log, "noop transition"; "target" => ?target);
             return Ok(None);
         }
@@ -459,7 +458,18 @@ mod test {
             let rnext = instance.current_state.clone();
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
-            assert_eq!(rnext.run_state, state.into());
+            match state {
+                ApiInstanceStateRequested::Stopped => {
+                    assert_eq!(
+                        rnext.run_state,
+                        ApiInstanceState::Stopped { rebooting: false }
+                    );
+                }
+                ApiInstanceStateRequested::Destroyed => {
+                    assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+                }
+                _ => panic!("Unexpected requested state: {}", state),
+            }
             assert!(rx.try_next().is_err());
             rprev = rnext;
         }

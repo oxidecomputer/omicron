@@ -463,7 +463,6 @@ impl Nexus {
         project_name: &ApiName,
         instance_name: &ApiName,
     ) -> DeleteResult {
-        println!("NEXUS: project_destroy_instance");
         /*
          * TODO-robustness We need to figure out what to do with Destroyed
          * instances?  Presumably we need to clean them up at some point, but
@@ -471,12 +470,10 @@ impl Nexus {
          */
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        println!("NEXUS: Project looked up OK...");
         let instance = self
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
-        println!("NEXUS: Instance looked up OK...");
         self.db_datastore.project_delete_instance(&instance.identity.id).await
     }
 
@@ -571,13 +568,10 @@ impl Nexus {
          * never lose track of the fact that this Instance was supposed to be
          * running.
          */
-        println!("NEXUS: Reboot. Looking up instance...");
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        println!("NEXUS: Reboot. Checking runtime change allowed...");
         self.check_runtime_change_allowed(&instance.runtime)?;
-        println!("NEXUS: Reboot. Setting runtime...");
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -586,10 +580,7 @@ impl Nexus {
             },
         )
         .await?;
-        println!("NEXUS: Reboot. Instance fetch...");
-        let r = self.db_datastore.instance_fetch(&instance.identity.id).await?;
-        println!("NEXUS: Reboot - OK");
-        Ok(r)
+        self.db_datastore.instance_fetch(&instance.identity.id).await
     }
 
     /**
