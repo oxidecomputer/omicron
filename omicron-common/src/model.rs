@@ -652,39 +652,62 @@ impl Display for ApiInstanceState {
  * good validation error.  ApiInstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<&str> for ApiInstanceState {
-    type Error = anyhow::Error;
+impl TryFrom<(&str, bool)> for ApiInstanceState {
+    type Error = String;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        parse_str_using_serde(value)
+    fn try_from((variant, rebooting): (&str, bool)) -> Result<Self, Self::Error> {
+        println!("ApiInstanceState::try_from: ({}, {})", variant, rebooting);
+        let r = match variant {
+            "creating" => ApiInstanceState::Creating,
+            "starting" => ApiInstanceState::Starting,
+            "running" => ApiInstanceState::Running,
+            "stopping" => ApiInstanceState::Stopping { rebooting },
+            "stopped" => ApiInstanceState::Stopped { rebooting },
+            "repairing" => ApiInstanceState::Repairing,
+            "failed" => ApiInstanceState::Failed,
+            "destroyed" => ApiInstanceState::Destroyed,
+            _ => return Err(format!("Unexpected variant {}", variant)),
+        };
+        Ok(r)
     }
 }
 
+/*
+ * XXX We should not need this; it should be derivable from Serde.
+ */
+/*
 impl<'a> From<&'a ApiInstanceState> for &'a str {
     fn from(s: &'a ApiInstanceState) -> &'a str {
+        println!("ApiInstanceState to string: {}", s.label());
         s.label()
     }
 }
+*/
 
+// TODO: Remove me?
 impl From<ApiInstanceStateRequested> for ApiInstanceState {
     fn from(requested: ApiInstanceStateRequested) -> Self {
         match requested {
             ApiInstanceStateRequested::Running => ApiInstanceState::Running,
-            ApiInstanceStateRequested::Stopped => ApiInstanceState::Stopped { rebooting: false },
-            ApiInstanceStateRequested::Reboot => ApiInstanceState::Stopping { rebooting: true },
+            ApiInstanceStateRequested::Stopped => {
+                ApiInstanceState::Stopped { rebooting: false }
+            }
+            ApiInstanceStateRequested::Reboot => {
+                ApiInstanceState::Stopping { rebooting: true }
+            }
             ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
         }
     }
 }
 
 impl ApiInstanceState {
-    fn label(&self) -> &str {
+    pub fn label(&self) -> &'static str {
         match self {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
-            ApiInstanceState::Stopping {rebooting: _} => "stopping",
-            ApiInstanceState::Stopped {rebooting: _} => "stopped",
+            ApiInstanceState::Stopping { rebooting: _r } => "stopping",
+            ApiInstanceState::Stopped { rebooting: _r } => "stopped",
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
@@ -700,10 +723,10 @@ impl ApiInstanceState {
         match self {
             ApiInstanceState::Starting => false,
             ApiInstanceState::Running => false,
-            ApiInstanceState::Stopping {rebooting: _} => false,
+            ApiInstanceState::Stopping { rebooting: _ } => false,
 
             ApiInstanceState::Creating => true,
-            ApiInstanceState::Stopped {rebooting: _} => true,
+            ApiInstanceState::Stopped { rebooting: _ } => true,
             ApiInstanceState::Repairing => true,
             ApiInstanceState::Failed => true,
             ApiInstanceState::Destroyed => true,
@@ -753,6 +776,14 @@ impl Display for ApiInstanceStateRequested {
     }
 }
 
+impl TryFrom<&str> for ApiInstanceStateRequested {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        parse_str_using_serde(value)
+    }
+}
+
 impl ApiInstanceStateRequested {
     fn label(&self) -> &str {
         match self {
@@ -770,7 +801,7 @@ impl ApiInstanceStateRequested {
         match self {
             ApiInstanceStateRequested::Running => false,
             ApiInstanceStateRequested::Stopped => true,
-            ApiInstanceStateRequested::Reboot => false, // XXX
+            ApiInstanceStateRequested::Reboot => false,
             ApiInstanceStateRequested::Destroyed => true,
         }
     }

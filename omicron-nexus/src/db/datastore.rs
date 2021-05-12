@@ -387,28 +387,36 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        values.set("instance_state", &ApiInstanceState::Destroyed);
+        ApiInstanceState::Destroyed.sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
-        let p1 = cond_sql.next_param(&ApiInstanceState::Stopped { rebooting: false });
-        let p2 = cond_sql.next_param(&ApiInstanceState::Failed);
+        let stopped = ApiInstanceState::Stopped { rebooting: false }.to_string();
+        let p1 = cond_sql.next_param(&stopped);
+        let failed = ApiInstanceState::Failed.to_string();
+        let p2 = cond_sql.next_param(&failed);
         cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
 
         let update = sql_update_precond::<Instance, LookupByUniqueId>(
             &client,
             (),
             instance_id,
-            &["instance_state", "time_deleted"],
+            &["instance_state", "rebooting", "time_deleted"],
             &values,
             cond_sql,
         )
         .await?;
 
         let row = &update.found_state;
+        println!("Lookup up 'found_id'...");
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let instance_state: ApiInstanceState =
-            sql_row_value(&row, "found_instance_state")?;
+        println!("Lookup up 'found_instance_state'...");
+        let variant = sql_row_value(&row, "found_instance_state")?;
+        println!("Lookup up 'found_rebooting'...");
+        let rebooting = sql_row_value(&row, "found_rebooting")?;
+        println!("Converting to instance_state");
+        let instance_state = ApiInstanceState::try_from((variant, rebooting))
+            .map_err(|e| ApiError::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);
 
         if update.updated {

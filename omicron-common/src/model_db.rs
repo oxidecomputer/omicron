@@ -118,10 +118,11 @@ macro_rules! impl_sql_wrapping {
     };
 }
 
+// XXX: "impl_sql_wrapping(A, B)" means "serialize 'A' as 'B'"
 impl_sql_wrapping!(ApiByteCount, i64);
 impl_sql_wrapping!(ApiGeneration, i64);
 impl_sql_wrapping!(ApiInstanceCpuCount, i64);
-impl_sql_wrapping!(ApiInstanceState, &str);
+// impl_sql_wrapping!(ApiInstanceState, &str);
 impl_sql_wrapping!(ApiName, &str);
 
 /*
@@ -158,6 +159,18 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     }
 }
 
+impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+
+        let variant = sql_row_value(value, "instance_state")?;
+        let rebooting = sql_row_value(value, "rebooting")?;
+        ApiInstanceState::try_from((variant, rebooting))
+            .map_err(|err| ApiError::InternalError { message: err.into() } )
+    }
+}
+
 /// Load an [`ApiProject`] from a whole row of the "Project" table.
 impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
@@ -191,7 +204,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(ApiInstanceRuntimeState {
-            run_state: sql_row_value(value, "instance_state")?,
+            run_state: ApiInstanceState::try_from(value)?,
             sled_uuid: sql_row_value(value, "active_server_id")?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,

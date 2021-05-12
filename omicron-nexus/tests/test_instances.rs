@@ -150,9 +150,14 @@ async fn test_instances() {
      * Reboot the instance.
      */
     let instance = instance_next;
+    println!("TEST: Request to reboot instance...");
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping { rebooting: true });
+    println!("TEST: Request to reboot instance... OK");
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: true }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -182,7 +187,10 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping { rebooting: false });
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -191,7 +199,10 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped { rebooting: false });
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopped { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -234,9 +245,14 @@ async fn test_instances() {
     );
 
     let instance = instance_next;
+    println!("TEST: Request to reboot instance again...");
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping { rebooting: true });
+    println!("TEST: Request to reboot instance again... OK");
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: true }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -265,15 +281,21 @@ async fn test_instances() {
      * fail because you cannot stop an instance that's en route to a stopped
      * state.
      */
+    println!("TEST: Request to stop the instance...");
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping { rebooting: false });
+    println!("TEST: Request to stop the instance... OK");
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
     );
 
+    println!("TEST: Request to reboot the instance (expect error)...");
     let error = client
         .make_request_error(
             Method::POST,
@@ -281,11 +303,15 @@ async fn test_instances() {
             StatusCode::BAD_REQUEST,
         )
         .await;
+    println!("TEST: Request to reboot the instance (expect error)... OK");
     assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped { rebooting: true });
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopped { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -293,6 +319,7 @@ async fn test_instances() {
 
     /* TODO-coverage add a test to try to delete the project at this point. */
 
+    println!("TEST: Deleting instance...");
     /* Delete the instance. */
     client
         .make_request_no_body(
@@ -313,6 +340,7 @@ async fn test_instances() {
      * Once more, try to reboot it.  This should not work on a destroyed
      * instance.
      */
+    println!("TEST: Expecting failed reboot");
     client
         .make_request_error(
             Method::POST,
@@ -324,6 +352,7 @@ async fn test_instances() {
     /*
      * Similarly, we should not be able to start or stop the instance.
      */
+    println!("TEST: Expecting failed start");
     client
         .make_request_error(
             Method::POST,
@@ -332,6 +361,7 @@ async fn test_instances() {
         )
         .await;
 
+    println!("TEST: Expecting failed stop");
     client
         .make_request_error(
             Method::POST,
