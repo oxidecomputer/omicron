@@ -1,91 +1,38 @@
-use std::str::FromStr;
+//! Implementation of procedural macros for deriving oximeter's traits.
+//!
+//! This crate provides the implementation of the `Target` derive macro and the `oximeter::metric`
+//! attribute macro. These allow users of the main `oximeter` crate to easily derive the methods to
+//! retrieve the names, types, and values of their struct fields, and to associate a supported
+//! measurement type with their metric struct.
+
+// Copyright 2021 Oxide Computer Company
+
+extern crate proc_macro;
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, ToTokens, TokenStreamExt};
+use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Error, Fields, Ident, Type};
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-/// The data type of an individual measurement of a metric.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Eq,
-    Hash,
-    JsonSchema,
-    Serialize,
-    Deserialize,
-)]
-pub enum MeasurementType {
-    Bool,
-    I64,
-    F64,
-    String,
-    Bytes,
-    CumulativeI64,
-    CumulativeF64,
-    HistogramI64,
-    HistogramF64,
+/// Derive the `Target` trait for a type.
+#[proc_macro_derive(Target)]
+pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    target_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
-impl FromStr for MeasurementType {
-    type Err = String;
-    fn from_str(type_: &str) -> Result<Self, Self::Err> {
-        match type_ {
-            "bool" => Ok(MeasurementType::Bool),
-            "i64" => Ok(MeasurementType::I64),
-            "f64" => Ok(MeasurementType::F64),
-            "String" => Ok(MeasurementType::String),
-            "Bytes" => Ok(MeasurementType::Bytes),
-            "CumulativeI64" => Ok(MeasurementType::CumulativeI64),
-            "CumulativeF64" => Ok(MeasurementType::CumulativeF64),
-            "HistogramI64" => Ok(MeasurementType::HistogramI64),
-            "HistogramF64" => Ok(MeasurementType::HistogramF64),
-            _ => Err(String::from(
-                "Invalid measurement type, must be one of
-                \"bool\", \"i64\", \"f64\", \"String\", \"Bytes\"
-                \"CumulativeI64\" or \"CumulativeF64\"
-                \"HistogramI64\" or \"HistogramF64\"",
-            )),
-        }
-    }
-}
-
-impl ToTokens for MeasurementType {
-    fn to_tokens(&self, stream: &mut TokenStream) {
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Joint));
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Alone));
-        let mod_name = proc_macro2::Ident::new("oximeter", Span::call_site());
-        stream.append(mod_name);
-
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Joint));
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Alone));
-        let enum_name =
-            proc_macro2::Ident::new("MeasurementType", Span::call_site());
-        stream.append(enum_name);
-
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Joint));
-        stream
-            .append(proc_macro2::Punct::new(':', proc_macro2::Spacing::Alone));
-        let ident =
-            proc_macro2::Ident::new(&format!("{:?}", self), Span::call_site());
-        stream.append(ident);
-    }
+/// Derive the `Metric` trait for a struct.
+#[proc_macro_attribute]
+pub fn metric(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    metric_impl(attr.into(), input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
 // Implementation of `#[derive(Target)]`
-pub fn target(tokens: TokenStream) -> syn::Result<TokenStream> {
+fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     if let Data::Struct(ref data) = item.data {
         let name = &item.ident;
@@ -112,12 +59,12 @@ pub fn target(tokens: TokenStream) -> syn::Result<TokenStream> {
 }
 
 // Implementation of the `[oximeter::metric]` procedural macro attribute.
-pub fn metric(
+fn metric_impl(
     attr: TokenStream,
     item: TokenStream,
 ) -> syn::Result<TokenStream> {
-    let measurement_type = parse_metric_attributes(attr)?;
-
+    let measurement_type = syn::parse2::<Ident>(attr)?;
+    let meas_type = type_name_for_measurement_type(&measurement_type)?;
     let item = syn::parse2::<syn::ItemStruct>(item)?;
     let name = &item.ident;
     if let Fields::Named(ref data_fields) = item.fields {
@@ -134,7 +81,8 @@ pub fn metric(
             &names,
             &types,
             &values,
-            measurement_type,
+            &measurement_type,
+            meas_type,
         );
         return Ok(quote! {
             #item
@@ -186,26 +134,24 @@ fn build_target_trait_impl(
 }
 
 fn type_name_for_measurement_type(
-    measurement_type: MeasurementType,
-) -> TokenStream {
-    match measurement_type {
-        MeasurementType::Bool => quote! { bool },
-        MeasurementType::I64 => quote! { i64 },
-        MeasurementType::F64 => quote! { f64 },
-        MeasurementType::String => quote! { String },
-        MeasurementType::Bytes => quote! { bytes::Bytes },
-        MeasurementType::CumulativeI64 => {
-            quote! { ::oximeter::types::Cumulative<i64> }
-        }
-        MeasurementType::CumulativeF64 => {
-            quote! { ::oximeter::types::Cumulative<f64> }
-        }
-        MeasurementType::HistogramI64 => {
-            quote! { ::oximeter::histogram::Histogram<i64> }
-        }
-        MeasurementType::HistogramF64 => {
-            quote! { ::oximeter::histogram::Histogram<f64> }
-        }
+    measurement_type: &Ident,
+) -> syn::Result<TokenStream> {
+    match format!("{}", measurement_type).as_str() {
+        "Bool" => Ok(quote! { bool }),
+        "I64" => Ok(quote! { i64 }),
+        "F64" => Ok(quote! { f64 }),
+        "String" => Ok(quote! { String }),
+        "Bytes" => Ok(quote! { bytes::Bytes }),
+        "CumulativeI64" => Ok(quote! { ::oximeter::types::Cumulative<i64> }),
+        "CumulativeF64" => Ok(quote! { ::oximeter::types::Cumulative<f64> }),
+        "HistogramI64" => Ok(quote! { ::oximeter::histogram::Histogram<i64> }),
+        "HistogramF64" => Ok(quote! { ::oximeter::histogram::Histogram<f64> }),
+        _ => Err(Error::new(measurement_type.span(),
+                "Invalid measurement type, must be a variant of oximeter::MeasurementType: \
+                \"Bool\", \"I64\", \"F64\", \"String\", \"Bytes\", \
+                \"CumulativeI64\" or \"CumulativeF64\", \
+                \"HistogramI64\" or \"HistogramF64\".",
+            ))
     }
 }
 
@@ -215,13 +161,18 @@ fn build_metric_trait_impl(
     names: &[String],
     types: &[TokenStream],
     values: &[TokenStream],
-    measurement_type: MeasurementType,
+    measurement_type: &Ident,
+    meas_type: TokenStream,
 ) -> TokenStream {
     let refs = names.iter().map(|name| format_ident!("{}", name));
     let name = to_snake_case(&format!("{}", item_name));
     let fmt = format!("{}{{}}", "{}:".repeat(values.len()));
     let key_formatter = quote! { format!(#fmt, #(self.#refs),*, #name) };
-    let meas_type = type_name_for_measurement_type(measurement_type);
+    let measurement_type = syn::parse_str::<syn::Expr>(&format!(
+        "::oximeter::MeasurementType::{}",
+        measurement_type
+    ))
+    .unwrap();
     quote! {
         impl ::oximeter::Metric for #item_name {
             type Measurement = #meas_type;
@@ -351,22 +302,13 @@ fn to_snake_case(name: &str) -> String {
     out
 }
 
-// Pull out the measurement type from the attribute
-fn parse_metric_attributes(attr: TokenStream) -> syn::Result<MeasurementType> {
-    let type_ = syn::parse2::<Ident>(attr)?;
-    let measurement_type = format!("{}", type_)
-        .parse()
-        .map_err(|e| Error::new(type_.span(), e))?;
-    Ok(measurement_type)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_target() {
-        let out = target(
+        let out = target_impl(
             quote! {
                 #[derive(Target)]
                 struct MyTarget {
@@ -382,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_target_unsupported_type() {
-        let out = target(
+        let out = target_impl(
             quote! {
                 #[derive(Target)]
                 struct MyTarget {
@@ -396,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_target_unit_struct() {
-        let out = target(
+        let out = target_impl(
             quote! {
                 #[derive(Target)]
                 struct MyTarget;
@@ -408,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_target_enum() {
-        let out = target(
+        let out = target_impl(
             quote! {
                 #[derive(Target)]
                 enum MyTarget {
@@ -424,9 +366,9 @@ mod tests {
     #[test]
     fn test_metric() {
         let valid_types = &[
-            "bool",
-            "i64",
-            "f64",
+            "Bool",
+            "I64",
+            "F64",
             "String",
             "Bytes",
             "CumulativeI64",
@@ -436,7 +378,7 @@ mod tests {
         ];
         for type_ in valid_types.iter() {
             let ident = syn::parse_str::<Type>(type_).unwrap();
-            let out = metric(
+            let out = metric_impl(
                 quote! { #ident },
                 quote! {
                     struct MyMetric {
@@ -450,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_metric_enum() {
-        let out = metric(
+        let out = metric_impl(
             quote! { bool },
             quote! {
                 enum MyMetric {
@@ -463,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_metric_unsupported_type() {
-        let out = metric(
+        let out = metric_impl(
             quote! { f32 },
             quote! {
                 struct MyMetric {

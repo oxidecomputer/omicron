@@ -234,7 +234,7 @@ mod tests {
         pub id: i64,
     }
 
-    #[metric(i64)]
+    #[metric(I64)]
     #[derive(Clone)]
     struct Met {
         pub good: bool,

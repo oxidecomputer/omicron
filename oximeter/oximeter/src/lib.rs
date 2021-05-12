@@ -1,9 +1,7 @@
 //! Tools for generating and collecting metric data in the Oxide rack.
 // Copyright 2021 Oxide Computer Company
 
-pub use oximeter_macro_impl::MeasurementType;
-pub use oximeter_metric::*;
-pub use oximeter_target::*;
+pub use oximeter_macro_impl::*;
 
 // Export the current crate as `oximeter`. The macros defined in `oximeter-macro-impl` generate
 // code referring to symbols like `oximeter::traits::Target`. In consumers of this crate, that's
@@ -18,4 +16,4 @@ pub mod traits;
 pub mod types;
 
 pub use traits::{Metric, Producer, Target};
-pub use types::{Error, FieldType, FieldValue};
+pub use types::{Error, FieldType, FieldValue, MeasurementType};

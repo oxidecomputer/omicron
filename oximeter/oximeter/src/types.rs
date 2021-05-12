@@ -16,7 +16,6 @@ use uuid::Uuid;
 
 use crate::histogram;
 use crate::traits;
-use crate::MeasurementType;
 
 /// The `FieldType` identifies the type of a target or metric field.
 #[derive(
@@ -74,6 +73,32 @@ impl From<bool> for FieldValue {
     fn from(value: bool) -> Self {
         FieldValue::Bool(value)
     }
+}
+
+/// The data type of an individual measurement of a metric.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Eq,
+    Hash,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
+pub enum MeasurementType {
+    Bool,
+    I64,
+    F64,
+    String,
+    Bytes,
+    CumulativeI64,
+    CumulativeF64,
+    HistogramI64,
+    HistogramF64,
 }
 
 /// A measurement is a single sampled data point from a metric.
@@ -436,7 +461,7 @@ mod tests {
         pub id: i64,
     }
 
-    #[crate::metric(i64)]
+    #[crate::metric(I64)]
     #[derive(Clone)]
     struct Met {
         pub good: bool,

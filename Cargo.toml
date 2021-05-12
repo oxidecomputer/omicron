@@ -6,8 +6,6 @@ members = [
     "omicron-sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
-    "oximeter/oximeter-target",
-    "oximeter/oximeter-metric",
 ]
 
 default-members = [
@@ -17,8 +15,6 @@ default-members = [
     "omicron-sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
-    "oximeter/oximeter-target",
-    "oximeter/oximeter-metric",
 ]
 
 [profile.dev]

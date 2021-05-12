@@ -974,8 +974,6 @@ dependencies = [
  "hyper",
  "num-traits",
  "oximeter-macro-impl",
- "oximeter-metric",
- "oximeter-target",
  "schemars",
  "serde",
  "slog",
@@ -991,23 +989,7 @@ dependencies = [
  "bytes",
  "proc-macro2",
  "quote",
- "schemars",
- "serde",
  "syn",
-]
-
-[[package]]
-name = "oximeter-metric"
-version = "0.1.0"
-dependencies = [
- "oximeter-macro-impl",
-]
-
-[[package]]
-name = "oximeter-target"
-version = "0.1.0"
-dependencies = [
- "oximeter-macro-impl",
 ]
 
 [[package]]

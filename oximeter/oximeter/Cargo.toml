@@ -22,12 +22,6 @@ version = "0.2.14"
 [dependencies.hyper]
 version = "0.14.7"
 
-[dependencies.oximeter-metric]
-path = "../oximeter-metric"
-
-[dependencies.oximeter-target]
-path = "../oximeter-target"
-
 [dependencies.oximeter-macro-impl]
 path = "../oximeter-macro-impl"
 
