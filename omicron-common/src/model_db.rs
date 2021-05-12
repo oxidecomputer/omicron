@@ -164,7 +164,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
         let variant = sql_row_value(value, "instance_state")?;
         let rebooting = sql_row_value(value, "rebooting")?;
         ApiInstanceState::try_from((variant, rebooting))
-            .map_err(|err| ApiError::InternalError { message: err.into() })
+            .map_err(|err| ApiError::InternalError { message: err })
     }
 }
 
