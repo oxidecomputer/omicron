@@ -248,7 +248,7 @@ where
     /// ```
     pub fn with_bins(bins: &[BinRange<T>]) -> Result<Self, HistogramError> {
         let mut bins_ = Vec::with_capacity(bins.len());
-        let first = bins.first().ok_or_else(|| HistogramError::EmptyBins)?;
+        let first = bins.first().ok_or(HistogramError::EmptyBins)?;
 
         // Prepend a range ..start if needed
         if let Bound::Included(start) = first.start_bound() {
@@ -277,8 +277,8 @@ where
         } else {
             None
         };
-        if end.is_some() {
-            bins_.push(end.unwrap());
+        if let Some(end) = end {
+            bins_.push(end);
         }
 
         // Ensure there are no gaps, and each value is comparable
@@ -314,8 +314,7 @@ where
     pub fn new(left_edges: &[T]) -> Result<Self, HistogramError> {
         let mut items = left_edges.iter();
         let mut bins = Vec::with_capacity(left_edges.len() + 1);
-        let mut current =
-            items.next().ok_or_else(|| HistogramError::EmptyBins)?;
+        let mut current = items.next().ok_or(HistogramError::EmptyBins)?;
         is_comparable(*current)?;
         if *current > <T as Bounded>::min_value() {
             bins.push(Bin { range: BinRange::to(*current), count: 0 });
@@ -337,7 +336,7 @@ where
         if *current < <T as Bounded>::max_value() {
             bins.push(Bin { range: BinRange::from(*current), count: 0 });
         }
-        Ok(Self { bins: bins, n_samples: 0 })
+        Ok(Self { bins, n_samples: 0 })
     }
 
     /// Add a new sample into the histogram.
