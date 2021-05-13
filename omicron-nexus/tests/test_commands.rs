@@ -116,4 +116,6 @@ fn test_nexus_openapi() {
     assert_eq!(spec.info.version, "0.0.1");
     assert!(spec.paths.len() > 0);
     assert!(spec.paths.get("/projects").is_some());
+
+    assert_contents("tests/output/nexus-openapi.json", &stdout_text);
 }
