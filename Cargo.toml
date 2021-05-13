@@ -3,14 +3,18 @@ members = [
     "omicron-bootstrap-agent",
     "omicron-common",
     "omicron-nexus",
-    "omicron-sled-agent"
+    "omicron-sled-agent",
+    "oximeter/oximeter",
+    "oximeter/oximeter-macro-impl",
 ]
 
 default-members = [
     "omicron-bootstrap-agent",
     "omicron-common",
     "omicron-nexus",
-    "omicron-sled-agent"
+    "omicron-sled-agent",
+    "oximeter/oximeter",
+    "oximeter/oximeter-macro-impl",
 ]
 
 [profile.dev]

@@ -1,0 +1,22 @@
+[package]
+name = "oximeter-macro-impl"
+version = "0.1.0"
+authors = ["Benjamin Naecker <ben@oxide.computer>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies.bytes]
+version = "1.0.1"
+features = ["serde"]
+
+[dependencies.proc-macro2]
+version = "1.0.26"
+
+[dependencies.quote]
+version = "1.0.9"
+
+[dependencies.syn]
+version = "1.0.71"
+features = [ "full", "derive", "extra-traits" ]
