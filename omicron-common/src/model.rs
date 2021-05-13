@@ -617,6 +617,7 @@ pub struct ApiProjectUpdateParams {
  * but also includes states related to the Instance's lifecycle
  */
 #[derive(
+    Copy,
     Clone,
     Debug,
     Deserialize,
@@ -724,6 +725,7 @@ impl ApiInstanceState {
  * A subset of [`ApiInstanceState`].
  */
 #[derive(
+    Copy,
     Clone,
     Debug,
     Deserialize,
@@ -872,7 +874,7 @@ impl ApiObject for ApiInstanceRuntimeState {
     type View = ApiInstanceRuntimeStateView;
     fn to_view(&self) -> ApiInstanceRuntimeStateView {
         ApiInstanceRuntimeStateView {
-            run_state: self.run_state.clone(),
+            run_state: self.run_state,
             time_run_state_updated: self.time_updated,
         }
     }

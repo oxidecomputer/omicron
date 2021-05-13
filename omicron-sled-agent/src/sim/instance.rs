@@ -184,8 +184,8 @@ impl Simulatable for SimInstance {
          * checked `self.requested_state` above, we know we're in one of
          * these two transitions and assert that here.
          */
-        let run_state_before = current.run_state.clone();
-        let run_state_after = &pending.run_state;
+        let run_state_before = current.run_state;
+        let run_state_after = pending.run_state;
         match run_state_before {
             ApiInstanceState::Stopped { rebooting: _ }
             | ApiInstanceState::Stopping { rebooting: _ } => {
@@ -216,7 +216,7 @@ impl Simulatable for SimInstance {
         };
 
         let next_async = if run_state_before.is_rebooting() {
-            assert_eq!(*run_state_after, ApiInstanceStateRequested::Stopped);
+            assert_eq!(run_state_after, ApiInstanceStateRequested::Stopped);
             Some(ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceStateRequested::Running,
             })
