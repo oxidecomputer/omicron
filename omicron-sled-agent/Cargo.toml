@@ -51,5 +51,5 @@ subprocess = "0.2.4"
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 #
 [[bin]]
-name = "sled-agent"
+name = "sled-agent-sim"
 doc = false

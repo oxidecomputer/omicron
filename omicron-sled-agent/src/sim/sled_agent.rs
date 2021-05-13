@@ -1,8 +1,6 @@
 /*!
- * Sled agent implementation
+ * Simulated sled agent implementation
  */
-
-use super::config::SimMode;
 
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
@@ -14,7 +12,10 @@ use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::sim::{SimCollection, SimDisk, SimInstance};
+use super::collection::SimCollection;
+use super::config::SimMode;
+use super::disk::SimDisk;
+use super::instance::SimInstance;
 
 /**
  * Simulates management of the control plane on a sled

@@ -19,7 +19,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::SledAgent;
+use super::sled_agent::SledAgent;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
