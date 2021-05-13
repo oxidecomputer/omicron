@@ -23,11 +23,11 @@ jobs:
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.GLOBAL_GITHUB_TOKEN }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Extract branch name
         shell: bash
-        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        run: BRANCH="${GITHUB_HEAD_REF//\//-}"; echo "::set-output name=branch::${BRANCH:-main}"
         id: extract_branch
       - name: Build and push
         # This pushes a docker image to github's container registry.
@@ -35,7 +35,7 @@ jobs:
         # The docs are here: https://github.com/docker/build-push-action
         uses: docker/build-push-action@9379083e426e2e84abb80c8c091f5cdeb7d3fd7a
         with:
-          push: true
+          push: ${{ ! startsWith(github.ref, 'refs/heads/dependabot') }}
           file: ./Dockerfile
           tags: ghcr.io/${{ github.repository_owner }}/omicron:${{ steps.extract_branch.outputs.branch }},ghcr.io/${{ github.repository_owner }}/omicron:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache

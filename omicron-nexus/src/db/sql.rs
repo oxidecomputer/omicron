@@ -48,6 +48,7 @@ use tokio_postgres::types::ToSql;
  * `sql!(sql_str[, param...])` where `sql_str` is `&'static str` and the params
  * are all numbered params?
  */
+#[derive(Clone)]
 pub struct SqlString<'a> {
     contents: String,
     params: Vec<&'a (dyn ToSql + Sync)>,
@@ -243,10 +244,6 @@ pub trait Table {
     type ModelType: for<'a> TryFrom<&'a tokio_postgres::Row, Error = ApiError>
         + Send
         + 'static;
-    // TODO-cleanup can we remove the RESOURCE_TYPE here?  And if so, can we
-    // make this totally agnostic to the control plane?
-    /** [`ApiResourceType`] that corresponds to rows of this table */
-    const RESOURCE_TYPE: ApiResourceType;
     /** Name of the table */
     const TABLE_NAME: &'static str;
     /** List of names of all columns in the table. */
@@ -256,7 +253,27 @@ pub trait Table {
      * Parts of a WHERE clause that should be included in all queries for live
      * records
      */
+    /*
+     * TODO-design This really ought to be a default only for ResourceTable.  As
+     * it is, it's easy to accidentally leave this on non-ResourceTable Tables.
+     * The reverse, though, would make it easy to leave it off ResourceTables.
+     */
     const LIVE_CONDITIONS: &'static str = "time_deleted IS NULL";
+}
+
+/**
+ * Describes a [`Table`] whose rows represent HTTP resources in the public API
+ *
+ * Among other things, lookups from these tables produces suitable `ApiError`s
+ * when an object is not found.
+ */
+pub trait ResourceTable: Table {
+    /*
+     * TODO-cleanup can we remove the RESOURCE_TYPE here?  And if so, can we
+     * make this totally agnostic to the control plane?
+     */
+    /** [`ApiResourceType`] that corresponds to rows of this table */
+    const RESOURCE_TYPE: ApiResourceType;
 }
 
 /**
@@ -315,11 +332,7 @@ pub trait Table {
  * fetches rows exactly matching the scope parameters and sorted immediately
  * _after_ the given item key.
  */
-pub trait LookupKey<'a> {
-    /*
-     * Items defined by the various impls of this trait
-     */
-
+pub trait LookupKey<'a, T: Table> {
     /** Names of the database columns that make up the scope key */
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str];
 
@@ -339,11 +352,7 @@ pub trait LookupKey<'a> {
     /** Rust type describing the item key */
     type ItemKey: ToSql + for<'f> FromSql<'f> + Sync + Clone + 'static;
 
-    /**
-     * Generates an error for the case where no item was found for a particular
-     * lookup
-     */
-    fn where_select_error<T: Table>(
+    fn where_select_error(
         scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
     ) -> ApiError;
@@ -361,13 +370,11 @@ pub trait LookupKey<'a> {
      * most one row will match.  However, the SQL generated here neither assumes
      * nor guarantees that only one row will match.
      */
-    fn where_select_rows<'b>(
+    fn where_select_rows(
         scope_key: Self::ScopeKey,
         item_key: &'a Self::ItemKey,
-        output: &'b mut SqlString<'a>,
-    ) where
-        'a: 'b,
-    {
+        output: &mut SqlString<'a>,
+    ) {
         let mut column_names =
             Vec::with_capacity(Self::SCOPE_KEY_COLUMN_NAMES.len() + 1);
         column_names.extend_from_slice(&Self::SCOPE_KEY_COLUMN_NAMES);
@@ -388,13 +395,13 @@ pub trait LookupKey<'a> {
      * about the ordering and expects callers to provide the item key of the row
      * they want.
      */
-    fn where_select_page<'b, 'c, 'd>(
+    fn where_select_page<'b, 'c>(
         scope_key: Self::ScopeKey,
-        pagparams: &'c DataPageParams<'c, Self::ItemKey>,
-        output: &'b mut SqlString<'d>,
+        pagparams: &DataPageParams<'b, Self::ItemKey>,
+        output: &mut SqlString<'c>,
     ) where
-        'a: 'b + 'd,
-        'c: 'a,
+        'a: 'c,
+        'b: 'c,
     {
         let (operator, order) = match pagparams.direction {
             dropshot::PaginationOrder::Ascending => (">", "ASC"),
