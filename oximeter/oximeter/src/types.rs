@@ -205,6 +205,10 @@ pub enum Error {
     #[error("Error running metric server: {0}")]
     MetricServer(String),
 
+    /// An error running an `Oximeter` server
+    #[error("Error running oximeter: {0}")]
+    OximeterServer(String),
+
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),

@@ -64,7 +64,7 @@ impl Producer for CpuBusyProducer {
                 .to_std()
                 .map_err(|e| Error::ProductionError(e.to_string()))?
                 .as_secs_f64();
-            *busy += (elapsed - busy.value());
+            *busy += elapsed - busy.value();
             data.push(Sample::new(&self.vm, cpu, *busy, None));
         }
         // Yield the available samples.
@@ -80,7 +80,7 @@ async fn main() {
     let logging_config =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
     let registration_info =
-        RegistrationInfo::new("127.0.0.1:12221", "/producers");
+        RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
     let server_info = MetricServerInfo::new(address, "/collect");
     let config = MetricServerConfig {
         server_info,
@@ -90,6 +90,6 @@ async fn main() {
     };
     let server = MetricServer::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
-    server.collector().register_producer(Box::new(producer));
+    server.collector().register_producer(Box::new(producer)).unwrap();
     server.serve_forever().await.unwrap();
 }

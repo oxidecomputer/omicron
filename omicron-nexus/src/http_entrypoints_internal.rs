@@ -14,7 +14,9 @@ use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
 use omicron_common::SledAgentClient;
-use oximeter::collect::MetricServerInfo;
+use oximeter::{
+    collect::MetricServerInfo, oximeter_server::OximeterStartupInfo,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -31,6 +33,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
+        api.register(cpapi_collectors_post)?;
         Ok(())
     }
 
@@ -135,7 +138,7 @@ async fn cpapi_disks_put(
  */
 #[endpoint {
      method = POST,
-     path = "/producers",
+     path = "/metrics/producers",
  }]
 async fn cpapi_producers_post(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
@@ -147,5 +150,24 @@ async fn cpapi_producers_post(
     let producer_info = producer_info.into_inner();
     let producer_id = producer_info.producer_id().producer_id;
     info!(log, "registered new producer"; "producer_id" => producer_id.to_string());
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Accept a notification of a new oximeter collection server.
+ */
+#[endpoint {
+     method = POST,
+     path = "/metrics/collectors",
+ }]
+async fn cpapi_collectors_post(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    oximeter_info: TypedBody<OximeterStartupInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    let _nexus = &context.nexus;
+    let log = &context.log;
+    let oximeter_info = oximeter_info.into_inner();
+    info!(log, "registered new oximeter metric collection server"; "address" => oximeter_info.address);
     Ok(HttpResponseUpdatedNoContent())
 }

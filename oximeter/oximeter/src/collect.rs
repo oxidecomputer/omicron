@@ -51,7 +51,18 @@ impl RegistrationInfo {
 }
 
 /// Idenitifier for a producer.
-#[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialOrd,
+    PartialEq,
+    Ord,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
 pub struct ProducerId {
     pub producer_id: Uuid,
 }
@@ -63,6 +74,12 @@ impl ProducerId {
     }
 }
 
+impl Default for ProducerId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Display for ProducerId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.producer_id.to_string())
@@ -71,7 +88,17 @@ impl std::fmt::Display for ProducerId {
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialOrd,
+    PartialEq,
+    Ord,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
 pub struct MetricServerInfo {
     producer_id: ProducerId,
     address: SocketAddr,
@@ -90,7 +117,7 @@ impl MetricServerInfo {
     /// use oximeter::collect::MetricServerInfo;
     ///
     /// let info = MetricServerInfo::new("127.0.0.1:4444", "/collect");
-    /// assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id());
+    /// assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
     /// ```
     pub fn new<T>(address: T, base_route: &str) -> Self
     where
@@ -145,6 +172,12 @@ pub struct Collector {
     producer_id: ProducerId,
 }
 
+impl Default for Collector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Collector {
     /// Construct a new `Collector`.
     pub fn new() -> Self {
@@ -161,7 +194,8 @@ impl Collector {
         &self,
         producer: Box<dyn Producer>,
     ) -> Result<(), Error> {
-        Ok(self.producers.lock().unwrap().push(producer))
+        self.producers.lock().unwrap().push(producer);
+        Ok(())
     }
 
     /// Collect available samples from all registered producers.
@@ -218,7 +252,12 @@ impl MetricServer {
             collector.clone(),
             &dropshot_log,
         )
-        .map_err(|msg| Error::MetricServer(msg.to_string()))?
+        .map_err(|msg| {
+            Error::MetricServer(format!(
+                "failed to start Dropshot server: {}",
+                msg
+            ))
+        })?
         .start();
 
         debug!(log, "registering metric server as a producer");
@@ -232,7 +271,7 @@ impl MetricServer {
             log,
             "starting oximeter metric server";
             "route" => config.server_info.collection_route(),
-            "producer_id" => collector.producer_id().to_string(),
+            "producer_id" => ?collector.producer_id(),
             "address" => config.server_info.address(),
         );
         Ok(Self { collector, server })
@@ -240,10 +279,9 @@ impl MetricServer {
 
     /// Serve requests for metrics.
     pub async fn serve_forever(self) -> Result<(), Error> {
-        Ok(self
-            .server
-            .await
-            .map_err(|msg| Error::MetricServer(msg.to_string()))?)
+        Ok(self.server.await.map_err(|msg| {
+            Error::MetricServer(format!("failed to start server: {}", msg))
+        })?)
     }
 
     /// Return the [`Collector`] managed by this server.
