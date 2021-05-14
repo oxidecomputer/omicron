@@ -668,6 +668,16 @@ impl<'a> From<&'a ApiInstanceState> for &'a str {
     }
 }
 
+impl From<ApiInstanceStateRequested> for ApiInstanceState {
+    fn from(requested: ApiInstanceStateRequested) -> Self {
+        match requested {
+            ApiInstanceStateRequested::Running => ApiInstanceState::Running,
+            ApiInstanceStateRequested::Stopped => ApiInstanceState::Stopped,
+            ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
+        }
+    }
+}
+
 impl ApiInstanceState {
     fn label(&self) -> &str {
         match self {
@@ -698,6 +708,56 @@ impl ApiInstanceState {
             ApiInstanceState::Repairing => true,
             ApiInstanceState::Failed => true,
             ApiInstanceState::Destroyed => true,
+        }
+    }
+}
+
+/**
+ * Requestable running state of an Instance.
+ *
+ * A subset of [`ApiInstanceState`].
+ */
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiInstanceStateRequested {
+    Running,
+    Stopped,
+    Destroyed,
+}
+
+impl Display for ApiInstanceStateRequested {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl ApiInstanceStateRequested {
+    fn label(&self) -> &str {
+        match self {
+            ApiInstanceStateRequested::Running => "running",
+            ApiInstanceStateRequested::Stopped => "stopped",
+            ApiInstanceStateRequested::Destroyed => "destroyed",
+        }
+    }
+
+    /**
+     * Returns true if the state represents a stopped Instance.
+     */
+    pub fn is_stopped(&self) -> bool {
+        match self {
+            ApiInstanceStateRequested::Running => false,
+            ApiInstanceStateRequested::Stopped => true,
+            ApiInstanceStateRequested::Destroyed => true,
         }
     }
 }
@@ -787,7 +847,7 @@ pub struct ApiInstanceRuntimeState {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateRequested {
-    pub run_state: ApiInstanceState,
+    pub run_state: ApiInstanceStateRequested,
     pub reboot_wanted: bool,
 }
 
