@@ -68,6 +68,7 @@ https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment
 *** DELETE the one instance we know about
 *** GET the one instance we know about again and expect it to fail
 *** list instances again and expect to find nothing
+* We will need archivers for deleted records -- especially saga logs
 
 External dependencies / open questions:
 

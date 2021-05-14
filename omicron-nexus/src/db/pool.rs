@@ -11,6 +11,16 @@
  * like here.  Even if by luck we stick with bb8, we definitely want to think
  * through the various parameters.
  *
+ * Notes about bb8's behavior:
+ * * When the database is completely offline, and somebody wants a connection,
+ *   it still waits for the connection timeout before giving up.  That seems
+ *   like not what we want.  (To be clear, this is a failure mode where we know
+ *   the database is offline, not one where it's partitioned and we can't tell.)
+ * * Although the `build_unchecked()` builder allows the pool to start up with
+ *   no connections established (good), it also _seems_ to not establish any
+ *   connections even when it could, resulting in a latency bubble for the first
+ *   operation after startup.  That's not what we're looking for.
+ *
  * TODO-design Need TLS support (the types below hardcode NoTls).
  */
 
@@ -19,6 +29,7 @@ use bb8_postgres::PostgresConnectionManager;
 use omicron_common::error::ApiError;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct Pool {
     pool: bb8::Pool<PostgresConnectionManager<tokio_postgres::NoTls>>,
 }

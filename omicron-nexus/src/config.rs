@@ -20,6 +20,8 @@ pub struct Config {
     pub dropshot_external: ConfigDropshot,
     /** Dropshot configuration for internal API server */
     pub dropshot_internal: ConfigDropshot,
+    /** Identifier for this instance of Nexus */
+    pub id: uuid::Uuid,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
     /** Database parameters */
@@ -201,6 +203,7 @@ mod test {
         let config = read_config(
             "valid",
             r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -221,6 +224,7 @@ mod test {
         assert_eq!(
             config,
             Config {
+                id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
