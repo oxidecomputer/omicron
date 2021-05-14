@@ -11,6 +11,7 @@
 
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
+use lazy_static::lazy_static;
 use omicron_common::model::ApiGeneration;
 use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
@@ -19,14 +20,45 @@ use omicron_common::model::ApiInstanceState;
 use omicron_common::model::ApiInstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
 use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
+use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
+
+/*
+ * We'll need a richer mechanism for registering sagas, but this works for now.
+ */
+pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
+lazy_static! {
+    pub static ref SAGA_INSTANCE_CREATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceCreate>> =
+        Arc::new(saga_instance_create());
+}
+
+lazy_static! {
+    pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> =
+        all_templates();
+}
+
+fn all_templates(
+) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
+    vec![(
+        SAGA_INSTANCE_CREATE_NAME,
+        Arc::clone(&SAGA_INSTANCE_CREATE_TEMPLATE)
+            as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+    )]
+    .into_iter()
+    .collect()
+}
+
+/*
+ * "Create Instance" saga template
+ */
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
@@ -34,6 +66,7 @@ pub struct ParamsInstanceCreate {
     pub create_params: ApiInstanceCreateParams,
 }
 
+#[derive(Debug)]
 pub struct SagaInstanceCreate;
 impl SagaType for SagaInstanceCreate {
     type SagaParamsType = Arc<ParamsInstanceCreate>;

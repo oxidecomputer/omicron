@@ -40,6 +40,7 @@ use omicron_common::model::ApiProjectCreateParams;
 use omicron_common::model::ApiProjectUpdateParams;
 use omicron_common::model::ApiProjectView;
 use omicron_common::model::ApiRackView;
+use omicron_common::model::ApiSagaView;
 use omicron_common::model::ApiSledView;
 use omicron_common::model::DataPageParams;
 use omicron_common::model::PaginationOrder;
@@ -84,6 +85,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(api_hardware_racks_get_rack)?;
         api.register(api_hardware_sleds_get)?;
         api.register(api_hardware_sleds_get_sled)?;
+
+        api.register(api_sagas_get)?;
+        api.register(api_sagas_get_saga)?;
 
         Ok(())
     }
@@ -738,4 +742,54 @@ async fn api_hardware_sleds_get_sled(
     let path = path_params.into_inner();
     let sled_info = nexus.sled_lookup(&path.sled_id).await?;
     Ok(HttpResponseOk(sled_info.to_view()))
+}
+
+/*
+ * Sagas
+ */
+
+/**
+ * List all sagas (for debugging)
+ */
+#[endpoint {
+     method = GET,
+     path = "/sagas",
+ }]
+async fn api_sagas_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<ApiPaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ApiSagaView>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let saga_stream = nexus.sagas_list(&pagparams).await?;
+    let view_list = to_view_list(saga_stream).await;
+    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
+}
+
+/**
+ * Path parameters for Saga requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct SagaPathParam {
+    saga_id: Uuid,
+}
+
+/**
+ * Fetch information about a single saga (for debugging)
+ */
+#[endpoint {
+     method = GET,
+     path = "/sagas/{saga_id}",
+ }]
+async fn api_sagas_get_saga(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<ApiSagaView>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let saga = nexus.saga_get(path.saga_id).await?;
+    Ok(HttpResponseOk(saga))
 }
