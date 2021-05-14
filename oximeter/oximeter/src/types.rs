@@ -3,6 +3,7 @@
 
 use std::boxed::Box;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::ops::{Add, AddAssign};
 
@@ -31,6 +32,7 @@ pub enum FieldType {
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -193,11 +195,15 @@ impl From<histogram::Histogram<f64>> for Measurement {
 }
 
 /// Errors related to the generation or collection of metrics.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
 pub enum Error {
     /// An error occurred during the production of metric samples.
     #[error("Error during sample production: {0}")]
     ProductionError(String),
+
+    /// An error occured running a `MetricServer`
+    #[error("Error running metric server: {0}")]
+    MetricServer(String),
 
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
@@ -283,14 +289,8 @@ pub struct Target {
     /// `':'` character.
     pub key: String,
 
-    /// The names of this target's fields.
-    pub field_names: Vec<String>,
-
-    /// The types of this target's fields.
-    pub field_types: Vec<FieldType>,
-
-    /// The values of this target's fields.
-    pub field_values: Vec<FieldValue>,
+    /// The name and value for each field of the target.
+    pub fields: BTreeMap<String, FieldValue>,
 }
 
 impl<T> From<&T> for Target
@@ -301,13 +301,12 @@ where
         Self {
             name: target.name().to_string(),
             key: target.key(),
-            field_names: target
+            fields: target
                 .field_names()
                 .iter()
                 .map(|x| x.to_string())
+                .zip(target.field_values())
                 .collect(),
-            field_types: target.field_types().to_vec(),
-            field_values: target.field_values(),
         }
     }
 }
@@ -328,14 +327,8 @@ pub struct Metric {
     /// `':'` character.
     pub key: String,
 
-    /// The names of this metric's fields.
-    pub field_names: Vec<String>,
-
-    /// The types of this metric's fields.
-    pub field_types: Vec<FieldType>,
-
-    /// The values of this metric's fields.
-    pub field_values: Vec<FieldValue>,
+    /// The name and value for each field of the metric.
+    pub fields: BTreeMap<String, FieldValue>,
 
     /// The data type of a measurement from this metric.
     pub measurement_type: MeasurementType,
@@ -357,13 +350,12 @@ where
         Self {
             name: metric.name().to_string(),
             key: metric.key(),
-            field_names: metric
+            fields: metric
                 .field_names()
                 .iter()
                 .map(|x| x.to_string())
+                .zip(metric.field_values())
                 .collect(),
-            field_types: metric.field_types().to_vec(),
-            field_values: metric.field_values(),
             measurement_type: metric.measurement_type(),
         }
     }
@@ -526,9 +518,13 @@ mod tests {
         let t2 = types::Target::from(&t);
         assert_eq!(t.name(), t2.name);
         assert_eq!(t.key(), t2.key);
-        assert_eq!(t.field_names(), t2.field_names);
-        assert_eq!(t.field_types(), t2.field_types);
-        assert_eq!(t.field_values(), t2.field_values);
+        let fields = t
+            .field_names()
+            .iter()
+            .map(|x| x.to_string())
+            .zip(t.field_values())
+            .collect();
+        assert_eq!(t2.fields, fields);
     }
 
     #[test]
@@ -537,9 +533,13 @@ mod tests {
         let m2 = types::Metric::from(&m);
         assert_eq!(m.name(), m2.name);
         assert_eq!(m.key(), m2.key);
-        assert_eq!(m.field_names(), m2.field_names);
-        assert_eq!(m.field_types(), m2.field_types);
-        assert_eq!(m.field_values(), m2.field_values);
+        let fields = m
+            .field_names()
+            .iter()
+            .map(|x| x.to_string())
+            .zip(m.field_values())
+            .collect();
+        assert_eq!(m2.fields, fields);
         assert_eq!(m.measurement_type(), m2.measurement_type);
     }
 

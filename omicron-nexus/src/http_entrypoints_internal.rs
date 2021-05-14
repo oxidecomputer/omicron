@@ -1,7 +1,6 @@
-/*!
+/**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
-
 use super::ServerContext;
 
 use dropshot::endpoint;
@@ -15,6 +14,7 @@ use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
 use omicron_common::SledAgentClient;
+use oximeter::collect::MetricServerInfo;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -30,6 +30,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
+        api.register(cpapi_producers_post)?;
         Ok(())
     }
 
@@ -126,5 +127,25 @@ async fn cpapi_disks_put(
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
     nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Accept a registration from a new metric producer
+ */
+#[endpoint {
+     method = POST,
+     path = "/producers",
+ }]
+async fn cpapi_producers_post(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    producer_info: TypedBody<MetricServerInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    let _nexus = &context.nexus;
+    let log = &context.log;
+    let producer_info = producer_info.into_inner();
+    let producer_id = producer_info.producer_id().producer_id;
+    info!(log, "registered new producer"; "producer_id" => producer_id.to_string());
     Ok(HttpResponseUpdatedNoContent())
 }

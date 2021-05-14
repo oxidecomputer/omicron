@@ -48,7 +48,7 @@ impl HistogramSupport for f64 {
 }
 
 /// Errors related to constructing histograms or adding samples into them.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
 pub enum HistogramError {
     /// An attempt to construct a histogram with an empty set of bins.
     #[error("Bins may not be empty")]

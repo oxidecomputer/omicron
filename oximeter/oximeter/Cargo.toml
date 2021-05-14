@@ -25,6 +25,10 @@ version = "0.14.7"
 [dependencies.oximeter-macro-impl]
 path = "../oximeter-macro-impl"
 
+[dependencies.reqwest]
+version = "0.11.3"
+features = [ "json" ]
+
 [dependencies.schemars]
 version = "0.8.3"
 features = [ "uuid", "bytes", "chrono" ]
