@@ -21,6 +21,14 @@ pub struct InstanceState {
     pub pending: Option<ApiInstanceRuntimeStateRequested>,
 }
 
+/// Action to be taken on behalf of state transition.
+pub enum Action {
+    Run,
+    Stop,
+    Reboot,
+    Destroy,
+}
+
 impl InstanceState {
     pub fn new(current: ApiInstanceRuntimeState) -> Self {
         InstanceState {
@@ -28,6 +36,18 @@ impl InstanceState {
             pending: None,
         }
     }
+
+    fn mut_update(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
+        self.current =
+            ApiInstanceRuntimeState {
+                run_state: next,
+                sled_uuid: self.current.sled_uuid,
+                gen: self.current.gen.next(),
+                time_updated: Utc::now(),
+            };
+        self.pending = pending.map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
+    }
+
 
     fn update(&self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) -> Self {
         InstanceState {
@@ -41,37 +61,32 @@ impl InstanceState {
         }
     }
 
-
-    // TODO: Act on &mut self? Perform update?
     pub fn next(
-        &self,
+        &mut self,
         target: &ApiInstanceRuntimeStateRequested,
-    ) -> Result<InstanceState, ApiError> {
+    ) -> Result<Option<Action>, ApiError> {
         // Validate the state transition and return the next state.
         // This may differ from the "final" state if the transition requires
         // multiple stages (i.e., running -> stopping -> stopped).
-        let (next_state, final_state) = match target.run_state {
+        match target.run_state {
             ApiInstanceStateRequested::Running => {
                 match self.current.run_state {
                     // Early exit: Running request is no-op
                     ApiInstanceState::Running
+                    | ApiInstanceState::Starting
                     | ApiInstanceState::Stopping { rebooting: true }
                     | ApiInstanceState::Stopped { rebooting: true } => {
-                        return Ok(self.clone());
+                        return Ok(None)
                     }
                     // Valid states for a running request
                     ApiInstanceState::Creating
-                    | ApiInstanceState::Starting
                     | ApiInstanceState::Stopping { rebooting: false }
                     | ApiInstanceState::Stopped { rebooting: false } => {
-                        if self.current.run_state.is_stopped() {
-                            (
-                                ApiInstanceState::Starting,
-                                Some(ApiInstanceStateRequested::Running),
-                            )
-                        } else {
-                            (ApiInstanceState::Running, None)
-                        }
+                        self.mut_update(
+                            ApiInstanceState::Starting,
+                            Some(ApiInstanceStateRequested::Running),
+                        );
+                        return Ok(Some(Action::Run))
                     }
                     // Invalid states for a running request
                     ApiInstanceState::Repairing
@@ -91,27 +106,24 @@ impl InstanceState {
                     // Early exit: Stop request is a no-op
                     ApiInstanceState::Stopped { rebooting: false }
                     | ApiInstanceState::Stopping { rebooting: false } => {
-                        return Ok(self.clone());
+                        return Ok(None)
                     }
                     // Valid states for a stop request
                     ApiInstanceState::Creating
-                    | ApiInstanceState::Starting
-                    | ApiInstanceState::Running
-                    | ApiInstanceState::Stopping { rebooting: true }
                     | ApiInstanceState::Stopped { rebooting: true } => {
-                        // Note that if we were rebooting, a request to enter
-                        // the stopped state effectively cancels the reboot.
-                        if self.current.run_state.is_stopped() {
-                            (
-                                ApiInstanceState::Stopped { rebooting: false },
-                                None,
-                            )
-                        } else {
-                            (
-                                ApiInstanceState::Stopping { rebooting: false },
-                                Some(ApiInstanceStateRequested::Stopped),
-                            )
-                        }
+                        // Already stopped, no action necessary.
+                        self.mut_update(ApiInstanceState::Stopped { rebooting: false }, None);
+                        return Ok(None)
+                    },
+                    ApiInstanceState::Starting
+                    | ApiInstanceState::Running
+                    | ApiInstanceState::Stopping { rebooting: true } => {
+                        // The VM could be running, explicitly tell it to stop.
+                        self.mut_update(
+                            ApiInstanceState::Stopping { rebooting: false },
+                            Some(ApiInstanceStateRequested::Stopped),
+                        );
+                        return Ok(Some(Action::Stop))
                     }
                     // Invalid states for a stop request
                     ApiInstanceState::Repairing
@@ -131,21 +143,15 @@ impl InstanceState {
                     // Early exit: Reboot request is a no-op
                     ApiInstanceState::Stopping { rebooting: true }
                     | ApiInstanceState::Stopped { rebooting: true } => {
-                        return Ok(self.clone());
+                        return Ok(None);
                     }
                     // Valid states for a reboot request
                     ApiInstanceState::Starting | ApiInstanceState::Running => {
-                        if self.current.run_state.is_stopped() {
-                            (
-                                ApiInstanceState::Stopped { rebooting: true },
-                                Some(ApiInstanceStateRequested::Stopped),
-                            )
-                        } else {
-                            (
-                                ApiInstanceState::Stopping { rebooting: true },
-                                Some(ApiInstanceStateRequested::Stopped),
-                            )
-                        }
+                         self.mut_update(
+                            ApiInstanceState::Stopping { rebooting: true },
+                            Some(ApiInstanceStateRequested::Stopped),
+                        );
+                        return Ok(Some(Action::Reboot));
                     }
                     // Invalid states for a reboot request
                     _ => {
@@ -161,17 +167,17 @@ impl InstanceState {
             // All states may be destroyed.
             ApiInstanceStateRequested::Destroyed => {
                 if self.current.run_state.is_stopped() {
-                    (ApiInstanceState::Destroyed, None)
+                    self.mut_update(ApiInstanceState::Destroyed, None);
+                    return Ok(Some(Action::Destroy));
                 } else {
-                    (
+                    self.mut_update(
                         ApiInstanceState::Stopping { rebooting: false },
                         Some(ApiInstanceStateRequested::Destroyed),
-                    )
+                    );
+                    return Ok(Some(Action::Stop));
                 }
             }
         };
-
-        Ok(self.update(next_state, final_state))
     }
 
     // TODO: So...... the fact that we only have a *single* match
