@@ -476,8 +476,9 @@ mod test {
     }
 
     /**
-     * Tests SimObject in general when backed by a SimDisk in particular, for
-     * non-reboot-related transitions.
+     * Tests a SimInstance which transitions to running and is subsequently destroyed.
+     * This test observes an intermediate transition through "stopping" to
+     * accomplish this goal.
      */
     #[tokio::test]
     async fn test_sim_instance_running_then_destroyed() {

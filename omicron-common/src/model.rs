@@ -654,19 +654,18 @@ impl Display for ApiInstanceState {
  * good validation error.  ApiInstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<(&str, bool)> for ApiInstanceState {
+impl TryFrom<(&str, Option<bool>)> for ApiInstanceState {
     type Error = String;
 
     fn try_from(
-        (variant, rebooting): (&str, bool),
+        (variant, rebooting): (&str, Option<bool>),
     ) -> Result<Self, Self::Error> {
-        println!("ApiInstanceState::try_from: ({}, {})", variant, rebooting);
         let r = match variant {
             "creating" => ApiInstanceState::Creating,
             "starting" => ApiInstanceState::Starting,
             "running" => ApiInstanceState::Running,
-            "stopping" => ApiInstanceState::Stopping { rebooting },
-            "stopped" => ApiInstanceState::Stopped { rebooting },
+            "stopping" => ApiInstanceState::Stopping { rebooting: rebooting.unwrap() },
+            "stopped" => ApiInstanceState::Stopped { rebooting: rebooting.unwrap() },
             "repairing" => ApiInstanceState::Repairing,
             "failed" => ApiInstanceState::Failed,
             "destroyed" => ApiInstanceState::Destroyed,

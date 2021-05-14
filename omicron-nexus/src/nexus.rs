@@ -616,11 +616,11 @@ impl Nexus {
     ) -> UpdateResult<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
-         * runtime state with "rebooting = true".  We cannot simply stop the
-         * Instance and start it again here because if we crash in the meantime,
-         * we might leave it stopped.
+         * runtime state of "reboot". We cannot simply stop the Instance and
+         * start it again here because if we crash in the meantime, we might
+         * leave it stopped.
          *
-         * When an instance is rebooted, the "rebooting" remains set on
+         * When an instance is rebooted, the "rebooting" flag remains set on
          * the runtime state as it transitions to "Stopping" and "Stopped".
          * This flag is cleared when the state goes to "Starting".  This way,
          * even if the whole rack powered off while this was going on, we would

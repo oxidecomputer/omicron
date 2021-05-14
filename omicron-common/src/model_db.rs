@@ -163,9 +163,9 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let variant = sql_row_value(value, "instance_state")?;
-        let rebooting = sql_row_value(value, "rebooting")?;
+        let rebooting: Option<bool> = sql_row_value(value, "instance_state_rebooting")?;
         ApiInstanceState::try_from((variant, rebooting))
-            .map_err(|err| ApiError::InternalError { message: err })
+            .map_err(|err| ApiError::InternalError { message: err.to_string() })
     }
 }
 
