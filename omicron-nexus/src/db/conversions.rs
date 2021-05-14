@@ -44,8 +44,8 @@ impl SqlSerialize for ApiInstanceCreateParams {
 impl SqlSerialize for ApiInstanceState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         match self {
-            ApiInstanceState::Stopping { rebooting } |
-                ApiInstanceState::Stopped { rebooting } => {
+            ApiInstanceState::Stopping { rebooting }
+            | ApiInstanceState::Stopped { rebooting } => {
                 output.set("instance_state_rebooting", rebooting);
             }
             _ => {

@@ -418,7 +418,8 @@ impl DataStore {
         let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         let variant = sql_row_value(&row, "found_instance_state")?;
-        let rebooting: Option<bool> = sql_row_value(&row, "found_instance_state_rebooting")?;
+        let rebooting: Option<bool> =
+            sql_row_value(&row, "found_instance_state_rebooting")?;
         let instance_state = ApiInstanceState::try_from((variant, rebooting))
             .map_err(|e| ApiError::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);

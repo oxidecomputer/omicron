@@ -664,8 +664,12 @@ impl TryFrom<(&str, Option<bool>)> for ApiInstanceState {
             "creating" => ApiInstanceState::Creating,
             "starting" => ApiInstanceState::Starting,
             "running" => ApiInstanceState::Running,
-            "stopping" => ApiInstanceState::Stopping { rebooting: rebooting.unwrap() },
-            "stopped" => ApiInstanceState::Stopped { rebooting: rebooting.unwrap() },
+            "stopping" => {
+                ApiInstanceState::Stopping { rebooting: rebooting.unwrap() }
+            }
+            "stopped" => {
+                ApiInstanceState::Stopped { rebooting: rebooting.unwrap() }
+            }
             "repairing" => ApiInstanceState::Repairing,
             "failed" => ApiInstanceState::Failed,
             "destroyed" => ApiInstanceState::Destroyed,
