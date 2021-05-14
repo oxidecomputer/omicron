@@ -38,7 +38,7 @@ impl Simulatable for SimInstance {
             pending: pending.clone(),
         };
 
-        let _action = state.next(target)?;
+        let _action = state.request_transition(target)?;
         Ok((state.current, state.pending))
     }
 
@@ -46,13 +46,38 @@ impl Simulatable for SimInstance {
         current: &Self::CurrentState,
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
-        let current = InstanceState {
+
+        let (next, next_pending) = match pending.run_state {
+            ApiInstanceStateRequested::Running => {
+                (ApiInstanceState::Running, None)
+            }
+            ApiInstanceStateRequested::Stopped => {
+                let next_pending =
+                    if let ApiInstanceState::Stopping { rebooting } = current.run_state {
+                        if rebooting {
+                            Some(ApiInstanceStateRequested::Running)
+                        } else {
+                            None
+                        }
+                    } else {
+                        panic!("Unexpected transition to stopped without stopping");
+                    };
+                (
+                    ApiInstanceState::Stopped { rebooting: false }, next_pending
+                )
+            }
+            ApiInstanceStateRequested::Destroyed => {
+                (ApiInstanceState::Destroyed, None)
+            }
+            _ => return (current.clone(), None),
+        };
+
+        let mut current = InstanceState {
             current: current.clone(),
             pending: Some(pending.clone()),
         };
-
-        let next = current.advance();
-        (next.current, next.pending)
+        current.update(next, next_pending);
+        (current.current, current.pending)
     }
 
     fn state_unchanged(

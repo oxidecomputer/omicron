@@ -10,9 +10,8 @@ use omicron_common::model::ApiInstanceStateRequested;
 // TODO: Refactor to "instance" module.
 // TODO: Add "disk" module.
 
-/// The instance state is a combination of the last-known state,
-/// as well as an "objective" state which the sled agent will
-/// work towards achieving.
+/// The instance state is a combination of the last-known state, as well as an
+/// "objective" state which the sled agent will work towards achieving.
 // TODO: Use this instead of "current + pending" in APIs.
 #[derive(Clone)]
 pub struct InstanceState {
@@ -37,7 +36,8 @@ impl InstanceState {
         }
     }
 
-    fn mut_update(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
+    // Transitions to a new instance state value.
+    pub fn update(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
         self.current =
             ApiInstanceRuntimeState {
                 run_state: next,
@@ -48,20 +48,11 @@ impl InstanceState {
         self.pending = pending.map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
     }
 
-
-    fn update(&self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) -> Self {
-        InstanceState {
-            current: ApiInstanceRuntimeState {
-                run_state: next,
-                sled_uuid: self.current.sled_uuid,
-                gen: self.current.gen.next(),
-                time_updated: Utc::now(),
-            },
-            pending: pending.map(|run_state| ApiInstanceRuntimeStateRequested { run_state }),
-        }
-    }
-
-    pub fn next(
+    /// Attempts to move from the current state to the requested "target" state.
+    ///
+    /// On success, returns the action, if any, which is necessary to carry
+    /// out this state transition.
+    pub fn request_transition(
         &mut self,
         target: &ApiInstanceRuntimeStateRequested,
     ) -> Result<Option<Action>, ApiError> {
@@ -82,7 +73,7 @@ impl InstanceState {
                     ApiInstanceState::Creating
                     | ApiInstanceState::Stopping { rebooting: false }
                     | ApiInstanceState::Stopped { rebooting: false } => {
-                        self.mut_update(
+                        self.update(
                             ApiInstanceState::Starting,
                             Some(ApiInstanceStateRequested::Running),
                         );
@@ -112,14 +103,22 @@ impl InstanceState {
                     ApiInstanceState::Creating
                     | ApiInstanceState::Stopped { rebooting: true } => {
                         // Already stopped, no action necessary.
-                        self.mut_update(ApiInstanceState::Stopped { rebooting: false }, None);
+                        self.update(ApiInstanceState::Stopped { rebooting: false }, None);
+                        return Ok(None)
+                    },
+                    ApiInstanceState::Stopping { rebooting: true } => {
+                        // The VM is stopping, so no new action is necessary to
+                        // make it stop, but we can avoid rebooting.
+                        self.update(
+                            ApiInstanceState::Stopping { rebooting: false },
+                            Some(ApiInstanceStateRequested::Stopped),
+                        );
                         return Ok(None)
                     },
                     ApiInstanceState::Starting
-                    | ApiInstanceState::Running
-                    | ApiInstanceState::Stopping { rebooting: true } => {
-                        // The VM could be running, explicitly tell it to stop.
-                        self.mut_update(
+                    | ApiInstanceState::Running => {
+                        // The VM is running, explicitly tell it to stop.
+                        self.update(
                             ApiInstanceState::Stopping { rebooting: false },
                             Some(ApiInstanceStateRequested::Stopped),
                         );
@@ -147,7 +146,7 @@ impl InstanceState {
                     }
                     // Valid states for a reboot request
                     ApiInstanceState::Starting | ApiInstanceState::Running => {
-                         self.mut_update(
+                         self.update(
                             ApiInstanceState::Stopping { rebooting: true },
                             Some(ApiInstanceStateRequested::Stopped),
                         );
@@ -167,10 +166,10 @@ impl InstanceState {
             // All states may be destroyed.
             ApiInstanceStateRequested::Destroyed => {
                 if self.current.run_state.is_stopped() {
-                    self.mut_update(ApiInstanceState::Destroyed, None);
+                    self.update(ApiInstanceState::Destroyed, None);
                     return Ok(Some(Action::Destroy));
                 } else {
-                    self.mut_update(
+                    self.update(
                         ApiInstanceState::Stopping { rebooting: false },
                         Some(ApiInstanceStateRequested::Destroyed),
                     );
@@ -178,48 +177,5 @@ impl InstanceState {
                 }
             }
         };
-    }
-
-    // TODO: So...... the fact that we only have a *single* match
-    // for the "pending" state is a sign that maaaayyyyybe pending is actually
-    // implicit????
-    //
-    // Or at least can be constrained significantly
-    pub fn advance(
-        &self
-    ) -> InstanceState {
-        if let Some(pending) = self.pending.as_ref() {
-            match self.current.run_state {
-                ApiInstanceState::Creating | ApiInstanceState::Starting => {
-                    match pending.run_state {
-                        ApiInstanceStateRequested::Running => {
-                            self.update(ApiInstanceState::Running, None)
-                        }
-                        _ => panic!("unexpected transition: Creating/Starting only allowed to become Running"),
-                    }
-                },
-                ApiInstanceState::Stopping { rebooting } => {
-                    match pending.run_state {
-                        ApiInstanceStateRequested::Stopped => {
-                            let next = if rebooting {
-                                Some(ApiInstanceStateRequested::Running)
-                            } else {
-                                None
-                            };
-                            self.update( ApiInstanceState::Stopped { rebooting: false }, next)
-
-                        }
-                        ApiInstanceStateRequested::Destroyed => {
-                            self.update(ApiInstanceState::Destroyed, None)
-                        }
-                        _ => panic!("unexpected transition: Stopping only allowed to become Stopped; was trying to become {}", pending.run_state),
-                    }
-                },
-                _ => panic!("unexpected transition: Pending transition from non-transitory state {}", self.current.run_state),
-            }
-        } else {
-            // No pending state means that we have no objective state.
-            self.clone()
-        }
     }
 }
