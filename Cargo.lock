@@ -25,16 +25,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "api_identity"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?rev=73d690a#73d690a2cae88928ac7268e55c4304a796031040"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1038,7 +1028,7 @@ dependencies = [
  "dropshot",
  "http",
  "hyper",
- "omicron-common 0.1.0",
+ "omicron-common",
  "serde",
  "serde_json",
  "slog",
@@ -1056,7 +1046,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "async-trait",
  "backoff",
  "chrono",
@@ -1093,41 +1083,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?rev=73d690a#73d690a2cae88928ac7268e55c4304a796031040"
-dependencies = [
- "anyhow",
- "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?rev=73d690a)",
- "async-trait",
- "backoff",
- "chrono",
- "dropshot",
- "futures",
- "http",
- "hyper",
- "libc",
- "ring",
- "schemars",
- "serde",
- "serde_json",
- "signal-hook",
- "signal-hook-tokio",
- "slog",
- "steno",
- "structopt",
- "subprocess",
- "tar",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-postgres",
- "toml",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
@@ -1145,7 +1100,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "newtype_derive",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-sled-agent",
  "openapiv3",
  "schemars",
@@ -1174,7 +1129,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
- "omicron-common 0.1.0",
+ "omicron-common",
  "propolis-client",
  "schemars",
  "serde",
@@ -1504,7 +1459,6 @@ dependencies = [
  "http",
  "hyper",
  "libc",
- "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?rev=73d690a)",
  "ring",
  "schemars",
  "serde",
