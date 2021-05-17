@@ -17,6 +17,7 @@ use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
+use omicron_common::model::ApiInstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -159,7 +160,7 @@ async fn sic_instance_ensure(
      */
     let osagactx = sagactx.user_data();
     let runtime_params = ApiInstanceRuntimeStateRequested {
-        run_state: ApiInstanceState::Running,
+        run_state: ApiInstanceStateRequested::Running,
         reboot_wanted: false,
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
