@@ -1,0 +1,48 @@
+[package]
+name = "oximeter"
+version = "0.1.0"
+authors = ["Benjamin Naecker <ben@oxide.computer>"]
+edition = "2018"
+
+[dependencies.bytes]
+version = "1.0.1"
+features = [ "serde" ]
+
+[dependencies.chrono]
+version = "0.4.19"
+features = [ "serde" ]
+
+[dependencies.dropshot]
+git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
+
+[dependencies.num-traits]
+version = "0.2.14"
+
+[dependencies.hyper]
+version = "0.14.7"
+
+[dependencies.oximeter-macro-impl]
+path = "../oximeter-macro-impl"
+
+[dependencies.schemars]
+version = "0.8.3"
+features = [ "uuid", "bytes", "chrono" ]
+
+[dependencies.serde]
+version = "1"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.thiserror]
+version = "1.0.24"
+
+[dependencies.tokio]
+version = "1.0"
+
+[dependencies.uuid]
+version = "0.8.2"
+features = [ "v4", "serde" ]

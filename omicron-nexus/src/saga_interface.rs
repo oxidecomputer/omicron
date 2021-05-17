@@ -7,6 +7,7 @@ use crate::Nexus;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::SledAgentClient;
+use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -17,6 +18,12 @@ use uuid::Uuid;
  */
 pub struct SagaContext {
     nexus: Arc<Nexus>,
+}
+
+impl fmt::Debug for SagaContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SagaContext { (nexus) ... }")
+    }
 }
 
 impl SagaContext {

@@ -27,13 +27,15 @@ impl ServerContext {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
+        nexus_id: &Uuid,
     ) -> Arc<ServerContext> {
         Arc::new(ServerContext {
-            nexus: Arc::new(Nexus::new_with_id(
+            nexus: Nexus::new_with_id(
                 rack_id,
                 log.new(o!("component" => "nexus")),
                 pool,
-            )),
+                nexus_id,
+            ),
             log,
         })
     }

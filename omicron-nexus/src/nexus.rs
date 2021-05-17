@@ -5,12 +5,14 @@
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
 use omicron_common::bail_unless;
+use omicron_common::collection::collection_page;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiDiskAttachment;
@@ -32,22 +34,19 @@ use omicron_common::model::ApiProjectCreateParams;
 use omicron_common::model::ApiProjectUpdateParams;
 use omicron_common::model::ApiRack;
 use omicron_common::model::ApiResourceType;
+use omicron_common::model::ApiSagaView;
 use omicron_common::model::ApiSled;
 use omicron_common::model::CreateResult;
 use omicron_common::model::DataPageParams;
 use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
-use omicron_common::model::PaginationOrder::Ascending;
-use omicron_common::model::PaginationOrder::Descending;
 use omicron_common::model::UpdateResult;
 use omicron_common::SledAgentClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
-use std::ops::Bound;
 use std::sync::Arc;
-use steno::SagaExecutor;
 use steno::SagaId;
 use steno::SagaResultOk;
 use steno::SagaTemplate;
@@ -83,7 +82,7 @@ pub trait TestInterfaces {
  */
 pub struct Nexus {
     /** uuid for this rack (TODO should also be in persistent storage) */
-    id: Uuid,
+    rack_id: Uuid,
 
     /** general server log */
     log: Logger,
@@ -92,7 +91,10 @@ pub struct Nexus {
     api_rack_identity: ApiIdentityMetadata,
 
     /** persistent storage for resources in the control plane */
-    db_datastore: db::DataStore,
+    db_datastore: Arc<db::DataStore>,
+
+    /** saga execution coordinator */
+    sec_client: Arc<steno::SecClient>,
 
     /**
      * List of sled agents known by this nexus.
@@ -115,26 +117,61 @@ pub struct Nexus {
  */
 impl Nexus {
     /**
-     * Create a new Nexus instance for the given rack id `id`
-     *
-     * The state of the system is maintained in memory, so we always start from
-     * a clean slate.
+     * Create a new Nexus instance for the given rack id `rack_id`
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(id: &Uuid, log: Logger, pool: db::Pool) -> Nexus {
-        Nexus {
-            id: *id,
-            log,
+    pub fn new_with_id(
+        rack_id: &Uuid,
+        log: Logger,
+        pool: db::Pool,
+        nexus_id: &Uuid,
+    ) -> Arc<Nexus> {
+        let pool = Arc::new(pool);
+        let my_sec_id = db::SecId::from(*nexus_id);
+        let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
+        let sec_store = Arc::new(db::CockroachDbSecStore::new(
+            my_sec_id,
+            Arc::clone(&db_datastore),
+            log.new(o!("component" => "SecStore")),
+        )) as Arc<dyn steno::SecStore>;
+        let sec_client = Arc::new(steno::sec(
+            log.new(o!(
+                "component" => "SEC",
+                "sec_id" => my_sec_id.to_string()
+            )),
+            sec_store,
+        ));
+        let nexus = Nexus {
+            rack_id: *rack_id,
+            log: log.new(o!()),
             api_rack_identity: ApiIdentityMetadata {
-                id: *id,
-                name: ApiName::try_from(format!("rack-{}", *id)).unwrap(),
+                id: *rack_id,
+                name: ApiName::try_from(format!("rack-{}", *rack_id)).unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
             },
-            db_datastore: db::DataStore::new(Arc::new(pool)),
+            db_datastore,
+            sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
-        }
+        };
+
+        /*
+         * TODO-design Would really like to store this recovery_task, but Nexus
+         * is immutable (behind the Arc) once we've done this.
+         */
+        /* TODO-cleanup all the extra Arcs here seems wrong */
+        let nexus_arc = Arc::new(nexus);
+        db::recover(
+            log.new(o!("component" => "SagaRecoverer")),
+            my_sec_id,
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::clone(&pool),
+            Arc::clone(&sec_client),
+            &sagas::ALL_TEMPLATES,
+        );
+
+        nexus_arc
     }
 
     /*
@@ -155,38 +192,56 @@ impl Nexus {
     /**
      * Given a saga template and parameters, create a new saga and execute it.
      */
-    /*
-     * TODO-debugging It would be nice to keep a list of the outstanding sagas
-     * and maybe even provide APIs to report their status.
-     * Maybe steno could even have an interface for keeping track of a bunch of
-     * sagas, maybe as part of a SagaExecCoordinator or something.
-     */
     async fn execute_saga<P, S>(
         self: &Arc<Self>,
-        saga_template: SagaTemplate<S>,
-        saga_params: P,
+        saga_template: Arc<SagaTemplate<S>>,
+        template_name: &str,
+        saga_params: Arc<P>,
     ) -> Result<SagaResultOk, ApiError>
     where
         S: SagaType<
             ExecContextType = Arc<SagaContext>,
             SagaParamsType = Arc<P>,
         >,
+        /*
+         * TODO-cleanup The bound `P: Serialize` should not be necessary because
+         * SagaParamsType must already impl Serialize.
+         */
+        P: serde::Serialize,
     {
-        let saga_context = Arc::new(SagaContext::new(Arc::clone(self)));
         let saga_id = SagaId(Uuid::new_v4());
-        let saga_exec = SagaExecutor::new(
-            &saga_id,
-            Arc::new(saga_template),
-            &self.id.to_string(),
-            Arc::new(saga_context),
-            Arc::new(saga_params),
-        )
-        .map_err(|e| {
-            /* TODO-error more context would be useful */
-            ApiError::InternalError { message: e.to_string() }
-        })?;
-        saga_exec.run().await;
-        saga_exec.result().kind.map_err(|saga_error| {
+        let saga_context =
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+        let future = self
+            .sec_client
+            .saga_create(
+                saga_id,
+                saga_context,
+                saga_template,
+                template_name.to_owned(),
+                saga_params,
+            )
+            .await
+            .context("creating saga")
+            .map_err(|error| {
+                /*
+                 * TODO-error This could be a service unavailable error,
+                 * depending on the failure mode.  We need more information from
+                 * Steno.
+                 */
+                ApiError::internal_error(&format!("{:#}", error))
+            })?;
+
+        self.sec_client
+            .saga_start(saga_id)
+            .await
+            .context("starting saga")
+            .map_err(|error| {
+                ApiError::internal_error(&format!("{:#}", error))
+            })?;
+
+        let result = future.await;
+        result.kind.map_err(|saga_error| {
             saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
                 ApiError::InternalError { message: e.to_string() }
@@ -395,14 +450,18 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
-        let saga_template = sagas::saga_instance_create();
-        let saga_params = sagas::ParamsInstanceCreate {
+        let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
             create_params: params.clone(),
-        };
+        });
 
-        let saga_outputs =
-            self.execute_saga(saga_template, saga_params).await?;
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_INSTANCE_CREATE_TEMPLATE),
+                sagas::SAGA_INSTANCE_CREATE_NAME,
+                saga_params,
+            )
+            .await?;
         /* TODO-error more context would be useful  */
         let instance_id = saga_outputs
             .lookup_output::<Uuid>("instance_id")
@@ -557,11 +616,11 @@ impl Nexus {
     ) -> UpdateResult<ApiInstance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
-         * runtime state with "rebooting = true".  We cannot simply stop the
-         * Instance and start it again here because if we crash in the meantime,
-         * we might leave it stopped.
+         * runtime state of "reboot". We cannot simply stop the Instance and
+         * start it again here because if we crash in the meantime, we might
+         * leave it stopped.
          *
-         * When an instance is rebooted, the "rebooting" remains set on
+         * When an instance is rebooted, the "rebooting" flag remains set on
          * the runtime state as it transitions to "Stopping" and "Stopped".
          * This flag is cleared when the state goes to "Starting".  This way,
          * even if the whole rack powered off while this was going on, we would
@@ -921,7 +980,7 @@ impl Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<ApiRack> {
         if let Some(marker) = pagparams.marker {
-            if *marker >= self.id {
+            if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
             }
         }
@@ -930,7 +989,7 @@ impl Nexus {
     }
 
     pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
-        if *rack_id == self.id {
+        if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
             Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
@@ -988,6 +1047,43 @@ impl Nexus {
             },
             service_address: sa.service_address,
         })
+    }
+
+    /*
+     * Sagas
+     */
+
+    pub async fn sagas_list(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResult<ApiSagaView> {
+        /*
+         * The endpoint we're serving only supports `ApiScanById`, which only
+         * supports an ascending scan.
+         */
+        bail_unless!(
+            pagparams.direction == dropshot::PaginationOrder::Ascending
+        );
+        let marker = pagparams.marker.map(|s| SagaId::from(*s));
+        let saga_list = self
+            .sec_client
+            .saga_list(marker, pagparams.limit)
+            .await
+            .into_iter()
+            .map(ApiSagaView::from)
+            .map(Ok);
+        Ok(futures::stream::iter(saga_list).boxed())
+    }
+
+    pub async fn saga_get(&self, id: Uuid) -> LookupResult<ApiSagaView> {
+        self.sec_client
+            .saga_get(steno::SagaId::from(id))
+            .await
+            .map(ApiSagaView::from)
+            .map(Ok)
+            .map_err(|_: ()| {
+                ApiError::not_found_by_id(ApiResourceType::SagaDbg, &id)
+            })?
     }
 
     /*
@@ -1129,60 +1225,5 @@ impl TestInterfaces for Nexus {
             disk.runtime.disk_state.attached_instance_id().unwrap();
         let instance = self.db_datastore.instance_fetch(instance_id).await?;
         self.instance_sled(&instance).await
-    }
-}
-
-/**
- * List a page of items from a collection `search_tree` that maps lookup keys
- * directly to the actual objects
- */
-fn collection_page<KeyType, ValueType>(
-    search_tree: &BTreeMap<KeyType, Arc<ValueType>>,
-    pagparams: &DataPageParams<'_, KeyType>,
-) -> ListResult<Arc<ValueType>>
-where
-    KeyType: std::cmp::Ord,
-    ValueType: Send + Sync + 'static,
-{
-    /*
-     * We assemble the list of results that we're going to return now.  If the
-     * caller is holding a lock, they'll be able to release it right away.  This
-     * also makes the lifetime of the return value much easier.
-     */
-    let list = collection_page_as_iter(search_tree, pagparams)
-        .map(|(_, v)| Ok(Arc::clone(v)))
-        .collect::<Vec<Result<Arc<ValueType>, ApiError>>>();
-    Ok(futures::stream::iter(list).boxed())
-}
-
-/**
- * Returns a page of items from a collection `search_tree` as an iterator
- */
-fn collection_page_as_iter<'a, 'b, KeyType, ValueType>(
-    search_tree: &'a BTreeMap<KeyType, ValueType>,
-    pagparams: &'b DataPageParams<'_, KeyType>,
-) -> Box<dyn Iterator<Item = (&'a KeyType, &'a ValueType)> + 'a>
-where
-    KeyType: std::cmp::Ord,
-{
-    /*
-     * Convert the 32-bit limit to a "usize".  This can in principle fail, but
-     * not in any context in which we ever expect this code to run.
-     */
-    let limit = usize::try_from(pagparams.limit.get()).unwrap();
-    match (pagparams.direction, &pagparams.marker) {
-        (Ascending, None) => Box::new(search_tree.iter().take(limit)),
-        (Descending, None) => Box::new(search_tree.iter().rev().take(limit)),
-        (Ascending, Some(start_value)) => Box::new(
-            search_tree
-                .range((Bound::Excluded(*start_value), Bound::Unbounded))
-                .take(limit),
-        ),
-        (Descending, Some(start_value)) => Box::new(
-            search_tree
-                .range((Bound::Unbounded, Bound::Excluded(*start_value)))
-                .rev()
-                .take(limit),
-        ),
     }
 }

@@ -358,7 +358,7 @@ impl From<&ApiByteCount> for i64 {
  */
 /*
  * Because generation numbers are stored in the database, we represent them as
- * i64.  For the same reason as for
+ * i64.
  */
 #[derive(
     Copy,
@@ -433,6 +433,7 @@ pub enum ApiResourceType {
     Instance,
     Rack,
     Sled,
+    SagaDbg,
 }
 
 impl Display for ApiResourceType {
@@ -447,6 +448,7 @@ impl Display for ApiResourceType {
                 ApiResourceType::Instance => "instance",
                 ApiResourceType::Rack => "rack",
                 ApiResourceType::Sled => "sled",
+                ApiResourceType::SagaDbg => "saga_dbg",
             }
         )
     }
@@ -652,19 +654,22 @@ impl Display for ApiInstanceState {
  * good validation error.  ApiInstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<(&str, bool)> for ApiInstanceState {
+impl TryFrom<(&str, Option<bool>)> for ApiInstanceState {
     type Error = String;
 
     fn try_from(
-        (variant, rebooting): (&str, bool),
+        (variant, rebooting): (&str, Option<bool>),
     ) -> Result<Self, Self::Error> {
-        println!("ApiInstanceState::try_from: ({}, {})", variant, rebooting);
         let r = match variant {
             "creating" => ApiInstanceState::Creating,
             "starting" => ApiInstanceState::Starting,
             "running" => ApiInstanceState::Running,
-            "stopping" => ApiInstanceState::Stopping { rebooting },
-            "stopped" => ApiInstanceState::Stopped { rebooting },
+            "stopping" => {
+                ApiInstanceState::Stopping { rebooting: rebooting.unwrap() }
+            }
+            "stopped" => {
+                ApiInstanceState::Stopped { rebooting: rebooting.unwrap() }
+            }
             "repairing" => ApiInstanceState::Repairing,
             "failed" => ApiInstanceState::Failed,
             "destroyed" => ApiInstanceState::Destroyed,
@@ -1233,6 +1238,100 @@ pub struct ApiSledView {
     #[serde(flatten)]
     pub identity: ApiIdentityMetadata,
     pub service_address: SocketAddr,
+}
+
+/*
+ * Sagas
+ *
+ * These are currently only intended for observability by developers.  We will
+ * eventually want to flesh this out into something more observable for end
+ * users.
+ */
+#[derive(ApiObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+pub struct ApiSagaView {
+    pub id: Uuid,
+    pub state: ApiSagaStateView,
+    /*
+     * TODO-cleanup This object contains a fake `ApiIdentityMetadata`.  Why?  We
+     * want to paginate these objects.  http_pagination.rs provides a bunch of
+     * useful facilities -- notably `ApiPaginatedById`.  `ApiPaginatedById`
+     * requires being able to take an arbitrary object in the result set and get
+     * its id.  To do that, it uses the `ApiObjectIdentity` trait, which expects
+     * to be able to return an `ApiIdentityMetadata` reference from an object.
+     * Finally, the pagination facilities just pull the `id` out of that.
+     *
+     * In this case (as well as others, like sleds and racks), we have ids, and
+     * we want to be able to paginate by id, but we don't have full identity
+     * metadata.  (Or we do, but it's similarly faked up.)  What we should
+     * probably do is create a new trait, say `ApiObjectId`, that returns _just_
+     * an id.  We can provide a blanket impl for anything that impls
+     * ApiIdentityMetadata.  We can define one-off impls for structs like this
+     * one.  Then the id-only pagination interfaces can require just
+     * `ApiObjectId`.
+     */
+    #[serde(skip)]
+    pub identity: ApiIdentityMetadata,
+}
+
+impl ApiObject for ApiSagaView {
+    type View = Self;
+    fn to_view(&self) -> Self::View {
+        self.clone()
+    }
+}
+
+impl From<steno::SagaView> for ApiSagaView {
+    fn from(s: steno::SagaView) -> Self {
+        ApiSagaView {
+            id: Uuid::from(s.id),
+            state: ApiSagaStateView::from(s.state),
+            identity: ApiIdentityMetadata {
+                /* TODO-cleanup See the note in ApiSagaView above. */
+                id: Uuid::from(s.id),
+                name: ApiName::try_from(format!("saga-{}", s.id)).unwrap(),
+                description: format!("saga {}", s.id),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
+        }
+    }
+}
+
+/*
+ * TODO-robustness This type is unnecessarily loosey-goosey.  For example, see
+ * the use of Options in the "Done" variant.
+ */
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiSagaStateView {
+    Running,
+    #[serde(rename_all = "camelCase")]
+    Done {
+        failed: bool,
+        error_node_name: Option<String>,
+        error_info: Option<steno::ActionError>,
+    },
+}
+
+impl From<steno::SagaStateView> for ApiSagaStateView {
+    fn from(st: steno::SagaStateView) -> Self {
+        match st {
+            steno::SagaStateView::Ready { .. } => ApiSagaStateView::Running,
+            steno::SagaStateView::Running { .. } => ApiSagaStateView::Running,
+            steno::SagaStateView::Done { result, .. } => match result.kind {
+                Ok(_) => ApiSagaStateView::Done {
+                    failed: false,
+                    error_node_name: None,
+                    error_info: None,
+                },
+                Err(e) => ApiSagaStateView::Done {
+                    failed: true,
+                    error_node_name: Some(e.error_node_name),
+                    error_info: Some(e.error_source),
+                },
+            },
+        }
+    }
 }
 
 /*

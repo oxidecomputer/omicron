@@ -110,7 +110,7 @@ CREATE TABLE omicron.public.Instance (
     /* Runtime state */
     -- instance_state omicron.public.InstanceState NOT NULL, // TODO see above
     instance_state TEXT NOT NULL,
-    rebooting BOOL NOT NULL,
+    instance_state_rebooting BOOL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -210,6 +210,97 @@ CREATE TABLE omicron.public.Sled (
 
     sled_agent_ip INET
 );
+
+/*******************************************************************/
+
+/*
+ * Sagas
+ */
+
+/*
+ * TODO See notes above about cockroachdb/cockroach#57411 /
+ * cockroachdb/cockroach#58084.
+ * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
+ */
+-- CREATE TYPE omicron.public.SagaState AS ENUM (
+--     'running',
+--     'unwinding',
+--     'done'
+-- );
+
+
+CREATE TABLE omicron.public.Saga (
+    /* immutable fields */
+
+    /* unique identifier for this execution */
+    id UUID PRIMARY KEY,
+    /* unique id of the creator */
+    creator UUID NOT NULL,
+    /* name of the saga template name being run */
+    template_name STRING(127) NOT NULL,
+    /* time the saga was started */
+    time_created TIMESTAMPTZ NOT NULL,
+    /* saga parameters */
+    saga_params JSONB NOT NULL,
+
+    /*
+     * TODO:
+     * - id for current SEC (maybe NULL?)
+     * - time of last adoption
+     * - previous SEC? previous adoption time?
+     * - number of adoptions?
+     */
+    saga_state STRING(31) NOT NULL, /* see SagaState above */
+    current_sec UUID NOT NULL,
+    adopt_generation INT NOT NULL,
+    adopt_time TIMESTAMPTZ NOT NULL
+);
+
+/*
+ * For recovery (and probably takeover), we need to be able to list running
+ * sagas by SEC.  We need to paginate this list by the id.
+ */
+CREATE UNIQUE INDEX ON omicron.public.Saga (
+    current_sec, id
+) WHERE saga_state != 'done';
+
+/*
+ * TODO more indexes for Saga?
+ * - Debugging and/or reporting: saga_template_name? creator?
+ */
+
+/*
+ * TODO See notes above about cockroachdb/cockroach#57411 /
+ * cockroachdb/cockroach#58084.
+ */
+-- CREATE TYPE omicron.public.SagaNodeEventType AS ENUM (
+--     'started',
+--     'succeeded',
+--     'failed'
+--     'undo_started'
+--     'undo_finished'
+-- );
+
+CREATE TABLE omicron.public.SagaNodeEvent (
+    saga_id UUID NOT NULL,
+    node_id INT NOT NULL,
+    event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
+    data JSONB,
+    event_time TIMESTAMPTZ NOT NULL,
+    creator UUID NOT NULL,
+
+    /*
+     * It's important to be able to list the nodes in a saga.  We put the
+     * node_id in the saga so that we can paginate the list.
+     *
+     * We make it a UNIQUE index and include the event_type to prevent two SECs
+     * from attempting to record the same event for the same saga.  Whether this
+     * should be allowed is still TBD.
+     */
+    PRIMARY KEY (saga_id, node_id, event_type)
+);
+
+/*******************************************************************/
 
 /*
  * Metadata for the schema itself.  This version number isn't great, as there's

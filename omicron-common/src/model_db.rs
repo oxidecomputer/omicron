@@ -7,12 +7,13 @@
  * There are essentially two patterns used for database conversions:
  *
  * (1) For Rust types that map directly to database types, we impl
- *     tokio_postgres's [`ToSql`] and [`FromSql`] traits.  For the most part,
- *     these are newtypes in Rust that wrap a type for which there is already an
- *     impl for these traits and we delegate to those impls where possible.  For
- *     example, [`ApiByteCount`] is a numeric newtype containing a u64, which
- *     maps directly to a CockroachDB (PostgreSQL) `int`, which is essentially
- *     an `i64`.  The `ToSql` and `FromSql` impls for `ApiByteCount` delegate to
+ *     tokio_postgres's [`tokio_postgres::types::ToSql`] and
+ *     [`tokio_postgres::types::FromSql`] traits.  For the most part, these are
+ *     newtypes in Rust that wrap a type for which there is already an impl for
+ *     these traits and we delegate to those impls where possible.  For example,
+ *     [`ApiByteCount`] is a numeric newtype containing a u64, which maps
+ *     directly to a CockroachDB (PostgreSQL) `int`, which is essentially an
+ *     `i64`.  The `ToSql` and `FromSql` impls for `ApiByteCount` delegate to
  *     the existing impls for `i64`.
  *
  * (2) For Rust types that require multiple database values (e.g., an
@@ -67,8 +68,6 @@ use crate::model::ApiProject;
 use chrono::DateTime;
 use chrono::Utc;
 use std::convert::TryFrom;
-use tokio_postgres::types::FromSql;
-use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 /*
@@ -81,9 +80,10 @@ use uuid::Uuid;
  * T: TryFrom<D>.  These impls delegate to the "D" impls of these traits.  See
  * the module-level documentation for why this is useful.
  */
+#[macro_export]
 macro_rules! impl_sql_wrapping {
     ($T:ident, $D:ty) => {
-        impl ToSql for $T {
+        impl tokio_postgres::types::ToSql for $T {
             fn to_sql(
                 &self,
                 ty: &tokio_postgres::types::Type,
@@ -96,23 +96,24 @@ macro_rules! impl_sql_wrapping {
             }
 
             fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <$D as ToSql>::accepts(ty)
+                <$D as tokio_postgres::types::ToSql>::accepts(ty)
             }
 
             tokio_postgres::types::to_sql_checked!();
         }
 
-        impl<'a> FromSql<'a> for $T {
+        impl<'a> tokio_postgres::types::FromSql<'a> for $T {
             fn from_sql(
                 ty: &tokio_postgres::types::Type,
                 raw: &'a [u8],
             ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-                let value: $D = <$D as FromSql>::from_sql(ty, raw)?;
+                let value: $D =
+                    <$D as tokio_postgres::types::FromSql>::from_sql(ty, raw)?;
                 $T::try_from(value).map_err(|e| e.into())
             }
 
             fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                <$D as FromSql>::accepts(ty)
+                <$D as tokio_postgres::types::FromSql>::accepts(ty)
             }
         }
     };
@@ -162,7 +163,8 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let variant = sql_row_value(value, "instance_state")?;
-        let rebooting = sql_row_value(value, "rebooting")?;
+        let rebooting: Option<bool> =
+            sql_row_value(value, "instance_state_rebooting")?;
         ApiInstanceState::try_from((variant, rebooting))
             .map_err(|err| ApiError::InternalError { message: err })
     }

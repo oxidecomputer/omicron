@@ -12,6 +12,7 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
 use std::convert::TryFrom;
+use std::num::NonZeroU32;
 
 use super::operations::sql_execute;
 use super::operations::sql_query;
@@ -19,20 +20,21 @@ use super::operations::sql_query_always_one;
 use super::operations::sql_query_maybe_one;
 use super::sql;
 use super::sql::LookupKey;
+use super::sql::ResourceTable;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
 use super::sql::Table;
 
 /// Fetch parts of a row using the specified lookup
-pub async fn sql_fetch_row_raw<'a, L, T>(
+pub async fn sql_fetch_row_raw<'a, L, R>(
     client: &tokio_postgres::Client,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
     columns: &[&'static str],
 ) -> LookupResult<tokio_postgres::Row>
 where
-    L: LookupKey<'a>,
-    T: Table,
+    L: LookupKey<'a, R>,
+    R: ResourceTable,
 {
     let mut lookup_cond_sql = SqlString::new();
     L::where_select_rows(scope_key, item_key, &mut lookup_cond_sql);
@@ -40,29 +42,29 @@ where
     let sql = format!(
         "SELECT {} FROM {} WHERE ({}) AND ({}) LIMIT 2",
         columns.join(", "),
-        T::TABLE_NAME,
-        T::LIVE_CONDITIONS,
+        R::TABLE_NAME,
+        R::LIVE_CONDITIONS,
         &lookup_cond_sql.sql_fragment(),
     );
     let query_params = lookup_cond_sql.sql_params();
-    let mkzerror = move || L::where_select_error::<T>(scope_key, item_key);
+    let mkzerror = move || L::where_select_error(scope_key, item_key);
     sql_query_maybe_one(client, &sql, query_params, mkzerror).await
 }
 
 /// Fetch an entire row using the specified lookup
-pub async fn sql_fetch_row_by<'a, L, T>(
+pub async fn sql_fetch_row_by<'a, L, R>(
     client: &tokio_postgres::Client,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<T::ModelType>
+) -> LookupResult<R::ModelType>
 where
-    L: LookupKey<'a>,
-    T: Table,
+    L: LookupKey<'a, R>,
+    R: ResourceTable,
 {
     let row =
-        sql_fetch_row_raw::<L, T>(client, scope_key, item_key, T::ALL_COLUMNS)
+        sql_fetch_row_raw::<L, R>(client, scope_key, item_key, R::ALL_COLUMNS)
             .await?;
-    T::ModelType::try_from(&row)
+    R::ModelType::try_from(&row)
 }
 
 /// Fetch a page of rows from a table using the specified lookup
@@ -72,7 +74,7 @@ pub async fn sql_fetch_page_from_table<'a, L, T>(
     pagparams: &'a DataPageParams<'a, L::ItemKey>,
 ) -> ListResult<T::ModelType>
 where
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
     L::ScopeKey: 'a,
     T: Table,
 {
@@ -94,32 +96,119 @@ pub async fn sql_fetch_page_by<'a, L, T, R>(
     columns: &'static [&'static str],
 ) -> ListResult<R>
 where
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
     T: Table,
     R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
         + Send
         + 'static,
 {
-    let mut page_cond_sql = SqlString::new();
-    L::where_select_page(scope_key, pagparams, &mut page_cond_sql);
-    let limit = i64::from(pagparams.limit.get());
-    let limit_clause = format!("LIMIT {}", page_cond_sql.next_param(&limit));
-    page_cond_sql.push_str(limit_clause.as_str());
-
-    let sql = format!(
-        "SELECT {} FROM {} WHERE ({}) {}",
-        columns.join(", "),
-        T::TABLE_NAME,
-        T::LIVE_CONDITIONS,
-        &page_cond_sql.sql_fragment(),
-    );
-    let query_params = page_cond_sql.sql_params();
-    let rows = sql_query(client, sql.as_str(), query_params)
-        .await
-        .map_err(sql_error_generic)?;
+    let mut s = SqlString::new();
+    s.push_str("TRUE");
+    let rows =
+        sql_fetch_page_raw::<L, T>(client, scope_key, pagparams, columns, s)
+            .await?;
     let list =
         rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
     Ok(futures::stream::iter(list).boxed())
+}
+
+/// Fetches a page of rows from a table `T` using the specified lookup `L`.  The
+/// page is identified by `pagparams`, which contains a marker value, a scan
+/// direction, and a limit of rows to fetch.  The caller can provide additional
+/// constraints in SQL using `extra_cond_sql`.
+async fn sql_fetch_page_raw<'a, 'b, L, T>(
+    client: &'a tokio_postgres::Client,
+    scope_key: L::ScopeKey,
+    pagparams: &DataPageParams<'b, L::ItemKey>,
+    columns: &'static [&'static str],
+    extra_cond_sql: SqlString<'b>,
+) -> Result<Vec<tokio_postgres::Row>, ApiError>
+where
+    L: LookupKey<'a, T>,
+    T: Table,
+    'a: 'b,
+{
+    let (mut page_select_sql, extra_fragment) =
+        SqlString::new_with_params(extra_cond_sql);
+    L::where_select_page(scope_key, pagparams, &mut page_select_sql);
+    let limit = i64::from(pagparams.limit.get());
+    let limit_clause = format!("LIMIT {}", page_select_sql.next_param(&limit));
+    page_select_sql.push_str(limit_clause.as_str());
+
+    let sql = format!(
+        "SELECT {} FROM {} WHERE ({}) AND ({}) {}",
+        columns.join(", "),
+        T::TABLE_NAME,
+        extra_fragment,
+        T::LIVE_CONDITIONS,
+        &page_select_sql.sql_fragment(),
+    );
+    let query_params = page_select_sql.sql_params();
+    sql_query(client, sql.as_str(), query_params)
+        .await
+        .map_err(sql_error_generic)
+}
+
+/// Fetch _all_ rows from table `T` that match SQL conditions `extra_cond`.
+/// This function makes paginated requests using lookup `L`.  Rows are returned
+/// as a Vec of type `R`.
+pub async fn sql_paginate<'a, L, T, R>(
+    client: &'a tokio_postgres::Client,
+    scope_key: L::ScopeKey,
+    columns: &'static [&'static str],
+    extra_cond: SqlString<'a>,
+) -> Result<Vec<R>, ApiError>
+where
+    L: LookupKey<'a, T>,
+    T: Table,
+    R: for<'b> TryFrom<&'b tokio_postgres::Row, Error = ApiError>
+        + Send
+        + 'static,
+{
+    let mut results = Vec::new();
+    let mut last_row_marker = None;
+    let direction = dropshot::PaginationOrder::Ascending;
+    let limit = NonZeroU32::new(100).unwrap();
+    loop {
+        /* TODO-error more context here about what we were doing */
+        let pagparams = DataPageParams {
+            marker: last_row_marker.as_ref(),
+            direction,
+            limit,
+        };
+        let rows = sql_fetch_page_raw::<L, T>(
+            client,
+            scope_key,
+            &pagparams,
+            columns,
+            extra_cond.clone(),
+        )
+        .await?;
+        if rows.len() == 0 {
+            return Ok(results);
+        }
+
+        /*
+         * Extract the marker column and prepare pagination parameters for the
+         * next query.
+         */
+        let last_row = rows.last().unwrap();
+        last_row_marker = Some(sql_row_value::<_, L::ItemKey>(
+            last_row,
+            L::ITEM_KEY_COLUMN_NAME,
+        )?);
+
+        /*
+         * Now transform the rows we got and append them to the list we're
+         * accumulating.
+         */
+        results.append(
+            &mut rows
+                .iter()
+                .map(R::try_from)
+                .collect::<Result<Vec<R>, ApiError>>()?,
+        );
+    }
 }
 
 ///
@@ -178,7 +267,7 @@ pub async fn sql_update_precond<'a, 'b, T, L>(
 ) -> Result<UpdatePrecond, ApiError>
 where
     T: Table,
-    L: LookupKey<'a>,
+    L: LookupKey<'a, T>,
 {
     /*
      * We want to update a row only if it meets some preconditions.  One
@@ -385,7 +474,7 @@ where
      * NotFound-by-name if they get this error.  It sounds kind of cheesy but
      * only the caller knows this translation has been done.
      */
-    let mkzerror = || L::where_select_error::<T>(scope_key, item_key);
+    let mkzerror = || L::where_select_error(scope_key, item_key);
     let row = sql_query_maybe_one(
         &client,
         sql.as_str(),
@@ -441,11 +530,54 @@ fn sql_error_on_create(
  * provide this in `unique_value` and it will be returned with an
  * [`ApiError::ObjectAlreadyExists`] error.
  */
-pub async fn sql_insert_unique<T>(
+pub async fn sql_insert_unique<R>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,
     unique_value: &str,
-) -> Result<T::ModelType, ApiError>
+) -> Result<R::ModelType, ApiError>
+where
+    R: ResourceTable,
+{
+    let mut sql = SqlString::new();
+    let param_names = values
+        .values()
+        .iter()
+        .map(|value| sql.next_param(*value))
+        .collect::<Vec<String>>();
+    let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
+
+    sql.push_str(
+        format!(
+            "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+            R::TABLE_NAME,
+            column_names.join(", "),
+            param_names.join(", "),
+            R::ALL_COLUMNS.join(", "),
+        )
+        .as_str(),
+    );
+
+    let row =
+        sql_query_always_one(client, sql.sql_fragment(), sql.sql_params())
+            .await
+            .map_err(|e| {
+                sql_error_on_create(R::RESOURCE_TYPE, unique_value, e)
+            })?;
+
+    R::ModelType::try_from(&row)
+}
+
+///
+/// Insert a database record, not necessarily idempotently
+///
+/// This is used when the caller wants to explicitly handle the case of a
+/// conflict or else expects that a conflict will never happen and wants to
+/// treat it as an unhandleable operational error.
+///
+pub async fn sql_insert<T>(
+    client: &tokio_postgres::Client,
+    values: &SqlValueSet,
+) -> Result<(), ApiError>
 where
     T: Table,
 {
@@ -459,23 +591,18 @@ where
 
     sql.push_str(
         format!(
-            "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+            "INSERT INTO {} ({}) VALUES ({})",
             T::TABLE_NAME,
             column_names.join(", "),
             param_names.join(", "),
-            T::ALL_COLUMNS.join(", "),
         )
         .as_str(),
     );
 
-    let row =
-        sql_query_always_one(client, sql.sql_fragment(), sql.sql_params())
-            .await
-            .map_err(|e| {
-                sql_error_on_create(T::RESOURCE_TYPE, unique_value, e)
-            })?;
-
-    T::ModelType::try_from(&row)
+    sql_execute(client, sql.sql_fragment(), sql.sql_params())
+        .await
+        .map(|_| ())
+        .map_err(sql_error_generic)
 }
 
 ///
@@ -499,14 +626,14 @@ where
 /// that the caller is trying to insert.  This is provided in the returned
 /// [`ApiError::ObjectAlreadyExists`] error.
 ///
-pub async fn sql_insert_unique_idempotent<'a, T>(
+pub async fn sql_insert_unique_idempotent<'a, R>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
 ) -> Result<(), ApiError>
 where
-    T: Table,
+    R: ResourceTable,
 {
     let mut sql = SqlString::new();
     let param_names = values
@@ -519,7 +646,7 @@ where
     sql.push_str(
         format!(
             "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING",
-            T::TABLE_NAME,
+            R::TABLE_NAME,
             column_names.join(", "),
             param_names.join(", "),
             ignore_conflicts_on,
@@ -529,7 +656,7 @@ where
 
     sql_execute(client, sql.sql_fragment(), sql.sql_params())
         .await
-        .map_err(|e| sql_error_on_create(T::RESOURCE_TYPE, unique_value, e))
+        .map_err(|e| sql_error_on_create(R::RESOURCE_TYPE, unique_value, e))
         .map(|_| ())
 }
 
@@ -659,19 +786,19 @@ where
 // conflict on the unique (project_id, name) index.  In that case, we just want
 // to fail right away -- the whole saga is going to fail with a user error.
 //
-pub async fn sql_insert_unique_idempotent_and_fetch<'a, T, L>(
+pub async fn sql_insert_unique_idempotent_and_fetch<'a, R, L>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<T::ModelType>
+) -> LookupResult<R::ModelType>
 where
-    T: Table,
-    L: LookupKey<'a>,
+    R: ResourceTable,
+    L: LookupKey<'a, R>,
 {
-    sql_insert_unique_idempotent::<T>(
+    sql_insert_unique_idempotent::<R>(
         client,
         values,
         unique_value,
@@ -686,7 +813,7 @@ where
      * that must be true for this function to be correct, and is true in the
      * cases of our callers.)
      */
-    sql_fetch_row_by::<L, T>(client, scope_key, item_key)
+    sql_fetch_row_by::<L, R>(client, scope_key, item_key)
         .await
         .map_err(sql_error_not_missing)
 }
