@@ -14,7 +14,7 @@ use omicron_common::NexusClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::InstanceState;
+use crate::common::instance::InstanceState;
 
 /**
  * Simulated Instance (virtual machine), as created by the external Oxide API
@@ -47,6 +47,11 @@ impl Simulatable for SimInstance {
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
 
+        // These operations would typically be triggered via responses from
+        // Propolis, but for a simulated sled agent, this does not exist.
+        //
+        // Instead, we make transitions to new states based entirely on the
+        // value of "pending".
         let (next, next_pending) = match pending.run_state {
             ApiInstanceStateRequested::Running => {
                 (ApiInstanceState::Running, None)
@@ -76,7 +81,7 @@ impl Simulatable for SimInstance {
             current: current.clone(),
             pending: Some(pending.clone()),
         };
-        current.update(next, next_pending);
+        current.transition(next, next_pending);
         (current.current, current.pending)
     }
 
