@@ -27,6 +27,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroU32;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -1389,6 +1390,7 @@ pub struct ProducerServerInfo {
     producer_id: ProducerId,
     address: SocketAddr,
     collection_route: String,
+    interval: Duration,
 }
 
 impl ProducerServerInfo {
@@ -1396,22 +1398,24 @@ impl ProducerServerInfo {
      * Generate info for a metric server listening on the given address and route.
      *
      * This will generate a new, random [`ProducerId`] for the server. The `base_route` should be
-     * a route stem, to which the producer ID will be appended.
+     * a route stem, to which the producer ID will be appended. `interval` is the desired initial
+     * collection interval for the producers metrics.
      *
      * Example
      * -------
      * ```rust
+     * use std::time::Duration;
      * use omicron_common::model::ProducerServerInfo;
      *
-     * let info = ProducerServerInfo::new("127.0.0.1:4444", "/collect");
+     * let info = ProducerServerInfo::new("127.0.0.1:4444", "/collect", Duration::from_secs(10));
      * assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
      * ```
      */
-    pub fn new<T>(address: T, base_route: &str) -> Self
+    pub fn new<T>(address: T, base_route: &str, interval: Duration) -> Self
     where
         T: ToSocketAddrs,
     {
-        Self::with_id(ProducerId::new(), address, base_route)
+        Self::with_id(ProducerId::new(), address, base_route, interval)
     }
 
     /**
@@ -1422,6 +1426,7 @@ impl ProducerServerInfo {
         producer_id: ProducerId,
         address: T,
         base_route: &str,
+        interval: Duration,
     ) -> Self
     where
         T: ToSocketAddrs,
@@ -1433,6 +1438,7 @@ impl ProducerServerInfo {
                 "{}/{}",
                 base_route, producer_id.producer_id
             ),
+            interval,
         }
     }
 
@@ -1455,6 +1461,13 @@ impl ProducerServerInfo {
      */
     pub fn collection_route(&self) -> &str {
         &self.collection_route
+    }
+
+    /**
+     * Return the interval on which metrics should be collected.
+     */
+    pub fn interval(&self) -> &Duration {
+        &self.interval
     }
 }
 

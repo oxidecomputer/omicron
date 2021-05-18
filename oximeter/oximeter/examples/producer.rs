@@ -1,6 +1,8 @@
 //! Integration test running a producer that exports a few basic metrics.
 // Copyright 2021 Oxide Computer Company
 
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
 use omicron_common::model::ProducerServerInfo;
@@ -82,7 +84,8 @@ async fn main() {
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
     let registration_info =
         RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
-    let server_info = ProducerServerInfo::new(address, "/collect");
+    let server_info =
+        ProducerServerInfo::new(address, "/collect", Duration::from_secs(10));
     let config = ProducerServerConfig {
         server_info,
         registration_info,
