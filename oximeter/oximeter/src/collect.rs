@@ -11,16 +11,16 @@ use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
+use omicron_common::model::{ProducerId, ProducerServerInfo};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o};
-use uuid::Uuid;
 
 use crate::types;
 use crate::{Error, Producer};
 
-/// Information describing how a [`MetricServer`] registers itself for collection.
+/// Information describing how a [`ProducerServer`] registers itself for collection.
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct RegistrationInfo {
     address: SocketAddr,
@@ -47,118 +47,6 @@ impl RegistrationInfo {
     /// Return the route at which the registration request will be sent.
     pub fn registration_route(&self) -> &str {
         &self.registration_route
-    }
-}
-
-/// Idenitifier for a producer.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialOrd,
-    PartialEq,
-    Ord,
-    Eq,
-    JsonSchema,
-    Serialize,
-    Deserialize,
-)]
-pub struct ProducerId {
-    pub producer_id: Uuid,
-}
-
-impl ProducerId {
-    /// Construct a new producer ID.
-    pub fn new() -> Self {
-        Self { producer_id: Uuid::new_v4() }
-    }
-}
-
-impl Default for ProducerId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for ProducerId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.producer_id.to_string())
-    }
-}
-
-/// Information announced by a metric server, used so that clients can contact it and collect
-/// available metric data from it.
-#[derive(
-    Debug,
-    Clone,
-    PartialOrd,
-    PartialEq,
-    Ord,
-    Eq,
-    JsonSchema,
-    Serialize,
-    Deserialize,
-)]
-pub struct MetricServerInfo {
-    producer_id: ProducerId,
-    address: SocketAddr,
-    collection_route: String,
-}
-
-impl MetricServerInfo {
-    /// Generate info for a metric server listening on the given address and route.
-    ///
-    /// This will generate a new, random [`ProducerId`] for the server. The `base_route` should be
-    /// a route stem, to which the producer ID will be appended.
-    ///
-    /// Example
-    /// -------
-    /// ```rust
-    /// use oximeter::collect::MetricServerInfo;
-    ///
-    /// let info = MetricServerInfo::new("127.0.0.1:4444", "/collect");
-    /// assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
-    /// ```
-    pub fn new<T>(address: T, base_route: &str) -> Self
-    where
-        T: ToSocketAddrs,
-    {
-        Self::with_id(ProducerId::new(), address, base_route)
-    }
-
-    /// Generate info for a metric server, listening on the given address and route, with a known
-    /// ID.
-    pub fn with_id<T>(
-        producer_id: ProducerId,
-        address: T,
-        base_route: &str,
-    ) -> Self
-    where
-        T: ToSocketAddrs,
-    {
-        Self {
-            producer_id,
-            address: address.to_socket_addrs().unwrap().next().unwrap(),
-            collection_route: format!(
-                "{}/{}",
-                base_route, producer_id.producer_id
-            ),
-        }
-    }
-
-    /// Return the producer ID for this server.
-    pub fn producer_id(&self) -> ProducerId {
-        self.producer_id
-    }
-
-    /// Return the address on which this server listens.
-    pub fn address(&self) -> SocketAddr {
-        self.address
-    }
-
-    /// Return the route that can be used to request metric data.
-    pub fn collection_route(&self) -> &str {
-        &self.collection_route
     }
 }
 
@@ -221,30 +109,30 @@ impl Collector {
 unsafe impl Sync for Collector {}
 unsafe impl Send for Collector {}
 
-/// Information used to configure a [`MetricServer`]
+/// Information used to configure a [`ProducerServer`]
 #[derive(Debug, Clone)]
-pub struct MetricServerConfig {
-    pub server_info: MetricServerInfo,
+pub struct ProducerServerConfig {
+    pub server_info: ProducerServerInfo,
     pub registration_info: RegistrationInfo,
     pub dropshot_config: ConfigDropshot,
     pub logging_config: ConfigLogging,
 }
 
 /// A Dropshot server used to expose metrics to be collected over the network.
-pub struct MetricServer {
+pub struct ProducerServer {
     collector: Collector,
     server: HttpServer<Collector>,
 }
 
-impl MetricServer {
+impl ProducerServer {
     /// Start a new metric server, registering it with the chosen endpoint, and listening for
     /// requests on the associated address and route.
-    pub async fn start(config: &MetricServerConfig) -> Result<Self, Error> {
+    pub async fn start(config: &ProducerServerConfig) -> Result<Self, Error> {
         let log = config
             .logging_config
             .to_logger("metric-server")
-            .map_err(|msg| Error::MetricServer(msg.to_string()))?;
-        let collector = Collector::with_id(config.server_info.producer_id);
+            .map_err(|msg| Error::ProducerServer(msg.to_string()))?;
+        let collector = Collector::with_id(config.server_info.producer_id());
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
             &config.dropshot_config,
@@ -253,7 +141,7 @@ impl MetricServer {
             &dropshot_log,
         )
         .map_err(|msg| {
-            Error::MetricServer(format!(
+            Error::ProducerServer(format!(
                 "failed to start Dropshot server: {}",
                 msg
             ))
@@ -280,7 +168,7 @@ impl MetricServer {
     /// Serve requests for metrics.
     pub async fn serve_forever(self) -> Result<(), Error> {
         Ok(self.server.await.map_err(|msg| {
-            Error::MetricServer(format!("failed to start server: {}", msg))
+            Error::ProducerServer(format!("failed to start server: {}", msg))
         })?)
     }
 
@@ -294,7 +182,7 @@ impl MetricServer {
     }
 }
 
-// Register API endpoints of the `MetricServer`.
+// Register API endpoints of the `ProducerServer`.
 fn metric_server_api() -> ApiDescription<Collector> {
     let mut api = ApiDescription::new();
     api.register(collect_endpoint)
@@ -302,7 +190,7 @@ fn metric_server_api() -> ApiDescription<Collector> {
     api
 }
 
-// Implementation of the actual collection routine used by the `MetricServer`.
+// Implementation of the actual collection routine used by the `ProducerServer`.
 #[endpoint {
     method = GET,
     path = "/collect/{producer_id}",
@@ -319,12 +207,12 @@ async fn collect_endpoint(
 /// Register a metric server to be polled for metric data.
 ///
 /// This function is used to provide consumers the flexibility to define their own Dropshot
-/// servers, rather than using the `MetricServer` provided by this crate (which starts a _new_
+/// servers, rather than using the `ProducerServer` provided by this crate (which starts a _new_
 /// server).
 pub async fn register(
     client: &Client,
     registration_info: &RegistrationInfo,
-    server_info: &MetricServerInfo,
+    server_info: &ProducerServerInfo,
 ) -> Result<(), Error> {
     client
         .post(format!(
@@ -334,9 +222,9 @@ pub async fn register(
         .json(server_info)
         .send()
         .await
-        .map_err(|msg| Error::MetricServer(msg.to_string()))?
+        .map_err(|msg| Error::ProducerServer(msg.to_string()))?
         .error_for_status()
-        .map_err(|msg| Error::MetricServer(msg.to_string()))?;
+        .map_err(|msg| Error::ProducerServer(msg.to_string()))?;
     Ok(())
 }
 

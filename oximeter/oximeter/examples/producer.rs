@@ -3,8 +3,9 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
+use omicron_common::model::ProducerServerInfo;
 use oximeter::collect::{
-    MetricServer, MetricServerConfig, MetricServerInfo, RegistrationInfo,
+    ProducerServer, ProducerServerConfig, RegistrationInfo,
 };
 use oximeter::{
     types::{Cumulative, Sample},
@@ -81,14 +82,14 @@ async fn main() {
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
     let registration_info =
         RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
-    let server_info = MetricServerInfo::new(address, "/collect");
-    let config = MetricServerConfig {
+    let server_info = ProducerServerInfo::new(address, "/collect");
+    let config = ProducerServerConfig {
         server_info,
         registration_info,
         dropshot_config,
         logging_config,
     };
-    let server = MetricServer::start(&config).await.unwrap();
+    let server = ProducerServer::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
     server.collector().register_producer(Box::new(producer)).unwrap();
     server.serve_forever().await.unwrap();

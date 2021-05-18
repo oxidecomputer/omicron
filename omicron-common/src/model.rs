@@ -25,7 +25,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroU32;
 use thiserror::Error;
 use uuid::Uuid;
@@ -1334,6 +1334,128 @@ pub struct BootstrapAgentShareRequest {
 pub struct BootstrapAgentShareResponse {
     // TODO-completeness: format TBD; currently opaque.
     pub shared_secret: Vec<u8>,
+}
+
+/*
+ * Oximeter producer/collector objects.
+ */
+
+/**
+ * Idenitifier for a producer.
+ */
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
+pub struct ProducerId {
+    pub producer_id: Uuid,
+}
+
+impl ProducerId {
+    /**
+     * Construct a new producer ID.
+     */
+    pub fn new() -> Self {
+        Self { producer_id: Uuid::new_v4() }
+    }
+}
+
+impl Default for ProducerId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for ProducerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.producer_id.to_string())
+    }
+}
+
+/**
+ * Information announced by a metric server, used so that clients can contact it and collect
+ * available metric data from it.
+ */
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProducerServerInfo {
+    producer_id: ProducerId,
+    address: SocketAddr,
+    collection_route: String,
+}
+
+impl ProducerServerInfo {
+    /**
+     * Generate info for a metric server listening on the given address and route.
+     *
+     * This will generate a new, random [`ProducerId`] for the server. The `base_route` should be
+     * a route stem, to which the producer ID will be appended.
+     *
+     * Example
+     * -------
+     * ```rust
+     * use omicron_common::model::ProducerServerInfo;
+     *
+     * let info = ProducerServerInfo::new("127.0.0.1:4444", "/collect");
+     * assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
+     * ```
+     */
+    pub fn new<T>(address: T, base_route: &str) -> Self
+    where
+        T: ToSocketAddrs,
+    {
+        Self::with_id(ProducerId::new(), address, base_route)
+    }
+
+    /**
+     * Generate info for a metric server, listening on the given address and route, with a known
+     * ID.
+     */
+    pub fn with_id<T>(
+        producer_id: ProducerId,
+        address: T,
+        base_route: &str,
+    ) -> Self
+    where
+        T: ToSocketAddrs,
+    {
+        Self {
+            producer_id,
+            address: address.to_socket_addrs().unwrap().next().unwrap(),
+            collection_route: format!(
+                "{}/{}",
+                base_route, producer_id.producer_id
+            ),
+        }
+    }
+
+    /**
+     * Return the producer ID for this server.
+     */
+    pub fn producer_id(&self) -> ProducerId {
+        self.producer_id
+    }
+
+    /**
+     * Return the address on which this server listens.
+     */
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    /**
+     * Return the route that can be used to request metric data.
+     */
+    pub fn collection_route(&self) -> &str {
+        &self.collection_route
+    }
 }
 
 #[cfg(test)]

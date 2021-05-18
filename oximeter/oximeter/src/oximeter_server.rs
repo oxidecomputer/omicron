@@ -11,23 +11,21 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use omicron_common::backoff;
+use omicron_common::model::{ProducerId, ProducerServerInfo};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, warn, Logger};
 use uuid::Uuid;
 
-use crate::{
-    collect::{MetricServerInfo, ProducerId},
-    Error,
-};
+use crate::Error;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
 struct OximeterAgent {
     pub id: Uuid,
     _client: Client,
     log: Logger,
-    producers: Arc<Mutex<BTreeMap<ProducerId, MetricServerInfo>>>,
+    producers: Arc<Mutex<BTreeMap<ProducerId, ProducerServerInfo>>>,
 }
 
 impl OximeterAgent {
@@ -52,7 +50,7 @@ impl OximeterAgent {
     /// Register a new producer with this oximeter instance.
     pub fn register_producer(
         &self,
-        info: MetricServerInfo,
+        info: ProducerServerInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registering new metric producer";
               "producer_id" => info.producer_id().to_string(),
@@ -190,7 +188,7 @@ fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
 }]
 async fn producers_post(
     request_context: Arc<RequestContext<Arc<OximeterAgent>>>,
-    body: TypedBody<MetricServerInfo>,
+    body: TypedBody<ProducerServerInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let agent = request_context.context();
     let server_info = body.into_inner();

@@ -201,9 +201,9 @@ pub enum Error {
     #[error("Error during sample production: {0}")]
     ProductionError(String),
 
-    /// An error occured running a `MetricServer`
+    /// An error occured running a `ProducerServer`
     #[error("Error running metric server: {0}")]
-    MetricServer(String),
+    ProducerServer(String),
 
     /// An error running an `Oximeter` server
     #[error("Error running oximeter: {0}")]

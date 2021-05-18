@@ -13,10 +13,10 @@ use dropshot::TypedBody;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
+use omicron_common::model::ProducerServerInfo;
+use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
-use oximeter::{
-    collect::MetricServerInfo, oximeter_server::OximeterStartupInfo,
-};
+use oximeter::oximeter_server::OximeterStartupInfo;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -142,14 +142,12 @@ async fn cpapi_disks_put(
  }]
 async fn cpapi_producers_post(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
-    producer_info: TypedBody<MetricServerInfo>,
+    producer_info: TypedBody<ProducerServerInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let _nexus = &context.nexus;
-    let log = &context.log;
+    let nexus = &context.nexus;
     let producer_info = producer_info.into_inner();
-    let producer_id = producer_info.producer_id().producer_id;
-    info!(log, "registered new producer"; "producer_id" => producer_id.to_string());
+    nexus.assign_producer(producer_info).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -165,9 +163,21 @@ async fn cpapi_collectors_post(
     oximeter_info: TypedBody<OximeterStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let _nexus = &context.nexus;
-    let log = &context.log;
+    let nexus = &context.nexus;
     let oximeter_info = oximeter_info.into_inner();
-    info!(log, "registered new oximeter metric collection server"; "address" => oximeter_info.address);
+    let client_log =
+        context.log.new(o!("oximeter-collector" => oximeter_info.collector_id.clone().to_string()));
+    let client = Arc::new(OximeterClient::new(
+        oximeter_info.collector_id,
+        oximeter_info.address,
+        client_log,
+    ));
+    nexus.upsert_oximeter_collector(client).await;
+    info!(
+        context.log,
+        "registered new oximeter metric collection server";
+        "collector_id" => ?oximeter_info.collector_id,
+        "address" => oximeter_info.address
+    );
     Ok(HttpResponseUpdatedNoContent())
 }
