@@ -11,6 +11,7 @@ use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
 use omicron_common::model::ApiInstanceStateRequested;
 use omicron_common::NexusClient;
+use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -46,42 +47,24 @@ impl Simulatable for SimInstance {
         current: &Self::CurrentState,
         pending: &Self::RequestedState,
     ) -> (Self::CurrentState, Option<Self::RequestedState>) {
+        let mut current = InstanceState {
+            current: current.clone(),
+            pending: Some(pending.clone()),
+        };
 
         // These operations would typically be triggered via responses from
         // Propolis, but for a simulated sled agent, this does not exist.
         //
         // Instead, we make transitions to new states based entirely on the
         // value of "pending".
-        let (next, next_pending) = match pending.run_state {
-            ApiInstanceStateRequested::Running => {
-                (ApiInstanceState::Running, None)
-            }
-            ApiInstanceStateRequested::Stopped => {
-                let next_pending =
-                    if let ApiInstanceState::Stopping { rebooting } = current.run_state {
-                        if rebooting {
-                            Some(ApiInstanceStateRequested::Running)
-                        } else {
-                            None
-                        }
-                    } else {
-                        panic!("Unexpected transition to stopped without stopping");
-                    };
-                (
-                    ApiInstanceState::Stopped { rebooting: false }, next_pending
-                )
-            }
-            ApiInstanceStateRequested::Destroyed => {
-                (ApiInstanceState::Destroyed, None)
-            }
-            _ => return (current.clone(), None),
+        let observed = match pending.run_state {
+            ApiInstanceStateRequested::Running => PropolisInstanceState::Running,
+            ApiInstanceStateRequested::Stopped => PropolisInstanceState::Stopped,
+            ApiInstanceStateRequested::Destroyed => PropolisInstanceState::Destroyed,
+            _ => panic!("Unexpected pending state: {}", pending.run_state),
         };
 
-        let mut current = InstanceState {
-            current: current.clone(),
-            pending: Some(pending.clone()),
-        };
-        current.transition(next, next_pending);
+        let action = current.observe_transition(observed);
         (current.current, current.pending)
     }
 

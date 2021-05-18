@@ -4,6 +4,7 @@ use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::model::ApiInstanceState;
 use omicron_common::model::ApiInstanceStateRequested;
+use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
 pub enum Action {
@@ -11,6 +12,19 @@ pub enum Action {
     Stop,
     Reboot,
     Destroy,
+}
+
+pub fn propolis_to_omicron_state(state: PropolisInstanceState) -> ApiInstanceState {
+    match state {
+        PropolisInstanceState::Creating => ApiInstanceState::Creating,
+        PropolisInstanceState::Starting => ApiInstanceState::Starting,
+        PropolisInstanceState::Running => ApiInstanceState::Running,
+        PropolisInstanceState::Stopping => ApiInstanceState::Stopping { rebooting: false },
+        PropolisInstanceState::Stopped => ApiInstanceState::Stopped { rebooting: false },
+        PropolisInstanceState::Repairing => ApiInstanceState::Repairing,
+        PropolisInstanceState::Failed => ApiInstanceState::Failed,
+        PropolisInstanceState::Destroyed => ApiInstanceState::Destroyed
+    }
 }
 
 /// The instance state is a combination of the last-known state, as well as an
@@ -35,8 +49,8 @@ impl InstanceState {
     // generation number.
     //
     // This transition always succeeds.
-    // TODO: Not pub
-    pub fn transition(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
+    fn transition(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
+        // TODO: Deal with no-op transition?
         self.current =
             ApiInstanceRuntimeState {
                 run_state: next,
@@ -50,40 +64,20 @@ impl InstanceState {
     /// Update the known state of an instance based on a response from Propolis.
     pub fn observe_transition(
         &mut self,
-        next: ApiInstanceState,
-    ) -> Result<(), ApiError> {
-        todo!("gotta integrate the propolis library to make this real");
-        // TODO: React to *PROPOLIS* states, not "ApiInstanceStates".
-        //
-        // We should react to the *REAL* state of the world, not the "desired"
-        // state of the world.
-
-        /*
-        let (next, next_pending) = match self.pending.run_state {
-            ApiInstanceStateRequested::Running => {
-                (ApiInstanceState::Running, None)
-            }
-            ApiInstanceStateRequested::Stopped => {
-                let next_pending =
-                    if let ApiInstanceState::Stopping { rebooting } = self.current.run_state {
-                        if rebooting {
-                            Some(ApiInstanceStateRequested::Running)
-                        } else {
-                            None
-                        }
-                    } else {
-                        panic!("Unexpected transition to stopped without stopping");
-                    };
-                (
-                    ApiInstanceState::Stopped { rebooting: false }, next_pending
-                )
-            }
-            ApiInstanceStateRequested::Destroyed => {
-                (ApiInstanceState::Destroyed, None)
-            }
-            _ => return (current.clone(), None),
+        observed: PropolisInstanceState,
+    ) -> Option<Action> {
+        let next_pending = match observed {
+            PropolisInstanceState::Stopped => {
+                if matches!(self.current.run_state, ApiInstanceState::Stopping { rebooting } if rebooting) {
+                    Some(ApiInstanceStateRequested::Running)
+                } else {
+                    None
+                }
+            },
+            _ => None,
         };
-        */
+        self.transition(propolis_to_omicron_state(observed), next_pending);
+        None
     }
 
     /// Attempts to move from the current state to the requested "target" state.
