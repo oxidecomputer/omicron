@@ -13,10 +13,10 @@ use dropshot::TypedBody;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
-use omicron_common::model::ProducerServerInfo;
+use omicron_common::model::OximeterStartupInfo;
+use omicron_common::model::ProducerEndpoint;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
-use oximeter::oximeter_server::OximeterStartupInfo;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -142,7 +142,7 @@ async fn cpapi_disks_put(
  }]
 async fn cpapi_producers_post(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
-    producer_info: TypedBody<ProducerServerInfo>,
+    producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
@@ -165,8 +165,8 @@ async fn cpapi_collectors_post(
     let context = request_context.context();
     let nexus = &context.nexus;
     let oximeter_info = oximeter_info.into_inner();
-    let client_log =
-        context.log.new(o!("oximeter-collector" => oximeter_info.collector_id.clone().to_string()));
+    let id = oximeter_info.collector_id.to_string();
+    let client_log = context.log.new(o!("oximeter-collector" => id));
     let client = Arc::new(OximeterClient::new(
         oximeter_info.collector_id,
         oximeter_info.address,

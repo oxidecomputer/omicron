@@ -11,7 +11,7 @@ use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
-use omicron_common::model::{ProducerId, ProducerServerInfo};
+use omicron_common::model::{ProducerEndpoint, ProducerId};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -112,7 +112,7 @@ unsafe impl Send for Collector {}
 /// Information used to configure a [`ProducerServer`]
 #[derive(Debug, Clone)]
 pub struct ProducerServerConfig {
-    pub server_info: ProducerServerInfo,
+    pub server_info: ProducerEndpoint,
     pub registration_info: RegistrationInfo,
     pub dropshot_config: ConfigDropshot,
     pub logging_config: ConfigLogging,
@@ -212,7 +212,7 @@ async fn collect_endpoint(
 pub async fn register(
     client: &Client,
     registration_info: &RegistrationInfo,
-    server_info: &ProducerServerInfo,
+    server_info: &ProducerEndpoint,
 ) -> Result<(), Error> {
     client
         .post(format!(

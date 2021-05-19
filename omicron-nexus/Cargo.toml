@@ -34,9 +34,6 @@ path = "../omicron-common"
 [dependencies.omicron-sled-agent]
 path = "../omicron-sled-agent"
 
-[dependencies.oximeter]
-path = "../oximeter/oximeter"
-
 [dependencies.schemars]
 version = "0.8"
 features = [ "chrono", "uuid" ]

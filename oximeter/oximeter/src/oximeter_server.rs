@@ -12,10 +12,10 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use omicron_common::backoff;
-use omicron_common::model::{ProducerId, ProducerServerInfo};
+use omicron_common::model::{
+    OximeterStartupInfo, ProducerEndpoint, ProducerId,
+};
 use reqwest::Client;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, warn, Logger};
 use tokio::{sync::mpsc, task::JoinHandle, time::interval};
 use uuid::Uuid;
@@ -42,7 +42,7 @@ enum CollectionMessage {
 async fn collection_task(
     id: Uuid,
     log: Logger,
-    producer: ProducerServerInfo,
+    producer: ProducerEndpoint,
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<ProducerResults>,
 ) {
@@ -232,7 +232,7 @@ impl OximeterAgent {
     /// Register a new producer with this oximeter instance.
     pub fn register_producer(
         &self,
-        info: ProducerServerInfo,
+        info: ProducerEndpoint,
     ) -> Result<(), Error> {
         let id = info.producer_id();
         match self.collection_tasks.lock().unwrap().entry(id) {
@@ -278,16 +278,6 @@ pub struct Config {
 
     /// Logging configuration
     pub log: ConfigLogging,
-}
-
-/// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterStartupInfo {
-    /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
-
-    /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
 }
 
 /// A server used to collect metrics from components in the control plane.
@@ -378,7 +368,7 @@ fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
 }]
 async fn producers_post(
     request_context: Arc<RequestContext<Arc<OximeterAgent>>>,
-    body: TypedBody<ProducerServerInfo>,
+    body: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let agent = request_context.context();
     let server_info = body.into_inner();

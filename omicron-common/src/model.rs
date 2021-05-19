@@ -1386,14 +1386,14 @@ impl std::fmt::Display for ProducerId {
  * available metric data from it.
  */
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct ProducerServerInfo {
+pub struct ProducerEndpoint {
     producer_id: ProducerId,
     address: SocketAddr,
     collection_route: String,
     interval: Duration,
 }
 
-impl ProducerServerInfo {
+impl ProducerEndpoint {
     /**
      * Generate info for a metric server listening on the given address and route.
      *
@@ -1405,9 +1405,9 @@ impl ProducerServerInfo {
      * -------
      * ```rust
      * use std::time::Duration;
-     * use omicron_common::model::ProducerServerInfo;
+     * use omicron_common::model::ProducerEndpoint;
      *
-     * let info = ProducerServerInfo::new("127.0.0.1:4444", "/collect", Duration::from_secs(10));
+     * let info = ProducerEndpoint::new("127.0.0.1:4444", "/collect", Duration::from_secs(10));
      * assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
      * ```
      */
@@ -1469,6 +1469,16 @@ impl ProducerServerInfo {
     pub fn interval(&self) -> &Duration {
         &self.interval
     }
+}
+
+/// Message used to notify Nexus that this oximeter instance is up and running.
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub struct OximeterStartupInfo {
+    /// The ID for this oximeter instance.
+    pub collector_id: Uuid,
+
+    /// The address on which this oximeter instance listens for requests
+    pub address: SocketAddr,
 }
 
 #[cfg(test)]

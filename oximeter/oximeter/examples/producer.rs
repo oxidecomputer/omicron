@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
-use omicron_common::model::ProducerServerInfo;
+use omicron_common::model::ProducerEndpoint;
 use oximeter::collect::{
     ProducerServer, ProducerServerConfig, RegistrationInfo,
 };
@@ -85,7 +85,7 @@ async fn main() {
     let registration_info =
         RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
     let server_info =
-        ProducerServerInfo::new(address, "/collect", Duration::from_secs(10));
+        ProducerEndpoint::new(address, "/collect", Duration::from_secs(10));
     let config = ProducerServerConfig {
         server_info,
         registration_info,

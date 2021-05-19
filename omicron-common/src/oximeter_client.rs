@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::http_client::HttpClient;
-use crate::model::ProducerServerInfo;
+use crate::model::ProducerEndpoint;
 
 /// Client of an oximeter server
 pub struct Client {
@@ -34,7 +34,7 @@ impl Client {
     /// Register the metric producer server described in `info` with oximeter.
     pub async fn register_producer(
         &self,
-        info: &ProducerServerInfo,
+        info: &ProducerEndpoint,
     ) -> Result<(), ApiError> {
         self.client
             .request(

@@ -40,7 +40,7 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
-use omicron_common::model::ProducerServerInfo;
+use omicron_common::model::ProducerEndpoint;
 use omicron_common::model::UpdateResult;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
@@ -1238,28 +1238,38 @@ impl Nexus {
      */
     pub async fn assign_producer(
         &self,
-        producer_info: ProducerServerInfo,
+        producer_info: ProducerEndpoint,
     ) -> Result<(), ApiError> {
+        let collector = self.next_collector().await?;
+        collector.register_producer(&producer_info).await?;
+        info!(
+            self.log,
+            "assigned collector to new producer";
+            "producer_id" => ?producer_info.producer_id(),
+            "collector_id" => ?collector.id,
+        );
+        Ok(())
+    }
+
+    /**
+     * Return an oximeter collector to assign a newly-registered producer
+     */
+    async fn next_collector(&self) -> Result<Arc<OximeterClient>, ApiError> {
         // TODO-robustness Replace with a real load-balancing strategy.
-        if let Some((collector_id, collector)) =
-            self.oximeter_collectors.lock().await.iter().next()
-        {
-            collector.register_producer(&producer_info).await?;
-            info!(
-                self.log,
-                "assigned collector to new producer";
-                "producer_id" => ?producer_info.producer_id(),
-                "collector_id" => collector_id.to_string(),
-            );
-            Ok(())
-        } else {
-            warn!(self.log, "no collectors available to assign producer");
-            Err(ApiError::ServiceUnavailable {
-                message: String::from(
-                    "no collectors available to assign producer",
-                ),
+        self.oximeter_collectors
+            .lock()
+            .await
+            .values()
+            .next()
+            .map(Arc::clone)
+            .ok_or_else(|| {
+                warn!(self.log, "no collectors available to assign producer");
+                ApiError::ServiceUnavailable {
+                    message: String::from(
+                        "no collectors available to assign producer",
+                    ),
+                }
             })
-        }
     }
 }
 
