@@ -56,6 +56,7 @@ fn main() -> Result<()> {
         &Package::new("bootstrap-agent"),
         &Package::new("nexus"),
         &Package::new("sled-agent"),
+        &Package::new("oximeter"),
     ];
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
