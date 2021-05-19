@@ -15,18 +15,44 @@ use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::instance::InstanceState;
+use crate::common::instance::{InstanceState, Action as InstanceAction};
 
 /**
  * Simulated Instance (virtual machine), as created by the external Oxide API
  */
 #[derive(Debug)]
-pub struct SimInstance {}
+pub struct SimInstance {
+    state: InstanceState,
+}
 
 #[async_trait]
 impl Simulatable for SimInstance {
     type CurrentState = ApiInstanceRuntimeState;
     type RequestedState = ApiInstanceRuntimeStateRequested;
+    type Action = InstanceAction;
+    type ObservedState = PropolisInstanceState;
+
+    fn new(
+        current: ApiInstanceRuntimeState
+    ) -> Self {
+        SimInstance {
+            state: InstanceState::new(current),
+        }
+    }
+
+    fn request_transition(
+        &mut self,
+        target: ApiInstanceRuntimeStateRequested
+    ) -> Result<Option<InstanceAction>, ApiError> {
+        self.state.request_transition(&target)
+    }
+
+    fn observe_transition(
+        &mut self,
+        observed: PropolisInstanceState,
+    ) -> Option<InstanceAction> {
+        self.state.observe_transition(observed)
+    }
 
     fn next_state_for_new_target(
         current: &Self::CurrentState,

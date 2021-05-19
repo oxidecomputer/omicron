@@ -7,6 +7,7 @@ use omicron_common::model::ApiInstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
+#[derive(Clone, Debug)]
 pub enum Action {
     Run,
     Stop,
@@ -30,7 +31,7 @@ fn propolis_to_omicron_state(state: PropolisInstanceState) -> ApiInstanceState {
 /// The instance state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
 // TODO: Use this instead of "current + pending" in APIs.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InstanceState {
     // TODO: Not pub!
     pub current: ApiInstanceRuntimeState,

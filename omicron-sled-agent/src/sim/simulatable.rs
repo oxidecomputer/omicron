@@ -13,15 +13,6 @@ use uuid::Uuid;
  * as "starting", and then some time later reporting that the state is
  * "running".
  *
- * This interface defines only associated functions, not constructors nor what
- * would traditionally be called "methods".  On the one hand, this approach is
- * relatively simple to reason about, since all the functions are stateless.  On
- * the other hand, the interface is a little gnarly.  That's largely because
- * this plugs into a more complex simulation mechanism (implemented by
- * `SimObject` and `SimCollection`) and this interface defines only the small
- * chunks of functionality that differ between types.  Still, this is cleaner
- * than what was here before!
- *
  * The basic idea is that for any type that we want to simulate (e.g.,
  * Instances), there's a `CurrentState` (which you could think of as "stopped",
  * "starting", "running", "stopping") and a `RequestedState` (which would only
@@ -55,17 +46,8 @@ use uuid::Uuid;
  * When an asynchronous state change completes, we notify the control plane via
  * the `notify()` function.
  */
-/*
- * TODO-cleanup Among the awkward bits here is that the an object's state is
- * essentially represented by a tuple `(CurrentState, Option<RequestedState>)`,
- * but that's not represented anywhere.  Would it help to have that be a
- * first-class type?  Maybe it would be easier if there were a separate type
- * representing pairs of possible values here?  That sounds worse (because it
- * sounds MxN), but in practice many combinations are not legal and so it might
- * eliminate code that checks for these cases.
- */
 #[async_trait]
-pub trait Simulatable: fmt::Debug {
+pub trait Simulatable: fmt::Debug + Send + Sync {
     /**
      * Represents a possible current runtime state of the simulated object.
      * For an Instance, you might think of the state as "starting" or "running",
@@ -80,6 +62,38 @@ pub trait Simulatable: fmt::Debug {
      * transitions to intermediate states.
      */
     type RequestedState: Send + Clone + fmt::Debug;
+
+    /// Represents an action that should be taken by the Sled Agent.
+    /// Generated in response to a state change, either requested or observed.
+    type Action: Send + Clone + fmt::Debug;
+
+    /// Describes the state of the resource, as reported from the resource
+    /// itself.
+    // TODO: Add Debug to propolis structs
+    type ObservedState: Send; // + Clone + fmt::Debug;
+
+    fn new(
+        current: Self::CurrentState
+    ) -> Self;
+
+    /// Requests that the simulated object transition to a new target.
+    ///
+    /// If successful, returns the action that must be taken by the Sled Agent
+    /// to alter the resource into the desired state.
+    fn request_transition(
+        &mut self,
+        target: Self::RequestedState,
+    ) -> Result<Option<Self::Action>, ApiError>;
+
+    /// Update the state in response to an observed update within the simulated
+    /// resource.
+    ///
+    /// Returns any actions that should be taken by the Sled Agent to continue
+    /// altering the resource into a desired state.
+    fn observe_transition(
+        &mut self,
+        observed: Self::ObservedState,
+    ) -> Option<Self::Action>;
 
     /**
      * Given `current` (the current state of a simulated object), `pending`

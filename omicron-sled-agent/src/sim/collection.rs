@@ -26,6 +26,9 @@ use super::simulatable::Simulatable;
  */
 #[derive(Debug)]
 struct SimObject<S: Simulatable> {
+    /// The simulated object.
+    object: S,
+    // TODO: REMOVE current/requested state; they exist within object now.
     /** the current runtime state of the object */
     current_state: S::CurrentState,
     /** the most recently requested change to the object's runtime state */
@@ -73,6 +76,7 @@ impl<S: Simulatable> SimObject<S> {
         let (tx, rx) = futures::channel::mpsc::channel(SIM_CHANNEL_BUFFER_SIZE);
         (
             SimObject {
+                object: S::new(initial_state.clone()),
                 current_state: initial_state.clone(),
                 requested_state: None,
                 log,
@@ -94,6 +98,7 @@ impl<S: Simulatable> SimObject<S> {
     ) -> SimObject<S> {
         info!(log, "created"; "initial_state" => ?initial_state);
         SimObject {
+            object: S::new(initial_state.clone()),
             current_state: initial_state.clone(),
             requested_state: None,
             log,

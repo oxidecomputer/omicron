@@ -7,6 +7,7 @@ use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;
 
 /// Action to be taken on behalf of state transition.
+#[derive(Clone, Debug)]
 pub enum Action {
     Attach(Uuid),
     Detach(Uuid),
@@ -16,7 +17,7 @@ pub enum Action {
 /// The disk state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
 // TODO: Use this instead of "current + pending" in APIs.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DiskState {
     // TODO: Not pub!
     pub current: ApiDiskRuntimeState,

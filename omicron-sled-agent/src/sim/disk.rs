@@ -13,7 +13,7 @@ use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::disk::DiskState;
+use crate::common::disk::{DiskState, Action as DiskAction};
 
 /**
  * Simulated Disk (network block device), as created by the external Oxide API
@@ -21,12 +21,38 @@ use crate::common::disk::DiskState;
  * See `Simulatable` for how this works.
  */
 #[derive(Debug)]
-pub struct SimDisk {}
+pub struct SimDisk {
+    state: DiskState,
+}
 
 #[async_trait]
 impl Simulatable for SimDisk {
     type CurrentState = ApiDiskRuntimeState;
     type RequestedState = ApiDiskStateRequested;
+    type Action = DiskAction;
+    type ObservedState = PropolisDiskState;
+
+    fn new(
+        current: ApiDiskRuntimeState,
+    ) -> Self {
+        SimDisk {
+            state: DiskState::new(current),
+        }
+    }
+
+    fn request_transition(
+        &mut self,
+        target: ApiDiskStateRequested
+    ) -> Result<Option<DiskAction>, ApiError> {
+        self.state.request_transition(&target)
+    }
+
+    fn observe_transition(
+        &mut self,
+        observed: PropolisDiskState,
+    ) -> Option<DiskAction> {
+        self.state.observe_transition(observed)
+    }
 
     fn next_state_for_new_target(
         current: &Self::CurrentState,
