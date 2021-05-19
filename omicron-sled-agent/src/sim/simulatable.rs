@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use omicron_common::error::ApiError;
+use omicron_common::model::ApiGeneration;
 use omicron_common::NexusClient;
 use std::fmt;
 use std::sync::Arc;
@@ -72,9 +73,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     // TODO: Add Debug to propolis structs
     type ObservedState: Send; // + Clone + fmt::Debug;
 
-    fn new(
-        current: Self::CurrentState
-    ) -> Self;
+    fn new(current: Self::CurrentState) -> Self;
 
     /// Requests that the simulated object transition to a new target.
     ///
@@ -82,7 +81,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// to alter the resource into the desired state.
     fn request_transition(
         &mut self,
-        target: Self::RequestedState,
+        target: &Self::RequestedState,
     ) -> Result<Option<Self::Action>, ApiError>;
 
     /// Update the state in response to an observed update within the simulated
@@ -90,61 +89,22 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     ///
     /// Returns any actions that should be taken by the Sled Agent to continue
     /// altering the resource into a desired state.
-    fn observe_transition(
-        &mut self,
-        observed: Self::ObservedState,
-    ) -> Option<Self::Action>;
+    fn observe_transition(&mut self) -> Option<Self::Action>;
 
-    /**
-     * Given `current` (the current state of a simulated object), `pending`
-     * (the requested state associated with a currently outstanding asynchronous
-     * transition), and `target` (a new requested state), return a tuple
-     * describing the next state and the requested state for the next
-     * asynchronous transition, if any.
-     *
-     * If the requested transition is illegal (which should not be common),
-     * return an appropriate `ApiError`.  If the requested transition can be
-     * completed immediately (synchronously), the second field of the returned
-     * tuple should be `None`.  If the requested transition is asynchronous, the
-     * immediate next state should be returned as the first element and the
-     * pending asynchronous request should be returned as the second.
-     */
-    fn next_state_for_new_target(
-        current: &Self::CurrentState,
-        pending: &Option<Self::RequestedState>,
-        next: &Self::RequestedState,
-    ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>;
+    fn generation(&self) -> ApiGeneration;
 
-    /**
-     * Given `current` (the current state of a simulated object) and `pending`
-     * (the requested state associated with a currently outstanding asynchronous
-     * transition), return a tuple of the immediate next state and the requested
-     * state for the next asynchronous transition, if any.  The return value has
-     * the same semantics as for `next_state_for_new_target()`; however, this
-     * function is not allowed to fail.  (Put differently, if this could fail,
-     * then it should fail when the asynchronous state change was started, back
-     * in next_state_for_new_target()`.)
-     */
-    fn next_state_for_async_transition_finish(
-        current: &Self::CurrentState,
-        pending: &Self::RequestedState,
-    ) -> (Self::CurrentState, Option<Self::RequestedState>);
+    fn current(&self) -> &Self::CurrentState;
 
-    /**
-     * Returns true if "state2" represents no meaningful change from "state1".
-     * If possible, this should use a generation number or the like.
-     */
-    fn state_unchanged(
-        state1: &Self::CurrentState,
-        state2: &Self::CurrentState,
-    ) -> bool;
+    fn pending(&self) -> Option<Self::RequestedState>;
 
+    // TODO: Act on self?
     /**
      * Returns true if the state `current` is a terminal state representing that
      * the object has been destroyed.
      */
     fn ready_to_destroy(current: &Self::CurrentState) -> bool;
 
+    // TODO: Act on self?
     /**
      * Notifies Nexus (via `csc`) about a new state (`current`) for the object
      * identified by `id`.

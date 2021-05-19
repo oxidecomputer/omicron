@@ -15,16 +15,22 @@ pub enum Action {
     Destroy,
 }
 
-fn propolis_to_omicron_state(state: PropolisInstanceState) -> ApiInstanceState {
+fn propolis_to_omicron_state(
+    state: &PropolisInstanceState,
+) -> ApiInstanceState {
     match state {
         PropolisInstanceState::Creating => ApiInstanceState::Creating,
         PropolisInstanceState::Starting => ApiInstanceState::Starting,
         PropolisInstanceState::Running => ApiInstanceState::Running,
-        PropolisInstanceState::Stopping => ApiInstanceState::Stopping { rebooting: false },
-        PropolisInstanceState::Stopped => ApiInstanceState::Stopped { rebooting: false },
+        PropolisInstanceState::Stopping => {
+            ApiInstanceState::Stopping { rebooting: false }
+        }
+        PropolisInstanceState::Stopped => {
+            ApiInstanceState::Stopped { rebooting: false }
+        }
         PropolisInstanceState::Repairing => ApiInstanceState::Repairing,
         PropolisInstanceState::Failed => ApiInstanceState::Failed,
-        PropolisInstanceState::Destroyed => ApiInstanceState::Destroyed
+        PropolisInstanceState::Destroyed => ApiInstanceState::Destroyed,
     }
 }
 
@@ -40,29 +46,28 @@ pub struct InstanceState {
 
 impl InstanceState {
     pub fn new(current: ApiInstanceRuntimeState) -> Self {
-        InstanceState {
-            current,
-            pending: None,
-        }
+        InstanceState { current, pending: None }
     }
 
     /// Update the known state of an instance based on a response from Propolis.
     pub fn observe_transition(
         &mut self,
-        observed: PropolisInstanceState,
+        observed: &PropolisInstanceState,
     ) -> Option<Action> {
-        let next_pending = match observed {
-            PropolisInstanceState::Stopped => {
-                if matches!(self.current.run_state, ApiInstanceState::Stopping { rebooting } if rebooting) {
-                    Some(ApiInstanceStateRequested::Running)
-                } else {
-                    None
-                }
-            },
-            _ => None,
-        };
-        self.transition(propolis_to_omicron_state(observed), next_pending);
-        None
+        match observed {
+            PropolisInstanceState::Stopped if matches!(self.current.run_state, ApiInstanceState::Stopping { rebooting } if rebooting) =>
+            {
+                self.transition(
+                    ApiInstanceState::Starting,
+                    Some(ApiInstanceStateRequested::Running),
+                );
+                Some(Action::Run)
+            }
+            _ => {
+                self.transition(propolis_to_omicron_state(observed), None);
+                None
+            }
+        }
     }
 
     /// Attempts to move from the current state to the requested "target" state.
@@ -85,29 +90,29 @@ impl InstanceState {
     // generation number.
     //
     // This transition always succeeds.
-    fn transition(&mut self, next: ApiInstanceState, pending: Option<ApiInstanceStateRequested>) {
+    fn transition(
+        &mut self,
+        next: ApiInstanceState,
+        pending: Option<ApiInstanceStateRequested>,
+    ) {
         // TODO: Deal with no-op transition?
-        self.current =
-            ApiInstanceRuntimeState {
-                run_state: next,
-                sled_uuid: self.current.sled_uuid,
-                gen: self.current.gen.next(),
-                time_updated: Utc::now(),
-            };
-        self.pending = pending.map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
+        self.current = ApiInstanceRuntimeState {
+            run_state: next,
+            sled_uuid: self.current.sled_uuid,
+            gen: self.current.gen.next(),
+            time_updated: Utc::now(),
+        };
+        self.pending = pending
+            .map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
     }
 
-    fn request_running(
-        &mut self,
-    ) -> Result<Option<Action>, ApiError> {
+    fn request_running(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Running request is no-op
             ApiInstanceState::Running
             | ApiInstanceState::Starting
             | ApiInstanceState::Stopping { rebooting: true }
-            | ApiInstanceState::Stopped { rebooting: true } => {
-                return Ok(None)
-            }
+            | ApiInstanceState::Stopped { rebooting: true } => return Ok(None),
             // Valid states for a running request
             ApiInstanceState::Creating
             | ApiInstanceState::Stopping { rebooting: false }
@@ -116,7 +121,7 @@ impl InstanceState {
                     ApiInstanceState::Starting,
                     Some(ApiInstanceStateRequested::Running),
                 );
-                return Ok(Some(Action::Run))
+                return Ok(Some(Action::Run));
             }
             // Invalid states for a running request
             ApiInstanceState::Repairing
@@ -132,9 +137,7 @@ impl InstanceState {
         }
     }
 
-    fn request_stopped(
-        &mut self,
-    ) -> Result<Option<Action>, ApiError> {
+    fn request_stopped(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Stop request is a no-op
             ApiInstanceState::Stopped { rebooting: false }
@@ -145,9 +148,12 @@ impl InstanceState {
             ApiInstanceState::Creating
             | ApiInstanceState::Stopped { rebooting: true } => {
                 // Already stopped, no action necessary.
-                self.transition(ApiInstanceState::Stopped { rebooting: false }, None);
-                return Ok(None)
-            },
+                self.transition(
+                    ApiInstanceState::Stopped { rebooting: false },
+                    None,
+                );
+                return Ok(None);
+            }
             ApiInstanceState::Stopping { rebooting: true } => {
                 // The VM is stopping, so no new action is necessary to
                 // make it stop, but we can avoid rebooting.
@@ -155,16 +161,15 @@ impl InstanceState {
                     ApiInstanceState::Stopping { rebooting: false },
                     Some(ApiInstanceStateRequested::Stopped),
                 );
-                return Ok(None)
-            },
-            ApiInstanceState::Starting
-            | ApiInstanceState::Running => {
+                return Ok(None);
+            }
+            ApiInstanceState::Starting | ApiInstanceState::Running => {
                 // The VM is running, explicitly tell it to stop.
                 self.transition(
                     ApiInstanceState::Stopping { rebooting: false },
                     Some(ApiInstanceStateRequested::Stopped),
                 );
-                return Ok(Some(Action::Stop))
+                return Ok(Some(Action::Stop));
             }
             // Invalid states for a stop request
             ApiInstanceState::Repairing
@@ -180,9 +185,7 @@ impl InstanceState {
         }
     }
 
-    fn request_reboot(
-        &mut self,
-    ) -> Result<Option<Action>, ApiError> {
+    fn request_reboot(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Reboot request is a no-op
             ApiInstanceState::Stopping { rebooting: true }
@@ -191,7 +194,7 @@ impl InstanceState {
             }
             // Valid states for a reboot request
             ApiInstanceState::Starting | ApiInstanceState::Running => {
-                 self.transition(
+                self.transition(
                     ApiInstanceState::Stopping { rebooting: true },
                     Some(ApiInstanceStateRequested::Stopped),
                 );
@@ -209,9 +212,7 @@ impl InstanceState {
         }
     }
 
-    fn request_destroyed(
-        &mut self,
-    ) -> Result<Option<Action>, ApiError> {
+    fn request_destroyed(&mut self) -> Result<Option<Action>, ApiError> {
         if self.current.run_state.is_stopped() {
             self.transition(ApiInstanceState::Destroyed, None);
             return Ok(Some(Action::Destroy));

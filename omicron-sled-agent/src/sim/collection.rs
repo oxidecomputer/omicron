@@ -28,11 +28,6 @@ use super::simulatable::Simulatable;
 struct SimObject<S: Simulatable> {
     /// The simulated object.
     object: S,
-    // TODO: REMOVE current/requested state; they exist within object now.
-    /** the current runtime state of the object */
-    current_state: S::CurrentState,
-    /** the most recently requested change to the object's runtime state */
-    requested_state: Option<S::RequestedState>,
     /** debug log */
     log: Logger,
     /** tx-side of a channel used to notify when async state changes begin */
@@ -77,8 +72,6 @@ impl<S: Simulatable> SimObject<S> {
         (
             SimObject {
                 object: S::new(initial_state.clone()),
-                current_state: initial_state.clone(),
-                requested_state: None,
                 log,
                 channel_tx: Some(tx),
             },
@@ -99,8 +92,6 @@ impl<S: Simulatable> SimObject<S> {
         info!(log, "created"; "initial_state" => ?initial_state);
         SimObject {
             object: S::new(initial_state.clone()),
-            current_state: initial_state.clone(),
-            requested_state: None,
             log,
             channel_tx: None,
         }
@@ -115,26 +106,22 @@ impl<S: Simulatable> SimObject<S> {
         &mut self,
         target: S::RequestedState,
     ) -> Result<Option<S::RequestedState>, ApiError> {
-        let dropped = self.requested_state.clone();
-        let state_before = self.current_state.clone();
+        let dropped = self.object.pending().clone();
+        let old_gen = self.object.generation();
 
-        let (state_after, requested_state) =
-            S::next_state_for_new_target(&state_before, &dropped, &target)?;
+        let _action = self.object.request_transition(&target)?;
 
-        if S::state_unchanged(&state_before, &state_after) {
+        if old_gen == self.object.generation() {
             info!(self.log, "noop transition"; "target" => ?target);
             return Ok(None);
         }
 
         info!(self.log, "transition";
-            "state_before" => ?state_before,
             "target" => ?target,
-            "state_after" => ?state_after,
-            "new_requested_state" => ?requested_state,
             "dropped" => ?dropped,
+            "current" => ?self.object.current(),
+            "pending" => ?self.object.pending(),
         );
-
-        self.current_state = state_after;
 
         /*
          * If this is an asynchronous transition, notify the background task to
@@ -157,8 +144,7 @@ impl<S: Simulatable> SimObject<S> {
          *     could identify this case at compile time (e.g., using an enum),
          *     but that's not currently the case.
          */
-        if requested_state.is_some() {
-            self.requested_state = requested_state;
+        if self.object.pending().is_some() {
             if let Some(ref mut tx) = self.channel_tx {
                 let result = tx.try_send(());
                 if let Err(error) = result {
@@ -166,15 +152,13 @@ impl<S: Simulatable> SimObject<S> {
                     assert!(error.is_full());
                 }
             }
-        } else {
-            self.requested_state = None;
         }
 
         Ok(dropped)
     }
 
     fn transition_finish(&mut self) {
-        if self.requested_state.is_none() {
+        if self.object.pending().is_none() {
             /*
              * Somebody must have requested a state change while we were
              * simulating a previous asynchronous one.  By definition, the new
@@ -189,27 +173,15 @@ impl<S: Simulatable> SimObject<S> {
             return;
         }
 
-        let requested_state = self.requested_state.take().unwrap();
-        let (next_state, next_async) =
-            S::next_state_for_async_transition_finish(
-                &self.current_state,
-                &requested_state,
-            );
+        let current = self.object.current().clone();
+        let pending = self.object.pending().clone();
+        let _action = self.object.observe_transition();
         info!(self.log, "simulated transition finish";
-            "state_before" => ?self.current_state,
-            "requested_state" => ?self.requested_state,
-            "state_after" => ?next_state,
+            "state_before" => ?current,
+            "requested_state" => ?pending,
+            "state_after" => ?self.object.current(),
+            "pending_after" => ?self.object.pending(),
         );
-
-        self.current_state = next_state;
-
-        /*
-         * If the async transition started another async transition, begin that
-         * now.  It must be legal.
-         */
-        if let Some(new_target) = next_async {
-            self.transition(new_target).unwrap();
-        }
     }
 }
 
@@ -281,9 +253,8 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             let mut objects = self.objects.lock().await;
             let mut object = objects.remove(&id).unwrap();
             object.transition_finish();
-            let after = object.current_state.clone();
-            if object.requested_state.is_none()
-                && S::ready_to_destroy(&object.current_state)
+            let after = object.object.current().clone();
+            if object.object.pending().is_none() && S::ready_to_destroy(&after)
             {
                 (after, Some(object))
             } else {
@@ -362,7 +333,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         };
 
         let rv =
-            object.transition(target).map(|_| object.current_state.clone());
+            object.transition(target).map(|_| object.object.current().clone());
         if rv.is_ok() || !is_new {
             objects.insert(*id, object);
         }
@@ -375,6 +346,7 @@ mod test {
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
+    use crate::sim::simulatable::Simulatable;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
@@ -423,7 +395,7 @@ mod test {
     async fn test_sim_instance_creating_to_stop() {
         let logctx = test_setup_log("test_sim_instance_creating_to_stop").await;
         let (mut instance, mut rx) = make_instance(&logctx);
-        let r1 = instance.current_state.clone();
+        let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
@@ -433,12 +405,12 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        assert!(instance.requested_state.is_none());
-        assert_eq!(&r1.time_updated, &instance.current_state.time_updated);
-        assert_eq!(&r1.run_state, &instance.current_state.run_state);
-        assert_eq!(r1.gen, instance.current_state.gen);
+        assert!(instance.object.pending().is_none());
+        assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
+        assert_eq!(&r1.run_state, &instance.object.current().run_state);
+        assert_eq!(r1.gen, instance.object.generation());
         assert!(rx.try_next().is_err());
 
         /*
@@ -459,8 +431,8 @@ mod test {
                 })
                 .unwrap();
             assert!(dropped.is_none());
-            assert!(instance.requested_state.is_none());
-            let rnext = instance.current_state.clone();
+            assert!(instance.object.pending().is_none());
+            let rnext = instance.object.current().clone();
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
             match state {
@@ -490,7 +462,7 @@ mod test {
         let logctx =
             test_setup_log("test_sim_instance_running_then_destroyed").await;
         let (mut instance, mut rx) = make_instance(&logctx);
-        let r1 = instance.current_state.clone();
+        let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
@@ -500,12 +472,12 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        assert!(instance.requested_state.is_none());
-        assert_eq!(&r1.time_updated, &instance.current_state.time_updated);
-        assert_eq!(&r1.run_state, &instance.current_state.run_state);
-        assert_eq!(r1.gen, instance.current_state.gen);
+        assert!(instance.object.pending().is_none());
+        assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
+        assert_eq!(&r1.run_state, &instance.object.current().run_state);
+        assert_eq!(r1.gen, instance.object.current().gen);
         assert!(rx.try_next().is_err());
 
         /*
@@ -520,9 +492,9 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.requested_state.is_some());
+        assert!(instance.object.pending().is_some());
         assert!(rx.try_next().is_ok());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
@@ -530,16 +502,16 @@ mod test {
         rprev = rnext;
 
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         assert!(rx.try_next().is_err());
         assert_eq!(rprev.run_state, ApiInstanceState::Starting);
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
         rprev = rnext;
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
 
         /*
@@ -553,9 +525,9 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         assert!(rx.try_next().is_err());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
         assert_eq!(rnext.time_updated, rprev.time_updated);
         assert_eq!(rnext.run_state, rprev.run_state);
@@ -573,8 +545,8 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.requested_state.is_some());
-        let rnext = instance.current_state.clone();
+        assert!(instance.object.pending().is_some());
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(
@@ -585,10 +557,10 @@ mod test {
         rprev = rnext;
 
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         assert_eq!(
             rprev.run_state,
             ApiInstanceState::Stopping { rebooting: false }
@@ -596,7 +568,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
     }
 
@@ -605,7 +577,7 @@ mod test {
         let logctx =
             test_setup_log("test_sim_instance_preempt_transition").await;
         let (mut instance, mut rx) = make_instance(&logctx);
-        let r1 = instance.current_state.clone();
+        let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
@@ -615,12 +587,12 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        assert!(instance.requested_state.is_none());
-        assert_eq!(&r1.time_updated, &instance.current_state.time_updated);
-        assert_eq!(&r1.run_state, &instance.current_state.run_state);
-        assert_eq!(r1.gen, instance.current_state.gen);
+        assert!(instance.object.pending().is_none());
+        assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
+        assert_eq!(&r1.run_state, &instance.object.current().run_state);
+        assert_eq!(r1.gen, instance.object.current().gen);
         assert!(rx.try_next().is_err());
 
         /*
@@ -642,8 +614,8 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.requested_state.is_some());
-        let rnext = instance.current_state.clone();
+        assert!(instance.object.pending().is_some());
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
@@ -662,7 +634,7 @@ mod test {
             dropped.unwrap().run_state,
             ApiInstanceStateRequested::Running
         );
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(
@@ -675,10 +647,10 @@ mod test {
          * Finish the async transition.
          */
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         assert_eq!(
             rprev.run_state,
             ApiInstanceState::Stopping { rebooting: false }
@@ -686,7 +658,7 @@ mod test {
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
 
         logctx.cleanup_successful();
@@ -703,7 +675,7 @@ mod test {
          * Get an initial instance up to "Running".
          */
         let (mut instance, _rx) = make_instance(&logctx);
-        let r1 = instance.current_state.clone();
+        let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
         assert_eq!(r1.run_state, ApiInstanceState::Creating);
@@ -715,7 +687,7 @@ mod test {
             .unwrap()
             .is_none());
         instance.transition_finish();
-        let (rprev, rnext) = (r1, instance.current_state.clone());
+        let (rprev, rnext) = (r1, instance.object.current().clone());
 
         // Chrono doesn't give us enough precision, so sleep a bit
         if cfg!(windows) {
@@ -732,7 +704,7 @@ mod test {
             })
             .unwrap()
             .is_none());
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
 
         // Chrono doesn't give us enough precision, so sleep a bit
         if cfg!(windows) {
@@ -745,9 +717,9 @@ mod test {
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
         );
-        assert!(instance.requested_state.is_some());
+        assert!(instance.object.pending().is_some());
         instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
 
         // Chrono doesn't give us enough precision, so sleep a bit
         if cfg!(windows) {
@@ -757,13 +729,13 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-        assert!(instance.requested_state.is_some());
+        assert!(instance.object.pending().is_some());
         instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
 
         /*
          * Begin a reboot.  Then, while it's still "Stopping", begin another
@@ -776,7 +748,7 @@ mod test {
             })
             .unwrap()
             .is_none());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
@@ -787,20 +759,20 @@ mod test {
             })
             .unwrap()
             .is_none());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
         );
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
 
         /*
@@ -814,13 +786,13 @@ mod test {
             })
             .unwrap()
             .is_none());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
         );
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
@@ -828,20 +800,20 @@ mod test {
             })
             .unwrap()
             .is_some());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
         );
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
 
         /*
@@ -858,7 +830,7 @@ mod test {
             .unwrap()
             .is_none());
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopped { rebooting: false }
@@ -869,7 +841,7 @@ mod test {
             })
             .unwrap()
             .is_none());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
@@ -877,20 +849,20 @@ mod test {
             })
             .unwrap()
             .is_some());
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(
             rnext.run_state,
             ApiInstanceState::Stopping { rebooting: true }
         );
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
         instance.transition_finish();
-        let rnext = instance.current_state.clone();
+        let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.requested_state.is_none());
+        assert!(instance.object.pending().is_none());
         instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.current_state.clone());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
 
         /*
@@ -914,9 +886,10 @@ mod test {
      */
     #[tokio::test]
     async fn test_sim_disk_transition_to_detached_states() {
-        let logctx = test_setup_log("test_sim_disk_transition_to_detached_states").await;
+        let logctx =
+            test_setup_log("test_sim_disk_transition_to_detached_states").await;
         let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
-        let r1 = disk.current_state.clone();
+        let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, ApiDiskState::Creating);
@@ -934,7 +907,7 @@ mod test {
         for (requested, next) in detached_states {
             assert!(!rprev.disk_state.is_attached());
             disk.transition(requested.clone()).unwrap();
-            let rnext = disk.current_state.clone();
+            let rnext = disk.object.current().clone();
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
             assert_eq!(rnext.disk_state, next);
@@ -946,7 +919,7 @@ mod test {
     async fn test_sim_disk_attach_then_destroy() {
         let logctx = test_setup_log("test_sim_disk_attach_then_destroy").await;
         let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
-        let r1 = disk.current_state.clone();
+        let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, ApiDiskState::Creating);
@@ -959,7 +932,7 @@ mod test {
             .transition(ApiDiskStateRequested::Attached(id.clone()))
             .unwrap()
             .is_none());
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(rnext.disk_state, ApiDiskState::Attaching(id.clone()));
@@ -968,14 +941,14 @@ mod test {
         let rprev = rnext;
 
         disk.transition_finish();
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         let rprev = rnext;
 
         disk.transition_finish();
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
         assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
         assert!(rnext.disk_state.is_attached());
@@ -986,7 +959,7 @@ mod test {
             .transition(ApiDiskStateRequested::Attached(id.clone()))
             .unwrap()
             .is_none());
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
         let rprev = rnext;
 
@@ -1003,7 +976,7 @@ mod test {
         } else {
             panic!("unexpected error type");
         }
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
         let rprev = rnext;
 
@@ -1012,14 +985,14 @@ mod test {
          * transition again.
          */
         disk.transition(ApiDiskStateRequested::Detached).unwrap();
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert_eq!(rnext.disk_state, ApiDiskState::Detaching(id.clone()));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
 
         disk.transition_finish();
-        let rnext = disk.current_state.clone();
+        let rnext = disk.object.current().clone();
         assert_eq!(rnext.disk_state, ApiDiskState::Detached);
         assert!(rnext.gen > rprev.gen);
 
@@ -1029,23 +1002,23 @@ mod test {
          */
         disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
         assert_eq!(
-            disk.current_state.disk_state,
+            disk.object.current().disk_state,
             ApiDiskState::Attaching(id.clone())
         );
         disk.transition(ApiDiskStateRequested::Destroyed).unwrap();
         assert_eq!(
-            disk.current_state.disk_state,
+            disk.object.current().disk_state,
             ApiDiskState::Detaching(id.clone())
         );
         disk.transition_finish();
-        assert_eq!(disk.current_state.disk_state, ApiDiskState::Destroyed);
+        assert_eq!(disk.object.current().disk_state, ApiDiskState::Destroyed);
     }
 
     #[tokio::test]
     async fn test_sim_disk_attach_then_fault() {
         let logctx = test_setup_log("test_sim_disk_attach_then_fault").await;
         let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
-        let r1 = disk.current_state.clone();
+        let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, ApiDiskState::Creating);
@@ -1055,12 +1028,12 @@ mod test {
         disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
         disk.transition_finish();
         assert_eq!(
-            disk.current_state.disk_state,
+            disk.object.current().disk_state,
             ApiDiskState::Attached(id.clone())
         );
         disk.transition(ApiDiskStateRequested::Faulted).unwrap();
         assert_eq!(
-            disk.current_state.disk_state,
+            disk.object.current().disk_state,
             ApiDiskState::Detaching(id.clone())
         );
         let error = disk
@@ -1072,7 +1045,7 @@ mod test {
             panic!("unexpected error type");
         }
         disk.transition_finish();
-        assert_eq!(disk.current_state.disk_state, ApiDiskState::Faulted);
+        assert_eq!(disk.object.current().disk_state, ApiDiskState::Faulted);
 
         logctx.cleanup_successful();
     }

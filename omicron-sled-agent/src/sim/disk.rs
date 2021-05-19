@@ -8,12 +8,13 @@ use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskState;
 use omicron_common::model::ApiDiskStateRequested;
+use omicron_common::model::ApiGeneration;
 use omicron_common::NexusClient;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::disk::{DiskState, Action as DiskAction};
+use crate::common::disk::{Action as DiskAction, DiskState};
 
 /**
  * Simulated Disk (network block device), as created by the external Oxide API
@@ -32,67 +33,45 @@ impl Simulatable for SimDisk {
     type Action = DiskAction;
     type ObservedState = PropolisDiskState;
 
-    fn new(
-        current: ApiDiskRuntimeState,
-    ) -> Self {
-        SimDisk {
-            state: DiskState::new(current),
-        }
+    fn new(current: ApiDiskRuntimeState) -> Self {
+        SimDisk { state: DiskState::new(current) }
     }
 
     fn request_transition(
         &mut self,
-        target: ApiDiskStateRequested
+        target: &ApiDiskStateRequested,
     ) -> Result<Option<DiskAction>, ApiError> {
-        self.state.request_transition(&target)
+        self.state.request_transition(target)
     }
 
-    fn observe_transition(
-        &mut self,
-        observed: PropolisDiskState,
-    ) -> Option<DiskAction> {
-        self.state.observe_transition(observed)
+    fn observe_transition(&mut self) -> Option<DiskAction> {
+        if let Some(pending) = self.state.pending.as_ref() {
+            let observed = match pending {
+                ApiDiskStateRequested::Attached(uuid) => {
+                    PropolisDiskState::Attached(*uuid)
+                }
+                ApiDiskStateRequested::Detached => PropolisDiskState::Detached,
+                ApiDiskStateRequested::Destroyed => {
+                    PropolisDiskState::Destroyed
+                }
+                ApiDiskStateRequested::Faulted => PropolisDiskState::Faulted,
+            };
+            self.state.observe_transition(&observed)
+        } else {
+            None
+        }
     }
 
-    fn next_state_for_new_target(
-        current: &Self::CurrentState,
-        pending: &Option<Self::RequestedState>,
-        next: &Self::RequestedState,
-    ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>
-    {
-        let mut state = DiskState {
-            current: current.clone(),
-            pending: pending.clone(),
-        };
-        let _action = state.request_transition(next)?;
-        Ok((state.current, state.pending))
+    fn generation(&self) -> ApiGeneration {
+        self.state.current.gen
     }
 
-    fn next_state_for_async_transition_finish(
-        current: &Self::CurrentState,
-        pending: &Self::RequestedState,
-    ) -> (Self::CurrentState, Option<Self::RequestedState>) {
-        let mut current = DiskState {
-            current: current.clone(),
-            pending: Some(pending.clone()),
-        };
-
-        let observed = match pending {
-            ApiDiskStateRequested::Attached(uuid) => PropolisDiskState::Attached(*uuid),
-            ApiDiskStateRequested::Detached => PropolisDiskState::Detached,
-            ApiDiskStateRequested::Destroyed => PropolisDiskState::Destroyed,
-            ApiDiskStateRequested::Faulted => PropolisDiskState::Faulted,
-        };
-
-        let _action = current.observe_transition(observed);
-        (current.current.clone(), None)
+    fn current(&self) -> &Self::CurrentState {
+        &self.state.current
     }
 
-    fn state_unchanged(
-        state1: &Self::CurrentState,
-        state2: &Self::CurrentState,
-    ) -> bool {
-        state1.gen == state2.gen
+    fn pending(&self) -> Option<Self::RequestedState> {
+        self.state.pending.clone()
     }
 
     fn ready_to_destroy(current: &Self::CurrentState) -> bool {
