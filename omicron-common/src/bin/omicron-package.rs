@@ -330,7 +330,10 @@ fn do_install(
     })?;
 
     // Move the digest of expected packages.
-    std::fs::copy(artifact_dir.join("digest.toml"), install_dir.join("digest.toml"))?;
+    std::fs::copy(
+        artifact_dir.join("digest.toml"),
+        install_dir.join("digest.toml"),
+    )?;
 
     // Copy all packages to the install location in parallel.
     let packages: Vec<(&String, &PackageInfo)> =
