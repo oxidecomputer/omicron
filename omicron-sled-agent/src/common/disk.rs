@@ -1,3 +1,5 @@
+//! Describes the states of network-attached storage.
+
 use chrono::Utc;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
@@ -27,14 +29,18 @@ impl DiskState {
         DiskState { current, pending: None }
     }
 
+    /// Returns the current disk state.
     pub fn current(&self) -> &ApiDiskRuntimeState {
         &self.current
     }
+
+    /// Returns the pending (desired) disk state, if any exists.
     pub fn pending(&self) -> &Option<ApiDiskStateRequested> {
         &self.pending
     }
 
-    /// Update the known state of a disk based on a response from Propolis.
+    /// Update the known state of a disk based on an observed state from
+    /// Propolis.
     pub fn observe_transition(
         &mut self,
         observed: &PropolisDiskState,

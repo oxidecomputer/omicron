@@ -1,3 +1,5 @@
+//! Describes the states of VM instances.
+
 use chrono::Utc;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceRuntimeState;
@@ -47,14 +49,18 @@ impl InstanceState {
         InstanceState { current, pending: None }
     }
 
+    /// Returns the current instance state.
     pub fn current(&self) -> &ApiInstanceRuntimeState {
         &self.current
     }
+
+    /// Returns the pending (desired) instance state, if any exists.
     pub fn pending(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
         &self.pending
     }
 
-    /// Update the known state of an instance based on a response from Propolis.
+    /// Update the known state of an instance based on an observed state from
+    /// Propolis.
     pub fn observe_transition(
         &mut self,
         observed: &PropolisInstanceState,
