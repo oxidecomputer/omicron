@@ -1,7 +1,6 @@
-/*!
+/**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
-
 use super::ServerContext;
 
 use dropshot::endpoint;
@@ -14,6 +13,9 @@ use dropshot::TypedBody;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
+use omicron_common::model::OximeterStartupInfo;
+use omicron_common::model::ProducerEndpoint;
+use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -30,6 +32,8 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
+        api.register(cpapi_producers_post)?;
+        api.register(cpapi_collectors_post)?;
         Ok(())
     }
 
@@ -126,5 +130,54 @@ async fn cpapi_disks_put(
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
     nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Accept a registration from a new metric producer
+ */
+#[endpoint {
+     method = POST,
+     path = "/metrics/producers",
+ }]
+async fn cpapi_producers_post(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    producer_info: TypedBody<ProducerEndpoint>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+    let producer_info = producer_info.into_inner();
+    nexus.assign_producer(producer_info).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Accept a notification of a new oximeter collection server.
+ */
+#[endpoint {
+     method = POST,
+     path = "/metrics/collectors",
+ }]
+async fn cpapi_collectors_post(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    oximeter_info: TypedBody<OximeterStartupInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+    let oximeter_info = oximeter_info.into_inner();
+    let id = oximeter_info.collector_id.to_string();
+    let client_log = context.log.new(o!("oximeter-collector" => id));
+    let client = Arc::new(OximeterClient::new(
+        oximeter_info.collector_id,
+        oximeter_info.address,
+        client_log,
+    ));
+    nexus.upsert_oximeter_collector(client).await;
+    info!(
+        context.log,
+        "registered new oximeter metric collection server";
+        "collector_id" => ?oximeter_info.collector_id,
+        "address" => oximeter_info.address
+    );
     Ok(HttpResponseUpdatedNoContent())
 }

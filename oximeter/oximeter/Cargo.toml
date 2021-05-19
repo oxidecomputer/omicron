@@ -25,6 +25,13 @@ version = "0.14.7"
 [dependencies.oximeter-macro-impl]
 path = "../oximeter-macro-impl"
 
+[dependencies.omicron-common]
+path = "../../omicron-common"
+
+[dependencies.reqwest]
+version = "0.11.3"
+features = [ "json" ]
+
 [dependencies.schemars]
 version = "0.8.3"
 features = [ "uuid", "bytes", "chrono" ]
@@ -36,6 +43,9 @@ features = [ "derive" ]
 [dependencies.slog]
 version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.structopt]
+version = "0.3"
 
 [dependencies.thiserror]
 version = "1.0.24"
