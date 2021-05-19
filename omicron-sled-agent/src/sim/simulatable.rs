@@ -41,38 +41,29 @@ use uuid::Uuid;
  * may be disallowed (e.g., "reboot" from a stopped state).
  *
  * The implementor determines the set of possible states (via `CurrentState` and
- * `RequestedState`) as well as what transitions are allowed (via
- * `next_state_for_new_target()`).
+ * `RequestedState`) as well as what transitions are allowed.
  *
  * When an asynchronous state change completes, we notify the control plane via
  * the `notify()` function.
  */
 #[async_trait]
 pub trait Simulatable: fmt::Debug + Send + Sync {
-    /**
-     * Represents a possible current runtime state of the simulated object.
-     * For an Instance, you might think of the state as "starting" or "running",
-     * etc., although in practice it's likely an object that includes this as
-     * well as a generation counter and other metadata.
-     */
+    /// Represents a possible current runtime state of the simulated object.
+    /// For an Instance, you might think of the state as "starting" or "running",
+    /// etc., although in practice it's likely an object that includes this as
+    /// well as a generation counter and other metadata.
     type CurrentState: Send + Clone + fmt::Debug;
 
-    /**
-     * Represents a possible requested state of the simulated object.  This is
-     * often a subset of current states, since users may not be able to request
-     * transitions to intermediate states.
-     */
+    /// Represents a possible requested state of the simulated object.  This is
+    /// often a subset of current states, since users may not be able to request
+    /// transitions to intermediate states.
     type RequestedState: Send + Clone + fmt::Debug;
 
     /// Represents an action that should be taken by the Sled Agent.
     /// Generated in response to a state change, either requested or observed.
     type Action: Send + Clone + fmt::Debug;
 
-    /// Describes the state of the resource, as reported from the resource
-    /// itself.
-    // TODO: Add Debug to propolis structs
-    type ObservedState: Send; // + Clone + fmt::Debug;
-
+    /// Creates a new Simulatable object.
     fn new(current: Self::CurrentState) -> Self;
 
     /// Requests that the simulated object transition to a new target.
@@ -91,26 +82,23 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// altering the resource into a desired state.
     fn observe_transition(&mut self) -> Option<Self::Action>;
 
+    /// Returns the generation number for the current state.
     fn generation(&self) -> ApiGeneration;
 
+    /// Returns the current state.
     fn current(&self) -> &Self::CurrentState;
 
-    fn pending(&self) -> Option<Self::RequestedState>;
+    /// Returns the "pending" (desired) state, if one exists.
+    fn pending(&self) -> &Option<Self::RequestedState>;
 
-    // TODO: Act on self?
-    /**
-     * Returns true if the state `current` is a terminal state representing that
-     * the object has been destroyed.
-     */
-    fn ready_to_destroy(current: &Self::CurrentState) -> bool;
+    /// Returns true if the state `current` is a terminal state representing that
+    /// the object has been destroyed.
+    fn ready_to_destroy(&self) -> bool;
 
-    // TODO: Act on self?
-    /**
-     * Notifies Nexus (via `csc`) about a new state (`current`) for the object
-     * identified by `id`.
-     */
+    /// Notifies Nexus (via `nexus_client`) about a new state (`current`) for
+    /// the object identified by `id`.
     async fn notify(
-        csc: &Arc<NexusClient>,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;

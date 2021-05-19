@@ -31,7 +31,6 @@ impl Simulatable for SimInstance {
     type CurrentState = ApiInstanceRuntimeState;
     type RequestedState = ApiInstanceRuntimeStateRequested;
     type Action = InstanceAction;
-    type ObservedState = PropolisInstanceState;
 
     fn new(current: ApiInstanceRuntimeState) -> Self {
         SimInstance { state: InstanceState::new(current) }
@@ -45,7 +44,7 @@ impl Simulatable for SimInstance {
     }
 
     fn observe_transition(&mut self) -> Option<InstanceAction> {
-        if let Some(pending) = self.state.pending.as_ref() {
+        if let Some(pending) = self.state.pending() {
             // These operations would typically be triggered via responses from
             // Propolis, but for a simulated sled agent, this does not exist.
             //
@@ -70,32 +69,26 @@ impl Simulatable for SimInstance {
     }
 
     fn generation(&self) -> ApiGeneration {
-        self.state.current.gen
+        self.state.current().gen
     }
 
     fn current(&self) -> &Self::CurrentState {
-        &self.state.current
+        self.state.current()
     }
 
-    fn pending(&self) -> Option<Self::RequestedState> {
-        self.state.pending.clone()
+    fn pending(&self) -> &Option<Self::RequestedState> {
+        self.state.pending()
     }
 
-    fn ready_to_destroy(current: &Self::CurrentState) -> bool {
-        current.run_state == ApiInstanceState::Destroyed
+    fn ready_to_destroy(&self) -> bool {
+        self.current().run_state == ApiInstanceState::Destroyed
     }
 
     async fn notify(
-        csc: &Arc<NexusClient>,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {
-        /*
-         * Notify Nexus that the instance state has changed.  The sled agent is
-         * authoritative for the runtime state, and we use a generation number
-         * here so that calls processed out of order do not settle on the wrong
-         * value.
-         */
-        csc.notify_instance_updated(id, &current).await
+        nexus_client.notify_instance_updated(id, &current).await
     }
 }

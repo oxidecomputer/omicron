@@ -31,7 +31,6 @@ impl Simulatable for SimDisk {
     type CurrentState = ApiDiskRuntimeState;
     type RequestedState = ApiDiskStateRequested;
     type Action = DiskAction;
-    type ObservedState = PropolisDiskState;
 
     fn new(current: ApiDiskRuntimeState) -> Self {
         SimDisk { state: DiskState::new(current) }
@@ -45,7 +44,7 @@ impl Simulatable for SimDisk {
     }
 
     fn observe_transition(&mut self) -> Option<DiskAction> {
-        if let Some(pending) = self.state.pending.as_ref() {
+        if let Some(pending) = self.state.pending() {
             let observed = match pending {
                 ApiDiskStateRequested::Attached(uuid) => {
                     PropolisDiskState::Attached(*uuid)
@@ -63,26 +62,26 @@ impl Simulatable for SimDisk {
     }
 
     fn generation(&self) -> ApiGeneration {
-        self.state.current.gen
+        self.state.current().gen
     }
 
     fn current(&self) -> &Self::CurrentState {
-        &self.state.current
+        self.state.current()
     }
 
-    fn pending(&self) -> Option<Self::RequestedState> {
-        self.state.pending.clone()
+    fn pending(&self) -> &Option<Self::RequestedState> {
+        self.state.pending()
     }
 
-    fn ready_to_destroy(current: &Self::CurrentState) -> bool {
-        ApiDiskState::Destroyed == current.disk_state
+    fn ready_to_destroy(&self) -> bool {
+        ApiDiskState::Destroyed == self.current().disk_state
     }
 
     async fn notify(
-        csc: &Arc<NexusClient>,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError> {
-        csc.notify_disk_updated(id, &current).await
+        nexus_client.notify_disk_updated(id, &current).await
     }
 }

@@ -36,17 +36,22 @@ fn propolis_to_omicron_state(
 
 /// The instance state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
-// TODO: Use this instead of "current + pending" in APIs.
 #[derive(Clone, Debug)]
 pub struct InstanceState {
-    // TODO: Not pub!
-    pub current: ApiInstanceRuntimeState,
-    pub pending: Option<ApiInstanceRuntimeStateRequested>,
+    current: ApiInstanceRuntimeState,
+    pending: Option<ApiInstanceRuntimeStateRequested>,
 }
 
 impl InstanceState {
     pub fn new(current: ApiInstanceRuntimeState) -> Self {
         InstanceState { current, pending: None }
+    }
+
+    pub fn current(&self) -> &ApiInstanceRuntimeState {
+        &self.current
+    }
+    pub fn pending(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
+        &self.pending
     }
 
     /// Update the known state of an instance based on a response from Propolis.

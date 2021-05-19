@@ -28,9 +28,9 @@ use super::simulatable::Simulatable;
 struct SimObject<S: Simulatable> {
     /// The simulated object.
     object: S,
-    /** debug log */
+    /// Debug log
     log: Logger,
-    /** tx-side of a channel used to notify when async state changes begin */
+    /// Tx-side of a channel used to notify when async state changes begin
     channel_tx: Option<Sender<()>>,
 }
 
@@ -108,9 +108,7 @@ impl<S: Simulatable> SimObject<S> {
     ) -> Result<Option<S::RequestedState>, ApiError> {
         let dropped = self.object.pending().clone();
         let old_gen = self.object.generation();
-
-        let _action = self.object.request_transition(&target)?;
-
+        let action = self.object.request_transition(&target)?;
         if old_gen == self.object.generation() {
             info!(self.log, "noop transition"; "target" => ?target);
             return Ok(None);
@@ -121,6 +119,7 @@ impl<S: Simulatable> SimObject<S> {
             "dropped" => ?dropped,
             "current" => ?self.object.current(),
             "pending" => ?self.object.pending(),
+            "action" => ?action,
         );
 
         /*
@@ -158,29 +157,15 @@ impl<S: Simulatable> SimObject<S> {
     }
 
     fn transition_finish(&mut self) {
-        if self.object.pending().is_none() {
-            /*
-             * Somebody must have requested a state change while we were
-             * simulating a previous asynchronous one.  By definition, the new
-             * one must also be asynchronous, and the first of the two calls to
-             * `transition_finish()` will complete the new transition.  The
-             * second one will find us here.
-             * TODO-cleanup We could probably eliminate this case by not
-             * sending a message to the background task if we were already in an
-             * async transition.
-             */
-            info!(self.log, "noop transition finish"; "current" => ?self);
-            return;
-        }
-
         let current = self.object.current().clone();
         let pending = self.object.pending().clone();
-        let _action = self.object.observe_transition();
+        let action = self.object.observe_transition();
         info!(self.log, "simulated transition finish";
             "state_before" => ?current,
             "requested_state" => ?pending,
             "state_after" => ?self.object.current(),
             "pending_after" => ?self.object.pending(),
+            "action" => ?action,
         );
     }
 }
@@ -193,7 +178,7 @@ impl<S: Simulatable> SimObject<S> {
  */
 pub struct SimCollection<S: Simulatable> {
     /** handle to the Nexus API, used to notify about async transitions */
-    ctlsc: Arc<NexusClient>,
+    nexus_client: Arc<NexusClient>,
     /** logger for this collection */
     log: Logger,
     /** simulation mode: automatic (timer-based) or explicit (using an API) */
@@ -205,12 +190,12 @@ pub struct SimCollection<S: Simulatable> {
 impl<S: Simulatable + 'static> SimCollection<S> {
     /** Returns a new collection of simulated objects. */
     pub fn new(
-        ctlsc: Arc<NexusClient>,
+        nexus_client: Arc<NexusClient>,
         log: Logger,
         sim_mode: SimMode,
     ) -> SimCollection<S> {
         SimCollection {
-            ctlsc,
+            nexus_client,
             log,
             sim_mode,
             objects: Mutex::new(BTreeMap::new()),
@@ -254,7 +239,8 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             let mut object = objects.remove(&id).unwrap();
             object.transition_finish();
             let after = object.object.current().clone();
-            if object.object.pending().is_none() && S::ready_to_destroy(&after)
+            if object.object.pending().is_none()
+                && object.object.ready_to_destroy()
             {
                 (after, Some(object))
             } else {
@@ -268,7 +254,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
          * TODO-robustness: If this fails, we need to put it on some list of
          * updates to retry later.
          */
-        S::notify(&self.ctlsc, &id, new_state).await.unwrap();
+        S::notify(&self.nexus_client, &id, new_state).await.unwrap();
 
         /*
          * If the object came to rest destroyed, complete any async cleanup
@@ -410,7 +396,7 @@ mod test {
         assert!(instance.object.pending().is_none());
         assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
         assert_eq!(&r1.run_state, &instance.object.current().run_state);
-        assert_eq!(r1.gen, instance.object.generation());
+        assert_eq!(r1.gen, instance.object.current().gen);
         assert!(rx.try_next().is_err());
 
         /*

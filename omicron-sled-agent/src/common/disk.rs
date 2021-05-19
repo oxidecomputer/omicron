@@ -16,17 +16,22 @@ pub enum Action {
 
 /// The disk state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
-// TODO: Use this instead of "current + pending" in APIs.
 #[derive(Clone, Debug)]
 pub struct DiskState {
-    // TODO: Not pub!
-    pub current: ApiDiskRuntimeState,
-    pub pending: Option<ApiDiskStateRequested>,
+    current: ApiDiskRuntimeState,
+    pending: Option<ApiDiskStateRequested>,
 }
 
 impl DiskState {
     pub fn new(current: ApiDiskRuntimeState) -> Self {
         DiskState { current, pending: None }
+    }
+
+    pub fn current(&self) -> &ApiDiskRuntimeState {
+        &self.current
+    }
+    pub fn pending(&self) -> &Option<ApiDiskStateRequested> {
+        &self.pending
     }
 
     /// Update the known state of a disk based on a response from Propolis.
@@ -146,8 +151,7 @@ impl DiskState {
 
     fn request_destroy(&mut self) -> Result<Option<Action>, ApiError> {
         if self.current.disk_state.is_attached() {
-            let id =
-                self.current.disk_state.attached_instance_id().unwrap().clone();
+            let id = *self.current.disk_state.attached_instance_id().unwrap();
             self.transition(
                 ApiDiskState::Detaching(id),
                 Some(ApiDiskStateRequested::Destroyed),
@@ -161,8 +165,7 @@ impl DiskState {
 
     fn request_fault(&mut self) -> Result<Option<Action>, ApiError> {
         if self.current.disk_state.is_attached() {
-            let id =
-                self.current.disk_state.attached_instance_id().unwrap().clone();
+            let id = *self.current.disk_state.attached_instance_id().unwrap();
             self.transition(
                 ApiDiskState::Detaching(id),
                 Some(ApiDiskStateRequested::Faulted),
