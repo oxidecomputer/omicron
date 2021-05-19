@@ -122,7 +122,6 @@ macro_rules! impl_sql_wrapping {
 impl_sql_wrapping!(ApiByteCount, i64);
 impl_sql_wrapping!(ApiGeneration, i64);
 impl_sql_wrapping!(ApiInstanceCpuCount, i64);
-impl_sql_wrapping!(ApiInstanceState, &str);
 impl_sql_wrapping!(ApiName, &str);
 
 /*
@@ -159,6 +158,18 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     }
 }
 
+impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let variant = sql_row_value(value, "instance_state")?;
+        let rebooting: Option<bool> =
+            sql_row_value(value, "instance_state_rebooting")?;
+        ApiInstanceState::try_from((variant, rebooting))
+            .map_err(|err| ApiError::InternalError { message: err })
+    }
+}
+
 /// Load an [`ApiProject`] from a whole row of the "Project" table.
 impl TryFrom<&tokio_postgres::Row> for ApiProject {
     type Error = ApiError;
@@ -185,15 +196,14 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstance {
 }
 
 /// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
-/// using the "instance_state", "reboot_in_progress", "active_server_id",
-/// "state_generation", and "time_state_updated" columns.
+/// using the "instance_state", "active_server_id", "state_generation", and
+/// "time_state_updated" columns.
 impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     type Error = ApiError;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(ApiInstanceRuntimeState {
-            run_state: sql_row_value(value, "instance_state")?,
-            reboot_in_progress: sql_row_value(value, "reboot_in_progress")?,
+            run_state: ApiInstanceState::try_from(value)?,
             sled_uuid: sql_row_value(value, "active_server_id")?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,

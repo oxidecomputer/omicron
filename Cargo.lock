@@ -1556,6 +1556,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=9b0bd7e#9b0bd7e43f3114dc7765f3b595b68cfe0e9a7147"
 dependencies = [
  "schemars",
  "serde",

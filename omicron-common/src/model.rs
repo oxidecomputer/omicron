@@ -16,7 +16,6 @@ use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -621,6 +620,7 @@ pub struct ApiProjectUpdateParams {
  * but also includes states related to the Instance's lifecycle
  */
 #[derive(
+    Copy,
     Clone,
     Debug,
     Deserialize,
@@ -636,8 +636,8 @@ pub enum ApiInstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
-    Stopping,
-    Stopped,
+    Stopping { rebooting: bool },
+    Stopped { rebooting: bool },
     Repairing,
     Failed,
     Destroyed,
@@ -655,38 +655,39 @@ impl Display for ApiInstanceState {
  * good validation error.  ApiInstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<&str> for ApiInstanceState {
-    type Error = anyhow::Error;
+impl TryFrom<(&str, Option<bool>)> for ApiInstanceState {
+    type Error = String;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        parse_str_using_serde(value)
-    }
-}
-
-impl<'a> From<&'a ApiInstanceState> for &'a str {
-    fn from(s: &'a ApiInstanceState) -> &'a str {
-        s.label()
-    }
-}
-
-impl From<ApiInstanceStateRequested> for ApiInstanceState {
-    fn from(requested: ApiInstanceStateRequested) -> Self {
-        match requested {
-            ApiInstanceStateRequested::Running => ApiInstanceState::Running,
-            ApiInstanceStateRequested::Stopped => ApiInstanceState::Stopped,
-            ApiInstanceStateRequested::Destroyed => ApiInstanceState::Destroyed,
-        }
+    fn try_from(
+        (variant, rebooting): (&str, Option<bool>),
+    ) -> Result<Self, Self::Error> {
+        let r = match variant {
+            "creating" => ApiInstanceState::Creating,
+            "starting" => ApiInstanceState::Starting,
+            "running" => ApiInstanceState::Running,
+            "stopping" => {
+                ApiInstanceState::Stopping { rebooting: rebooting.unwrap() }
+            }
+            "stopped" => {
+                ApiInstanceState::Stopped { rebooting: rebooting.unwrap() }
+            }
+            "repairing" => ApiInstanceState::Repairing,
+            "failed" => ApiInstanceState::Failed,
+            "destroyed" => ApiInstanceState::Destroyed,
+            _ => return Err(format!("Unexpected variant {}", variant)),
+        };
+        Ok(r)
     }
 }
 
 impl ApiInstanceState {
-    fn label(&self) -> &str {
+    pub fn label(&self) -> &'static str {
         match self {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
-            ApiInstanceState::Stopping => "stopping",
-            ApiInstanceState::Stopped => "stopped",
+            ApiInstanceState::Stopping { rebooting: _r } => "stopping",
+            ApiInstanceState::Stopped { rebooting: _r } => "stopped",
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
@@ -695,20 +696,31 @@ impl ApiInstanceState {
 
     /**
      * Returns true if the given state represents a fully stopped Instance.
-     * This means that a transition from an is_not_stopped() state must go
+     * This means that a transition from an !is_stopped() state must go
      * through Stopping.
      */
     pub fn is_stopped(&self) -> bool {
         match self {
             ApiInstanceState::Starting => false,
             ApiInstanceState::Running => false,
-            ApiInstanceState::Stopping => false,
+            ApiInstanceState::Stopping { rebooting: _ } => false,
 
             ApiInstanceState::Creating => true,
-            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Stopped { rebooting: _ } => true,
             ApiInstanceState::Repairing => true,
             ApiInstanceState::Failed => true,
             ApiInstanceState::Destroyed => true,
+        }
+    }
+
+    /**
+     * Returns true if the given state represents an in-progress reboot.
+     */
+    pub fn is_rebooting(&self) -> bool {
+        match self {
+            ApiInstanceState::Stopped { rebooting } => *rebooting,
+            ApiInstanceState::Stopping { rebooting } => *rebooting,
+            _ => false,
         }
     }
 }
@@ -719,6 +731,7 @@ impl ApiInstanceState {
  * A subset of [`ApiInstanceState`].
  */
 #[derive(
+    Copy,
     Clone,
     Debug,
     Deserialize,
@@ -733,6 +746,8 @@ impl ApiInstanceState {
 pub enum ApiInstanceStateRequested {
     Running,
     Stopped,
+    // Implies a transition to "Stopped", then to "Running".
+    Reboot,
     Destroyed,
 }
 
@@ -747,6 +762,7 @@ impl ApiInstanceStateRequested {
         match self {
             ApiInstanceStateRequested::Running => "running",
             ApiInstanceStateRequested::Stopped => "stopped",
+            ApiInstanceStateRequested::Reboot => "reboot",
             ApiInstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -758,6 +774,7 @@ impl ApiInstanceStateRequested {
         match self {
             ApiInstanceStateRequested::Running => false,
             ApiInstanceStateRequested::Stopped => true,
+            ApiInstanceStateRequested::Reboot => false,
             ApiInstanceStateRequested::Destroyed => true,
         }
     }
@@ -830,8 +847,6 @@ impl ApiObject for ApiInstance {
 pub struct ApiInstanceRuntimeState {
     /** runtime state of the Instance */
     pub run_state: ApiInstanceState,
-    /** indicates whether a reboot is currently in progress */
-    pub reboot_in_progress: bool,
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
     /** generation number for this state */
@@ -849,7 +864,6 @@ pub struct ApiInstanceRuntimeState {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ApiInstanceRuntimeStateRequested {
     pub run_state: ApiInstanceStateRequested,
-    pub reboot_wanted: bool,
 }
 
 /**
@@ -866,7 +880,7 @@ impl ApiObject for ApiInstanceRuntimeState {
     type View = ApiInstanceRuntimeStateView;
     fn to_view(&self) -> ApiInstanceRuntimeStateView {
         ApiInstanceRuntimeStateView {
-            run_state: self.run_state.clone(),
+            run_state: self.run_state,
             time_run_state_updated: self.time_updated,
         }
     }
@@ -1044,19 +1058,6 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
             )),
         }
     }
-}
-
-pub fn parse_str_using_serde<T: Serialize + DeserializeOwned>(
-    s: &str,
-) -> Result<T, anyhow::Error> {
-    /*
-     * Round-tripping through serde is a little absurd, but has the benefit
-     * of always staying in sync with the real definition.  (The initial
-     * serialization is necessary to correctly handle any quotes or the like
-     * in the input string.)
-     */
-    let json = serde_json::to_string(s).unwrap();
-    serde_json::from_str(&json).context("parsing instance state")
 }
 
 impl ApiDiskState {

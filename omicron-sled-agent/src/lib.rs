@@ -10,6 +10,7 @@
 /* Clippy's style lints are useful, but not worth running automatically. */
 #![allow(clippy::style)]
 
+pub mod common;
 pub mod sim;
 
 #[macro_use]

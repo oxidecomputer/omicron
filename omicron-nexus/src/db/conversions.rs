@@ -12,6 +12,7 @@ use omicron_common::model::ApiDiskState;
 use omicron_common::model::ApiIdentityMetadataCreateParams;
 use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
+use omicron_common::model::ApiInstanceState;
 use omicron_common::model::ApiProjectCreateParams;
 
 use super::sql::SqlSerialize;
@@ -40,13 +41,27 @@ impl SqlSerialize for ApiInstanceCreateParams {
     }
 }
 
+impl SqlSerialize for ApiInstanceState {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        match self {
+            ApiInstanceState::Stopping { rebooting }
+            | ApiInstanceState::Stopped { rebooting } => {
+                output.set("instance_state_rebooting", rebooting);
+            }
+            _ => {
+                output.set("instance_state_rebooting", &Option::<bool>::None);
+            }
+        }
+        output.set("instance_state", &self.label());
+    }
+}
+
 impl SqlSerialize for ApiInstanceRuntimeState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("instance_state", &self.run_state);
+        self.run_state.sql_serialize(output);
         output.set("active_server_id", &self.sled_uuid);
         output.set("state_generation", &self.gen);
         output.set("time_state_updated", &self.time_updated);
-        output.set("reboot_in_progress", &self.reboot_in_progress);
     }
 }
 

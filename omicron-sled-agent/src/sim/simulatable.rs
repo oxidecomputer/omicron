@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use omicron_common::error::ApiError;
+use omicron_common::model::ApiGeneration;
 use omicron_common::NexusClient;
 use std::fmt;
 use std::sync::Arc;
@@ -12,15 +13,6 @@ use uuid::Uuid;
  * means for example accepting a request to boot it, reporting the current state
  * as "starting", and then some time later reporting that the state is
  * "running".
- *
- * This interface defines only associated functions, not constructors nor what
- * would traditionally be called "methods".  On the one hand, this approach is
- * relatively simple to reason about, since all the functions are stateless.  On
- * the other hand, the interface is a little gnarly.  That's largely because
- * this plugs into a more complex simulation mechanism (implemented by
- * `SimObject` and `SimCollection`) and this interface defines only the small
- * chunks of functionality that differ between types.  Still, this is cleaner
- * than what was here before!
  *
  * The basic idea is that for any type that we want to simulate (e.g.,
  * Instances), there's a `CurrentState` (which you could think of as "stopped",
@@ -49,94 +41,64 @@ use uuid::Uuid;
  * may be disallowed (e.g., "reboot" from a stopped state).
  *
  * The implementor determines the set of possible states (via `CurrentState` and
- * `RequestedState`) as well as what transitions are allowed (via
- * `next_state_for_new_target()`).
+ * `RequestedState`) as well as what transitions are allowed.
  *
  * When an asynchronous state change completes, we notify the control plane via
  * the `notify()` function.
  */
-/*
- * TODO-cleanup Among the awkward bits here is that the an object's state is
- * essentially represented by a tuple `(CurrentState, Option<RequestedState>)`,
- * but that's not represented anywhere.  Would it help to have that be a
- * first-class type?  Maybe it would be easier if there were a separate type
- * representing pairs of possible values here?  That sounds worse (because it
- * sounds MxN), but in practice many combinations are not legal and so it might
- * eliminate code that checks for these cases.
- */
 #[async_trait]
-pub trait Simulatable: fmt::Debug {
-    /**
-     * Represents a possible current runtime state of the simulated object.
-     * For an Instance, you might think of the state as "starting" or "running",
-     * etc., although in practice it's likely an object that includes this as
-     * well as a generation counter and other metadata.
-     */
+pub trait Simulatable: fmt::Debug + Send + Sync {
+    /// Represents a possible current runtime state of the simulated object.
+    /// For an Instance, you might think of the state as "starting" or "running",
+    /// etc., although in practice it's likely an object that includes this as
+    /// well as a generation counter and other metadata.
     type CurrentState: Send + Clone + fmt::Debug;
 
-    /**
-     * Represents a possible requested state of the simulated object.  This is
-     * often a subset of current states, since users may not be able to request
-     * transitions to intermediate states.
-     */
+    /// Represents a possible requested state of the simulated object.  This is
+    /// often a subset of current states, since users may not be able to request
+    /// transitions to intermediate states.
     type RequestedState: Send + Clone + fmt::Debug;
 
-    /**
-     * Given `current` (the current state of a simulated object), `pending`
-     * (the requested state associated with a currently outstanding asynchronous
-     * transition), and `target` (a new requested state), return a tuple
-     * describing the next state and the requested state for the next
-     * asynchronous transition, if any.
-     *
-     * If the requested transition is illegal (which should not be common),
-     * return an appropriate `ApiError`.  If the requested transition can be
-     * completed immediately (synchronously), the second field of the returned
-     * tuple should be `None`.  If the requested transition is asynchronous, the
-     * immediate next state should be returned as the first element and the
-     * pending asynchronous request should be returned as the second.
-     */
-    fn next_state_for_new_target(
-        current: &Self::CurrentState,
-        pending: &Option<Self::RequestedState>,
-        next: &Self::RequestedState,
-    ) -> Result<(Self::CurrentState, Option<Self::RequestedState>), ApiError>;
+    /// Represents an action that should be taken by the Sled Agent.
+    /// Generated in response to a state change, either requested or observed.
+    type Action: Send + Clone + fmt::Debug;
 
-    /**
-     * Given `current` (the current state of a simulated object) and `pending`
-     * (the requested state associated with a currently outstanding asynchronous
-     * transition), return a tuple of the immediate next state and the requested
-     * state for the next asynchronous transition, if any.  The return value has
-     * the same semantics as for `next_state_for_new_target()`; however, this
-     * function is not allowed to fail.  (Put differently, if this could fail,
-     * then it should fail when the asynchronous state change was started, back
-     * in next_state_for_new_target()`.)
-     */
-    fn next_state_for_async_transition_finish(
-        current: &Self::CurrentState,
-        pending: &Self::RequestedState,
-    ) -> (Self::CurrentState, Option<Self::RequestedState>);
+    /// Creates a new Simulatable object.
+    fn new(current: Self::CurrentState) -> Self;
 
-    /**
-     * Returns true if "state2" represents no meaningful change from "state1".
-     * If possible, this should use a generation number or the like.
-     */
-    fn state_unchanged(
-        state1: &Self::CurrentState,
-        state2: &Self::CurrentState,
-    ) -> bool;
+    /// Requests that the simulated object transition to a new target.
+    ///
+    /// If successful, returns the action that must be taken by the Sled Agent
+    /// to alter the resource into the desired state.
+    fn request_transition(
+        &mut self,
+        target: &Self::RequestedState,
+    ) -> Result<Option<Self::Action>, ApiError>;
 
-    /**
-     * Returns true if the state `current` is a terminal state representing that
-     * the object has been destroyed.
-     */
-    fn ready_to_destroy(current: &Self::CurrentState) -> bool;
+    /// Update the state in response to an observed update within the simulated
+    /// resource.
+    ///
+    /// Returns any actions that should be taken by the Sled Agent to continue
+    /// altering the resource into a desired state.
+    fn observe_transition(&mut self) -> Option<Self::Action>;
 
-    /**
-     * Notifies Nexus (via `csc`) about a new state (`current`) for the object
-     * identified by `id`.
-     */
+    /// Returns the generation number for the current state.
+    fn generation(&self) -> ApiGeneration;
+
+    /// Returns the current state.
+    fn current(&self) -> &Self::CurrentState;
+
+    /// Returns the "pending" (desired) state, if one exists.
+    fn pending(&self) -> &Option<Self::RequestedState>;
+
+    /// Returns true if the state `current` is a terminal state representing that
+    /// the object has been destroyed.
+    fn ready_to_destroy(&self) -> bool;
+
+    /// Notifies Nexus (via `nexus_client`) about a new state (`current`) for
+    /// the object identified by `id`.
     async fn notify(
-        csc: &Arc<NexusClient>,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), ApiError>;
