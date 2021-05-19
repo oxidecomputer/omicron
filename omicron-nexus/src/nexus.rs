@@ -41,7 +41,9 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
+use omicron_common::model::ProducerEndpoint;
 use omicron_common::model::UpdateResult;
+use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -105,6 +107,13 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
+
+    /**
+     * List of oximeter collectors.
+     *
+     * As with the sled agents above, this should be persisted at some point.
+     */
+    oximeter_collectors: Mutex<BTreeMap<Uuid, Arc<OximeterClient>>>,
 }
 
 /*
@@ -154,6 +163,7 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
+            oximeter_collectors: Mutex::new(BTreeMap::new()),
         };
 
         /*
@@ -183,6 +193,22 @@ impl Nexus {
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
+    }
+
+    /**
+     * Insert a new client of an Oximeter collector server.
+     */
+    pub async fn upsert_oximeter_collector(
+        &self,
+        collector: Arc<OximeterClient>,
+    ) {
+        let mut clients = self.oximeter_collectors.lock().await;
+        info!(
+            self.log,
+            "registered oximeter collector client";
+            "id" => collector.id.to_string(),
+        );
+        clients.insert(collector.id, collector);
     }
 
     pub fn datastore(&self) -> &db::DataStore {
@@ -1203,6 +1229,45 @@ impl Nexus {
                 Err(error)
             }
         }
+    }
+
+    /**
+     * Assign a newly-registered metric producer to an oximeter collector server.
+     */
+    pub async fn assign_producer(
+        &self,
+        producer_info: ProducerEndpoint,
+    ) -> Result<(), ApiError> {
+        let collector = self.next_collector().await?;
+        collector.register_producer(&producer_info).await?;
+        info!(
+            self.log,
+            "assigned collector to new producer";
+            "producer_id" => ?producer_info.producer_id(),
+            "collector_id" => ?collector.id,
+        );
+        Ok(())
+    }
+
+    /**
+     * Return an oximeter collector to assign a newly-registered producer
+     */
+    async fn next_collector(&self) -> Result<Arc<OximeterClient>, ApiError> {
+        // TODO-robustness Replace with a real load-balancing strategy.
+        self.oximeter_collectors
+            .lock()
+            .await
+            .values()
+            .next()
+            .map(Arc::clone)
+            .ok_or_else(|| {
+                warn!(self.log, "no collectors available to assign producer");
+                ApiError::ServiceUnavailable {
+                    message: String::from(
+                        "no collectors available to assign producer",
+                    ),
+                }
+            })
     }
 }
 

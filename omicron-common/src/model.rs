@@ -24,8 +24,9 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroU32;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -1395,6 +1396,150 @@ pub struct BootstrapAgentShareRequest {
 pub struct BootstrapAgentShareResponse {
     // TODO-completeness: format TBD; currently opaque.
     pub shared_secret: Vec<u8>,
+}
+
+/*
+ * Oximeter producer/collector objects.
+ */
+
+/**
+ * Idenitifier for a producer.
+ */
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
+pub struct ProducerId {
+    pub producer_id: Uuid,
+}
+
+impl ProducerId {
+    /**
+     * Construct a new producer ID.
+     */
+    pub fn new() -> Self {
+        Self { producer_id: Uuid::new_v4() }
+    }
+}
+
+impl Default for ProducerId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for ProducerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.producer_id.to_string())
+    }
+}
+
+/**
+ * Information announced by a metric server, used so that clients can contact it and collect
+ * available metric data from it.
+ */
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProducerEndpoint {
+    producer_id: ProducerId,
+    address: SocketAddr,
+    collection_route: String,
+    interval: Duration,
+}
+
+impl ProducerEndpoint {
+    /**
+     * Generate info for a metric server listening on the given address and route.
+     *
+     * This will generate a new, random [`ProducerId`] for the server. The `base_route` should be
+     * a route stem, to which the producer ID will be appended. `interval` is the desired initial
+     * collection interval for the producers metrics.
+     *
+     * Example
+     * -------
+     * ```rust
+     * use std::time::Duration;
+     * use omicron_common::model::ProducerEndpoint;
+     *
+     * let info = ProducerEndpoint::new("127.0.0.1:4444", "/collect", Duration::from_secs(10));
+     * assert_eq!(info.collection_route(), format!("/collect/{}", info.producer_id()));
+     * ```
+     */
+    pub fn new<T>(address: T, base_route: &str, interval: Duration) -> Self
+    where
+        T: ToSocketAddrs,
+    {
+        Self::with_id(ProducerId::new(), address, base_route, interval)
+    }
+
+    /**
+     * Generate info for a metric server, listening on the given address and route, with a known
+     * ID.
+     */
+    pub fn with_id<T>(
+        producer_id: ProducerId,
+        address: T,
+        base_route: &str,
+        interval: Duration,
+    ) -> Self
+    where
+        T: ToSocketAddrs,
+    {
+        Self {
+            producer_id,
+            address: address.to_socket_addrs().unwrap().next().unwrap(),
+            collection_route: format!(
+                "{}/{}",
+                base_route, producer_id.producer_id
+            ),
+            interval,
+        }
+    }
+
+    /**
+     * Return the producer ID for this server.
+     */
+    pub fn producer_id(&self) -> ProducerId {
+        self.producer_id
+    }
+
+    /**
+     * Return the address on which this server listens.
+     */
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    /**
+     * Return the route that can be used to request metric data.
+     */
+    pub fn collection_route(&self) -> &str {
+        &self.collection_route
+    }
+
+    /**
+     * Return the interval on which metrics should be collected.
+     */
+    pub fn interval(&self) -> &Duration {
+        &self.interval
+    }
+}
+
+/// Message used to notify Nexus that this oximeter instance is up and running.
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub struct OximeterStartupInfo {
+    /// The ID for this oximeter instance.
+    pub collector_id: Uuid,
+
+    /// The address on which this oximeter instance listens for requests
+    pub address: SocketAddr,
 }
 
 #[cfg(test)]
