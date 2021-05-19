@@ -64,7 +64,7 @@ impl Simulatable for SimInstance {
             _ => panic!("Unexpected pending state: {}", pending.run_state),
         };
 
-        let action = current.observe_transition(observed);
+        let _action = current.observe_transition(observed);
         (current.current, current.pending)
     }
 

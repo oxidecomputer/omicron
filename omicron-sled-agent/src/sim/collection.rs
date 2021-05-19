@@ -908,8 +908,8 @@ mod test {
      * pending.
      */
     #[tokio::test]
-    async fn test_sim_disk() {
-        let logctx = test_setup_log("test_sim_disk").await;
+    async fn test_sim_disk_transition_to_detached_states() {
+        let logctx = test_setup_log("test_sim_disk_transition_to_detached_states").await;
         let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
         let r1 = disk.current_state.clone();
 
@@ -935,12 +935,20 @@ mod test {
             assert_eq!(rnext.disk_state, next);
             rprev = rnext;
         }
+    }
 
-        /*
-         * Now if we transition to "Attached", we should go through an async
-         * transition.
-         */
+    #[tokio::test]
+    async fn test_sim_disk_attach_then_destroy() {
+        let logctx = test_setup_log("test_sim_disk_attach_then_destroy").await;
+        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let r1 = disk.current_state.clone();
+
+        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
+        assert_eq!(r1.disk_state, ApiDiskState::Creating);
+        assert_eq!(r1.gen, ApiGeneration::new());
+
         let id = uuid::Uuid::new_v4();
+        let rprev = r1;
         assert!(!rprev.disk_state.is_attached());
         assert!(disk
             .transition(ApiDiskStateRequested::Attached(id.clone()))
@@ -1026,7 +1034,19 @@ mod test {
         );
         disk.transition_finish();
         assert_eq!(disk.current_state.disk_state, ApiDiskState::Destroyed);
+    }
 
+    #[tokio::test]
+    async fn test_sim_disk_attach_then_fault() {
+        let logctx = test_setup_log("test_sim_disk_attach_then_fault").await;
+        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let r1 = disk.current_state.clone();
+
+        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
+        assert_eq!(r1.disk_state, ApiDiskState::Creating);
+        assert_eq!(r1.gen, ApiGeneration::new());
+
+        let id = uuid::Uuid::new_v4();
         disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
         disk.transition_finish();
         assert_eq!(
@@ -1042,7 +1062,7 @@ mod test {
             .transition(ApiDiskStateRequested::Attached(id.clone()))
             .unwrap_err();
         if let ApiError::InvalidRequest { message } = error {
-            assert_eq!("cannot attach while detaching", message);
+            assert_eq!("cannot attach from detaching", message);
         } else {
             panic!("unexpected error type");
         }
