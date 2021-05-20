@@ -13,5 +13,12 @@
 pub mod common;
 pub mod sim;
 
+// TODO: Double check pub / exporting from submodules? Maybe limit visibility?
+
+pub mod config;
+mod http_entrypoints;
+pub mod server;
+mod sled_agent;
+
 #[macro_use]
 extern crate slog;
