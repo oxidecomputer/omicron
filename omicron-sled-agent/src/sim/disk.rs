@@ -43,8 +43,13 @@ impl Simulatable for SimDisk {
         self.state.request_transition(target)
     }
 
-    fn observe_transition(&mut self) -> Option<DiskAction> {
+    fn pending_transition(&mut self) -> Option<DiskAction> {
         if let Some(pending) = self.state.pending() {
+            // These operations would typically be triggered via responses from
+            // Propolis, but for a simulated sled agent, this does not exist.
+            //
+            // Instead, we make transitions to new states based entirely on the
+            // value of "pending".
             let observed = match pending {
                 ApiDiskStateRequested::Attached(uuid) => {
                     PropolisDiskState::Attached(*uuid)

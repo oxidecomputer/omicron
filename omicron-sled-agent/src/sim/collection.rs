@@ -159,7 +159,7 @@ impl<S: Simulatable> SimObject<S> {
     fn transition_finish(&mut self) {
         let current = self.object.current().clone();
         let pending = self.object.pending().clone();
-        let action = self.object.observe_transition();
+        let action = self.object.pending_transition();
         info!(self.log, "simulated transition finish";
             "state_before" => ?current,
             "requested_state" => ?pending,

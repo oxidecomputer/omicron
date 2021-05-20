@@ -75,12 +75,12 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
         target: &Self::RequestedState,
     ) -> Result<Option<Self::Action>, ApiError>;
 
-    /// Update the state in response to an observed update within the simulated
-    /// resource.
+    /// Updates the state in response to an update within the simulated
+    /// resource: whatever state was "pending" is observed immediately.
     ///
     /// Returns any actions that should be taken by the Sled Agent to continue
     /// altering the resource into a desired state.
-    fn observe_transition(&mut self) -> Option<Self::Action>;
+    fn pending_transition(&mut self) -> Option<Self::Action>;
 
     /// Returns the generation number for the current state.
     fn generation(&self) -> ApiGeneration;
