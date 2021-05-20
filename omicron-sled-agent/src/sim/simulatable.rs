@@ -80,7 +80,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     ///
     /// Returns any actions that should be taken by the Sled Agent to continue
     /// altering the resource into a desired state.
-    fn pending_transition(&mut self) -> Option<Self::Action>;
+    fn execute_pending_transition(&mut self) -> Option<Self::Action>;
 
     /// Returns the generation number for the current state.
     fn generation(&self) -> ApiGeneration;
