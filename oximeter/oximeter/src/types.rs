@@ -4,7 +4,7 @@
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
 
 use bytes::Bytes;
@@ -30,15 +30,32 @@ pub enum FieldType {
     Bool,
 }
 
+impl std::fmt::Display for FieldType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum FieldValue {
     String(String),
     I64(i64),
     IpAddr(IpAddr),
     Uuid(Uuid),
     Bool(bool),
+}
+
+impl FieldValue {
+    pub fn field_type(&self) -> FieldType {
+        match self {
+            FieldValue::String(_) => FieldType::String,
+            FieldValue::I64(_) => FieldType::I64,
+            FieldValue::IpAddr(_) => FieldType::IpAddr,
+            FieldValue::Uuid(_) => FieldType::Uuid,
+            FieldValue::Bool(_) => FieldType::Bool,
+        }
+    }
 }
 
 impl From<i64> for FieldValue {
@@ -62,6 +79,18 @@ impl From<&str> for FieldValue {
 impl From<IpAddr> for FieldValue {
     fn from(value: IpAddr) -> Self {
         FieldValue::IpAddr(value)
+    }
+}
+
+impl From<Ipv4Addr> for FieldValue {
+    fn from(value: Ipv4Addr) -> Self {
+        FieldValue::IpAddr(IpAddr::V4(value))
+    }
+}
+
+impl From<Ipv6Addr> for FieldValue {
+    fn from(value: Ipv6Addr) -> Self {
+        FieldValue::IpAddr(IpAddr::V6(value))
     }
 }
 
@@ -164,9 +193,9 @@ impl From<&str> for Measurement {
     }
 }
 
-impl From<&Bytes> for Measurement {
-    fn from(value: &Bytes) -> Self {
-        Measurement::Bytes(value.clone())
+impl From<Bytes> for Measurement {
+    fn from(value: Bytes) -> Self {
+        Measurement::Bytes(value)
     }
 }
 
@@ -208,6 +237,10 @@ pub enum Error {
     /// An error running an `Oximeter` server
     #[error("Error running oximeter: {0}")]
     OximeterServer(String),
+
+    /// An error interacting with the timeseries database
+    #[error("Error interacting with timeseries database: {0}")]
+    Database(String),
 
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
@@ -495,7 +528,7 @@ mod tests {
         assert!(matches!(Measurement::from(0f64), Measurement::F64(_)));
         assert!(matches!(Measurement::from("foo"), Measurement::String(_)));
         assert!(matches!(
-            Measurement::from(&Bytes::new()),
+            Measurement::from(Bytes::new()),
             Measurement::Bytes(_)
         ));
         assert!(matches!(
