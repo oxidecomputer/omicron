@@ -1,25 +1,24 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='sled-agent'>
+<service_bundle type='manifest' name='propolis-server'>
 
-<service name='system/illumos/sled-agent' type='service' version='1'>
+<service name='system/illumos/propolis-server' type='service' version='1'>
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='bootstrap-agent' grouping='require_all' restart_on='none'
+  <dependency name='sled-agent' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/bootstrap-agent' />
+  <service_fmri value='svc:/system/illumos/sled-agent' />
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent %{svc:/system/illumos/bootstrap-agent:default/:properties/config/server_id} %{config/server_addr} %{config/nexus_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/propolis-server/propolis-server /opt/oxide/propolis-server/pkg/config.toml %{config/server_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
-    <propval name='nexus_addr' type='astring' value='127.0.0.1:12221' />
+    <propval name='server_addr' type='astring' value='127.0.0.1:12400' />
   </property_group>
 
   <property_group name='startd' type='framework'>
@@ -30,10 +29,10 @@
 
   <template>
     <common_name>
-      <loctext xml:lang='C'>Oxide Sled Agent</loctext>
+      <loctext xml:lang='C'>Oxide Propolis Server</loctext>
     </common_name>
     <description>
-      <loctext xml:lang='C'>Per-Server Sled Agent</loctext>
+      <loctext xml:lang='C'>Hypervisor</loctext>
     </description>
   </template>
 </service>
