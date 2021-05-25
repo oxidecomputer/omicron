@@ -23,10 +23,14 @@ binary_name = "sled-agent"
 service_name = "sled-agent"
 build = "rust"
 
+[package.oximeter]
+binary_name = "oximeter"
+service_name = "oximeter"
+build = "rust"
+
 [package.propolis-server]
 binary_name = "propolis-server"
 service_name = "propolis-server"
 build = "rust"
 # (Optional) List of binary blobs to be downloaded from S3.
 blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
-

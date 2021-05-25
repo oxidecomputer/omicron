@@ -1,3 +1,8 @@
+# Configuration for propolis server.
+#
+# Refer to https://github.com/oxidecomputer/propolis#readme
+# for more detail on the config format.
+
 bootrom = "/opt/oxide/propolis-server/blob/OVMF_CODE.fd"
 
 [dev.block0]

@@ -110,6 +110,9 @@ impl BootstrapAgent {
         // a decision from the previous boot.
         self.launch(&digests, &tar_source, &destination, "nexus")?;
 
+        // TODO-correctness: The same note as above applies to oximeter.
+        self.launch(&digests, &tar_source, &destination, "oximeter")?;
+
         // Note that we extract the propolis-server, but do not launch it.
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
