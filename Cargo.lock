@@ -1199,7 +1199,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "smf",
  "structopt",
  "subprocess",
  "tokio",
