@@ -1,3 +1,7 @@
+# This manifest describes packages which will be ingested by
+# the "omicron-package" tool - instructing how they should be
+# build, thrown into a tarball, and installed on the target system.
+
 # Path to SMF manifest directory
 smf = "smf"
 

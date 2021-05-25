@@ -362,7 +362,7 @@ The control plane repository contains a packaging tool which bundles binaries
 and SMF manifests. After building the expected binaries, they can be packaged
 in a format which lets them be transferred to a Helios machine.
 
-This tool acts on a `manifest.toml` file which describes the packages to be
+This tool acts on a `package-manifest.toml` file which describes the packages to be
 bundled in the build.
 
 [source,text]

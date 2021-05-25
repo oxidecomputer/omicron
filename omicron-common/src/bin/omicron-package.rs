@@ -81,12 +81,12 @@ enum SubCommand {
 struct Args {
     /// The path to the build manifest TOML file.
     ///
-    /// Defaults to "manifest.toml".
+    /// Defaults to "package-manifest.toml".
     #[structopt(
         short,
         long,
-        default_value = "manifest.toml",
-        help = "Path to manifest toml file"
+        default_value = "package-manifest.toml",
+        help = "Path to package manifest toml file"
     )]
     manifest: PathBuf,
 
