@@ -152,7 +152,10 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: true }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -182,7 +185,10 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -191,7 +197,10 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopped { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -236,7 +245,10 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: true }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -268,7 +280,10 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopping { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -285,7 +300,10 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
+    assert_eq!(
+        instance_next.runtime.run_state,
+        ApiInstanceState::Stopped { rebooting: false }
+    );
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated

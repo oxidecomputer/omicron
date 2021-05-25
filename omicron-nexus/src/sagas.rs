@@ -133,7 +133,6 @@ async fn sic_create_instance_record(
 
     let runtime = ApiInstanceRuntimeState {
         run_state: ApiInstanceState::Creating,
-        reboot_in_progress: false,
         sled_uuid: sled_uuid?,
         gen: ApiGeneration::new(),
         time_updated: Utc::now(),
@@ -161,7 +160,6 @@ async fn sic_instance_ensure(
     let osagactx = sagactx.user_data();
     let runtime_params = ApiInstanceRuntimeStateRequested {
         run_state: ApiInstanceStateRequested::Running,
-        reboot_wanted: false,
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
