@@ -696,7 +696,7 @@ impl ApiInstanceState {
 
     /**
      * Returns true if the given state represents a fully stopped Instance.
-     * This means that a transition from an is_not_stopped() state must go
+     * This means that a transition from an !is_stopped() state must go
      * through Stopping.
      */
     pub fn is_stopped(&self) -> bool {
