@@ -1,8 +1,10 @@
 //! Tools for interacting with the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
-pub mod client;
+mod client;
 mod model;
+
+pub use client::Client;
 
 #[cfg(test)]
 pub(crate) mod test_util {

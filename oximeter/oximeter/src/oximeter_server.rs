@@ -3,6 +3,7 @@
 
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,11 +17,12 @@ use omicron_common::model::{
     OximeterStartupInfo, ProducerEndpoint, ProducerId,
 };
 use reqwest::Client;
-use slog::{debug, info, o, warn, Logger};
+use serde::{Deserialize, Serialize};
+use slog::{debug, info, o, trace, warn, Logger};
 use tokio::{sync::mpsc, task::JoinHandle, time::interval};
 use uuid::Uuid;
 
-use crate::{collect::ProducerResults, Error};
+use crate::{collect::ProducerResults, db, Error};
 
 // Messages for controlling a collection task
 #[allow(dead_code)]
@@ -151,13 +153,12 @@ struct CollectionTask {
 }
 
 // Aggregation point for all results, from all collection tasks.
-//
-// TODO(ben) Replace this with an actual task for inserting results into ClickHouse.
 async fn results_sink(
     log: Logger,
-    mut rx: mpsc::Receiver<ProducerResults>,
+    client: db::Client,
     batch_size: usize,
     batch_interval: Duration,
+    mut rx: mpsc::Receiver<ProducerResults>,
 ) {
     let mut timer = interval(batch_interval);
     timer.tick().await; // completes immediately
@@ -165,12 +166,33 @@ async fn results_sink(
     loop {
         let insert = tokio::select! {
             _ = timer.tick() => {
-                true
+                if batch.is_empty() {
+                    trace!(log, "batch interval expired, but no samples to insert");
+                    false
+                } else {
+                    true
+                }
             }
             results = rx.recv() => {
                 match results {
                     Some(results) => {
-                        batch.extend(results.into_iter());
+                        let flattened_results = {
+                            let mut flattened = Vec::with_capacity(results.len());
+                            for inner_batch in results.into_iter() {
+                                match inner_batch {
+                                    Ok(samples) => flattened.extend(samples.into_iter()),
+                                    Err(e) => {
+                                        debug!(
+                                            log,
+                                            "received error (not samples) from a producer: {}",
+                                            e.to_string()
+                                        );
+                                    }
+                                }
+                            }
+                            flattened
+                        };
+                        batch.extend(flattened_results);
                         batch.len() >= batch_size
                     }
                     None => {
@@ -182,10 +204,37 @@ async fn results_sink(
         };
 
         if insert {
-            info!(log, "inserting {} results", batch.len());
+            debug!(log, "inserting {} samples into database", batch.len());
+            match client.insert_samples(&batch).await {
+                Ok(()) => trace!(log, "successfully inserted samples"),
+                Err(e) => {
+                    warn!(
+                        log,
+                        "failed to insert some results into metric DB: {}",
+                        e.to_string()
+                    );
+                }
+            }
+            // TODO-correctness The `insert_samples` call above may fail. The method itself needs
+            // better handling of partially-inserted results in that case, but we may need to retry
+            // or otherwise handle an error here as well.
             batch.clear();
         }
     }
+}
+
+/// Configuration for interacting with the metric database.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct DbConfig {
+    /// Address of the ClickHouse server
+    pub address: SocketAddr,
+
+    /// Batch size of samples at which to insert
+    pub batch_size: usize,
+
+    /// Interval on which to insert data into the database, regardless of the number of collected
+    /// samples. Value is in seconds.
+    pub batch_interval: u64,
 }
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -200,33 +249,38 @@ struct OximeterAgent {
 }
 
 impl OximeterAgent {
-    /// Construct a new agent, using the `log` as its root logger.
-    ///
-    /// This will internally create a new random UUID as the agent's ID.
-    pub fn new(log: &Logger) -> Self {
-        let log = log.new(o!("component" => "oximeter-agent"));
-        Self::with_id(Uuid::new_v4(), log)
-    }
-
     /// Construct a new agent with the given ID and logger.
-    pub fn with_id(id: Uuid, log: Logger) -> Self {
+    pub async fn with_id(
+        id: Uuid,
+        db_config: DbConfig,
+        log: &Logger,
+    ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
-        let insertion_log = log.new(o!("component" => "oximeter-inserter"));
+        let log = log.new(o!("component" => "oximeter-agent"));
+        let insertion_log = log.new(o!("component" => "results-sink"));
+        let client_log = log.new(o!("component" => "clickhouse-client"));
+
+        // Construct the ClickHouse client first, to propagate an error if needed.
+        let client = db::Client::new(db_config.address, client_log).await?;
+        client.init_db().await?;
+
+        // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
             results_sink(
                 insertion_log,
+                client,
+                db_config.batch_size,
+                Duration::from_secs(db_config.batch_interval),
                 result_receiver,
-                10,
-                Duration::from_secs(5),
             )
             .await
         });
-        Self {
+        Ok(Self {
             id,
             log,
             result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
-        }
+        })
     }
 
     /// Register a new producer with this oximeter instance.
@@ -269,15 +323,33 @@ impl OximeterAgent {
 }
 
 /// Configuration used to initialize an oximeter server
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
+    /// An unique ID for this oximeter server
+    pub id: Uuid,
+
     /// The address used to connect to Nexus.
     pub nexus_address: SocketAddr,
+
+    /// Configuration for working with ClickHouse
+    pub db: DbConfig,
 
     /// The internal Dropshot HTTP server configuration
     pub dropshot: ConfigDropshot,
 
     /// Logging configuration
     pub log: ConfigLogging,
+}
+
+impl Config {
+    /// Load configuration for an Oximeter server from a file.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| Error::OximeterServer(e.to_string()))?;
+        toml::from_str(&contents)
+            .map_err(|e| Error::OximeterServer(e.to_string()))
+    }
 }
 
 /// A server used to collect metrics from components in the control plane.
@@ -297,7 +369,11 @@ impl Oximeter {
             .to_logger("oximeter")
             .map_err(|msg| Error::OximeterServer(msg.to_string()))?;
         info!(log, "starting oximeter server");
-        let agent = Arc::new(OximeterAgent::new(&log));
+
+        // TODO-robustness Handle retries if the database is cannot be reached. This likely should
+        // just retry forever, as the system is unusable until a connection is made.
+        let agent =
+            Arc::new(OximeterAgent::with_id(config.id, config.db, &log).await?);
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
