@@ -109,7 +109,10 @@ impl BootstrapAgent {
         // Presumably, we'd try to contact a Nexus elsewhere
         // on the rack, or use the unlocked local storage to remember
         // a decision from the previous boot.
-        self.launch(&digests, &tar_source, &destination, "nexus")
+        self.launch(&digests, &tar_source, &destination, "nexus")?;
+
+        // TODO-correctness: The same note as above applies to oximeter.
+        self.launch(&digests, &tar_source, &destination, "oximeter")
     }
 
     // Verify, unpack, and enable a service.
