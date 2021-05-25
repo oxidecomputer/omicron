@@ -100,6 +100,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 dependencies = [
  "libc",
  "num_enum",
@@ -383,6 +384,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 dependencies = [
  "libc",
  "num_enum",
@@ -890,9 +892,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.94"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18794a8ad5b29321f790b55d93dfba91e125cb1a9edbd4f8e3150acc771c1a5e"
+checksum = "789da6d93f1b866ffe175afc5322a4d76c038605a1c3319bb57b06967ca98a36"
 
 [[package]]
 name = "linked-hash-map"
@@ -1192,7 +1194,7 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f54e11f)",
  "schemars",
  "serde",
  "serde_json",
@@ -1540,6 +1542,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 dependencies = [
  "bhyve_api",
  "bitflags",
@@ -1556,6 +1559,23 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11f#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
+dependencies = [
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "propolis-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 dependencies = [
  "reqwest",
  "ring",
@@ -1571,6 +1591,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -1578,7 +1599,7 @@ dependencies = [
  "futures",
  "libc",
  "propolis",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd)",
  "schemars",
  "serde",
  "serde_derive",
@@ -2604,6 +2625,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f54e11fd#8f54e11fdff6be6cc59d0aa4933f80523c0f5033"
 
 [[package]]
 name = "walkdir"
