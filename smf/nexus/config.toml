@@ -1,13 +1,30 @@
+#
+# Oxide API: example configuration file
+#
+
+# Identifier for this instance of Nexus
+id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+
 [database]
 # URL for connecting to the database
 url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
 
 [dropshot_external]
+# IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
 
 [dropshot_internal]
+# IP address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
 
 [log]
+# Show log messages of this level and more severe
 level = "info"
+
+# Example output to a terminal (with colors)
 mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"
