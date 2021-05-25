@@ -90,7 +90,7 @@ function do_curl
 
 	path="$1"
 	shift
-	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
+	(set -o xtrace; curl -sS "$OXAPI_URL$path" "$@" | json -ga)
 }
 
 # TODO-cleanup We could do a lot better than this.

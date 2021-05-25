@@ -151,7 +151,7 @@ impl BootstrapAgent {
         let destination = destination.as_ref();
         let service = service.as_ref();
 
-        info!(&self.log, "Launching {} Service", service);
+        info!(&self.log, "Extracting {} Service", service);
         let tar_name = format!("{}.tar", service);
         let tar_path = tar_source.join(&tar_name);
 
