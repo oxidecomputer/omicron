@@ -4,22 +4,25 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
+use slog::{debug, trace, Logger};
+
 use crate::db::model;
 use crate::{types::Sample, Error};
 
 #[derive(Debug, Clone)]
 pub struct Client {
     address: SocketAddr,
+    log: Logger,
     url: String,
     client: reqwest::Client,
 }
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
-    pub async fn new(address: SocketAddr) -> Result<Self, Error> {
+    pub async fn new(address: SocketAddr, log: Logger) -> Result<Self, Error> {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
-        let out = Self { address, url, client };
+        let out = Self { address, log, url, client };
         out.ping().await?;
         Ok(out)
     }
@@ -33,6 +36,7 @@ impl Client {
             .map_err(|e| Error::Database(e.to_string()))?
             .error_for_status()
             .map_err(|e| Error::Database(e.to_string()))?;
+        debug!(self.log, "successful ping of ClickHouse server");
         Ok(())
     }
 
@@ -41,6 +45,7 @@ impl Client {
         &self,
         samples: &[Sample],
     ) -> Result<(), Error> {
+        trace!(self.log, "unrolling {} total samples", samples.len());
         let mut rows = BTreeMap::new();
         for sample in samples.iter() {
             for (table_name, table_rows) in model::unroll_field_rows(sample) {
@@ -67,6 +72,12 @@ impl Client {
             // in the case that there's another kind of error, like a network outage, database
             // failure, ZooKeeper error, etc.
             self.execute(body).await?;
+            trace!(
+                self.log,
+                "inserted {} rows into table {}",
+                rows.len(),
+                table_name
+            );
         }
         Ok(())
     }
@@ -76,6 +87,7 @@ impl Client {
     pub(crate) async fn init_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
+        debug!(self.log, "initializing ClickHouse database");
         let sql = include_str!("./db-init.sql");
         for query in sql.split("\n--\n") {
             self.execute(query.to_string()).await?;
@@ -86,6 +98,7 @@ impl Client {
     // Wipe the ClickHouse database entirely.
     #[allow(dead_code)]
     pub(crate) async fn wipe_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
         let sql = include_str!("./db-wipe.sql").to_string();
         self.execute(sql).await
     }
@@ -94,6 +107,7 @@ impl Client {
     //
     // TODO-robustness This currently does no validation of the statement.
     async fn execute(&self, sql: String) -> Result<(), Error> {
+        trace!(self.log, "executing SQL query: {}", sql);
         let response = self
             .client
             .post(&self.url)
@@ -114,13 +128,15 @@ impl Client {
 mod tests {
     use super::*;
     use crate::db::test_util;
+    use slog::o;
 
     // This test is intentionally skipped for now, as we don't have ClickHouse set up in our CI
     // infrastructure yet. Uncomment the attribute line to enable it.
     //
     // #[tokio::test]
     async fn test_build_client() {
-        Client::new("[::1]:8123".parse().unwrap()).await.unwrap();
+        let log = slog::Logger::root(slog::Discard, o!());
+        Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
     }
 
     // This test is intentionally skipped for now, as we don't have ClickHouse set up in our CI
@@ -128,7 +144,9 @@ mod tests {
     //
     // #[tokio::test]
     async fn test_client_insert() {
-        let client = Client::new("[::1]:8123".parse().unwrap()).await.unwrap();
+        let log = slog::Logger::root(slog::Discard, o!());
+        let client =
+            Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
         client.wipe_db().await.unwrap();
         client.init_db().await.unwrap();
         let samples = {

@@ -1093,6 +1093,7 @@ dependencies = [
  "structopt",
  "thiserror",
  "tokio",
+ "toml",
  "uuid",
 ]
 

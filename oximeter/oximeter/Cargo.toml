@@ -20,4 +20,5 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 structopt = "0.3"
 thiserror = "1.0.24"
 tokio = "1.6"
+toml = "0.5.8"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
