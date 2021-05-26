@@ -19,16 +19,18 @@ pub(crate) mod test_util {
         pub num: i64,
     }
 
-    #[oximeter::metric(I64)]
+    #[derive(oximeter::Metric)]
     pub struct TestMetric {
         pub id: Uuid,
         pub good: bool,
+        pub value: i64,
     }
 
-    #[oximeter::metric(HistogramF64)]
+    #[derive(oximeter::Metric)]
     pub struct TestHistogram {
         pub id: Uuid,
         pub good: bool,
+        pub value: histogram::Histogram<f64>,
     }
 
     pub fn make_sample() -> Sample {
@@ -37,8 +39,8 @@ pub(crate) mod test_util {
             name2: "second_name".into(),
             num: 2,
         };
-        let metric = TestMetric { id: Uuid::new_v4(), good: true };
-        let sample = Sample::new(&target, &metric, 1, None);
+        let metric = TestMetric { id: Uuid::new_v4(), good: true, value: 1 };
+        let sample = Sample::new(&target, &metric, None);
         sample
     }
 
@@ -48,12 +50,13 @@ pub(crate) mod test_util {
             name2: "second_name".into(),
             num: 2,
         };
-        let metric = TestHistogram { id: Uuid::new_v4(), good: true };
         let mut hist = histogram::Histogram::new(&[0.0, 5.0, 10.0]).unwrap();
         hist.sample(1.0).unwrap();
         hist.sample(2.0).unwrap();
         hist.sample(6.0).unwrap();
-        let sample = Sample::new(&target, &metric, hist, None);
+        let metric =
+            TestHistogram { id: Uuid::new_v4(), good: true, value: hist };
+        let sample = Sample::new(&target, &metric, None);
         sample
     }
 }
