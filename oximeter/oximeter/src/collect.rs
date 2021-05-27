@@ -4,7 +4,7 @@
 
 use std::boxed::Box;
 use std::collections::BTreeSet;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use dropshot::{
@@ -12,43 +12,10 @@ use dropshot::{
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
 use omicron_common::model::{ProducerEndpoint, ProducerId};
-use reqwest::Client;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use slog::{debug, info, o};
 
 use crate::types;
 use crate::{Error, Producer};
-
-/// Information describing how a [`ProducerServer`] registers itself for collection.
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct RegistrationInfo {
-    address: SocketAddr,
-    registration_route: String,
-}
-
-impl RegistrationInfo {
-    /// Construct `RegistrationInfo`, to register at the given address and route.
-    pub fn new<T>(address: T, route: &str) -> Self
-    where
-        T: ToSocketAddrs,
-    {
-        Self {
-            address: address.to_socket_addrs().unwrap().next().unwrap(),
-            registration_route: route.to_string(),
-        }
-    }
-
-    /// Return the address of the server to be registered with.
-    pub fn address(&self) -> SocketAddr {
-        self.address
-    }
-
-    /// Return the route at which the registration request will be sent.
-    pub fn registration_route(&self) -> &str {
-        &self.registration_route
-    }
-}
 
 type ProducerList = Vec<Box<dyn Producer>>;
 pub type ProducerResults = Vec<Result<BTreeSet<types::Sample>, Error>>;
@@ -113,7 +80,7 @@ unsafe impl Send for Collector {}
 #[derive(Debug, Clone)]
 pub struct ProducerServerConfig {
     pub server_info: ProducerEndpoint,
-    pub registration_info: RegistrationInfo,
+    pub nexus_address: SocketAddr,
     pub dropshot_config: ConfigDropshot,
     pub logging_config: ConfigLogging,
 }
@@ -149,12 +116,7 @@ impl ProducerServer {
         .start();
 
         debug!(log, "registering metric server as a producer");
-        register(
-            &Client::new(),
-            &config.registration_info,
-            &config.server_info,
-        )
-        .await?;
+        register(config.nexus_address, &config.server_info).await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -201,7 +163,16 @@ async fn collect_endpoint(
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let collector = request_context.context();
     let producer_id = path_params.into_inner();
-    collect(collector, producer_id).await
+    Ok(HttpResponseOk(collect(collector, producer_id).await.map_err(|_| {
+        HttpError::for_not_found(
+            None,
+            format!(
+                "Producer ID {} is not valid, expected {}",
+                producer_id,
+                collector.producer_id()
+            ),
+        )
+    })?))
 }
 
 /// Register a metric server to be polled for metric data.
@@ -210,15 +181,11 @@ async fn collect_endpoint(
 /// servers, rather than using the `ProducerServer` provided by this crate (which starts a _new_
 /// server).
 pub async fn register(
-    client: &Client,
-    registration_info: &RegistrationInfo,
+    address: SocketAddr,
     server_info: &ProducerEndpoint,
 ) -> Result<(), Error> {
-    client
-        .post(format!(
-            "http://{}{}",
-            registration_info.address, registration_info.registration_route
-        ))
+    reqwest::Client::new()
+        .post(format!("http://{}/metrics/producers", address))
         .json(server_info)
         .send()
         .await
@@ -232,17 +199,10 @@ pub async fn register(
 pub async fn collect(
     collector: &Collector,
     producer_id: ProducerId,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+) -> Result<ProducerResults, Error> {
     if producer_id == collector.producer_id() {
-        Ok(HttpResponseOk(collector.collect()))
+        Ok(collector.collect())
     } else {
-        Err(HttpError::for_not_found(
-            None,
-            format!(
-                "Producer ID {} is not valid, expected {}",
-                producer_id,
-                collector.producer_id()
-            ),
-        ))
+        Err(Error::ProducerServer(String::from("invalid producer ID")))
     }
 }

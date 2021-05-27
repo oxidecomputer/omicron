@@ -6,9 +6,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
 use omicron_common::model::ProducerEndpoint;
-use oximeter::collect::{
-    ProducerServer, ProducerServerConfig, RegistrationInfo,
-};
+use oximeter::collect::{ProducerServer, ProducerServerConfig};
 use oximeter::{
     types::{Cumulative, Sample},
     Error, Metric, Producer, Target,
@@ -86,13 +84,11 @@ async fn main() {
         ConfigDropshot { bind_address: address, request_body_max_bytes: 2048 };
     let logging_config =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
-    let registration_info =
-        RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
     let server_info =
         ProducerEndpoint::new(address, "/collect", Duration::from_secs(10));
     let config = ProducerServerConfig {
         server_info,
-        registration_info,
+        nexus_address: "127.0.0.1:12221".parse().unwrap(),
         dropshot_config,
         logging_config,
     };

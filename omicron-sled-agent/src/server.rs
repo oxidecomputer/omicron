@@ -9,8 +9,11 @@ use super::sled_agent::SledAgent;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
+use omicron_common::error::ApiError;
 use omicron_common::model::ApiSledAgentStartupInfo;
+use omicron_common::model::{ProducerEndpoint, ProducerId};
 use omicron_common::NexusClient;
+use oximeter::collect;
 use slog::Logger;
 use std::sync::Arc;
 
@@ -87,6 +90,28 @@ impl Server {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
+
+        // Register as a metric producer with Nexus, retrying until success.
+        let producer_endpoint = ProducerEndpoint::with_id(
+            ProducerId { producer_id: config.id },
+            sa_address,
+            "/metrics",
+            std::time::Duration::from_secs(10),
+        );
+        let register_as_producer = || async {
+            debug!(log, "registering as a metric producer");
+            collect::register(config.nexus_address, &producer_endpoint)
+                .await
+                .map_err(|e| ApiError::unavail(&e.to_string()))
+                .map_err(BackoffError::Transient)
+        };
+        retry_notify(
+            internal_service_policy(),
+            register_as_producer,
+            log_notification_failure,
+        )
+        .await
+        .expect("Expected an infinite retry loop registering as producer");
         Ok(Server { sled_agent, http_server })
     }
 

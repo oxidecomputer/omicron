@@ -1200,6 +1200,7 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
+ "oximeter",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f54e11f)",
  "schemars",
  "serde",

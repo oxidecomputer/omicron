@@ -1,17 +1,24 @@
 /// Sled agent implementation
+use chrono::{DateTime, Utc};
 use futures::lock::Mutex;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiDiskStateRequested;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::model::ProducerId;
 use omicron_common::NexusClient;
 use slog::Logger;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{btree_map::Entry, BTreeMap};
+use std::sync::{self, Arc};
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceState};
+use oximeter::{
+    collect,
+    types::{Cumulative, Sample},
+    Metric, Target,
+};
 use propolis_client::Client as PropolisClient;
 
 // TODO(https://www.illumos.org/issues/13837): This is a hack;
@@ -138,6 +145,8 @@ pub struct SledAgent {
     log: Logger,
     nexus_client: Arc<NexusClient>,
     instances: Mutex<BTreeMap<Uuid, Instance>>,
+    cpu_producer: CpuMonitor,
+    metric_collector: collect::Collector,
 }
 
 impl SledAgent {
@@ -147,12 +156,25 @@ impl SledAgent {
         nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
         info!(&log, "created sled agent"; "id" => ?id);
+        let cpu_producer = CpuMonitor::new();
+        let uptime_tracker = UptimeTracker::new(
+            OxideService { name: "sled-agent".into(), id: *id },
+            ServiceUpTime { value: Cumulative::new(0.0) },
+        );
+        let metric_collector =
+            collect::Collector::with_id(ProducerId { producer_id: *id });
+        metric_collector.register_producer(Box::new(uptime_tracker)).unwrap();
+        metric_collector
+            .register_producer(Box::new(cpu_producer.clone()))
+            .unwrap();
 
         SledAgent {
             id: *id,
             log,
             nexus_client,
             instances: Mutex::new(BTreeMap::new()),
+            cpu_producer,
+            metric_collector,
         }
     }
 
@@ -235,6 +257,9 @@ impl SledAgent {
                             ),
                         })?;
                     println!("OK - RUN COMPLETE");
+
+                    // Add metrics for this new VM
+                    self.cpu_producer.add_instance(instance_id, 2);
                 }
                 InstanceAction::Stop => todo!(),
                 InstanceAction::Reboot => todo!(),
@@ -253,5 +278,119 @@ impl SledAgent {
         target: ApiDiskStateRequested,
     ) -> Result<ApiDiskRuntimeState, ApiError> {
         todo!("Disk attachment not yet implemented");
+    }
+
+    /// Collect all available metrics from this agent
+    pub async fn collect_metrics(
+        self: &Arc<Self>,
+        producer_id: ProducerId,
+    ) -> Result<collect::ProducerResults, ApiError> {
+        collect::collect(&self.metric_collector, producer_id)
+            .await
+            .map_err(|e| ApiError::internal_error(&e.to_string()))
+    }
+}
+
+// Target identifying metrics from a single virtual machine
+#[derive(Target, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct VirtualMachine {
+    pub id: Uuid,
+}
+
+// Metric with cumulative time a single vCPU is busy (in seconds)
+#[derive(Clone, Metric)]
+pub(crate) struct CpuBusy {
+    pub cpu_id: i64,
+    pub value: Cumulative<f64>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CpuMonitor {
+    start_time: DateTime<Utc>,
+    pub vms: Arc<sync::Mutex<BTreeMap<VirtualMachine, Vec<CpuBusy>>>>,
+}
+
+impl CpuMonitor {
+    pub fn new() -> Self {
+        Self {
+            start_time: Utc::now(),
+            vms: Arc::new(sync::Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    pub fn add_instance(&self, id: Uuid, n_cpus: usize) {
+        let target = VirtualMachine { id };
+        match self.vms.lock().unwrap().entry(target) {
+            Entry::Occupied(_) => {}
+            Entry::Vacant(entry) => {
+                let mut cpus = Vec::with_capacity(n_cpus);
+                for cpu_id in 0..n_cpus {
+                    cpus.push(CpuBusy {
+                        cpu_id: cpu_id as _,
+                        value: Cumulative::new(0.0),
+                    });
+                }
+                entry.insert(cpus);
+            }
+        }
+    }
+}
+
+impl oximeter::Producer for CpuMonitor {
+    fn produce(
+        &mut self,
+    ) -> Result<Box<(dyn Iterator<Item = Sample> + 'static)>, oximeter::Error>
+    {
+        let mut vms = self.vms.lock().unwrap();
+        // Je suis mendant
+        let now = Utc::now();
+        let accumulated_time: f64 =
+            (self.start_time - now).num_nanoseconds().unwrap() as f64 / 1e9;
+        let mut samples = Vec::with_capacity(vms.len());
+        for (vm, cpus) in vms.iter_mut() {
+            for cpu in cpus.iter_mut() {
+                cpu.value += accumulated_time - cpu.value.value();
+                samples.push(Sample::new(vm, cpu, Some(now)));
+            }
+        }
+        Ok(Box::new(samples.into_iter()))
+    }
+}
+
+#[derive(Target, Clone)]
+pub(crate) struct OxideService {
+    name: String,
+    id: Uuid,
+}
+
+#[derive(Clone, Metric)]
+pub(crate) struct ServiceUpTime {
+    value: Cumulative<f64>,
+}
+
+#[derive(Clone)]
+pub(crate) struct UptimeTracker {
+    start_time: DateTime<Utc>,
+    pub service: OxideService,
+    pub uptime: ServiceUpTime,
+}
+
+impl UptimeTracker {
+    pub fn new(service: OxideService, uptime: ServiceUpTime) -> Self {
+        Self { start_time: Utc::now(), service, uptime }
+    }
+}
+
+impl oximeter::Producer for UptimeTracker {
+    fn produce(
+        &mut self,
+    ) -> Result<Box<(dyn Iterator<Item = Sample> + 'static)>, oximeter::Error>
+    {
+        let now = Utc::now();
+        let diff =
+            (now - self.start_time).num_nanoseconds().unwrap() as f64 / 1e9;
+        self.uptime.value += diff - self.uptime.value.value();
+        let sample = Sample::new(&self.service, &self.uptime, Some(now));
+        Ok(Box::new(vec![sample].into_iter()))
     }
 }

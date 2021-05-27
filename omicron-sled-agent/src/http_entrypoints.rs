@@ -12,6 +12,8 @@ use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::DiskEnsureBody;
 use omicron_common::model::InstanceEnsureBody;
+use omicron_common::model::ProducerId;
+use oximeter::collect::ProducerResults;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -26,6 +28,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put)?;
         api.register(disk_put)?;
+        api.register(metrics_collect)?;
         Ok(())
     }
 
@@ -90,4 +93,17 @@ async fn disk_put(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/metrics/{producer_id}",
+}]
+async fn metrics_collect(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    path_params: Path<ProducerId>,
+) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+    let sled_agent = rqctx.context();
+    let producer_id = path_params.into_inner();
+    Ok(HttpResponseOk(sled_agent.collect_metrics(producer_id).await?))
 }
