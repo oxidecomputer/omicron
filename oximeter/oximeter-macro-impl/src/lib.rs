@@ -69,9 +69,7 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
             &measurement_type,
             &meas_type,
         );
-        return Ok(quote! {
-            #metric_impl
-        });
+        return Ok(quote! { #metric_impl });
     }
     Err(Error::new(
         item.span(),
@@ -176,10 +174,15 @@ fn build_metric_trait_impl(
     measurement_type: &TokenStream,
     meas_type: &syn::Type,
 ) -> TokenStream {
-    let refs = names.iter().map(|name| format_ident!("{}", name));
+    let refs =
+        names.iter().map(|name| format_ident!("{}", name)).collect::<Vec<_>>();
     let name = to_snake_case(&format!("{}", item_name));
     let fmt = format!("{}{{}}", "{}:".repeat(values.len()));
-    let key_formatter = quote! { format!(#fmt, #(self.#refs),*, #name) };
+    let key_formatter = if refs.is_empty() {
+        quote! { format!(#fmt, #name) }
+    } else {
+        quote! { format!(#fmt, #(self.#refs),*, #name) }
+    };
     let measurement_type =
         syn::parse_str::<syn::Expr>(&format!("{}", measurement_type)).unwrap();
     quote! {
