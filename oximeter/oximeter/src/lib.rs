@@ -20,4 +20,4 @@ pub mod types;
 
 pub use oximeter_server::Oximeter;
 pub use traits::{Metric, Producer, Target};
-pub use types::{Error, FieldType, FieldValue, MeasurementType};
+pub use types::{Error, FieldType, FieldValue, Measurement, MeasurementType};

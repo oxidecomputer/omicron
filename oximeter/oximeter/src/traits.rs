@@ -4,7 +4,7 @@
 use bytes::Bytes;
 
 use crate::histogram::Histogram;
-use crate::types::{Cumulative, Sample};
+use crate::types::{Cumulative, Measurement, Sample};
 use crate::{Error, FieldType, FieldValue, MeasurementType};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
@@ -79,7 +79,47 @@ pub trait Target {
 /// fields. In addition, a `Metric` has an associated measurement type, which must be one of the
 /// supported [`DataPoint`] types. This provides type safety, ensuring that the produced
 /// measurements are of the correct type for a metric.
+///
+/// Most users will derive the metric trait. This trait may be derived for structs with named
+/// fields, which must be one of the support data types. Additionally, structs _must_ have one
+/// field named `value`, which is one of the supported measurement types. The `value` field is used
+/// to store the current measured value of the metric itself.
+///
+/// Example
+/// -------
+/// ```rust
+/// use oximeter::Metric;
+///
+/// // A gauge with a floating-point value.
+/// #[derive(Metric)]
+/// struct MyMetric {
+///     name: String,
+///     value: f64
+/// }
+///
+/// let met = MyMetric{ name: "name".into(), value: 0.0 };
+/// assert_eq!(met.measurement_type(), oximeter::MeasurementType::F64);
+/// assert_eq!(met.measure(), oximeter::Measurement::F64(0.0));
+/// ```
+///
+/// A compiler error will be generated if this trait is derived on a struct without a field named
+/// `value`, or if that field has an unsupported type:
+///
+/// ```compile_fail
+/// #[derive(oximeter::Metric)]
+/// pub struct NoValueField {
+///     name: String,
+/// }
+/// ```
+///
+/// ```compile_fail
+/// #[derive(oximeter::Metric)]
+/// pub struct BadType {
+///     value: f32,
+/// }
+/// ```
 pub trait Metric {
+    /// The type of measurement produced by this metric.
     type Measurement: DataPoint;
 
     /// Return the name of the metric, which is the snake_case form of the struct's name.
@@ -103,6 +143,12 @@ pub trait Metric {
 
     /// Return the data type of a measurement for this this metric.
     fn measurement_type(&self) -> MeasurementType;
+
+    /// Return the current value of the underlying metric itself.
+    fn value(&self) -> &Self::Measurement;
+
+    /// Sample the underlying metric, returning a measurement from it.
+    fn measure(&self) -> Measurement;
 }
 
 /// The `DataPoint` trait identifies types that may be used as measurements or samples for a
@@ -137,7 +183,7 @@ impl DataPoint for Histogram<f64> {}
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::{metric, Error, Metric, Producer, Target};
+/// use oximeter::{Error, Metric, Producer, Target};
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
 /// #[derive(Clone, Target)]
@@ -145,12 +191,12 @@ impl DataPoint for Histogram<f64> {}
 ///     pub name: String,
 /// }
 ///
-/// #[metric(CumulativeI64)]
-/// #[derive(Clone)]
+/// #[derive(Clone, Metric)]
 /// pub struct RequestCount {
 ///     pub route: String,
 ///     pub method: String,
-///     pub response_code: i64
+///     pub response_code: i64,
+///     pub value: Cumulative<i64>,
 /// }
 ///
 /// fn route_handler(_route: &str, _method: &str) -> i64 {
@@ -161,7 +207,6 @@ impl DataPoint for Histogram<f64> {}
 /// pub struct RequestCounter {
 ///     target: Server,
 ///     metric: RequestCount,
-///     counter: Cumulative<i64>,
 /// }
 ///
 /// impl RequestCounter {
@@ -169,12 +214,11 @@ impl DataPoint for Histogram<f64> {}
 ///         Self {
 ///             target: target.clone(),
 ///             metric: metric.clone(),
-///             counter: Cumulative::new(0),
 ///         }
 ///     }
 ///
 ///     pub fn bump(&mut self) {
-///         self.counter.increment();
+///         self.metric.value.increment();
 ///     }
 /// }
 ///
@@ -183,7 +227,6 @@ impl DataPoint for Histogram<f64> {}
 ///         let sample = Sample::new(
 ///             &self.target,
 ///             &self.metric,
-///             self.counter,
 ///             None, // Use current timestamp
 ///         );
 ///         Ok(Box::new(vec![sample].into_iter()))
@@ -196,12 +239,13 @@ impl DataPoint for Histogram<f64> {}
 ///         route: "/".to_string(),
 ///         method: "HEAD".to_string(),
 ///         response_code: 200,
+///         value: Cumulative::new(0),
 ///     };
 ///     let mut producer = RequestCounter::new(&server, &request_count);
 ///
 ///     // No requests yet, there should be zero samples
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
+///     assert_eq!(sample.metric.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
 ///
 ///     // await some request..
 ///     let response_code = route_handler("/", "GET");
@@ -211,7 +255,7 @@ impl DataPoint for Histogram<f64> {}
 ///
 ///     // The incremented counter is reflected in the new sample.
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
+///     assert_eq!(sample.metric.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
 /// }
 /// ```
 pub trait Producer {
@@ -223,7 +267,7 @@ pub trait Producer {
 mod tests {
     use crate::types;
     use crate::{
-        metric, Error, FieldType, FieldValue, MeasurementType, Metric,
+        Error, FieldType, FieldValue, Measurement, MeasurementType, Metric,
         Producer, Target,
     };
     use std::boxed::Box;
@@ -234,17 +278,16 @@ mod tests {
         pub id: i64,
     }
 
-    #[metric(I64)]
-    #[derive(Clone)]
+    #[derive(Clone, Metric)]
     struct Met {
         pub good: bool,
         pub id: i64,
+        pub value: i64,
     }
 
     struct Prod {
         pub target: Targ,
         pub metric: Met,
-        pub value: i64,
     }
 
     impl Producer for Prod {
@@ -252,13 +295,8 @@ mod tests {
             &mut self,
         ) -> Result<Box<dyn Iterator<Item = types::Sample>>, Error> {
             Ok(Box::new(
-                vec![types::Sample::new(
-                    &self.target,
-                    &self.metric,
-                    self.value,
-                    None,
-                )]
-                .into_iter(),
+                vec![types::Sample::new(&self.target, &self.metric, None)]
+                    .into_iter(),
             ))
         }
     }
@@ -279,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_metric_trait() {
-        let m = Met { good: false, id: 2 };
+        let m = Met { good: false, id: 2, value: 0 };
 
         assert_eq!(m.name(), "met");
         assert_eq!(m.key(), "false:2:met");
@@ -295,14 +333,14 @@ mod tests {
     #[test]
     fn test_producer_trait() {
         let t = Targ { good: false, id: 2 };
-        let m = Met { good: false, id: 2 };
-        let mut p = Prod { target: t.clone(), metric: m.clone(), value: 0 };
+        let m = Met { good: false, id: 2, value: 0 };
+        let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
         assert_eq!(sample.target.key, t.key());
         assert_eq!(sample.metric.key, m.key());
-        assert_eq!(sample.measurement, types::Measurement::I64(0));
-        p.value += 10;
+        assert_eq!(sample.metric.measurement, Measurement::I64(0));
+        p.metric.value += 10;
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.measurement, types::Measurement::I64(10));
+        assert_eq!(sample.metric.measurement, Measurement::I64(10));
     }
 }

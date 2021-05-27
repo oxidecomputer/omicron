@@ -339,7 +339,7 @@ pub(crate) fn unroll_field_rows(
 /// Return the table name and serialized measurement row for a [`Sample`], to insert into
 /// ClickHouse.
 pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
-    match sample.measurement {
+    match sample.metric.measurement {
         Measurement::Bool(inner) => {
             let row = BoolMeasurementRow {
                 target_name: sample.target.name.clone(),
@@ -499,7 +499,7 @@ mod tests {
             unpacked.value.counts,
         )
         .unwrap();
-        if let Measurement::HistogramF64(hist) = sample.measurement {
+        if let Measurement::HistogramF64(hist) = sample.metric.measurement {
             assert_eq!(
                 hist, unpacked_hist,
                 "Unpacking histogram from database representation failed"

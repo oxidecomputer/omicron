@@ -12,7 +12,7 @@ extern crate proc_macro;
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{Data, DeriveInput, Error, Fields, Ident, Type};
+use syn::{Data, DeriveInput, Error, Fields, FieldsNamed, Ident, Type};
 
 /// Derive the `Target` trait for a type.
 #[proc_macro_derive(Target)]
@@ -21,14 +21,9 @@ pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 /// Derive the `Metric` trait for a struct.
-#[proc_macro_attribute]
-pub fn metric(
-    attr: proc_macro::TokenStream,
-    input: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    metric_impl(attr.into(), input.into())
-        .unwrap_or_else(|e| e.to_compile_error())
-        .into()
+#[proc_macro_derive(Metric)]
+pub fn metric(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    metric_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 // Implementation of `#[derive(Target)]`
@@ -36,21 +31,20 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     if let Data::Struct(ref data) = item.data {
         let name = &item.ident;
-        if let Fields::Named(ref data_fields) = data.fields {
-            let (names, types, values, _) =
-                extract_struct_fields(data_fields.named.iter())?;
-            if names.is_empty() {
+        let (names, types, values) =
+            if let Fields::Named(ref data_fields) = data.fields {
+                let (names, types, values, _) =
+                    extract_struct_fields(data_fields.named.iter(), false)?;
+                (names, types, values)
+            } else if matches!(data.fields, Fields::Unit) {
+                (vec![], vec![], vec![])
+            } else {
                 return Err(Error::new(
                     item.span(),
-                    "Structs must have at least one field",
+                    "Can only be derived for structs with named fields",
                 ));
-            }
-            return Ok(build_target_trait_impl(&name, &names, &types, &values));
-        }
-        return Err(Error::new(
-            item.span(),
-            "Can only be derived for structs with named fields",
-        ));
+            };
+        return Ok(build_target_trait_impl(&name, &names, &types, &values));
     }
     Err(Error::new(
         item.span(),
@@ -59,40 +53,78 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
 }
 
 // Implementation of the `[oximeter::metric]` procedural macro attribute.
-fn metric_impl(
-    attr: TokenStream,
-    item: TokenStream,
-) -> syn::Result<TokenStream> {
-    let measurement_type = syn::parse2::<Ident>(attr)?;
-    let meas_type = type_name_for_measurement_type(&measurement_type)?;
+fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<syn::ItemStruct>(item)?;
     let name = &item.ident;
     if let Fields::Named(ref data_fields) = item.fields {
+        let (meas_type, measurement_type) =
+            extract_measurement_type(data_fields)?;
         let (names, types, values, _) =
-            extract_struct_fields(data_fields.named.iter())?;
-        if names.is_empty() {
-            return Err(Error::new(
-                item.span(),
-                "Structs must have at least one field",
-            ));
-        }
+            extract_struct_fields(data_fields.named.iter(), true)?;
         let metric_impl = build_metric_trait_impl(
             &name,
             &names,
             &types,
             &values,
             &measurement_type,
-            meas_type,
+            &meas_type,
         );
-        return Ok(quote! {
-            #item
-            #metric_impl
-        });
+        return Ok(quote! { #metric_impl });
     }
     Err(Error::new(
         item.span(),
-        "Can only be derived for structs with named fields",
+        "Can only be derived for structs with at least one field, named `value`",
     ))
+}
+
+fn extract_measurement_type(
+    fields: &FieldsNamed,
+) -> syn::Result<(&syn::Type, TokenStream)> {
+    let field = fields
+        .named
+        .iter()
+        .find(|field| field.ident.as_ref().unwrap() == "value")
+        .ok_or_else(|| {
+            Error::new(fields.span(), "Must contain a field named \"value\"")
+        })?;
+    let err = |span| {
+        Error::new(
+            span,
+            "Must be one of the supported data types: \
+            bool, i64, f64, String, Bytes, Cumulative<i64>, Cumulative<f64>, \
+            Histogram<i64>, or Histogram<f64>",
+        )
+    };
+    if let syn::Type::Path(ref p) = field.ty {
+        let path = p.path.segments.last().ok_or_else(|| err(field.span()))?;
+        let as_segment =
+            |s: &str| syn::parse_str::<syn::PathSegment>(s).unwrap();
+
+        let meas_type = if path == &as_segment("bool") {
+            quote! { ::oximeter::MeasurementType::Bool }
+        } else if path == &as_segment("i64") {
+            quote! { ::oximeter::MeasurementType::I64 }
+        } else if path == &as_segment("f64") {
+            quote! { ::oximeter::MeasurementType::F64 }
+        } else if path == &as_segment("String") {
+            quote! { ::oximeter::MeasurementType::String }
+        } else if path == &as_segment("Bytes") {
+            quote! { ::oximeter::MeasurementType::Bytes }
+        } else if path == &as_segment("Cumulative<i64>") {
+            quote! { ::oximeter::MeasurementType::CumulativeI64 }
+        } else if path == &as_segment("Cumulative<f64>") {
+            quote! { ::oximeter::MeasurementType::CumulativeF64 }
+        } else if path == &as_segment("Histogram<i64>") {
+            quote! { ::oximeter::MeasurementType::HistogramI64 }
+        } else if path == &as_segment("Histogram<f64>") {
+            quote! { ::oximeter::MeasurementType::HistogramF64 }
+        } else {
+            return Err(err(field.span()));
+        };
+        Ok((&field.ty, meas_type))
+    } else {
+        Err(err(fields.span()))
+    }
 }
 
 // Build the derived implementation for the Target trait
@@ -133,46 +165,26 @@ fn build_target_trait_impl(
     }
 }
 
-fn type_name_for_measurement_type(
-    measurement_type: &Ident,
-) -> syn::Result<TokenStream> {
-    match format!("{}", measurement_type).as_str() {
-        "Bool" => Ok(quote! { bool }),
-        "I64" => Ok(quote! { i64 }),
-        "F64" => Ok(quote! { f64 }),
-        "String" => Ok(quote! { String }),
-        "Bytes" => Ok(quote! { bytes::Bytes }),
-        "CumulativeI64" => Ok(quote! { ::oximeter::types::Cumulative<i64> }),
-        "CumulativeF64" => Ok(quote! { ::oximeter::types::Cumulative<f64> }),
-        "HistogramI64" => Ok(quote! { ::oximeter::histogram::Histogram<i64> }),
-        "HistogramF64" => Ok(quote! { ::oximeter::histogram::Histogram<f64> }),
-        _ => Err(Error::new(measurement_type.span(),
-                "Invalid measurement type, must be a variant of oximeter::MeasurementType: \
-                \"Bool\", \"I64\", \"F64\", \"String\", \"Bytes\", \
-                \"CumulativeI64\" or \"CumulativeF64\", \
-                \"HistogramI64\" or \"HistogramF64\".",
-            ))
-    }
-}
-
 // Build the derived implementation for the Metric trait
 fn build_metric_trait_impl(
     item_name: &Ident,
     names: &[String],
     types: &[TokenStream],
     values: &[TokenStream],
-    measurement_type: &Ident,
-    meas_type: TokenStream,
+    measurement_type: &TokenStream,
+    meas_type: &syn::Type,
 ) -> TokenStream {
-    let refs = names.iter().map(|name| format_ident!("{}", name));
+    let refs =
+        names.iter().map(|name| format_ident!("{}", name)).collect::<Vec<_>>();
     let name = to_snake_case(&format!("{}", item_name));
     let fmt = format!("{}{{}}", "{}:".repeat(values.len()));
-    let key_formatter = quote! { format!(#fmt, #(self.#refs),*, #name) };
-    let measurement_type = syn::parse_str::<syn::Expr>(&format!(
-        "::oximeter::MeasurementType::{}",
-        measurement_type
-    ))
-    .unwrap();
+    let key_formatter = if refs.is_empty() {
+        quote! { format!(#fmt, #name) }
+    } else {
+        quote! { format!(#fmt, #(self.#refs),*, #name) }
+    };
+    let measurement_type =
+        syn::parse_str::<syn::Expr>(&format!("{}", measurement_type)).unwrap();
     quote! {
         impl ::oximeter::Metric for #item_name {
             type Measurement = #meas_type;
@@ -200,6 +212,14 @@ fn build_metric_trait_impl(
             fn measurement_type(&self) -> ::oximeter::MeasurementType {
                 #measurement_type
             }
+
+            fn value(&self) -> &#meas_type {
+                &self.value
+            }
+
+            fn measure(&self) -> ::oximeter::Measurement {
+                ::oximeter::Measurement::from(&self.value)
+            }
         }
     }
 }
@@ -210,6 +230,7 @@ fn extract_struct_fields<
     F: std::iter::ExactSizeIterator<Item = &'a syn::Field>,
 >(
     fields: F,
+    is_metric: bool,
 ) -> syn::Result<(
     Vec<String>,
     Vec<TokenStream>,
@@ -227,6 +248,11 @@ fn extract_struct_fields<
                 "{}",
                 field.ident.as_ref().expect("Field must have a name")
             );
+            if field_name == "value" && is_metric {
+                // Skip the value field, which has already been verified to exist and have a valid
+                // type.
+                continue;
+            }
             let field_type = format!(
                 "{}",
                 ty.path
@@ -241,7 +267,7 @@ fn extract_struct_fields<
             );
 
             let (type_variant, value_variant) =
-                extract_variants(&field_type, &field_name)?;
+                extract_variants(&field_type, &field_name, &field.span())?;
             names.push(field_name);
             types.push(type_variant);
             values.push(value_variant);
@@ -260,6 +286,7 @@ fn extract_struct_fields<
 fn extract_variants(
     type_name: &str,
     field_name: &str,
+    span: &Span,
 ) -> syn::Result<(TokenStream, TokenStream)> {
     let (fragment, maybe_clone) = match type_name {
         "String" => (type_name, ".clone()"),
@@ -268,7 +295,7 @@ fn extract_variants(
         "bool" => ("Bool", ""),
         _ => {
             return Err(Error::new(
-                Span::call_site(),
+                *span,
                 "Fields must be one of type: String, IpAddr, i64, bool, Uuid",
             ));
         }
@@ -345,7 +372,19 @@ mod tests {
             }
             .into(),
         );
-        assert!(out.is_err());
+        assert!(out.is_ok());
+    }
+
+    #[test]
+    fn test_target_empty_struct() {
+        let out = target_impl(
+            quote! {
+                #[derive(Target)]
+                struct MyTarget {}
+            }
+            .into(),
+        );
+        assert!(out.is_ok());
     }
 
     #[test]
@@ -366,53 +405,66 @@ mod tests {
     #[test]
     fn test_metric() {
         let valid_types = &[
-            "Bool",
-            "I64",
-            "F64",
+            "bool",
+            "i64",
+            "f64",
             "String",
             "Bytes",
-            "CumulativeI64",
-            "CumulativeF64",
-            "HistogramI64",
-            "HistogramF64",
+            "Cumulative<i64>",
+            "Cumulative<f64>",
+            "Histogram<i64>",
+            "Histogram<f64>",
         ];
         for type_ in valid_types.iter() {
             let ident = syn::parse_str::<Type>(type_).unwrap();
-            let out = metric_impl(
-                quote! { #ident },
-                quote! {
-                    struct MyMetric {
-                        field: String,
-                    }
-                },
-            );
+            let out = metric_impl(quote! {
+                struct MyMetric {
+                    field: String,
+                    value: #ident,
+                }
+            });
             assert!(out.is_ok());
         }
     }
 
     #[test]
     fn test_metric_enum() {
-        let out = metric_impl(
-            quote! { bool },
-            quote! {
-                enum MyMetric {
-                    Variant
-                }
-            },
-        );
+        let out = metric_impl(quote! {
+            enum MyMetric {
+                Variant
+            }
+        });
         assert!(out.is_err());
     }
 
     #[test]
     fn test_metric_unsupported_type() {
-        let out = metric_impl(
-            quote! { f32 },
-            quote! {
-                struct MyMetric {
-                    field: String,
-                }
-            },
-        );
+        let out = metric_impl(quote! {
+            struct MyMetric {
+                field: String,
+                value: f32,
+            }
+        });
         assert!(out.is_err());
+    }
+
+    #[test]
+    fn test_metric_without_value_field() {
+        let out = metric_impl(quote! {
+            struct MyMetric {
+                field: String,
+            }
+        });
+        assert!(out.is_err());
+    }
+
+    #[test]
+    fn test_target_with_value_field() {
+        let out = target_impl(quote! {
+            struct MyTarget {
+                value: String,
+            }
+        });
+        assert!(out.is_ok());
     }
 }

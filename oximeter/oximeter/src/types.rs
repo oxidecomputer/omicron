@@ -64,6 +64,12 @@ impl From<i64> for FieldValue {
     }
 }
 
+impl From<&i64> for FieldValue {
+    fn from(value: &i64) -> Self {
+        FieldValue::I64(*value)
+    }
+}
+
 impl From<String> for FieldValue {
     fn from(value: String) -> Self {
         FieldValue::String(value)
@@ -163,63 +169,36 @@ impl Measurement {
     }
 }
 
-impl From<bool> for Measurement {
-    fn from(value: bool) -> Self {
-        Measurement::Bool(value)
+// Helper macro to generate `From<T>` and `From<&T>` for the measurement types.
+macro_rules! impl_from {
+    {$type_:ty, $variant:ident} => {
+        impl From<$type_> for Measurement {
+            fn from(value: $type_) -> Self {
+                Measurement::$variant(value)
+            }
+        }
+
+        impl From<&$type_> for Measurement where $type_: Clone {
+            fn from(value: &$type_) -> Self {
+                Measurement::$variant(value.clone())
+            }
+        }
     }
 }
 
-impl From<i64> for Measurement {
-    fn from(value: i64) -> Self {
-        Measurement::I64(value)
-    }
-}
-
-impl From<f64> for Measurement {
-    fn from(value: f64) -> Self {
-        Measurement::F64(value)
-    }
-}
-
-impl From<String> for Measurement {
-    fn from(value: String) -> Self {
-        Measurement::String(value)
-    }
-}
+impl_from! { bool, Bool }
+impl_from! { i64, I64 }
+impl_from! { f64, F64 }
+impl_from! { String, String }
+impl_from! { Bytes, Bytes }
+impl_from! { Cumulative<i64>, CumulativeI64 }
+impl_from! { Cumulative<f64>, CumulativeF64 }
+impl_from! { histogram::Histogram<i64>, HistogramI64 }
+impl_from! { histogram::Histogram<f64>, HistogramF64 }
 
 impl From<&str> for Measurement {
     fn from(value: &str) -> Self {
         Measurement::String(value.to_string())
-    }
-}
-
-impl From<Bytes> for Measurement {
-    fn from(value: Bytes) -> Self {
-        Measurement::Bytes(value)
-    }
-}
-
-impl From<Cumulative<i64>> for Measurement {
-    fn from(value: Cumulative<i64>) -> Self {
-        Measurement::CumulativeI64(value)
-    }
-}
-
-impl From<Cumulative<f64>> for Measurement {
-    fn from(value: Cumulative<f64>) -> Self {
-        Measurement::CumulativeF64(value)
-    }
-}
-
-impl From<histogram::Histogram<i64>> for Measurement {
-    fn from(value: histogram::Histogram<i64>) -> Measurement {
-        Measurement::HistogramI64(value)
-    }
-}
-
-impl From<histogram::Histogram<f64>> for Measurement {
-    fn from(value: histogram::Histogram<f64>) -> Measurement {
-        Measurement::HistogramF64(value)
     }
 }
 
@@ -369,6 +348,9 @@ pub struct Metric {
 
     /// The data type of a measurement from this metric.
     pub measurement_type: MeasurementType,
+
+    /// The measured value of this metric
+    pub measurement: Measurement,
 }
 
 impl PartialEq for Metric {
@@ -394,6 +376,7 @@ where
                 .zip(metric.field_values())
                 .collect(),
             measurement_type: metric.measurement_type(),
+            measurement: metric.measure(),
         }
     }
 }
@@ -412,9 +395,6 @@ pub struct Sample {
 
     /// The `Metric` this sample is derived from.
     pub metric: Metric,
-
-    /// The actual measured data point for this sample.
-    pub measurement: Measurement,
 }
 
 impl PartialEq for Sample {
@@ -456,7 +436,6 @@ impl Sample {
     pub fn new<T, M, Meas>(
         target: &T,
         metric: &M,
-        measurement: Meas,
         timestamp: Option<DateTime<Utc>>,
     ) -> Self
     where
@@ -469,7 +448,6 @@ impl Sample {
             timestamp: timestamp.unwrap_or_else(Utc::now),
             target: target.into(),
             metric: metric.into(),
-            measurement: measurement.into(),
         }
     }
 }
@@ -490,11 +468,11 @@ mod tests {
         pub id: i64,
     }
 
-    #[crate::metric(I64)]
-    #[derive(Clone)]
+    #[derive(Clone, Metric)]
     struct Met {
         pub good: bool,
         pub id: i64,
+        pub value: i64,
     }
 
     #[test]
@@ -566,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_metric_struct() {
-        let m = Met { good: false, id: 2 };
+        let m = Met { good: false, id: 2, value: 0 };
         let m2 = types::Metric::from(&m);
         assert_eq!(m.name(), m2.name);
         assert_eq!(m.key(), m2.key);
@@ -583,13 +561,12 @@ mod tests {
     #[test]
     fn test_sample_struct() {
         let t = Targ { good: false, id: 2 };
-        let m = Met { good: false, id: 2 };
-        let measurement: i64 = 1;
+        let m = Met { good: false, id: 2, value: 1 };
         let timestamp = Utc::now();
-        let sample = types::Sample::new(&t, &m, measurement, Some(timestamp));
+        let sample = types::Sample::new(&t, &m, Some(timestamp));
         assert_eq!(sample.target.key, t.key());
         assert_eq!(sample.metric.key, m.key());
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.measurement, Measurement::I64(measurement));
+        assert_eq!(sample.metric.measurement, Measurement::I64(m.value));
     }
 }
