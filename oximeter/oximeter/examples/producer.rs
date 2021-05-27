@@ -11,7 +11,7 @@ use oximeter::collect::{
 };
 use oximeter::{
     types::{Cumulative, Sample},
-    Error, Producer, Target,
+    Error, Metric, Producer, Target,
 };
 use uuid::Uuid;
 
@@ -23,9 +23,10 @@ pub struct VirtualMachine {
 }
 
 /// Example metric describing the cumulative time a vCPU is busy, by CPU ID.
-#[oximeter::metric(CumulativeF64)]
+#[derive(Metric)]
 pub struct CpuBusy {
     pub cpu_id: i64,
+    pub value: Cumulative<f64>,
 }
 
 /// A simple struct for tracking busy time of a set of vCPUs, relative to a start time.
@@ -33,7 +34,6 @@ pub struct CpuBusyProducer {
     start_time: DateTime<Utc>,
     vm: VirtualMachine,
     cpu: Vec<CpuBusy>,
-    data: Vec<Cumulative<f64>>,
 }
 
 impl CpuBusyProducer {
@@ -46,8 +46,12 @@ impl CpuBusyProducer {
                 project_id: Uuid::new_v4(),
                 instance_id: Uuid::new_v4(),
             },
-            cpu: (0..n_cpus).map(|i| CpuBusy { cpu_id: i as _ }).collect(),
-            data: vec![Cumulative::default(); n_cpus],
+            cpu: (0..n_cpus)
+                .map(|i| CpuBusy {
+                    cpu_id: i as _,
+                    value: Cumulative::default(),
+                })
+                .collect(),
         }
     }
 }
@@ -58,7 +62,7 @@ impl Producer for CpuBusyProducer {
     ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, Error> {
         let timestamp = Utc::now();
         let mut data = Vec::with_capacity(self.cpu.len());
-        for (cpu, busy) in self.cpu.iter().zip(self.data.iter_mut()) {
+        for cpu in self.cpu.iter_mut() {
             // Get total elapsed time, add the diff to the cumulative counter.
             //
             // This is a bit silly, since we have to artificially create a diff and then sum. This
@@ -67,8 +71,8 @@ impl Producer for CpuBusyProducer {
                 .to_std()
                 .map_err(|e| Error::ProductionError(e.to_string()))?
                 .as_secs_f64();
-            *busy += elapsed - busy.value();
-            data.push(Sample::new(&self.vm, cpu, *busy, None));
+            cpu.value += elapsed - cpu.value.value();
+            data.push(Sample::new(&self.vm, cpu, None));
         }
         // Yield the available samples.
         Ok(Box::new(data.into_iter()))
