@@ -3,8 +3,8 @@
  */
 
 use super::config::Config;
-use super::sled_agent::SledAgent;
 use super::http_entrypoints::api as http_api;
+use super::sled_agent::SledAgent;
 
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -43,11 +43,8 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = Arc::new(SledAgent::new(
-            &config.id,
-            sa_log,
-            nexus_client.clone(),
-        ));
+        let sled_agent =
+            Arc::new(SledAgent::new(&config.id, sa_log, nexus_client.clone()));
 
         let sa = Arc::clone(&sled_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));

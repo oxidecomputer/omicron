@@ -2122,9 +2122,9 @@ checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
 
 [[package]]
 name = "smf"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "836e990d5a6ca0b31510a9405692ea8a90666f6f3d5fd5c7a26c4bc71874ebe0"
+checksum = "f19d427ae89311c2770c49fdcfa14627577c499311fe8f4cc8fcfde2dd3c4e2e"
 dependencies = [
  "thiserror",
 ]

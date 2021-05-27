@@ -1,5 +1,4 @@
 /// Sled agent implementation
-
 use futures::lock::Mutex;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiDiskRuntimeState;
@@ -12,8 +11,63 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::common::instance::{Action as InstanceAction, InstanceState};
 use propolis_client::Client as PropolisClient;
-use crate::common::instance::{InstanceState, Action as InstanceAction};
+
+// TODO(https://www.illumos.org/issues/13837): This is a hack;
+// remove me when when fixed. Ideally, the ".synchronous()" argument
+// to "svcadm enable" would wait for the service to be online, which
+// would simplify all this stuff.
+//
+// Ideally, when "svccfg add" returns, these properties would be set,
+// but unfortunately, they are not. This means that when we invoke
+// "svcadm enable -s", it's possible for critical restarter
+// properties to not exist when the command returns.
+//
+// We workaround this by querying for these properties in a loop.
+fn wait_for_service_to_come_online(
+    log: &Logger,
+    fmri: &str,
+) -> Result<(), ApiError> {
+    info!(log, "awaiting restarter/state online");
+    let name = smf::PropertyName::new("restarter", "state").unwrap();
+    let mut attempts = 0;
+    loop {
+        let result = smf::Properties::new().lookup().run(&name, &fmri);
+
+        match result {
+            Ok(value) => {
+                if value.value()
+                    == &smf::PropertyValue::Astring("online".to_string())
+                {
+                    return Ok(());
+                }
+                warn!(
+                    log,
+                    "restarter/state property exists for {}, but it is: {:#?}",
+                    fmri,
+                    value
+                );
+            }
+            Err(value) => {
+                warn!(
+                    log,
+                    "No restarter/state property of {} - {}", fmri, value
+                );
+                if attempts > 50 {
+                    return Err(ApiError::InternalError {
+                        message: format!(
+                            "Service never turned online: {}",
+                            value
+                        ),
+                    });
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                attempts += 1;
+            }
+        }
+    }
+}
 
 // TODO: Could easily refactor this elsewhere...
 struct Instance {
@@ -23,7 +77,11 @@ struct Instance {
 }
 
 impl Instance {
-    fn new(log: Logger, id: Uuid, initial_runtime: ApiInstanceRuntimeState) -> Result<Self, ApiError> {
+    fn new(
+        log: Logger,
+        id: Uuid,
+        initial_runtime: ApiInstanceRuntimeState,
+    ) -> Result<Self, ApiError> {
         // TODO: Probably needs more config?
         // TODO: Launch in a Zone?
 
@@ -36,44 +94,42 @@ impl Instance {
         // it being auto-initialized by SMF across reboots.
         // Instead, the bootstrap agent remains responsible for verifying
         // and enabling the services on each access.
-        smf::Config::import().run(manifest)
-            .map_err(|e|
-                ApiError::InternalError {
-                    message: format!("Cannot import propolis SMF manifest: {}", e)
-                }
-            )?;
+        info!(log, "Instance::new Importing {}", manifest);
+        smf::Config::import().run(manifest).map_err(|e| {
+            ApiError::InternalError {
+                message: format!("Cannot import propolis SMF manifest: {}", e),
+            }
+        })?;
 
         let service = "svc:/system/illumos/propolis-server";
         let instance = format!("vm-{}", id.to_string());
         let fmri = format!("{}:{}", service, instance);
-        smf::Config::add(service)
-            .run(&instance)
-            .map_err(|e|
-                ApiError::InternalError {
-                    message: format!("Cannot create propolis SMF service: {}", e)
-                }
-            )?;
+        info!(log, "Instance::new adding service: {}", service);
+        smf::Config::add(service).run(&instance).map_err(|e| {
+            ApiError::InternalError {
+                message: format!("Cannot create propolis SMF service: {}", e),
+            }
+        })?;
 
+        info!(log, "Instance::new enabling FMRI: {}", fmri);
+
+        // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
+        // ".synchronous()", but it doesn't, because of an SMF bug.
         smf::Adm::new()
             .enable()
-            .synchronous()
             .temporary()
-            .run(smf::AdmSelection::ByPattern(&[fmri]))
-            .map_err(|e|
-                ApiError::InternalError {
-                    message: format!("Cannot enable propolis SMF service: {}", e)
-                }
-            )?;
+            .run(smf::AdmSelection::ByPattern(&[&fmri]))
+            .map_err(|e| ApiError::InternalError {
+                message: format!("Cannot enable propolis SMF service: {}", e),
+            })?;
+
+        wait_for_service_to_come_online(&log, &fmri)?;
 
         // TODO: IP ADDRESS??? Be less hardcoded?
         let address = "127.0.0.1:12400";
         let client = PropolisClient::new(address.parse().unwrap(), log);
 
-        Ok(Instance {
-            id,
-            state: InstanceState::new(initial_runtime),
-            client,
-        })
+        Ok(Instance { id, state: InstanceState::new(initial_runtime), client })
     }
 }
 
@@ -120,14 +176,21 @@ impl SledAgent {
             } else {
                 // Instance does not exist - create it.
                 info!(&self.log, "new instance");
-                let instance_log = self.log.new(o!("instance" => instance_id.to_string()));
-                instances.insert(instance_id, Instance::new(instance_log, instance_id, initial_runtime)?);
+                let instance_log =
+                    self.log.new(o!("instance" => instance_id.to_string()));
+                instances.insert(
+                    instance_id,
+                    Instance::new(instance_log, instance_id, initial_runtime)?,
+                );
                 instances.get_mut(&instance_id).unwrap()
             }
         };
 
         if let Some(action) = instance.state.request_transition(&target)? {
-            info!(&self.log, "transition to {:#?}; action: {:#?}", target, action);
+            info!(
+                &self.log,
+                "transition to {:#?}; action: {:#?}", target, action
+            );
 
             // TODO: BACKOFF INSTEAD
             std::thread::sleep(core::time::Duration::from_secs(2));
@@ -135,40 +198,44 @@ impl SledAgent {
             match action {
                 InstanceAction::Run => {
                     // TODO: This is mostly lies right now.
-                    let request =
-                        propolis_client::api::InstanceEnsureRequest {
-                            properties: propolis_client::api::InstanceProperties {
-                                generation_id: 0,
-                                id: instance_id,
-                                name: "Test instance".to_string(),
-                                description: "Test description".to_string(),
-                                image_id: instance_id,
-                                bootrom_id: instance_id,
-                                memory: 256,
-                                vcpus: 2,
-                            }
-                        };
+                    let request = propolis_client::api::InstanceEnsureRequest {
+                        properties: propolis_client::api::InstanceProperties {
+                            generation_id: 0,
+                            id: instance_id,
+                            name: "Test instance".to_string(),
+                            description: "Test description".to_string(),
+                            image_id: instance_id,
+                            bootrom_id: instance_id,
+                            memory: 256,
+                            vcpus: 2,
+                        },
+                    };
 
                     println!("Ensuring VM instance...");
-                    instance.client.instance_ensure(&request)
-                        .await
-                        .map_err(|e|
-                            ApiError::InternalError {
-                                message: format!("Failed to ensure instance: {}", e)
-                            }
-                        )?;
+                    instance.client.instance_ensure(&request).await.map_err(
+                        |e| ApiError::InternalError {
+                            message: format!(
+                                "Failed to ensure instance: {}",
+                                e
+                            ),
+                        },
+                    )?;
 
                     println!("Setting VM state...");
-                    let request = propolis_client::api::InstanceStateRequested::Run;
-                    instance.client.instance_state_put(instance_id, request)
+                    let request =
+                        propolis_client::api::InstanceStateRequested::Run;
+                    instance
+                        .client
+                        .instance_state_put(instance_id, request)
                         .await
-                        .map_err(|e|
-                            ApiError::InternalError {
-                                message: format!("Failed to ensure instance: {}", e)
-                            }
-                        )?;
+                        .map_err(|e| ApiError::InternalError {
+                            message: format!(
+                                "Failed to ensure instance: {}",
+                                e
+                            ),
+                        })?;
                     println!("OK - RUN COMPLETE");
-                },
+                }
                 InstanceAction::Stop => todo!(),
                 InstanceAction::Reboot => todo!(),
                 InstanceAction::Destroy => todo!(),

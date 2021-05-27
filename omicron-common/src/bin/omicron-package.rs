@@ -97,7 +97,10 @@ struct Args {
 fn build_rust_package(package: &str, release: bool) -> Result<()> {
     let mut cmd = Command::new("cargo");
     // TODO: Just normal nightly
-    cmd.arg("+nightly-2021-04-24-x86_64-unknown-illumos").arg("build").arg("-p").arg(package);
+    cmd.arg("+nightly-2021-04-24-x86_64-unknown-illumos")
+        .arg("build")
+        .arg("-p")
+        .arg(package);
     if release {
         cmd.arg("--release");
     }
