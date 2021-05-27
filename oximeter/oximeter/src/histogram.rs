@@ -22,28 +22,18 @@ pub trait HistogramSupport:
     + Clone
     + 'static
 {
-    // We delegate by default to the `Bounded` trait's implementation of the min and max values
-    fn min_value() -> Self {
-        <Self as Bounded>::min_value()
-    }
+    fn is_finite(&self) -> bool;
+}
 
-    fn max_value() -> Self {
-        <Self as Bounded>::max_value()
+impl HistogramSupport for i64 {
+    fn is_finite(&self) -> bool {
+        true
     }
 }
 
-impl HistogramSupport for i64 {}
-
 impl HistogramSupport for f64 {
-    // We override the default for floats, to allow histograms containing +/- infinity. These are
-    // _not_ bounded according to the `num_traits::Bounded` trait, so we explicitly allow them
-    // here.
-    fn min_value() -> Self {
-        f64::NEG_INFINITY
-    }
-
-    fn max_value() -> Self {
-        f64::INFINITY
+    fn is_finite(&self) -> bool {
+        f64::is_finite(*self)
     }
 }
 
@@ -58,9 +48,9 @@ pub enum HistogramError {
     #[error("Bins must be monotonically increasing")]
     NonmonotonicBins,
 
-    /// A NaN was encountered, either as a bin edge or a sample.
-    #[error("Bin edges and samples must be non-NaN (finite or +/- infinity")]
-    NanValue,
+    /// A non-finite was encountered, either as a bin edge or a sample.
+    #[error("Bin edges and samples must be finite values, found: {0:?}")]
+    NonFiniteValue(String),
 
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
     #[error("Neigboring bins {0} and {1} are not adjoining")]
@@ -94,7 +84,6 @@ where
 
     /// Construct a range bounded inclusively from below and exclusively from above.
     pub fn range(start: T, end: T) -> Self {
-        assert!(start <= end);
         BinRange::Range(start, end)
     }
 
@@ -211,12 +200,28 @@ pub struct Bin<T> {
 /// assert_eq!(hist.n_samples(), 2);
 ///
 /// let data = hist.iter().collect::<Vec<_>>();
-/// assert_eq!(data[0].range, BinRange::to(0)); // An additional bin for `..0`
+/// assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0`
 /// assert_eq!(data[0].count, 0); // Nothing is in this bin
 ///
 /// assert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10`
 /// assert_eq!(data[1].count, 1); // 4 is sampled into this bin
 /// ```
+///
+/// Notes
+/// -----
+///
+/// Histograms may be constructed either from their left bin edges, or from a sequence of ranges.
+/// In either case, the left-most bin may be converted upon construction. In particular, if the
+/// left-most value is not equal to the minimum of the support, a new bin will be added from the
+/// minimum to that provided value. If the left-most value _is_ the support's minimum, because the
+/// provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one
+/// bounded below, `(MIN..0)` in this case.
+///
+/// The short of this is that, most of the time, it shouldn't matter. If one specifies the extremes
+/// of the support as their bins, be aware that the left-most may be converted from a
+/// `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is
+/// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
+/// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Histogram<T> {
     bins: Vec<Bin<T>>,
@@ -231,7 +236,7 @@ where
     ///
     /// The provided bins should be "back-to-back", so that the right edge of a bin and its
     /// rightward neighbor share a boundary. There should be no gaps and the bins must be strictly
-    /// increasing. Infinite values are supported, but NaNs are not.
+    /// increasing. Only finite values are supported (i.e., not NaN or +/- infinity).
     ///
     /// Note that additional bins on the left and right may be added, to ensure that the bins
     /// extend over the entire support of the histogram.
@@ -248,18 +253,33 @@ where
     /// ```
     pub fn with_bins(bins: &[BinRange<T>]) -> Result<Self, HistogramError> {
         let mut bins_ = Vec::with_capacity(bins.len());
+        let mut iter = bins.iter();
         let first = bins.first().ok_or(HistogramError::EmptyBins)?;
 
-        // Prepend a range ..start if needed
+        let min = <T as Bounded>::min_value();
         if let Bound::Included(start) = first.start_bound() {
-            is_comparable(*start)?;
-            if <T as HistogramSupport>::min_value() < *start {
-                bins_.push(Bin { range: BinRange::to(*start), count: 0 });
+            // Prepend a range `MIN..start` if needed
+            ensure_finite(*start)?;
+            if min < *start {
+                bins_.push(Bin {
+                    range: BinRange::range(min, *start),
+                    count: 0,
+                });
+            }
+        } else if matches!(first.start_bound(), Bound::Unbounded) {
+            // A range like `..end` was provided. _Transform_ this into `MIN..end`.
+            if let Bound::Excluded(end) = first.end_bound() {
+                bins_.push(Bin { range: BinRange::range(min, *end), count: 0 });
+                let _ = iter.next().unwrap(); // Remove the transformed bin
+            } else {
+                unreachable!(
+                    "Can't have an bin that is unbounded on both ends"
+                );
             }
         }
 
         // Collect all bins
-        bins_.extend(bins.iter().map(|bin| Bin { range: *bin, count: 0 }));
+        bins_.extend(iter.map(|bin| Bin { range: *bin, count: 0 }));
 
         // Append a range end.. if needed.
         //
@@ -269,7 +289,7 @@ where
         let end = if let Bound::Excluded(end) =
             bins_.last().unwrap().range.end_bound()
         {
-            if <T as HistogramSupport>::max_value() >= *end {
+            if <T as Bounded>::max_value() >= *end {
                 Some(Bin { range: BinRange::from(*end), count: 0 })
             } else {
                 None
@@ -285,11 +305,11 @@ where
         let n_bins = bins_.len();
         for (first, second) in bins_[..n_bins - 1].iter().zip(&bins_[1..]) {
             if let Bound::Included(start) = first.range.start_bound() {
-                is_comparable(*start)?;
+                ensure_finite(*start)?;
             }
             match (first.range.end_bound(), second.range.start_bound()) {
                 (Bound::Excluded(end), Bound::Included(start)) => {
-                    is_comparable(*end).and(is_comparable(*start))?;
+                    ensure_finite(*end).and(ensure_finite(*start))?;
                     if end != start {
                         return Err(
                             HistogramError::NonAdjoiningBins(
@@ -298,11 +318,11 @@ where
                         ));
                     }
                 }
-                _ => unreachable!("Bin ranges should always be excluded above and included below")
+                _ => unreachable!("Bin ranges should always be excluded above and included below: {:#?}", (first, second))
             }
         }
         if let Bound::Excluded(end) = bins_.last().unwrap().range.end_bound() {
-            is_comparable(*end)?;
+            ensure_finite(*end)?;
         }
         Ok(Self { bins: bins_, n_samples: 0 })
     }
@@ -314,27 +334,40 @@ where
     pub fn new(left_edges: &[T]) -> Result<Self, HistogramError> {
         let mut items = left_edges.iter();
         let mut bins = Vec::with_capacity(left_edges.len() + 1);
-        let mut current = items.next().ok_or(HistogramError::EmptyBins)?;
-        is_comparable(*current)?;
-        if *current > <T as Bounded>::min_value() {
-            bins.push(Bin { range: BinRange::to(*current), count: 0 });
+        let mut current = *items.next().ok_or(HistogramError::EmptyBins)?;
+        ensure_finite(current)?;
+        let min = <T as Bounded>::min_value();
+        if current > min {
+            // Bin greater than the minimum was specified, insert a new one from `MIN..current`.
+            bins.push(Bin { range: BinRange::range(min, current), count: 0 });
+        } else if current == min {
+            // An edge *at* the minimum was specified. Consume it, and insert a bin from
+            // `MIN..next`, if one exists. If one does not, or if this is the last item, the
+            // following loop will not be entered.
+            let next =
+                items.next().cloned().unwrap_or_else(<T as Bounded>::max_value);
+            bins.push(Bin { range: BinRange::range(min, next), count: 0 });
+            current = next;
         }
-        for next in items {
+        for &next in items {
             if current < next {
-                is_comparable(*next)?;
+                ensure_finite(next)?;
                 bins.push(Bin {
-                    range: BinRange::range(*current, *next),
+                    range: BinRange::range(current, next),
                     count: 0,
                 });
                 current = next;
             } else if current >= next {
                 return Err(HistogramError::NonmonotonicBins);
             } else {
-                return Err(HistogramError::NanValue);
+                return Err(HistogramError::NonFiniteValue(format!(
+                    "{:?}",
+                    current
+                )));
             }
         }
-        if *current < <T as Bounded>::max_value() {
-            bins.push(Bin { range: BinRange::from(*current), count: 0 });
+        if current < <T as Bounded>::max_value() {
+            bins.push(Bin { range: BinRange::from(current), count: 0 });
         }
         Ok(Self { bins, n_samples: 0 })
     }
@@ -342,12 +375,13 @@ where
     /// Add a new sample into the histogram.
     ///
     /// This bumps the internal counter at the bin containing `value`. An `Err` is returned if the
-    /// bin for the provided value can't be returned (usually because it's a NaN).
+    /// sample is not within the distribution's support (non-finite).
     pub fn sample(&mut self, value: T) -> Result<(), HistogramError> {
+        ensure_finite(value)?;
         let index = self
             .bins
             .binary_search_by(|bin| bin.range.cmp(&value).reverse())
-            .map_err(|_| HistogramError::NanValue)?;
+            .unwrap(); // The `ensure_finite` call above catches values that don't end up in a bin
         self.bins[index].count += 1;
         self.n_samples += 1;
         Ok(())
@@ -367,19 +401,58 @@ where
     pub fn iter(&self) -> impl Iterator<Item = &Bin<T>> {
         self.bins.iter()
     }
+
+    // An internal helper function to convert a histogram into a pair of arrays in the database.
+    //
+    // This converts the bins, which may be one or two elements, into just their left edges. These
+    // edges are always inclusive, by construction of the histogram. That is, they are guaranteed
+    // to consist of bins that are either `BinRange::Range` or `BinRange::RangeFrom`.
+    pub(crate) fn to_arrays(&self) -> (Vec<T>, Vec<u64>) {
+        let mut bins = Vec::with_capacity(self.n_bins());
+        let mut counts = Vec::with_capacity(self.n_bins());
+
+        // The first bin may either be BinRange::To or BinRange::Range.
+        for bin in self.bins.iter() {
+            match bin.range {
+                BinRange::Range(start, _) => {
+                    bins.push(start);
+                },
+                BinRange::RangeFrom(start) => {
+                    bins.push(start);
+                },
+                _ => unreachable!("No bins in a constructed histogram should be of type RangeTo"),
+            }
+            counts.push(bin.count);
+        }
+        (bins, counts)
+    }
+
+    // An internal helper function to deserialize a histogram from the database.
+    pub(crate) fn from_arrays(
+        bins: Vec<T>,
+        counts: Vec<u64>,
+    ) -> Result<Self, HistogramError> {
+        assert_eq!(bins.len(), counts.len());
+        let mut hist = Self::new(&bins)?;
+        let mut n_samples = 0;
+        for (bin, count) in hist.bins.iter_mut().zip(counts.into_iter()) {
+            bin.count = count;
+            n_samples += count;
+        }
+        hist.n_samples = n_samples;
+        Ok(hist)
+    }
 }
 
 // Helper to ensure all values are comparable, i.e., not NaN.
-fn is_comparable<T>(value: T) -> Result<(), HistogramError>
+fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
 where
     T: HistogramSupport,
 {
-    if value <= <T as HistogramSupport>::max_value()
-        && value >= <T as HistogramSupport>::min_value()
-    {
+    if value.is_finite() {
         Ok(())
     } else {
-        Err(HistogramError::NanValue)
+        Err(HistogramError::NonFiniteValue(format!("{:?}", value)))
     }
 }
 
@@ -388,16 +461,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_comparable() {
-        assert!(is_comparable(0i64).is_ok());
-        assert!(is_comparable(i64::MIN).is_ok());
-        assert!(is_comparable(i64::MAX).is_ok());
+    fn test_ensure_finite() {
+        assert!(ensure_finite(0i64).is_ok());
+        assert!(ensure_finite(i64::MIN).is_ok());
+        assert!(ensure_finite(i64::MAX).is_ok());
 
-        assert!(is_comparable(0.0).is_ok());
-        assert!(is_comparable(f64::NEG_INFINITY).is_ok());
-        assert!(is_comparable(f64::INFINITY).is_ok());
-
-        assert!(is_comparable(f64::NAN).is_err());
+        assert!(ensure_finite(0.0).is_ok());
+        assert!(ensure_finite(f64::NEG_INFINITY).is_err());
+        assert!(ensure_finite(f64::INFINITY).is_err());
+        assert!(ensure_finite(f64::NAN).is_err());
     }
 
     #[test]
@@ -466,7 +538,7 @@ mod tests {
         let hist = Histogram::with_bins(bins).unwrap();
         assert_eq!(hist.n_bins(), 3);
         let data = hist.iter().collect::<Vec<_>>();
-        assert_eq!(data[0].range, BinRange::RangeTo(0));
+        assert_eq!(data[0].range, BinRange::Range(i64::MIN, 0));
         assert_eq!(data[1].range, BinRange::Range(0, 10));
         assert_eq!(data[2].range, BinRange::RangeFrom(10));
     }
@@ -497,10 +569,13 @@ mod tests {
         let mut hist = Histogram::with_bins(&[(0..1).into()]).unwrap();
         assert!(hist.sample(i64::MIN).is_ok());
         assert!(hist.sample(i64::MAX).is_ok());
+        assert_eq!(hist.iter().nth(0).unwrap().count, 1);
+        assert_eq!(hist.iter().nth(1).unwrap().count, 0);
+        assert_eq!(hist.iter().nth(2).unwrap().count, 1);
 
         let mut hist = Histogram::with_bins(&[(0.0..1.0).into()]).unwrap();
         assert!(hist.sample(f64::MIN).is_ok());
-        assert!(hist.sample(f64::INFINITY).is_ok());
+        assert!(hist.sample(f64::INFINITY).is_err());
         assert!(hist.sample(f64::NAN).is_err());
     }
 
@@ -513,19 +588,19 @@ mod tests {
             "This histogram should have one bin, which covers the whole range"
         );
 
-        let hist =
-            Histogram::with_bins(&[(f64::NEG_INFINITY..).into()]).unwrap();
+        assert!(Histogram::with_bins(&[(f64::NEG_INFINITY..).into()]).is_err());
+        assert!(Histogram::with_bins(&[(..f64::INFINITY).into()]).is_err());
+        let hist = Histogram::with_bins(&[(f64::MIN..).into()]).unwrap();
         assert_eq!(
             hist.n_bins(),
             1,
             "This histogram should have one bin, which covers the whole range"
         );
-        let hist = Histogram::with_bins(&[(..f64::INFINITY).into()]).unwrap();
+        let hist = Histogram::with_bins(&[(..f64::MAX).into()]).unwrap();
         assert_eq!(
             hist.n_bins(), 2,
             "This histogram should have two bins, since `BinRange`s are always exclusive on the right"
         );
-
         assert!(Histogram::with_bins(&[(f64::NAN..).into()]).is_err());
         assert!(Histogram::with_bins(&[(..f64::NAN).into()]).is_err());
         assert!(Histogram::with_bins(&[
@@ -534,6 +609,22 @@ mod tests {
         ])
         .is_err());
         assert!(Histogram::new(&[f64::NAN, 0.0]).is_err());
+
+        let hist = Histogram::new(&[i64::MIN]).unwrap();
+        assert_eq!(
+            hist.bins[0].range,
+            BinRange::range(i64::MIN, i64::MAX),
+            "A single bin at i64::MIN should be turned into a single bin [i64::MIN, i64::MAX]"
+        );
+        let hist = Histogram::new(&[i64::MIN, 0]).unwrap();
+        assert_eq!(hist.bins[0].range, BinRange::range(i64::MIN, 0));
+
+        let hist = Histogram::new(&[f64::MIN]).unwrap();
+        assert_eq!(
+            hist.bins[0].range,
+            BinRange::range(f64::MIN, f64::MAX),
+            "A single bin at f64::MIN should be turned into a single bin [MIN, MAX)"
+        );
     }
 
     #[test]
@@ -557,8 +648,34 @@ mod tests {
             "Expected an Err when sampling NaN into a histogram"
         );
         assert!(
-            hist.sample(f64::NEG_INFINITY).is_ok(),
-            "Expected OK when sampling negative infinity into a histogram"
+            hist.sample(f64::NEG_INFINITY).is_err(),
+            "Expected an Err when sampling negative infinity into a histogram"
+        );
+    }
+
+    #[test]
+    fn test_histogram_to_arrays() {
+        let mut hist = Histogram::new(&[0, 10, 20]).unwrap();
+        hist.sample(1).unwrap();
+        hist.sample(11).unwrap();
+
+        let (bins, counts) = hist.to_arrays();
+        assert_eq!(
+            bins.len(),
+            counts.len(),
+            "Bins and counts should have the same size"
+        );
+        assert_eq!(
+            bins.len(),
+            hist.n_bins(),
+            "Paired-array bins should be of the same length as the histogram"
+        );
+        assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
+
+        let rebuilt = Histogram::from_arrays(bins, counts).unwrap();
+        assert_eq!(
+            hist, rebuilt,
+            "Histogram reconstructed from paired arrays is not correct"
         );
     }
 }

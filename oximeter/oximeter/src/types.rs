@@ -4,7 +4,7 @@
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
 
 use bytes::Bytes;
@@ -30,9 +30,14 @@ pub enum FieldType {
     Bool,
 }
 
+impl std::fmt::Display for FieldType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -41,9 +46,27 @@ pub enum FieldValue {
     Bool(bool),
 }
 
+impl FieldValue {
+    pub fn field_type(&self) -> FieldType {
+        match self {
+            FieldValue::String(_) => FieldType::String,
+            FieldValue::I64(_) => FieldType::I64,
+            FieldValue::IpAddr(_) => FieldType::IpAddr,
+            FieldValue::Uuid(_) => FieldType::Uuid,
+            FieldValue::Bool(_) => FieldType::Bool,
+        }
+    }
+}
+
 impl From<i64> for FieldValue {
     fn from(value: i64) -> Self {
         FieldValue::I64(value)
+    }
+}
+
+impl From<&i64> for FieldValue {
+    fn from(value: &i64) -> Self {
+        FieldValue::I64(*value)
     }
 }
 
@@ -62,6 +85,18 @@ impl From<&str> for FieldValue {
 impl From<IpAddr> for FieldValue {
     fn from(value: IpAddr) -> Self {
         FieldValue::IpAddr(value)
+    }
+}
+
+impl From<Ipv4Addr> for FieldValue {
+    fn from(value: Ipv4Addr) -> Self {
+        FieldValue::IpAddr(IpAddr::V4(value))
+    }
+}
+
+impl From<Ipv6Addr> for FieldValue {
+    fn from(value: Ipv6Addr) -> Self {
+        FieldValue::IpAddr(IpAddr::V6(value))
     }
 }
 
@@ -134,63 +169,36 @@ impl Measurement {
     }
 }
 
-impl From<bool> for Measurement {
-    fn from(value: bool) -> Self {
-        Measurement::Bool(value)
+// Helper macro to generate `From<T>` and `From<&T>` for the measurement types.
+macro_rules! impl_from {
+    {$type_:ty, $variant:ident} => {
+        impl From<$type_> for Measurement {
+            fn from(value: $type_) -> Self {
+                Measurement::$variant(value)
+            }
+        }
+
+        impl From<&$type_> for Measurement where $type_: Clone {
+            fn from(value: &$type_) -> Self {
+                Measurement::$variant(value.clone())
+            }
+        }
     }
 }
 
-impl From<i64> for Measurement {
-    fn from(value: i64) -> Self {
-        Measurement::I64(value)
-    }
-}
-
-impl From<f64> for Measurement {
-    fn from(value: f64) -> Self {
-        Measurement::F64(value)
-    }
-}
-
-impl From<String> for Measurement {
-    fn from(value: String) -> Self {
-        Measurement::String(value)
-    }
-}
+impl_from! { bool, Bool }
+impl_from! { i64, I64 }
+impl_from! { f64, F64 }
+impl_from! { String, String }
+impl_from! { Bytes, Bytes }
+impl_from! { Cumulative<i64>, CumulativeI64 }
+impl_from! { Cumulative<f64>, CumulativeF64 }
+impl_from! { histogram::Histogram<i64>, HistogramI64 }
+impl_from! { histogram::Histogram<f64>, HistogramF64 }
 
 impl From<&str> for Measurement {
     fn from(value: &str) -> Self {
         Measurement::String(value.to_string())
-    }
-}
-
-impl From<&Bytes> for Measurement {
-    fn from(value: &Bytes) -> Self {
-        Measurement::Bytes(value.clone())
-    }
-}
-
-impl From<Cumulative<i64>> for Measurement {
-    fn from(value: Cumulative<i64>) -> Self {
-        Measurement::CumulativeI64(value)
-    }
-}
-
-impl From<Cumulative<f64>> for Measurement {
-    fn from(value: Cumulative<f64>) -> Self {
-        Measurement::CumulativeF64(value)
-    }
-}
-
-impl From<histogram::Histogram<i64>> for Measurement {
-    fn from(value: histogram::Histogram<i64>) -> Measurement {
-        Measurement::HistogramI64(value)
-    }
-}
-
-impl From<histogram::Histogram<f64>> for Measurement {
-    fn from(value: histogram::Histogram<f64>) -> Measurement {
-        Measurement::HistogramF64(value)
     }
 }
 
@@ -208,6 +216,10 @@ pub enum Error {
     /// An error running an `Oximeter` server
     #[error("Error running oximeter: {0}")]
     OximeterServer(String),
+
+    /// An error interacting with the timeseries database
+    #[error("Error interacting with timeseries database: {0}")]
+    Database(String),
 
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
@@ -336,6 +348,9 @@ pub struct Metric {
 
     /// The data type of a measurement from this metric.
     pub measurement_type: MeasurementType,
+
+    /// The measured value of this metric
+    pub measurement: Measurement,
 }
 
 impl PartialEq for Metric {
@@ -361,6 +376,7 @@ where
                 .zip(metric.field_values())
                 .collect(),
             measurement_type: metric.measurement_type(),
+            measurement: metric.measure(),
         }
     }
 }
@@ -379,9 +395,6 @@ pub struct Sample {
 
     /// The `Metric` this sample is derived from.
     pub metric: Metric,
-
-    /// The actual measured data point for this sample.
-    pub measurement: Measurement,
 }
 
 impl PartialEq for Sample {
@@ -423,7 +436,6 @@ impl Sample {
     pub fn new<T, M, Meas>(
         target: &T,
         metric: &M,
-        measurement: Meas,
         timestamp: Option<DateTime<Utc>>,
     ) -> Self
     where
@@ -436,7 +448,6 @@ impl Sample {
             timestamp: timestamp.unwrap_or_else(Utc::now),
             target: target.into(),
             metric: metric.into(),
-            measurement: measurement.into(),
         }
     }
 }
@@ -457,11 +468,11 @@ mod tests {
         pub id: i64,
     }
 
-    #[crate::metric(I64)]
-    #[derive(Clone)]
+    #[derive(Clone, Metric)]
     struct Met {
         pub good: bool,
         pub id: i64,
+        pub value: i64,
     }
 
     #[test]
@@ -495,7 +506,7 @@ mod tests {
         assert!(matches!(Measurement::from(0f64), Measurement::F64(_)));
         assert!(matches!(Measurement::from("foo"), Measurement::String(_)));
         assert!(matches!(
-            Measurement::from(&Bytes::new()),
+            Measurement::from(Bytes::new()),
             Measurement::Bytes(_)
         ));
         assert!(matches!(
@@ -533,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_metric_struct() {
-        let m = Met { good: false, id: 2 };
+        let m = Met { good: false, id: 2, value: 0 };
         let m2 = types::Metric::from(&m);
         assert_eq!(m.name(), m2.name);
         assert_eq!(m.key(), m2.key);
@@ -550,13 +561,12 @@ mod tests {
     #[test]
     fn test_sample_struct() {
         let t = Targ { good: false, id: 2 };
-        let m = Met { good: false, id: 2 };
-        let measurement: i64 = 1;
+        let m = Met { good: false, id: 2, value: 1 };
         let timestamp = Utc::now();
-        let sample = types::Sample::new(&t, &m, measurement, Some(timestamp));
+        let sample = types::Sample::new(&t, &m, Some(timestamp));
         assert_eq!(sample.target.key, t.key());
         assert_eq!(sample.metric.key, m.key());
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.measurement, Measurement::I64(measurement));
+        assert_eq!(sample.metric.measurement, Measurement::I64(m.value));
     }
 }
