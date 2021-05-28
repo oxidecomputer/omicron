@@ -8,8 +8,8 @@ use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -116,32 +116,34 @@ struct InstanceInternal {
 }
 
 impl InstanceInternal {
-    async fn observe_state(&mut self, state: propolis_client::api::InstanceState) -> Result<(), ApiError> {
+    async fn observe_state(
+        &mut self,
+        state: propolis_client::api::InstanceState,
+    ) -> Result<(), ApiError> {
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
 
         // Notify Nexus of the state change.
-        self.nexus_client.notify_instance_updated(
-            &self.properties.id,
-            self.state.current(),
-        ).await?;
+        self.nexus_client
+            .notify_instance_updated(&self.properties.id, self.state.current())
+            .await?;
 
         // Take the next action, if any.
         if let Some(action) = action {
-             self.take_action(action).await?;
+            self.take_action(action).await?;
         }
         Ok(())
     }
 
-    async fn propolis_state_put(&self, request: propolis_client::api::InstanceStateRequested) -> Result<(), ApiError> {
+    async fn propolis_state_put(
+        &self,
+        request: propolis_client::api::InstanceStateRequested,
+    ) -> Result<(), ApiError> {
         self.client
             .instance_state_put(self.properties.id, request)
             .await
             .map_err(|e| ApiError::InternalError {
-                message: format!(
-                    "Failed to set state of instance: {}",
-                    e
-                ),
+                message: format!("Failed to set state of instance: {}", e),
             })
     }
 
@@ -149,37 +151,47 @@ impl InstanceInternal {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
         };
-        self.client.instance_ensure(&request).await.map_err(
-            |e| ApiError::InternalError {
-                message: format!(
-                    "Failed to ensure instance: {}",
-                    e
-                ),
-            },
-        )?;
+        self.client.instance_ensure(&request).await.map_err(|e| {
+            ApiError::InternalError {
+                message: format!("Failed to ensure instance: {}", e),
+            }
+        })?;
         Ok(())
     }
 
-    async fn take_action(&self, action: InstanceAction) -> Result<(), ApiError> {
+    async fn take_action(
+        &self,
+        action: InstanceAction,
+    ) -> Result<(), ApiError> {
         info!(self.log, "Taking action: {:#?}", action);
         match action {
             InstanceAction::Run => {
-                self.propolis_state_put(propolis_client::api::InstanceStateRequested::Run).await?;
+                self.propolis_state_put(
+                    propolis_client::api::InstanceStateRequested::Run,
+                )
+                .await?;
                 info!(self.log, "Finished taking RUN action");
             }
             InstanceAction::Stop => {
-                self.propolis_state_put(propolis_client::api::InstanceStateRequested::Stop).await?;
+                self.propolis_state_put(
+                    propolis_client::api::InstanceStateRequested::Stop,
+                )
+                .await?;
                 info!(self.log, "Finished taking STOP action");
-            },
+            }
             InstanceAction::Reboot => {
-                self.propolis_state_put(propolis_client::api::InstanceStateRequested::Reboot).await?;
+                self.propolis_state_put(
+                    propolis_client::api::InstanceStateRequested::Reboot,
+                )
+                .await?;
                 info!(self.log, "Finished taking REBOOT action");
-            },
-            InstanceAction::Destroy => todo!("DESTROY HAS NOT BEEN IMPLEMENTED YET"),
+            }
+            InstanceAction::Destroy => {
+                todo!("DESTROY HAS NOT BEEN IMPLEMENTED YET")
+            }
         }
         Ok(())
     }
-
 }
 
 // TODO: Could easily refactor this elsewhere...
@@ -239,30 +251,32 @@ impl Instance {
 
         // TODO: IP ADDRESS??? Be less hardcoded?
         let address = "127.0.0.1:12400";
-        let client = Arc::new(PropolisClient::new(address.parse().unwrap(), log.clone()));
+        let client = Arc::new(PropolisClient::new(
+            address.parse().unwrap(),
+            log.clone(),
+        ));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
         wait_for_http_server(&log, &client).await?;
 
-        let instance =
-            InstanceInternal {
-                log: log.new(o!("instance id" => id.to_string())),
-                // TODO: Mostly lies.
-                properties: propolis_client::api::InstanceProperties {
-                    id,
-                    name: "Test instance".to_string(),
-                    description: "Test description".to_string(),
-                    image_id: Uuid::nil(),
-                    bootrom_id: Uuid::nil(),
-                    memory: 256,
-                    vcpus: 2,
-                },
-                state: InstanceState::new(initial_runtime),
-                client: client.clone(),
-                nexus_client,
-            };
+        let instance = InstanceInternal {
+            log: log.new(o!("instance id" => id.to_string())),
+            // TODO: Mostly lies.
+            properties: propolis_client::api::InstanceProperties {
+                id,
+                name: "Test instance".to_string(),
+                description: "Test description".to_string(),
+                image_id: Uuid::nil(),
+                bootrom_id: Uuid::nil(),
+                memory: 256,
+                vcpus: 2,
+            },
+            state: InstanceState::new(initial_runtime),
+            client: client.clone(),
+            nexus_client,
+        };
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
@@ -278,8 +292,14 @@ impl Instance {
             loop {
                 // State monitor always returns the most recent state/gen pair
                 // known to Propolis.
-                let response = client.instance_state_monitor(id, gen).await.unwrap();
-                internal_clone.lock().await.observe_state(response.state).await.unwrap();
+                let response =
+                    client.instance_state_monitor(id, gen).await.unwrap();
+                internal_clone
+                    .lock()
+                    .await
+                    .observe_state(response.state)
+                    .await
+                    .unwrap();
 
                 // Update the generation number we're asking for, to ensure the
                 // Propolis will only return more recent values.
@@ -311,11 +331,7 @@ impl SledAgent {
     ) -> SledAgent {
         info!(&log, "created sled agent"; "id" => ?id);
 
-        SledAgent {
-            log,
-            nexus_client,
-            instances: Mutex::new(BTreeMap::new()),
-        }
+        SledAgent { log, nexus_client, instances: Mutex::new(BTreeMap::new()) }
     }
 
     /// Idempotently ensures that the given API Instance (described by
@@ -342,11 +358,20 @@ impl SledAgent {
                     self.log.new(o!("instance" => instance_id.to_string()));
                 instances.insert(
                     instance_id,
-                    Instance::new(instance_log, instance_id, initial_runtime, self.nexus_client.clone()).await?,
+                    Instance::new(
+                        instance_log,
+                        instance_id,
+                        initial_runtime,
+                        self.nexus_client.clone(),
+                    )
+                    .await?,
                 );
                 instances.get_mut(&instance_id).unwrap()
             }
-        }.internal.lock().await;
+        }
+        .internal
+        .lock()
+        .await;
 
         if let Some(action) = instance.state.request_transition(&target)? {
             info!(
