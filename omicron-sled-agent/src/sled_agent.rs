@@ -120,8 +120,10 @@ impl InstanceInternal {
         &mut self,
         state: propolis_client::api::InstanceState,
     ) -> Result<(), ApiError> {
+        info!(self.log, "Observing new propolis state: {:?}", state);
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
+        info!(self.log, "Next recommended action: {:?}", action);
 
         // Notify Nexus of the state change.
         self.nexus_client
@@ -187,7 +189,12 @@ impl InstanceInternal {
                 info!(self.log, "Finished taking REBOOT action");
             }
             InstanceAction::Destroy => {
-                todo!("DESTROY HAS NOT BEEN IMPLEMENTED YET")
+                self.propolis_state_put(
+                    propolis_client::api::InstanceStateRequested::Stop,
+                )
+                .await?;
+                info!(self.log, "Finished taking DESTROY (stop) action");
+                // TODO: Need a way to clean up
             }
         }
         Ok(())

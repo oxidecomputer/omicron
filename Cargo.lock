@@ -100,6 +100,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 dependencies = [
  "libc",
  "num_enum",
@@ -383,6 +384,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 dependencies = [
  "libc",
  "num_enum",
@@ -1549,6 +1551,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 dependencies = [
  "bhyve_api",
  "bitflags",
@@ -1565,6 +1568,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 dependencies = [
  "reqwest",
  "ring",
@@ -1580,6 +1584,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -2636,6 +2641,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=state-monitor#1ba27fe24c45e6225e353c82ff69d4e1625a9b9f"
 
 [[package]]
 name = "walkdir"
