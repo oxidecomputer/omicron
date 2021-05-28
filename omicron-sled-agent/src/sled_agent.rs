@@ -276,17 +276,25 @@ impl Instance {
         let join_handle = tokio::task::spawn(async move {
             let mut gen = 0;
             loop {
-                println!("Monitoring for state change... (gen: {})", gen);
+                // State monitor always returns the most recent state/gen pair
+                // known to Propolis.
                 let response = client.instance_state_monitor(id, gen).await.unwrap();
-                println!("Monitoring for state change... (gen: {}) SAW {:?}", gen, response);
-                gen = response.gen;
                 internal_clone.lock().await.observe_state(response.state).await.unwrap();
+
+                // Update the generation number we're asking for, to ensure the
+                // Propolis will only return more recent values.
+                gen = response.gen + 1;
             }
         });
 
         Ok(Instance { internal, join_handle })
     }
+}
 
+impl Drop for Instance {
+    fn drop(&mut self) {
+        self.join_handle.abort()
+    }
 }
 
 pub struct SledAgent {
