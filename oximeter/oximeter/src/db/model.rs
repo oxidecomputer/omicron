@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::histogram;
-use crate::types::{FieldValue, Measurement, Sample};
+use crate::types::{
+    FieldType, FieldValue, Measurement, MeasurementType, Sample,
+};
 
 // TODO-completeness This module implements and tests paths for inserting data into ClickHouse, but
 // not for reading it out. It's not yet clear how we'll be querying the database, but this is a
@@ -72,6 +74,45 @@ impl FieldSource {
         }
     }
 }
+
+/// A representation of a row in one of the target_schema table.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct TargetSchema {
+    pub target_name: String,
+    pub field_names: Vec<String>,
+    pub field_types: Vec<FieldType>,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl PartialEq for TargetSchema {
+    fn eq(&self, other: &TargetSchema) -> bool {
+        self.target_name == other.target_name
+            && self.field_names == other.field_names
+            && self.field_types == other.field_types
+    }
+}
+
+/// A representation of a row in one of the target_schema table.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct MetricSchema {
+    pub metric_name: String,
+    pub field_names: Vec<String>,
+    pub field_types: Vec<FieldType>,
+    pub measurement_type: MeasurementType,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl PartialEq for MetricSchema {
+    fn eq(&self, other: &MetricSchema) -> bool {
+        self.metric_name == other.metric_name
+            && self.field_names == other.field_names
+            && self.field_types == other.field_types
+            && self.measurement_type == other.measurement_type
+    }
+}
+
 // Internal module used to serialize datetime's to the database.
 //
 // Serde by default includes the timezone when serializing at `DateTime`. However, the `DateTime64`
@@ -433,6 +474,37 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     }
 }
 
+/// Return the schema for the target and metric, from a sample containing them
+pub(crate) fn schema_for(sample: &Sample) -> (TargetSchema, MetricSchema) {
+    let created = Utc::now();
+    let mut field_names = Vec::with_capacity(sample.target.fields.len());
+    let mut field_types = Vec::with_capacity(sample.target.fields.len());
+    for (name, value) in sample.target.fields.iter() {
+        field_names.push(name.clone());
+        field_types.push(value.field_type());
+    }
+    let target_schema = TargetSchema {
+        target_name: sample.target.name.clone(),
+        field_names,
+        field_types,
+        created,
+    };
+    let mut field_names = Vec::with_capacity(sample.metric.fields.len());
+    let mut field_types = Vec::with_capacity(sample.metric.fields.len());
+    for (name, value) in sample.metric.fields.iter() {
+        field_names.push(name.clone());
+        field_types.push(value.field_type());
+    }
+    let metric_schema = MetricSchema {
+        metric_name: sample.metric.name.clone(),
+        field_names,
+        field_types,
+        measurement_type: sample.metric.measurement.measurement_type(),
+        created,
+    };
+    (target_schema, metric_schema)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +579,56 @@ mod tests {
         } else {
             panic!("Expected a histogram measurement");
         }
+    }
+
+    #[test]
+    fn test_target_schema_partial_eq() {
+        let first = TargetSchema {
+            target_name: "target_name".to_string(),
+            field_names: vec!["field_name".to_string()],
+            field_types: vec![FieldType::I64],
+            created: Utc::now(),
+        };
+        assert_eq!(first, first);
+
+        let mut bad_target_name = first.clone();
+        bad_target_name.target_name = "another_target_name".into();
+        assert_ne!(first, bad_target_name);
+
+        let mut bad_field_name = first.clone();
+        bad_field_name.field_names[0] = "another_field_name".into();
+        assert_ne!(first, bad_field_name);
+
+        let mut bad_field_type = first.clone();
+        bad_field_type.field_types[0] = FieldType::Bool;
+        assert_ne!(first, bad_field_type);
+    }
+
+    #[test]
+    fn test_metric_schema_partial_eq() {
+        let first = MetricSchema {
+            metric_name: "metric_name".to_string(),
+            field_names: vec!["field_name".to_string()],
+            field_types: vec![FieldType::I64],
+            measurement_type: MeasurementType::F64,
+            created: Utc::now(),
+        };
+        assert_eq!(first, first);
+
+        let mut bad_metric_name = first.clone();
+        bad_metric_name.metric_name = "another_metric_name".into();
+        assert_ne!(first, bad_metric_name);
+
+        let mut bad_field_name = first.clone();
+        bad_field_name.field_names[0] = "another_field_name".into();
+        assert_ne!(first, bad_field_name);
+
+        let mut bad_field_type = first.clone();
+        bad_field_type.field_types[0] = FieldType::Bool;
+        assert_ne!(first, bad_field_type);
+
+        let mut bad_measurement_type = first.clone();
+        bad_measurement_type.measurement_type = MeasurementType::I64;
+        assert_ne!(first, bad_measurement_type);
     }
 }
