@@ -94,7 +94,6 @@ impl BootstrapAgent {
 
         let tar_source = Path::new("/opt/oxide");
         let destination = Path::new("/opt/oxide");
-
         // TODO-correctness: Validation should come from ROT, not local file.
         let digests: HashMap<String, Vec<u8>> = toml::from_str(
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
@@ -112,11 +111,34 @@ impl BootstrapAgent {
         self.launch(&digests, &tar_source, &destination, "nexus")?;
 
         // TODO-correctness: The same note as above applies to oximeter.
-        self.launch(&digests, &tar_source, &destination, "oximeter")
+        self.launch(&digests, &tar_source, &destination, "oximeter")?;
+
+        // Note that we extract the propolis-server, but do not launch it.
+        // This is the responsibility of the sled agent in response to requests
+        // from Nexus.
+        self.extract(&digests, &tar_source, &destination, "propolis-server")?;
+
+        Ok(())
+    }
+
+    fn launch<S, P1, P2>(
+        &self,
+        digests: &HashMap<String, Vec<u8>>,
+        tar_source: P1,
+        destination: P2,
+        service: S,
+    ) -> Result<(), BootstrapError>
+    where
+        S: AsRef<str>,
+        P1: AsRef<Path>,
+        P2: AsRef<Path>,
+    {
+        self.extract(digests, tar_source, destination, &service)?;
+        self.enable_service(service)
     }
 
     // Verify, unpack, and enable a service.
-    fn launch<S, P1, P2>(
+    fn extract<S, P1, P2>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
         tar_source: P1,
@@ -155,8 +177,7 @@ impl BootstrapAgent {
         }
 
         info!(&self.log, "Verified {} Service", service);
-        self.extract_archive(&mut tar_file, destination.join(service))?;
-        self.enable_service(service)
+        self.extract_archive(&mut tar_file, destination.join(service))
     }
 
     // Given a verified archive file, unpack it to a location.
@@ -190,11 +211,8 @@ impl BootstrapAgent {
         service: S,
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "Enabling service: {}", service.as_ref());
-        let manifest = format!(
-            "/opt/oxide/{}/smf/{}/manifest.xml",
-            service.as_ref(),
-            service.as_ref()
-        );
+        let manifest =
+            format!("/opt/oxide/{}/pkg/manifest.xml", service.as_ref());
 
         // Import and enable the service as distinct steps.
         //

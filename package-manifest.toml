@@ -1,0 +1,40 @@
+# This manifest describes packages which will be ingested by
+# the "omicron-package" tool - instructing how they should be
+# build, thrown into a tarball, and installed on the target system.
+
+# Path to SMF manifest directory
+smf = "smf"
+
+# Package name
+[package.omicron-bootstrap-agent]
+# Binary name
+binary_name = "bootstrap-agent"
+# Service name (subdirectory within "smf")
+service_name = "bootstrap-agent"
+# Information about how to build this package
+build = "rust"
+# (Optional) Indicates this is a bootstrapping service, and should be installed.
+# Points to the SMF manifest within this package.
+bootstrap = "manifest.xml"
+
+[package.omicron-nexus]
+binary_name = "nexus"
+service_name = "nexus"
+build = "rust"
+
+[package.omicron-sled-agent]
+binary_name = "sled-agent"
+service_name = "sled-agent"
+build = "rust"
+
+[package.oximeter]
+binary_name = "oximeter"
+service_name = "oximeter"
+build = "rust"
+
+[package.propolis-server]
+binary_name = "propolis-server"
+service_name = "propolis-server"
+build = "rust"
+# (Optional) List of binary blobs to be downloaded from S3.
+blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
