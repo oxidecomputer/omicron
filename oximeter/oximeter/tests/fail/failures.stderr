@@ -2,31 +2,34 @@ error: Fields must be one of type: String, IpAddr, i64, bool, Uuid
  --> $DIR/failures.rs:3:5
   |
 3 |     pub x: f32,
-  |     ^^^
+  |     ^^^^^^^^^^
 
 error: Fields must be one of type: String, IpAddr, i64, bool, Uuid
  --> $DIR/failures.rs:8:5
   |
 8 |     pub x: f32,
-  |     ^^^
+  |     ^^^^^^^^^^
 
 error: Must be one of the supported data types: bool, i64, f64, String, Bytes, Cumulative<i64>, Cumulative<f64>, Histogram<i64>, or Histogram<f64>
   --> $DIR/failures.rs:14:5
    |
 14 |     pub value: f32,
-   |     ^^^
+   |     ^^^^^^^^^^^^^^
 
 error: Can only be derived for structs with named fields
   --> $DIR/failures.rs:18:1
    |
-18 | pub enum CantUseEnum {
-   | ^^^
+18 | / pub enum CantUseEnum {
+19 | |     A,
+20 | |     B,
+21 | | }
+   | |_^
 
 error: Can only be derived for structs with named fields
   --> $DIR/failures.rs:24:1
    |
 24 | pub struct CantUseTupleStruct(i64);
-   | ^^^
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: expected `struct`
   --> $DIR/failures.rs:27:5
@@ -38,7 +41,7 @@ error: Can only be derived for structs with named fields
   --> $DIR/failures.rs:32:1
    |
 32 | pub struct CantUseTupleStructMetric(i64);
-   | ^^^
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: Must contain a field named "value"
   --> $DIR/failures.rs:35:27
