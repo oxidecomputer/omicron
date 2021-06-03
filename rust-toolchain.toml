@@ -11,5 +11,7 @@
 # consider using stable instead of nightly.
 
 [toolchain]
+# NOTE: This toolchain is also specified within .github/workflows/rust.yml
+# If you update it here, update that file too.
 channel = "nightly-2021-04-24"
 profile = "default"
