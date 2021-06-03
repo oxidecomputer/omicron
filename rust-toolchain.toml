@@ -1,0 +1,17 @@
+# We use nightly to enable the "asm" feature for dtrace probes.
+#
+# Additionally, we specify this specific verion of nightly to
+# workaround known bugs for illumos on more recent versions.
+# Context: https://github.com/rust-lang/rust/pull/85772
+#
+# Short-term: Once that bug is fixed, we should feel free
+# to update to migrate to a more recent nightly.
+#
+# Long-term: Once the ASM feature is stabilized, we should
+# consider using stable instead of nightly.
+
+[toolchain]
+# NOTE: This toolchain is also specified within .github/workflows/rust.yml
+# If you update it here, update that file too.
+channel = "nightly-2021-04-24"
+profile = "default"
