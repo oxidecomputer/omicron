@@ -57,7 +57,11 @@ jobs:
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: dtolnay/rust-toolchain@${{ matrix.toolchain }}
+    - name: Install Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+          toolchain: ${{ matrix.toolchain }}
+          override: true
     - name: Report cargo version
       run: cargo +${{ matrix.toolchain }} --version
     - name: Configure GitHub cache for CockroachDB binaries
