@@ -53,11 +53,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-10.15 ]
+        toolchain: [ "+nightly-2021-04-24", "stable" ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - name: Report cargo version
-      run: cargo --version
+      run: cargo ${{ matrix.toolchain }} --version
     - name: Configure GitHub cache for CockroachDB binaries
       id: cache-cockroachdb
       # actions/cache@v2.1.4
@@ -66,10 +67,10 @@ jobs:
         key: ${{ runner.os }}-cockroach-binary-v2
         path: "cockroachdb"
     - name: Build
-      run: cargo build --locked --all-targets --verbose
+      run: cargo ${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       # Put "./cockroachdb/bin" on the PATH for the test suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin" cargo test --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin" cargo ${{ matrix.toolchain }} test --locked --verbose
