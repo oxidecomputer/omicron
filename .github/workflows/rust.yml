@@ -12,8 +12,8 @@ jobs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
       - id: skip_check
-        # fkirc/skip-duplicate-actions@v3.4.0
-        uses: fkirc/skip-duplicate-actions@4c656bbdb6906310fa6213604828008bc28fe55d
+        # fkirc/skip-duplicate-actions@v3.4.0 (plus a bit)
+        uses: fkirc/skip-duplicate-actions@98d1dc89f43a47f8e4fba8e1c1fb8d6c5fc515ee
         with:
           # For workflows which are triggered concurrently with the same
           # contents, attempt to execute them exactly once.
