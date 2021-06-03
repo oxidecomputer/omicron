@@ -134,6 +134,7 @@ mod tests {
     // infrastructure yet. Uncomment the attribute line to enable it.
     //
     // #[tokio::test]
+    #[allow(dead_code)]
     async fn test_build_client() {
         let log = slog::Logger::root(slog::Discard, o!());
         Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
@@ -143,6 +144,7 @@ mod tests {
     // infrastructure yet. Uncomment the attribute line to enable it.
     //
     // #[tokio::test]
+    #[allow(dead_code)]
     async fn test_client_insert() {
         let log = slog::Logger::root(slog::Discard, o!());
         let client =
