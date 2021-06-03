@@ -14,6 +14,10 @@ jobs:
       - id: skip_check
         # fkirc/skip-duplicate-actions@v3.4.0
         uses: fkirc/skip-duplicate-actions@4c656bbdb6906310fa6213604828008bc28fe55d
+        with:
+          # For workflows which are triggered concurrently with the same
+          # contents, attempt to execute them exactly once.
+          concurrent_skipping: 'same_content_newer'
   check-style:
     needs: skip_duplicate_jobs
     if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
