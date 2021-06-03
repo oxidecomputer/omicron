@@ -2,6 +2,7 @@
 
 id = "1da65e5b-210c-4859-a7d7-200c1e659972"
 nexus_address = "127.0.0.1:12221"
+cache_dir = "/tmp"
 
 [db]
 address = "[::1]:8123"

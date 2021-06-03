@@ -15,6 +15,7 @@ pub mod collect;
 pub mod db;
 pub mod histogram;
 pub mod oximeter_server;
+mod producer_cache;
 pub mod traits;
 pub mod types;
 

@@ -3,7 +3,7 @@
 
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,6 +22,7 @@ use slog::{debug, info, o, trace, warn, Logger};
 use tokio::{sync::mpsc, task::JoinHandle, time::interval};
 use uuid::Uuid;
 
+use crate::producer_cache::ProducerCache;
 use crate::{collect::ProducerResults, db, Error};
 
 // Messages for controlling a collection task
@@ -241,11 +242,35 @@ pub struct DbConfig {
 struct OximeterAgent {
     /// The collector ID for this agent
     pub id: Uuid,
+
+    // Output for logging information
     log: Logger,
+
     // Handle to the TX-side of a channel for collecting results from the collection tasks
     result_sender: mpsc::Sender<ProducerResults>,
-    // The actual tokio tasks running the collection on a timer.
-    collection_tasks: Arc<Mutex<BTreeMap<ProducerId, CollectionTask>>>,
+
+    // Information about each assigned producer.
+    producers: Mutex<BTreeMap<ProducerId, ProducerInfo>>,
+
+    // The cache of producers
+    //
+    // TODO-correctness This code does nothing to clean this file up. That's probably the right
+    // behavior, as in general this service will never "complete successfully", only fail. In that
+    // case, we _want_ to leave the cache file, and recreate the required list of collection tasks
+    // to collect from the contained endpoints. But we might want to think about ways to specify
+    // that this file should be removed in the destructor or provide an explicit call to remove the
+    // file.
+    cache: ProducerCache,
+}
+
+// Small struct representing information an agent contains about a single producer
+struct ProducerInfo {
+    // Informaiton about the producer endpoint
+    endpoint: ProducerEndpoint,
+
+    // The tokio task actually polling for data from the endpoint
+    #[allow(dead_code)]
+    task: CollectionTask,
 }
 
 impl OximeterAgent {
@@ -254,6 +279,7 @@ impl OximeterAgent {
         id: Uuid,
         db_config: DbConfig,
         log: &Logger,
+        cache_dir: &Path,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!("component" => "oximeter-agent"));
@@ -274,36 +300,64 @@ impl OximeterAgent {
             )
             .await
         });
-        Ok(Self {
-            id,
-            log,
-            result_sender,
-            collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
-        })
+
+        // Construct the cache, which may have producers already in it.
+        let mut cache_path = cache_dir.to_path_buf();
+        cache_path.push(format!("producers-{}.db", id));
+        let cache = ProducerCache::new(&cache_path)?;
+
+        // Spawn tasks for the existing producers
+        let mut producers = BTreeMap::new();
+        let existing_producers = cache.producers()?;
+        if !existing_producers.is_empty() {
+            info!(
+                log,
+                "found {} existing producers in local cache at {:?}, inserting all",
+                existing_producers.len(),
+                cache.path()
+            );
+            for (producer_id, endpoint) in existing_producers.into_iter() {
+                let task = spawn_collection_task(
+                    id,
+                    &log,
+                    result_sender.clone(),
+                    endpoint.clone(),
+                );
+                let info = ProducerInfo { task, endpoint };
+                producers.insert(producer_id, info);
+            }
+        }
+        let producers = Mutex::new(producers);
+        Ok(Self { id, log, result_sender, producers, cache })
     }
 
     /// Register a new producer with this oximeter instance.
     pub fn register_producer(
         &self,
-        info: ProducerEndpoint,
+        endpoint: ProducerEndpoint,
     ) -> Result<(), Error> {
-        let id = info.producer_id();
-        match self.collection_tasks.lock().unwrap().entry(id) {
+        let id = endpoint.producer_id();
+        match self.producers.lock().unwrap().entry(id) {
             Entry::Vacant(value) => {
-                info!(self.log, "registered new metric producer";
-                      "producer_id" => info.producer_id().to_string(),
-                      "address" => info.address(),
+                self.cache.insert(&endpoint)?;
+                trace!(
+                    self.log,
+                    "inserted new producer into cache";
+                    "producer_id" => id.to_string(),
                 );
 
-                // Build channel to control the task and receive results.
-                let (tx, rx) = mpsc::channel(4);
-                let q = self.result_sender.clone();
-                let id = self.id;
-                let log = self.log.new(o!("component" => "collection-task"));
-                let task = tokio::spawn(async move {
-                    collection_task(id, log, info, rx, q).await;
-                });
-                value.insert(CollectionTask { inbox: tx, task });
+                let task = spawn_collection_task(
+                    self.id,
+                    &self.log,
+                    self.result_sender.clone(),
+                    endpoint.clone(),
+                );
+                let info = ProducerInfo { task, endpoint };
+                info!(self.log, "registered new metric producer";
+                      "producer_id" => id.to_string(),
+                      "address" => info.endpoint.address(),
+                );
+                value.insert(info);
                 Ok(())
             }
             Entry::Occupied(_) => {
@@ -319,6 +373,20 @@ impl OximeterAgent {
             }
         }
     }
+}
+
+fn spawn_collection_task(
+    collector_id: Uuid,
+    log: &Logger,
+    result_sender: mpsc::Sender<ProducerResults>,
+    producer: ProducerEndpoint,
+) -> CollectionTask {
+    let (inbox, rx) = mpsc::channel(4);
+    let log = log.new(o!("component" => "collection-task"));
+    let task = tokio::spawn(async move {
+        collection_task(collector_id, log, producer, rx, result_sender).await;
+    });
+    CollectionTask { inbox, task }
 }
 
 /// Configuration used to initialize an oximeter server
@@ -338,6 +406,10 @@ pub struct Config {
 
     /// Logging configuration
     pub log: ConfigLogging,
+
+    /// Local directory in which to cache producers assigned to this collector. The actual data
+    /// will be cached in the file `{cache_path}/{id}.db`.
+    pub cache_dir: PathBuf,
 }
 
 impl Config {
@@ -371,8 +443,15 @@ impl Oximeter {
 
         // TODO-robustness Handle retries if the database is cannot be reached. This likely should
         // just retry forever, as the system is unusable until a connection is made.
-        let agent =
-            Arc::new(OximeterAgent::with_id(config.id, config.db, &log).await?);
+        let agent = Arc::new(
+            OximeterAgent::with_id(
+                config.id,
+                config.db,
+                &log,
+                &config.cache_dir,
+            )
+            .await?,
+        );
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(

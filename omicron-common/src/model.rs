@@ -1423,10 +1423,16 @@ pub struct ProducerId {
 
 impl ProducerId {
     /**
-     * Construct a new producer ID.
+     * Construct a new random producer ID.
      */
     pub fn new() -> Self {
         Self { producer_id: Uuid::new_v4() }
+    }
+}
+
+impl From<Uuid> for ProducerId {
+    fn from(id: Uuid) -> Self {
+        Self { producer_id: id }
     }
 }
 
@@ -1446,7 +1452,7 @@ impl std::fmt::Display for ProducerId {
  * Information announced by a metric server, used so that clients can contact it and collect
  * available metric data from it.
  */
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct ProducerEndpoint {
     producer_id: ProducerId,
     address: SocketAddr,
