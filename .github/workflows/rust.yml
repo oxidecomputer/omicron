@@ -6,7 +6,20 @@ name: Rust
 on: [ push, pull_request ]
 
 jobs:
+  skip_duplicate_jobs:
+    runs-on: ubuntu-18.04
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          concurrent_skipping: 'same_content'
+          skip_after_successful_duplicate: 'true'
+          do_not_skip: '["pull_request", "workflow_dispath", "schedule"]'
   check-style:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -19,6 +32,8 @@ jobs:
       run: cargo fmt -- --check
 
   clippy-lint:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -38,6 +53,8 @@ jobs:
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -48,6 +65,8 @@ jobs:
       run: cargo doc
 
   build-and-test:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
