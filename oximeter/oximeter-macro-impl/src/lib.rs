@@ -321,10 +321,8 @@ fn to_snake_case(name: &str) -> String {
             if !out.is_empty() {
                 out.push('_');
             }
-            out.push(ch.to_lowercase().next().unwrap());
-        } else {
-            out.push(ch.to_lowercase().next().unwrap());
         }
+        out.push(ch.to_lowercase().next().unwrap());
     }
     out
 }
