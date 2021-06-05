@@ -3,22 +3,22 @@
 
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use slog::{debug, error, trace, Logger};
 
-use crate::db::model;
-use crate::{types::Sample, Error, FieldType, FieldValue};
+use crate::db::model::{self, Schematized};
+use crate::{types::Sample, Error};
 
 /// A `Client` to the ClickHouse metrics database.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Client {
     address: SocketAddr,
     log: Logger,
     url: String,
     client: reqwest::Client,
-    target_schema: Arc<Mutex<BTreeMap<String, model::TargetSchema>>>,
-    metric_schema: Arc<Mutex<BTreeMap<String, model::MetricSchema>>>,
+    target_schema: Mutex<BTreeMap<String, model::TargetSchema>>,
+    metric_schema: Mutex<BTreeMap<String, model::MetricSchema>>,
 }
 
 impl Client {
@@ -31,8 +31,8 @@ impl Client {
             log,
             url,
             client,
-            target_schema: Arc::new(Mutex::new(BTreeMap::new())),
-            metric_schema: Arc::new(Mutex::new(BTreeMap::new())),
+            target_schema: Mutex::new(BTreeMap::new()),
+            metric_schema: Mutex::new(BTreeMap::new()),
         };
         out.init_db().await?;
         out.get_schema().await?;
@@ -72,10 +72,12 @@ impl Client {
                 Ok((new_target, new_metric)) => {
                     if let Some(target) = new_target {
                         trace!(self.log, "new target schema: {}", target);
+                        println!("{}", target);
                         new_target_schema.push(target);
                     }
                     if let Some(metric) = new_metric {
                         trace!(self.log, "new metric schema: {}", metric);
+                        println!("{}", metric);
                         new_metric_schema.push(metric);
                     }
                 }
@@ -164,67 +166,22 @@ impl Client {
         sample: &Sample,
     ) -> Result<(Option<String>, Option<String>), Error> {
         let (target_schema, metric_schema) = model::schema_for(sample);
-
-        // Verify the target schema
-        let target_schema = match self
-            .target_schema
-            .lock()
-            .unwrap()
-            .entry(target_schema.target_name.clone())
-        {
-            Entry::Vacant(entry) => Some(
-                serde_json::to_string(&*entry.insert(target_schema)).unwrap(),
-            ),
-            Entry::Occupied(entry) => {
-                let existing_schema = entry.get();
-                if existing_schema != &target_schema {
-                    let err = error_for_schema_mismatch(
-                        &target_schema.target_name,
-                        &existing_schema.field_names,
-                        &existing_schema.field_types,
-                        &sample.target.fields,
-                    );
-                    error!(
-                        self.log,
-                        "target schema mismatch, sample will be skipped: {}",
-                        err
-                    );
-                    return Err(err);
-                }
-                None
-            }
-        };
-
-        // Verify the metric schema
-        let metric_schema = match self
-            .metric_schema
-            .lock()
-            .unwrap()
-            .entry(metric_schema.metric_name.clone())
-        {
-            Entry::Vacant(entry) => Some(
-                serde_json::to_string(&*entry.insert(metric_schema)).unwrap(),
-            ),
-            Entry::Occupied(entry) => {
-                let existing_schema = entry.get();
-                if existing_schema != &metric_schema {
-                    let err = error_for_schema_mismatch(
-                        &metric_schema.metric_name,
-                        &existing_schema.field_names,
-                        &existing_schema.field_types,
-                        &sample.metric.fields,
-                    );
-                    error!(
-                        self.log,
-                        "metric schema mismatch, sample will be skipped: {}",
-                        err
-                    );
-                    return Err(err);
-                }
-                None
-            }
-        };
-
+        let target_schema = ensure_schema_matches(
+            &mut self.target_schema.lock().unwrap(),
+            target_schema,
+            &self.log,
+        )?
+        .map(|schema| {
+            serde_json::to_string(&model::DbTargetSchema::from(schema)).unwrap()
+        });
+        let metric_schema = ensure_schema_matches(
+            &mut self.metric_schema.lock().unwrap(),
+            metric_schema,
+            &self.log,
+        )?
+        .map(|schema| {
+            serde_json::to_string(&model::DbMetricSchema::from(schema)).unwrap()
+        });
         Ok((target_schema, metric_schema))
     }
 
@@ -290,8 +247,10 @@ impl Client {
         } else {
             trace!(self.log, "extracting new target schema");
             let new = body.lines().map(|line| {
-                let schema =
-                    serde_json::from_str::<model::TargetSchema>(line).unwrap();
+                let schema = model::TargetSchema::from(
+                    serde_json::from_str::<model::DbTargetSchema>(line)
+                        .unwrap(),
+                );
                 (schema.target_name.clone(), schema)
             });
             self.target_schema.lock().unwrap().extend(new);
@@ -308,8 +267,10 @@ impl Client {
         } else {
             trace!(self.log, "extracting new metric schema");
             let new = body.lines().map(|line| {
-                let schema =
-                    serde_json::from_str::<model::MetricSchema>(line).unwrap();
+                let schema = model::MetricSchema::from(
+                    serde_json::from_str::<model::DbMetricSchema>(line)
+                        .unwrap(),
+                );
                 (schema.metric_name.clone(), schema)
             });
             self.metric_schema.lock().unwrap().extend(new);
@@ -335,23 +296,49 @@ async fn handle_db_response(
     }
 }
 
+// Helper to verify a new and existing schema, or generate an error for a schema mismatch
+fn ensure_schema_matches<'a, S: Schematized<'a> + Clone>(
+    map: &mut BTreeMap<String, S>,
+    new_schema: S,
+    log: &Logger,
+) -> Result<Option<S>, Error> {
+    match map.entry(new_schema.name().to_string()) {
+        Entry::Vacant(entry) => Ok(Some(entry.insert(new_schema).clone())),
+        Entry::Occupied(entry) => {
+            let existing_schema = entry.get();
+            if existing_schema == &new_schema {
+                Ok(None)
+            } else {
+                let err =
+                    error_for_schema_mismatch(&new_schema, &existing_schema);
+                error!(
+                    log,
+                    "{} schema mismatch, sample will be skipped: {}",
+                    existing_schema.column_name(),
+                    err
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
 // Generate an error describing a schema mismatch
-fn error_for_schema_mismatch(
-    name: &str,
-    existing_names: &[String],
-    existing_types: &[FieldType],
-    new_fields: &BTreeMap<String, FieldValue>,
+fn error_for_schema_mismatch<'a, S: Schematized<'a>>(
+    schema: &S,
+    existing_schema: &S,
 ) -> Error {
-    let expected = existing_names
+    let expected = existing_schema
+        .fields()
         .iter()
-        .cloned()
-        .zip(existing_types.iter().cloned())
+        .map(|field| (field.name.clone(), field.ty))
         .collect();
-    let actual = new_fields
+    let actual = schema
+        .fields()
         .iter()
-        .map(|(name, value)| (name.clone(), value.field_type()))
+        .map(|field| (field.name.clone(), field.ty))
         .collect();
-    Error::SchemaMismatch { name: name.to_string(), expected, actual }
+    Error::SchemaMismatch { name: schema.name().to_string(), expected, actual }
 }
 
 // This set of tests is behind a configuration flag that must be explicitly enabled. These test
@@ -456,14 +443,6 @@ mod tests {
         client.init_db().await.unwrap();
         let sample = test_util::make_sample();
 
-        // Verify that this sample is considered new, i.e., we return rows to update the target and
-        // metric schema tables.
-        let result = client.verify_sample_schema(&sample).unwrap();
-        assert!(
-            matches!(result, (Some(_), Some(_))),
-            "When verifying a new sample, the rows to be inserted should be returned"
-        );
-
         // Clear the internal maps, so that the below call updates them and inserts into the DB.
         // This is the peril of testing a non-public API.
         client.target_schema.lock().unwrap().clear();
@@ -482,9 +461,11 @@ mod tests {
                 "After inserting a new sample, its schema should be included",
             )
             .clone();
+        let (actual_target_schema, actual_metric_schema) =
+            model::schema_for(&sample);
         assert_eq!(
             expected_target_schema,
-            serde_json::from_str(&result.0.unwrap()).unwrap(),
+            actual_target_schema,
             "The target schema for a new sample was not correctly inserted into internal cache",
         );
         let expected_metric_schema = client
@@ -498,7 +479,7 @@ mod tests {
             .clone();
         assert_eq!(
             expected_metric_schema,
-            serde_json::from_str(&result.1.unwrap()).unwrap(),
+            actual_metric_schema,
             "The metric schema for a new sample was not correctly inserted into internal cache",
         );
 
@@ -517,9 +498,13 @@ mod tests {
         let result = client.execute_with_body(sql).await.unwrap();
         let schema = result
             .lines()
-            .map(|line| serde_json::from_str(&line).unwrap())
-            .collect::<Vec<model::TargetSchema>>();
-        println!("{:#?}", schema);
+            .map(|line| {
+                model::TargetSchema::from(
+                    serde_json::from_str::<model::DbTargetSchema>(&line)
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_target_schema, schema[0]);
 
@@ -529,7 +514,12 @@ mod tests {
         let result = client.execute_with_body(sql).await.unwrap();
         let schema = result
             .lines()
-            .map(|line| serde_json::from_str(&line).unwrap())
+            .map(|line| {
+                model::MetricSchema::from(
+                    serde_json::from_str::<model::DbMetricSchema>(&line)
+                        .unwrap(),
+                )
+            })
             .collect::<Vec<model::MetricSchema>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_metric_schema, schema[0]);

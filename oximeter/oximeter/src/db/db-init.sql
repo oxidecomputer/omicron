@@ -113,14 +113,15 @@ ORDER BY (target_name, metric_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.metric_schema
 (
     metric_name String,
-    field_names Array(String),
-    field_types Array(Enum(
-        'Bool' = 1,
-        'I64' = 2,
-        'IpAddr' = 3,
-        'String' = 4,
-        'Bytes' = 5,
-        'Uuid' = 6
+    fields Nested(
+        name String,
+        type Enum(
+            'Bool' = 1,
+            'I64' = 2,
+            'IpAddr' = 3,
+            'String' = 4,
+            'Bytes' = 5,
+            'Uuid' = 6
     )),
     measurement_type Enum(
         'Bool' = 1,
@@ -136,7 +137,7 @@ CREATE TABLE IF NOT EXISTS oximeter.metric_schema
     created DateTime64(6, 'UTC')
 )
 ENGINE = MergeTree()
-PRIMARY KEY (metric_name, field_names);
+PRIMARY KEY (metric_name, fields.name);
 --
 CREATE TABLE IF NOT EXISTS oximeter.metric_fields_bool
 (
@@ -201,19 +202,20 @@ ORDER BY (metric_name, field_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.target_schema
 (
     target_name String,
-    field_names Array(String),
-    field_types Array(Enum(
-        'Bool' = 1,
-        'I64' = 2,
-        'IpAddr' = 3,
-        'String' = 4,
-        'Bytes' = 5,
-        'Uuid' = 6
+    fields Nested(
+        name String,
+        type Enum(
+            'Bool' = 1,
+            'I64' = 2,
+            'IpAddr' = 3,
+            'String' = 4,
+            'Bytes' = 5,
+            'Uuid' = 6
     )),
     created DateTime64(6, 'UTC')
 )
 ENGINE = MergeTree()
-PRIMARY KEY (target_name, field_names);
+PRIMARY KEY (target_name, fields.name);
 --
 CREATE TABLE IF NOT EXISTS oximeter.target_fields_bool
 (
