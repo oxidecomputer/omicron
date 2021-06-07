@@ -13,7 +13,7 @@ jobs:
     steps:
       - id: skip_check
         # fkirc/skip-duplicate-actions@v3.4.0 (plus a bit)
-        uses: fkirc/skip-duplicate-actions@98d1dc89f43a47f8e4fba8e1c1fb8d6c5fc515ee
+        uses: fkirc/skip-duplicate-actions@867de26591aa7542d65bc38f576c5a244c3c6034
         with:
           # For workflows which are triggered concurrently with the same
           # contents, attempt to execute them exactly once.
