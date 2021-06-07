@@ -4,3 +4,5 @@ README.html
 TODO.html
 logs
 out
+tools/clickhouse*
+tools/cockroach*

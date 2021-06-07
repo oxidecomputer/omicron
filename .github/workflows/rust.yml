@@ -13,7 +13,7 @@ jobs:
     steps:
       - id: skip_check
         # fkirc/skip-duplicate-actions@v3.4.0 (plus a bit)
-        uses: fkirc/skip-duplicate-actions@98d1dc89f43a47f8e4fba8e1c1fb8d6c5fc515ee
+        uses: fkirc/skip-duplicate-actions@867de26591aa7542d65bc38f576c5a244c3c6034
         with:
           # For workflows which are triggered concurrently with the same
           # contents, attempt to execute them exactly once.
@@ -92,6 +92,9 @@ jobs:
       with:
         key: ${{ runner.os }}-cockroach-binary-v2
         path: "cockroachdb"
+    - name: Install ClickHouse
+      # Workflow environment variables are not propagated to the script by default
+      run: sudo CI=$CI ./tools/ci_download_clickhouse
     - name: Build
       run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download CockroachDB binary
@@ -100,3 +103,5 @@ jobs:
     - name: Run tests
       # Put "./cockroachdb/bin" on the PATH for the test suite.
       run: PATH="$PATH:$PWD/cockroachdb/bin" cargo +${{ matrix.toolchain }} test --locked --verbose
+    - name: Run ClickHouse client tests
+      run: cargo test --locked --verbose --features clickhouse-tests --package oximeter -- --test-threads 1 db::client

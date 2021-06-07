@@ -221,6 +221,14 @@ pub enum Error {
     #[error("Error interacting with timeseries database: {0}")]
     Database(String),
 
+    /// A schema provided when collecting samples did not match the expected schema
+    #[error("Schema mismatch for target/metric {name}, expected fields {expected:?} found fields {actual:?}")]
+    SchemaMismatch {
+        name: String,
+        expected: BTreeMap<String, FieldType>,
+        actual: BTreeMap<String, FieldType>,
+    },
+
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
