@@ -72,12 +72,10 @@ impl Client {
                 Ok((new_target, new_metric)) => {
                     if let Some(target) = new_target {
                         trace!(self.log, "new target schema: {}", target);
-                        println!("{}", target);
                         new_target_schema.push(target);
                     }
                     if let Some(metric) = new_metric {
                         trace!(self.log, "new metric schema: {}", metric);
-                        println!("{}", metric);
                         new_metric_schema.push(metric);
                     }
                 }
@@ -443,8 +441,15 @@ mod tests {
         client.init_db().await.unwrap();
         let sample = test_util::make_sample();
 
-        // Clear the internal maps, so that the below call updates them and inserts into the DB.
-        // This is the peril of testing a non-public API.
+        // Verify that this sample is considered new, i.e., we return rows to update the target and
+        // metric schema tables.
+        let result = client.verify_sample_schema(&sample).unwrap();
+        assert!(
+            matches!(result, (Some(_), Some(_))),
+            "When verifying a new sample, the rows to be inserted should be returned"
+        );
+
+        // Clear the internal caches of seen schema
         client.target_schema.lock().unwrap().clear();
         client.metric_schema.lock().unwrap().clear();
 
@@ -452,6 +457,8 @@ mod tests {
         client.insert_samples(&[sample.clone()]).await.unwrap();
 
         // The internal maps should now contain both the target and metric schema
+        let (actual_target_schema, actual_metric_schema) =
+            model::schema_for(&sample);
         let expected_target_schema = client
             .target_schema
             .lock()
@@ -461,8 +468,6 @@ mod tests {
                 "After inserting a new sample, its schema should be included",
             )
             .clone();
-        let (actual_target_schema, actual_metric_schema) =
-            model::schema_for(&sample);
         assert_eq!(
             expected_target_schema,
             actual_target_schema,

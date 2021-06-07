@@ -102,5 +102,6 @@ jobs:
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       # Put "./cockroachdb/bin" on the PATH for the test suite.
+      run: PATH="$PATH:$PWD/cockroachdb/bin" cargo +${{ matrix.toolchain }} test --locked --verbose
     - name: Run ClickHouse client tests
       run: cargo test --locked --verbose --features clickhouse-tests --package oximeter -- --test-threads 1 db::client
