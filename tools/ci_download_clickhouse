@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# This is used _only within GitHub CI_ to install the ClickHouse server
+# To install in any other context, see https://clickhouse.tech/docs/en/getting-started/install
+
+function main() {
+    set -o xtrace
+    set -o pipefail
+    set -o errexit
+    verify_github_ci
+    verify_linux
+    verify_root
+    add_clickhouse_apt_sources
+    install_clickhouse
+    sudo systemctl start clickhouse-server.service
+}
+
+function verify_github_ci() {
+    if ! [ "$CI" ]; then
+        echo "This script can only be used to install ClickHouse"
+        echo "within GitHub's CI. Please see the link below for"
+        echo "directions to install ClickHouse"
+        echo ""
+        echo "https://clickhouse.tech/docs/en/getting-started/install/"
+        exit 1
+    fi
+}
+
+function verify_linux() {
+    case "$OSTYPE" in
+        linux*)
+            ;;
+        *)
+            echo "This script can only be used to install ClickHouse on"
+            echo "Linux platforms. See https://clickhouse.tech/docs/en/getting-started/install/#from-binaries-non-linux"
+            echo "for instructions to install manually on non-Linux platforms"
+            exit 0 # Return 0 to avoid erroring out on CI
+            ;;
+    esac
+}
+
+function verify_root() {
+    if [ $(id -u) -ne 0 ]; then
+        echo "This script must be run as root"
+        exit 1
+    fi
+}
+
+function add_clickhouse_apt_sources() {
+    apt-get install apt-transport-https ca-certificates dirmngr
+    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E0C56BD4
+    echo "deb https://repo.clickhouse.tech/deb/stable/ main/" | \
+            tee /etc/apt/sources.list.d/clickhouse.list
+    apt-get update
+}
+
+function install_clickhouse() {
+    # ClickHouse clearly expects this to be installed by a human,
+    # since they prompt in the middle of installation to ask for
+    # the default users password.
+    apt-get install -y --no-install-recommends expect
+    expect -f - <<-EOI
+        spawn apt-get install -y --no-install-recommends clickhouse-server
+        expect "Enter password for default user:" { send "\r" }
+        wait
+EOI
+}
+
+main

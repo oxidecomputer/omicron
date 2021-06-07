@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::histogram;
-use crate::types::{FieldValue, Measurement, Sample};
+use crate::types::{
+    FieldType, FieldValue, Measurement, MeasurementType, Sample,
+};
 
 // TODO-completeness This module implements and tests paths for inserting data into ClickHouse, but
 // not for reading it out. It's not yet clear how we'll be querying the database, but this is a
@@ -72,7 +74,196 @@ impl FieldSource {
         }
     }
 }
-// Internal module used to serialize datetime's to the database.
+
+/// Information about a target or metric field as contained in a schema.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Field {
+    /// The field name
+    pub name: String,
+
+    /// The field type
+    pub ty: FieldType,
+}
+
+// The list of fields in a schema as represented in the actual schema tables in the database.
+//
+// Data about the schema in ClickHouse is represented in the `{target,metric}_schema` tables. These
+// contain the fields as a nested table, which is stored as a struct of arrays. This type is used
+// to convert between that representation in the database, and the representation we prefer, i.e.,
+// the `Field` type above. In other words, we prefer to work with an array of structs, but
+// ClickHouse requires a struct of arrays. `Field` is the former, `DbFieldList` is the latter.
+//
+// Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
+// the nested column names.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct DbFieldList {
+    #[serde(rename = "fields.name")]
+    pub names: Vec<String>,
+    #[serde(rename = "fields.type")]
+    pub types: Vec<FieldType>,
+}
+
+impl From<DbFieldList> for Vec<Field> {
+    fn from(list: DbFieldList) -> Self {
+        list.names
+            .into_iter()
+            .zip(list.types.into_iter())
+            .map(|(name, ty)| Field { name, ty })
+            .collect()
+    }
+}
+
+impl From<Vec<Field>> for DbFieldList {
+    fn from(list: Vec<Field>) -> Self {
+        let (names, types) =
+            list.into_iter().map(|field| (field.name, field.ty)).unzip();
+        DbFieldList { names, types }
+    }
+}
+
+// A trait describing types in one of the database's schema tables.
+pub(crate) trait Schematized<'a>:
+    PartialEq<Self> + Deserialize<'a> + Serialize + Sized
+{
+    // The column in the DB with the object's name
+    fn column_name(&self) -> &str;
+    // The name of the object the schema represents, i.e., the entry in the `column_name` table.
+    fn name(&self) -> &str;
+    // The list of fields for this schema.
+    fn fields(&self) -> &[Field];
+}
+
+/// A representation of a row in one of the target_schema table.
+///
+/// Targets describe the source of telemetry or metric data, i.e., the object that the measurement
+/// is derived from. These are described by the [`Target`](crate::traits::Target) trait.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TargetSchema {
+    pub target_name: String,
+    pub fields: Vec<Field>,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl Schematized<'_> for TargetSchema {
+    fn column_name(&self) -> &str {
+        "target_name"
+    }
+
+    fn name(&self) -> &str {
+        &self.target_name
+    }
+
+    fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+}
+
+impl PartialEq for TargetSchema {
+    fn eq(&self, other: &TargetSchema) -> bool {
+        self.target_name == other.target_name && self.fields == other.fields
+    }
+}
+
+// The internal representation of `TargetSchema` used in the database
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct DbTargetSchema {
+    pub target_name: String,
+    #[serde(flatten)]
+    pub fields: DbFieldList,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl From<DbTargetSchema> for TargetSchema {
+    fn from(schema: DbTargetSchema) -> Self {
+        TargetSchema {
+            target_name: schema.target_name,
+            fields: schema.fields.into(),
+            created: schema.created,
+        }
+    }
+}
+
+impl From<TargetSchema> for DbTargetSchema {
+    fn from(schema: TargetSchema) -> Self {
+        DbTargetSchema {
+            target_name: schema.target_name,
+            fields: schema.fields.into(),
+            created: schema.created,
+        }
+    }
+}
+
+/// A representation of a row in one of the metric_schema table.
+///
+/// Metrics describe the aspect or feature of a target that metric data captures. This is the
+/// actual feature being measured, and is described by the [`Metric`](crate::traits::Metric) trait.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MetricSchema {
+    pub metric_name: String,
+    pub fields: Vec<Field>,
+    pub measurement_type: MeasurementType,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl PartialEq for MetricSchema {
+    fn eq(&self, other: &MetricSchema) -> bool {
+        self.metric_name == other.metric_name
+            && self.fields == other.fields
+            && self.measurement_type == other.measurement_type
+    }
+}
+
+impl Schematized<'_> for MetricSchema {
+    fn column_name(&self) -> &str {
+        "metric_name"
+    }
+
+    fn name(&self) -> &str {
+        &self.metric_name
+    }
+
+    fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+}
+
+// The internal representation of `MetricSchema` used in the database
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct DbMetricSchema {
+    pub metric_name: String,
+    #[serde(flatten)]
+    pub fields: DbFieldList,
+    pub measurement_type: MeasurementType,
+    #[serde(with = "serde_timestamp")]
+    pub created: DateTime<Utc>,
+}
+
+impl From<DbMetricSchema> for MetricSchema {
+    fn from(schema: DbMetricSchema) -> Self {
+        MetricSchema {
+            metric_name: schema.metric_name,
+            fields: schema.fields.into(),
+            measurement_type: schema.measurement_type,
+            created: schema.created,
+        }
+    }
+}
+
+impl From<MetricSchema> for DbMetricSchema {
+    fn from(schema: MetricSchema) -> Self {
+        DbMetricSchema {
+            metric_name: schema.metric_name,
+            fields: schema.fields.into(),
+            measurement_type: schema.measurement_type,
+            created: schema.created,
+        }
+    }
+}
+
+// Internal module used to serialize datetimes to the database.
 //
 // Serde by default includes the timezone when serializing at `DateTime`. However, the `DateTime64`
 // type in ClickHouse already includes the timezone, and so times are always assumed relative to
@@ -433,6 +624,41 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     }
 }
 
+/// Return the schema for the target and metric, from a sample containing them
+pub(crate) fn schema_for(sample: &Sample) -> (TargetSchema, MetricSchema) {
+    let created = Utc::now();
+    let target_schema = TargetSchema {
+        target_name: sample.target.name.clone(),
+        fields: sample
+            .target
+            .fields
+            .iter()
+            .map(|(name, value)| {
+                let name = name.to_string();
+                let ty = value.field_type();
+                Field { name, ty }
+            })
+            .collect(),
+        created,
+    };
+    let metric_schema = MetricSchema {
+        metric_name: sample.metric.name.clone(),
+        fields: sample
+            .metric
+            .fields
+            .iter()
+            .map(|(name, value)| {
+                let name = name.to_string();
+                let ty = value.field_type();
+                Field { name, ty }
+            })
+            .collect(),
+        measurement_type: sample.metric.measurement.measurement_type(),
+        created,
+    };
+    (target_schema, metric_schema)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +733,68 @@ mod tests {
         } else {
             panic!("Expected a histogram measurement");
         }
+    }
+
+    #[test]
+    fn test_target_schema_partial_eq() {
+        let first = TargetSchema {
+            target_name: "target_name".to_string(),
+            fields: vec![Field {
+                name: "field_name".to_string(),
+                ty: FieldType::I64,
+            }],
+            created: Utc::now(),
+        };
+        assert_eq!(first, first);
+
+        let mut bad_target_name = first.clone();
+        bad_target_name.target_name = "another_target_name".into();
+        assert_ne!(first, bad_target_name);
+
+        let mut bad_field_name = first.clone();
+        bad_field_name.fields[0].name = "another_field_name".into();
+        assert_ne!(first, bad_field_name);
+
+        let mut bad_field_type = first.clone();
+        bad_field_type.fields[0].ty = FieldType::Bool;
+        assert_ne!(first, bad_field_type);
+
+        let mut different_timestamp = first.clone();
+        different_timestamp.created = Utc::now();
+        assert_eq!(first, different_timestamp);
+    }
+
+    #[test]
+    fn test_metric_schema_partial_eq() {
+        let first = MetricSchema {
+            metric_name: "metric_name".to_string(),
+            fields: vec![Field {
+                name: "field_name".to_string(),
+                ty: FieldType::I64,
+            }],
+            measurement_type: MeasurementType::F64,
+            created: Utc::now(),
+        };
+        assert_eq!(first, first);
+
+        let mut bad_metric_name = first.clone();
+        bad_metric_name.metric_name = "another_metric_name".into();
+        assert_ne!(first, bad_metric_name);
+
+        let mut bad_field_name = first.clone();
+        bad_field_name.fields[0].name = "another_field_name".into();
+        assert_ne!(first, bad_field_name);
+
+        let mut bad_field_type = first.clone();
+        bad_field_type.fields[0].ty = FieldType::Bool;
+        assert_ne!(first, bad_field_type);
+
+        let mut bad_measurement_type = first.clone();
+        bad_measurement_type.measurement_type = MeasurementType::I64;
+        assert_ne!(first, bad_measurement_type);
+
+        let mut different_timestamp = first.clone();
+        different_timestamp.created = Utc::now();
+        assert_eq!(first, different_timestamp);
     }
 }
