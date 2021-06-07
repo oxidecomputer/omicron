@@ -89,7 +89,10 @@ async fn wait_for_http_server(
             Ok(_) => return Ok(()),
             Err(value) => {
                 if let propolis_client::Error::Status(_) = &value {
-                    info!(log, "successfully waited for HTTP server initialization");
+                    info!(
+                        log,
+                        "successfully waited for HTTP server initialization"
+                    );
                     // This means the propolis server responded to our garbage
                     // request, instead of a connection error.
                     return Ok(());
@@ -323,7 +326,10 @@ impl Instance {
     /// necessary to perform state transitions.
     ///
     /// Returns the new state after starting the transition.
-    pub async fn transition(&self, target: ApiInstanceRuntimeStateRequested) -> Result<ApiInstanceRuntimeState, ApiError> {
+    pub async fn transition(
+        &self,
+        target: ApiInstanceRuntimeStateRequested,
+    ) -> Result<ApiInstanceRuntimeState, ApiError> {
         let mut inner = self.internal.lock().await;
         if let Some(action) = inner.state.request_transition(&target)? {
             info!(

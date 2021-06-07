@@ -3,9 +3,7 @@
 use futures::lock::Mutex;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
-    ApiDiskRuntimeState,
-    ApiDiskStateRequested,
-    ApiInstanceRuntimeState,
+    ApiDiskRuntimeState, ApiDiskStateRequested, ApiInstanceRuntimeState,
     ApiInstanceRuntimeStateRequested,
 };
 use omicron_common::NexusClient;
