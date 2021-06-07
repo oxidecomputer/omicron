@@ -1,6 +1,4 @@
-/*!
-* Library interface to the sled agent
- */
+//! Library interface to the sled agent
 
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
@@ -14,21 +12,15 @@ use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 
-/**
- * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
- * server wired up to the sled agent
- */
+/// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
+/// server wired up to the sled agent
 pub struct Server {
-    /** underlying sled agent */
-    pub sled_agent: Arc<SledAgent>,
-    /** dropshot server for the API */
-    pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
+    /// Dropshot server for the API.
+    http_server: dropshot::HttpServer<SledAgent>,
 }
 
 impl Server {
-    /**
-     * Start a SledAgent server
-     */
+    /// Starts a SledAgent server
     pub async fn start(
         config: &Config,
         log: &Logger,
@@ -44,27 +36,24 @@ impl Server {
             "server" => config.id.clone().to_string()
         ));
         let sled_agent =
-            Arc::new(SledAgent::new(&config.id, sa_log, nexus_client.clone()));
+            SledAgent::new(&config.id, sa_log, nexus_client.clone());
 
-        let sa = Arc::clone(&sled_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),
-            sa,
+            sled_agent,
             &dropshot_log,
         )
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        /*
-         * Notify the control plane that we're up, and continue trying this
-         * until it succeeds. We retry with an randomized, capped exponential
-         * backoff.
-         *
-         * TODO-robustness if this returns a 400 error, we probably want to
-         * return a permanent error from the `notify_nexus` closure.
-         */
+        // Notify the control plane that we're up, and continue trying this
+        // until it succeeds. We retry with an randomized, capped exponential
+        // backoff.
+        //
+        // TODO-robustness if this returns a 400 error, we probably want to
+        // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
@@ -87,24 +76,20 @@ impl Server {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
-        Ok(Server { sled_agent, http_server })
+        Ok(Server { http_server })
     }
 
-    /**
-     * Wait for the given server to shut down
-     *
-     * Note that this doesn't initiate a graceful shutdown, so if you call this
-     * immediately after calling `start()`, the program will block indefinitely
-     * or until something else initiates a graceful shutdown.
-     */
+    /// Wait for the given server to shut down
+    ///
+    /// Note that this doesn't initiate a graceful shutdown, so if you call this
+    /// immediately after calling `start()`, the program will block indefinitely
+    /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
 }
 
-/**
- * Run an instance of the `Server`
- */
+/// Run an instance of the `Server`
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let log = config
         .log

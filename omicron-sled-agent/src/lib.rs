@@ -10,13 +10,14 @@
 /* Clippy's style lints are useful, but not worth running automatically. */
 #![allow(clippy::style)]
 
+// Shared sled agent modules.
 pub mod common;
 pub mod sim;
 
-// TODO: Double check pub / exporting from submodules? Maybe limit visibility?
-
+// "Real" sled agent modules.
 pub mod config;
 mod http_entrypoints;
+mod instance;
 pub mod server;
 mod sled_agent;
 
