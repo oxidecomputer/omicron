@@ -1376,58 +1376,17 @@
       },
       "ApiInstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": [
-              "creating",
-              "starting",
-              "running",
-              "repairing",
-              "failed",
-              "destroyed"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "stopping": {
-                "type": "object",
-                "properties": {
-                  "rebooting": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "rebooting"
-                ]
-              }
-            },
-            "required": [
-              "stopping"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "stopped": {
-                "type": "object",
-                "properties": {
-                  "rebooting": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "rebooting"
-                ]
-              }
-            },
-            "required": [
-              "stopped"
-            ],
-            "additionalProperties": false
-          }
+        "type": "string",
+        "enum": [
+          "creating",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "rebooting",
+          "repairing",
+          "failed",
+          "destroyed"
         ]
       },
       "ApiInstanceView": {
