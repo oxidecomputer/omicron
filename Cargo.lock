@@ -102,7 +102,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "libc",
  "num_enum",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "libc",
  "num_enum",
@@ -1551,7 +1551,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "bhyve_api",
  "bitflags",
@@ -1568,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "reqwest",
  "ring",
@@ -1584,7 +1584,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "anyhow",
  "dropshot",
@@ -2567,9 +2567,9 @@ dependencies = [
 
 [[package]]
 name = "usdt"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65306dc73a2b4a0483f07a5286ac85646d851d7705ccfe50b0a0fefb511df2c4"
+checksum = "81a88c42c9da3342c4ceb7da5076b6c56f5fb035ffe09c1bacd0dcc224876e3d"
 dependencies = [
  "dtrace-parser",
  "usdt-impl",
@@ -2578,9 +2578,9 @@ dependencies = [
 
 [[package]]
 name = "usdt-impl"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa5f3cc283c9f9df534fa68edebdfe9a79e084646cc7ae9e0884619279f10b20"
+checksum = "18a543960a8dffaed8a59fb87275967422f00abaf13d9f960f20a7fffa84f294"
 dependencies = [
  "byteorder",
  "dof",
@@ -2595,9 +2595,9 @@ dependencies = [
 
 [[package]]
 name = "usdt-macro"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01bf75f97b8d894c284489632ac4b75657a16ee91061d60b11cdcb5c3951005b"
+checksum = "8501d970100644d2eefbd28fce77cb76c0391d0355d2ed5202407555b73be42f"
 dependencies = [
  "dtrace-parser",
  "proc-macro2",
@@ -2638,7 +2638,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
+source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 
 [[package]]
 name = "walkdir"

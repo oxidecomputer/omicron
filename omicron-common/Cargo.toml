@@ -10,9 +10,7 @@ futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
 libc = "0.2.95"
-# TODO: FIXME
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", branch = "rebooting" }
-# propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "c9f2807" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fafae47a" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"
