@@ -102,7 +102,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 dependencies = [
  "libc",
  "num_enum",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 dependencies = [
  "libc",
  "num_enum",
@@ -1551,7 +1551,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 dependencies = [
  "bhyve_api",
  "bitflags",
@@ -1568,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 dependencies = [
  "reqwest",
  "ring",
@@ -1584,7 +1584,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 dependencies = [
  "anyhow",
  "dropshot",
@@ -2638,7 +2638,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#adbe39e97f1f2ee04e8a9662edc1e9a1e2ab39cf"
+source = "git+https://github.com/oxidecomputer/propolis?branch=rebooting#15e2a7caa39c8afcecdaf0ee8558939a497151b4"
 
 [[package]]
 name = "walkdir"
