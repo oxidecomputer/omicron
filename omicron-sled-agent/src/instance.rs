@@ -113,6 +113,25 @@ async fn wait_for_http_server(
     }
 }
 
+fn instance_action_to_request(
+    action: &InstanceAction,
+) -> propolis_client::api::InstanceStateRequested {
+    match action {
+        InstanceAction::Run => {
+            propolis_client::api::InstanceStateRequested::Run
+        }
+        InstanceAction::Stop => {
+            propolis_client::api::InstanceStateRequested::Stop
+        }
+        InstanceAction::Reboot => {
+            propolis_client::api::InstanceStateRequested::Reboot
+        }
+        InstanceAction::Destroy => {
+            propolis_client::api::InstanceStateRequested::Stop
+        }
+    }
+}
+
 struct InstanceInternal {
     log: Logger,
     properties: propolis_client::api::InstanceProperties,
@@ -127,6 +146,7 @@ impl InstanceInternal {
         state: propolis_client::api::InstanceState,
     ) -> Result<(), ApiError> {
         info!(self.log, "Observing new propolis state: {:?}", state);
+
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
         info!(self.log, "Next recommended action: {:?}", action);
@@ -167,41 +187,15 @@ impl InstanceInternal {
         Ok(())
     }
 
-    pub async fn take_action(
+    async fn take_action(
         &self,
         action: InstanceAction,
     ) -> Result<(), ApiError> {
         info!(self.log, "Taking action: {:#?}", action);
-        match action {
-            InstanceAction::Run => {
-                self.propolis_state_put(
-                    propolis_client::api::InstanceStateRequested::Run,
-                )
-                .await?;
-                info!(self.log, "Finished taking RUN action");
-            }
-            InstanceAction::Stop => {
-                self.propolis_state_put(
-                    propolis_client::api::InstanceStateRequested::Stop,
-                )
-                .await?;
-                info!(self.log, "Finished taking STOP action");
-            }
-            InstanceAction::Reboot => {
-                self.propolis_state_put(
-                    propolis_client::api::InstanceStateRequested::Reboot,
-                )
-                .await?;
-                info!(self.log, "Finished taking REBOOT action");
-            }
-            InstanceAction::Destroy => {
-                self.propolis_state_put(
-                    propolis_client::api::InstanceStateRequested::Stop,
-                )
-                .await?;
-                info!(self.log, "Finished taking DESTROY (stop) action");
-                // TODO: Need a way to clean up
-            }
+        self.propolis_state_put(instance_action_to_request(&action)).await?;
+        if matches!(action, InstanceAction::Destroy) {
+            info!(self.log, "Finished taking DESTROY (stop) action");
+            // TODO: Need a way to clean up
         }
         Ok(())
     }
@@ -299,23 +293,36 @@ impl Instance {
 
         // Monitor propolis for state changes in the background.
         let internal_clone = internal.clone();
-        let join_handle = tokio::task::spawn(async move {
-            let mut gen = 0;
-            loop {
-                // State monitor always returns the most recent state/gen pair
-                // known to Propolis.
-                let response =
-                    client.instance_state_monitor(id, gen).await.unwrap();
-                internal_clone
-                    .lock()
-                    .await
-                    .observe_state(response.state)
-                    .await
-                    .unwrap();
+        let join_handle: JoinHandle<()> = tokio::task::spawn(async move {
+            let r: Result<(), ApiError> = async {
+                let mut gen = 0;
+                loop {
+                    // State monitor always returns the most recent state/gen pair
+                    // known to Propolis.
+                    let response = client
+                        .instance_state_monitor(id, gen)
+                        .await
+                        .map_err(|e| ApiError::InternalError {
+                            message: format!(
+                                "Failed to monitor propolis: {}",
+                                e
+                            ),
+                        })?;
+                    internal_clone
+                        .lock()
+                        .await
+                        .observe_state(response.state)
+                        .await?;
 
-                // Update the generation number we're asking for, to ensure the
-                // Propolis will only return more recent values.
-                gen = response.gen + 1;
+                    // Update the generation number we're asking for, to ensure the
+                    // Propolis will only return more recent values.
+                    gen = response.gen + 1;
+                }
+            }
+            .await;
+            if let Err(e) = r {
+                let log = &internal_clone.lock().await.log;
+                warn!(log, "State monitoring task failed: {}", e);
             }
         });
 
