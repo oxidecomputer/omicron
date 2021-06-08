@@ -589,8 +589,9 @@ impl Nexus {
             ApiInstanceState::Creating => true,
             ApiInstanceState::Starting => true,
             ApiInstanceState::Running => true,
-            ApiInstanceState::Stopping { rebooting: _ } => true,
-            ApiInstanceState::Stopped { rebooting: _ } => true,
+            ApiInstanceState::Stopping => true,
+            ApiInstanceState::Stopped => true,
+            ApiInstanceState::Rebooting => true,
 
             ApiInstanceState::Repairing => false,
             ApiInstanceState::Failed => false,

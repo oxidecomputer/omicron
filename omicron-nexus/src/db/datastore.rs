@@ -396,10 +396,7 @@ impl DataStore {
 
         let mut cond_sql = SqlString::new();
 
-        // Note that we are looking for matches with the states "Stopped"
-        // or "Failed" - we do not care about the "rebooting" value here.
-        let stopped =
-            ApiInstanceState::Stopped { rebooting: false }.to_string();
+        let stopped = ApiInstanceState::Stopped.to_string();
         let p1 = cond_sql.next_param(&stopped);
         let failed = ApiInstanceState::Failed.to_string();
         let p2 = cond_sql.next_param(&failed);
@@ -409,7 +406,7 @@ impl DataStore {
             &client,
             (),
             instance_id,
-            &["instance_state", "instance_state_rebooting", "time_deleted"],
+            &["instance_state", "time_deleted"],
             &values,
             cond_sql,
         )
@@ -417,10 +414,8 @@ impl DataStore {
 
         let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let variant = sql_row_value(&row, "found_instance_state")?;
-        let rebooting: Option<bool> =
-            sql_row_value(&row, "found_instance_state_rebooting")?;
-        let instance_state = ApiInstanceState::try_from((variant, rebooting))
+        let variant: &str = sql_row_value(&row, "found_instance_state")?;
+        let instance_state = ApiInstanceState::try_from(variant)
             .map_err(|e| ApiError::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);
 

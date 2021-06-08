@@ -24,12 +24,9 @@ fn propolis_to_omicron_state(
         PropolisInstanceState::Creating => ApiInstanceState::Creating,
         PropolisInstanceState::Starting => ApiInstanceState::Starting,
         PropolisInstanceState::Running => ApiInstanceState::Running,
-        PropolisInstanceState::Stopping => {
-            ApiInstanceState::Stopping { rebooting: false }
-        }
-        PropolisInstanceState::Stopped => {
-            ApiInstanceState::Stopped { rebooting: false }
-        }
+        PropolisInstanceState::Stopping => ApiInstanceState::Stopping,
+        PropolisInstanceState::Stopped => ApiInstanceState::Stopped,
+        PropolisInstanceState::Rebooting => ApiInstanceState::Rebooting,
         PropolisInstanceState::Repairing => ApiInstanceState::Repairing,
         PropolisInstanceState::Failed => ApiInstanceState::Failed,
         PropolisInstanceState::Destroyed => ApiInstanceState::Destroyed,
@@ -65,20 +62,25 @@ impl InstanceState {
         &mut self,
         observed: &PropolisInstanceState,
     ) -> Option<Action> {
-        match observed {
-            PropolisInstanceState::Stopped if matches!(self.current.run_state, ApiInstanceState::Stopping { rebooting } if rebooting) =>
-            {
-                self.transition(
-                    ApiInstanceState::Starting,
-                    Some(ApiInstanceStateRequested::Running),
-                );
-                Some(Action::Run)
-            }
-            _ => {
-                self.transition(propolis_to_omicron_state(observed), None);
-                None
+        if matches!(self.current.run_state, ApiInstanceState::Rebooting) {
+            match observed {
+                PropolisInstanceState::Stopping | PropolisInstanceState::Stopped => {
+                    // No-op; these cases are covered by "rebooting".
+                    return None;
+                },
+                PropolisInstanceState::Starting => {
+                    self.transition(
+                        propolis_to_omicron_state(observed),
+                        Some(ApiInstanceStateRequested::Running)
+                    );
+                    return None;
+                }
+                _ => {}
             }
         }
+
+        self.transition(propolis_to_omicron_state(observed), None);
+        None
     }
 
     /// Attempts to move from the current state to the requested "target" state.
@@ -122,12 +124,11 @@ impl InstanceState {
             // Early exit: Running request is no-op
             ApiInstanceState::Running
             | ApiInstanceState::Starting
-            | ApiInstanceState::Stopping { rebooting: true }
-            | ApiInstanceState::Stopped { rebooting: true } => return Ok(None),
+            | ApiInstanceState::Rebooting => return Ok(None),
             // Valid states for a running request
             ApiInstanceState::Creating
-            | ApiInstanceState::Stopping { rebooting: false }
-            | ApiInstanceState::Stopped { rebooting: false } => {
+            | ApiInstanceState::Stopping
+            | ApiInstanceState::Stopped => {
                 self.transition(
                     ApiInstanceState::Starting,
                     Some(ApiInstanceStateRequested::Running),
@@ -151,33 +152,25 @@ impl InstanceState {
     fn request_stopped(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Stop request is a no-op
-            ApiInstanceState::Stopped { rebooting: false }
-            | ApiInstanceState::Stopping { rebooting: false } => {
+            ApiInstanceState::Stopped
+            | ApiInstanceState::Stopping => {
                 return Ok(None)
             }
             // Valid states for a stop request
-            ApiInstanceState::Creating
-            | ApiInstanceState::Stopped { rebooting: true } => {
+            ApiInstanceState::Creating => {
                 // Already stopped, no action necessary.
                 self.transition(
-                    ApiInstanceState::Stopped { rebooting: false },
+                    ApiInstanceState::Stopped,
                     None,
                 );
                 return Ok(None);
             }
-            ApiInstanceState::Stopping { rebooting: true } => {
-                // The VM is stopping, so no new action is necessary to
-                // make it stop, but we can avoid rebooting.
-                self.transition(
-                    ApiInstanceState::Stopping { rebooting: false },
-                    Some(ApiInstanceStateRequested::Stopped),
-                );
-                return Ok(None);
-            }
-            ApiInstanceState::Starting | ApiInstanceState::Running => {
+            ApiInstanceState::Starting
+            | ApiInstanceState::Running
+            | ApiInstanceState::Rebooting => {
                 // The VM is running, explicitly tell it to stop.
                 self.transition(
-                    ApiInstanceState::Stopping { rebooting: false },
+                    ApiInstanceState::Stopping,
                     Some(ApiInstanceStateRequested::Stopped),
                 );
                 return Ok(Some(Action::Stop));
@@ -199,15 +192,13 @@ impl InstanceState {
     fn request_reboot(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Reboot request is a no-op
-            ApiInstanceState::Stopping { rebooting: true }
-            | ApiInstanceState::Stopped { rebooting: true } => {
-                return Ok(None);
-            }
+            ApiInstanceState::Rebooting => return Ok(None),
             // Valid states for a reboot request
-            ApiInstanceState::Starting | ApiInstanceState::Running => {
+            ApiInstanceState::Starting
+            | ApiInstanceState::Running => {
                 self.transition(
-                    ApiInstanceState::Stopping { rebooting: true },
-                    Some(ApiInstanceStateRequested::Stopped),
+                    ApiInstanceState::Rebooting,
+                    Some(ApiInstanceStateRequested::Running),
                 );
                 return Ok(Some(Action::Reboot));
             }
@@ -229,7 +220,7 @@ impl InstanceState {
             return Ok(Some(Action::Destroy));
         } else {
             self.transition(
-                ApiInstanceState::Stopping { rebooting: false },
+                ApiInstanceState::Stopping,
                 Some(ApiInstanceStateRequested::Destroyed),
             );
             return Ok(Some(Action::Stop));

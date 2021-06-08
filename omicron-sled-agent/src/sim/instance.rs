@@ -44,7 +44,9 @@ impl Simulatable for SimInstance {
     }
 
     fn execute_pending_transition(&mut self) -> Option<InstanceAction> {
-        if let Some(pending) = self.state.pending() {
+        if matches!(self.state.current().run_state, ApiInstanceState::Rebooting) {
+            self.state.observe_transition(&PropolisInstanceState::Starting)
+        } else if let Some(pending) = self.state.pending() {
             // These operations would typically be triggered via responses from
             // Propolis, but for a simulated sled agent, this does not exist.
             //
