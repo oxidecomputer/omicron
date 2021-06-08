@@ -636,8 +636,13 @@ pub enum ApiInstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
-    Stopping { rebooting: bool },
-    Stopped { rebooting: bool },
+    /// Implied that a transition to "Stopped" is imminent.
+    Stopping,
+    /// The instance is currently stopped.
+    Stopped,
+    /// The instance is in the process of rebooting - it will remain
+    /// in the "rebooting" state until the VM is starting once more.
+    Rebooting,
     Repairing,
     Failed,
     Destroyed,
@@ -655,22 +660,17 @@ impl Display for ApiInstanceState {
  * good validation error.  ApiInstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<(&str, Option<bool>)> for ApiInstanceState {
+impl TryFrom<&str> for ApiInstanceState {
     type Error = String;
 
-    fn try_from(
-        (variant, rebooting): (&str, Option<bool>),
-    ) -> Result<Self, Self::Error> {
+    fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
             "creating" => ApiInstanceState::Creating,
             "starting" => ApiInstanceState::Starting,
             "running" => ApiInstanceState::Running,
-            "stopping" => {
-                ApiInstanceState::Stopping { rebooting: rebooting.unwrap() }
-            }
-            "stopped" => {
-                ApiInstanceState::Stopped { rebooting: rebooting.unwrap() }
-            }
+            "stopping" => ApiInstanceState::Stopping,
+            "stopped" => ApiInstanceState::Stopped,
+            "rebooting" => ApiInstanceState::Rebooting,
             "repairing" => ApiInstanceState::Repairing,
             "failed" => ApiInstanceState::Failed,
             "destroyed" => ApiInstanceState::Destroyed,
@@ -686,8 +686,9 @@ impl ApiInstanceState {
             ApiInstanceState::Creating => "creating",
             ApiInstanceState::Starting => "starting",
             ApiInstanceState::Running => "running",
-            ApiInstanceState::Stopping { rebooting: _r } => "stopping",
-            ApiInstanceState::Stopped { rebooting: _r } => "stopped",
+            ApiInstanceState::Stopping => "stopping",
+            ApiInstanceState::Stopped => "stopped",
+            ApiInstanceState::Rebooting => "rebooting",
             ApiInstanceState::Repairing => "repairing",
             ApiInstanceState::Failed => "failed",
             ApiInstanceState::Destroyed => "destroyed",
@@ -703,10 +704,11 @@ impl ApiInstanceState {
         match self {
             ApiInstanceState::Starting => false,
             ApiInstanceState::Running => false,
-            ApiInstanceState::Stopping { rebooting: _ } => false,
+            ApiInstanceState::Stopping => false,
+            ApiInstanceState::Rebooting => false,
 
             ApiInstanceState::Creating => true,
-            ApiInstanceState::Stopped { rebooting: _ } => true,
+            ApiInstanceState::Stopped => true,
             ApiInstanceState::Repairing => true,
             ApiInstanceState::Failed => true,
             ApiInstanceState::Destroyed => true,
@@ -718,8 +720,7 @@ impl ApiInstanceState {
      */
     pub fn is_rebooting(&self) -> bool {
         match self {
-            ApiInstanceState::Stopped { rebooting } => *rebooting,
-            ApiInstanceState::Stopping { rebooting } => *rebooting,
+            ApiInstanceState::Rebooting => true,
             _ => false,
         }
     }
@@ -746,7 +747,8 @@ impl ApiInstanceState {
 pub enum ApiInstanceStateRequested {
     Running,
     Stopped,
-    // Implies a transition to "Stopped", then to "Running".
+    // Issues a reset command to the instance, such that it should
+    // stop and then immediately become running.
     Reboot,
     Destroyed,
 }
