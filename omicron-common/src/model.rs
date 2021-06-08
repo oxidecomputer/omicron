@@ -714,16 +714,6 @@ impl ApiInstanceState {
             ApiInstanceState::Destroyed => true,
         }
     }
-
-    /**
-     * Returns true if the given state represents an in-progress reboot.
-     */
-    pub fn is_rebooting(&self) -> bool {
-        match self {
-            ApiInstanceState::Rebooting => true,
-            _ => false,
-        }
-    }
 }
 
 /**
