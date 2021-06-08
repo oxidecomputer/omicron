@@ -64,14 +64,15 @@ impl InstanceState {
     ) -> Option<Action> {
         if matches!(self.current.run_state, ApiInstanceState::Rebooting) {
             match observed {
-                PropolisInstanceState::Stopping | PropolisInstanceState::Stopped => {
+                PropolisInstanceState::Stopping
+                | PropolisInstanceState::Stopped => {
                     // No-op; these cases are covered by "rebooting".
                     return None;
-                },
+                }
                 PropolisInstanceState::Starting => {
                     self.transition(
                         propolis_to_omicron_state(observed),
-                        Some(ApiInstanceStateRequested::Running)
+                        Some(ApiInstanceStateRequested::Running),
                     );
                     return None;
                 }
@@ -152,17 +153,13 @@ impl InstanceState {
     fn request_stopped(&mut self) -> Result<Option<Action>, ApiError> {
         match self.current.run_state {
             // Early exit: Stop request is a no-op
-            ApiInstanceState::Stopped
-            | ApiInstanceState::Stopping => {
+            ApiInstanceState::Stopped | ApiInstanceState::Stopping => {
                 return Ok(None)
             }
             // Valid states for a stop request
             ApiInstanceState::Creating => {
                 // Already stopped, no action necessary.
-                self.transition(
-                    ApiInstanceState::Stopped,
-                    None,
-                );
+                self.transition(ApiInstanceState::Stopped, None);
                 return Ok(None);
             }
             ApiInstanceState::Starting
@@ -194,8 +191,7 @@ impl InstanceState {
             // Early exit: Reboot request is a no-op
             ApiInstanceState::Rebooting => return Ok(None),
             // Valid states for a reboot request
-            ApiInstanceState::Starting
-            | ApiInstanceState::Running => {
+            ApiInstanceState::Starting | ApiInstanceState::Running => {
                 self.transition(
                     ApiInstanceState::Rebooting,
                     Some(ApiInstanceStateRequested::Running),

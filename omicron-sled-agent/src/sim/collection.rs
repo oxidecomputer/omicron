@@ -423,10 +423,7 @@ mod test {
             assert!(rnext.time_updated >= rprev.time_updated);
             match state {
                 ApiInstanceStateRequested::Stopped => {
-                    assert_eq!(
-                        rnext.run_state,
-                        ApiInstanceState::Stopped
-                    );
+                    assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
                 }
                 ApiInstanceStateRequested::Destroyed => {
                     assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
@@ -535,10 +532,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Stopping
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
         assert!(!rnext.run_state.is_stopped());
         rprev = rnext;
 
@@ -547,10 +541,7 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.pending().is_none());
-        assert_eq!(
-            rprev.run_state,
-            ApiInstanceState::Stopping
-        );
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
         instance.transition_finish();
@@ -623,10 +614,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Stopping
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
         rprev = rnext;
 
         /*
@@ -637,10 +625,7 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.pending().is_none());
-        assert_eq!(
-            rprev.run_state,
-            ApiInstanceState::Stopping
-        );
+        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
         instance.transition_finish();
@@ -732,10 +717,7 @@ mod test {
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Rebooting
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceStateRequested::Reboot,
@@ -743,10 +725,7 @@ mod test {
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Rebooting
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
@@ -770,10 +749,7 @@ mod test {
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Rebooting
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
@@ -784,10 +760,7 @@ mod test {
             .unwrap()
             .is_some());
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Rebooting
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
@@ -814,10 +787,7 @@ mod test {
             .is_none());
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Stopped
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
         assert!(instance
             .transition(ApiInstanceRuntimeStateRequested {
                 run_state: ApiInstanceStateRequested::Running,
@@ -833,10 +803,7 @@ mod test {
             .unwrap()
             .is_some());
         let rnext = instance.object.current().clone();
-        assert_eq!(
-            rnext.run_state,
-            ApiInstanceState::Rebooting
-        );
+        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);

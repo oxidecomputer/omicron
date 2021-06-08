@@ -663,9 +663,7 @@ impl Display for ApiInstanceState {
 impl TryFrom<&str> for ApiInstanceState {
     type Error = String;
 
-    fn try_from(
-        variant: &str,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
             "creating" => ApiInstanceState::Creating,
             "starting" => ApiInstanceState::Starting,
