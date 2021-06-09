@@ -40,7 +40,7 @@ impl SledAgent {
     /// `api_instance`) exists on this server in the given runtime state
     /// (described by `target`).
     pub async fn instance_ensure(
-        self: &Self,
+        self,
         instance_id: Uuid,
         initial_runtime: ApiInstanceRuntimeState,
         target: ApiInstanceRuntimeStateRequested,
@@ -80,7 +80,7 @@ impl SledAgent {
     ///
     /// NOTE: Not yet implemented.
     pub async fn disk_ensure(
-        self: &Self,
+        self,
         _disk_id: Uuid,
         _initial_state: ApiDiskRuntimeState,
         _target: ApiDiskStateRequested,
