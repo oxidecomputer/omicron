@@ -39,7 +39,7 @@ fn propolis_to_omicron_state(
 
 fn get_next_desired_state(
     observed: &PropolisInstanceState,
-    requested: ApiInstanceStateRequested
+    requested: ApiInstanceStateRequested,
 ) -> Option<ApiInstanceStateRequested> {
     use ApiInstanceStateRequested as Requested;
     use PropolisInstanceState as Observed;
@@ -97,9 +97,10 @@ impl InstanceState {
         use ApiInstanceStateRequested as Requested;
 
         let current = propolis_to_omicron_state(observed);
-        let desired = self.desired.as_ref().and_then(|s| {
-            get_next_desired_state(&observed, s.run_state)
-        });
+        let desired = self
+            .desired
+            .as_ref()
+            .and_then(|s| get_next_desired_state(&observed, s.run_state));
 
         self.transition(current, desired);
 
@@ -107,8 +108,10 @@ impl InstanceState {
         // Nexus), but if the instance reports that it has been destroyed,
         // we should clean it up.
         match (current, desired) {
-            (State::Destroyed, _) | (State::Stopped, Some(Requested::Destroyed))
-                => Some(Action::Destroy),
+            (State::Destroyed, _)
+            | (State::Stopped, Some(Requested::Destroyed)) => {
+                Some(Action::Destroy)
+            }
             _ => None,
         }
     }
@@ -254,36 +257,35 @@ impl InstanceState {
 
 #[cfg(test)]
 mod test {
+    use super::{Action, InstanceState};
     use chrono::Utc;
     use omicron_common::model::{
-        ApiInstanceState as State,
-        ApiGeneration,
-        ApiInstanceRuntimeState,
+        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState as State,
         ApiInstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
-    use super::{Action, InstanceState};
 
     fn make_instance() -> InstanceState {
-        InstanceState::new(
-            ApiInstanceRuntimeState {
-                run_state: State::Creating,
-                sled_uuid: uuid::Uuid::new_v4(),
-                gen: ApiGeneration::new(),
-                time_updated: Utc::now(),
-            }
-        )
+        InstanceState::new(ApiInstanceRuntimeState {
+            run_state: State::Creating,
+            sled_uuid: uuid::Uuid::new_v4(),
+            gen: ApiGeneration::new(),
+            time_updated: Utc::now(),
+        })
     }
 
     fn verify_state(
         instance: &InstanceState,
         expected_current: State,
-        expected_desired: Option<Requested>
+        expected_desired: Option<Requested>,
     ) {
         assert_eq!(expected_current, instance.current().run_state);
         match expected_desired {
             Some(desired) => {
-                assert_eq!(desired, instance.desired().as_ref().unwrap().run_state);
+                assert_eq!(
+                    desired,
+                    instance.desired().as_ref().unwrap().run_state
+                );
             }
             None => assert!(instance.desired().is_none()),
         }
@@ -294,7 +296,10 @@ mod test {
         let mut instance = make_instance();
 
         verify_state(&instance, State::Creating, None);
-        assert_eq!(Action::Run, instance.request_transition(Requested::Running).unwrap().unwrap());
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
         verify_state(&instance, State::Starting, Some(Requested::Running));
     }
 
@@ -302,14 +307,20 @@ mod test {
     async fn test_reboot() {
         let mut instance = make_instance();
 
-        assert_eq!(Action::Run, instance.request_transition(Requested::Running).unwrap().unwrap());
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
 
         // Normal reboot behavior:
         // - Request Reboot
         // - Observe Stopping, Starting, Running
-        assert_eq!(Action::Reboot, instance.request_transition(Requested::Reboot).unwrap().unwrap());
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
         assert_eq!(None, instance.observe_transition(&Observed::Stopping));
@@ -326,7 +337,10 @@ mod test {
     async fn test_reboot_skip_starting_converges_to_running() {
         let mut instance = make_instance();
 
-        assert_eq!(Action::Run, instance.request_transition(Requested::Running).unwrap().unwrap());
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
 
@@ -334,7 +348,10 @@ mod test {
         // - Request Reboot
         // - Observe Stopping, jump immediately to Running.
         // - Ultimately, we should still end up "running".
-        assert_eq!(Action::Reboot, instance.request_transition(Requested::Reboot).unwrap().unwrap());
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
         assert_eq!(None, instance.observe_transition(&Observed::Stopping));
@@ -348,7 +365,10 @@ mod test {
     async fn test_reboot_skip_stopping_converges_to_running() {
         let mut instance = make_instance();
 
-        assert_eq!(Action::Run, instance.request_transition(Requested::Running).unwrap().unwrap());
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
 
@@ -356,7 +376,10 @@ mod test {
         // - Request Reboot
         // - Observe Starting then Running.
         // - Ultimately, we should still end up "running".
-        assert_eq!(Action::Reboot, instance.request_transition(Requested::Reboot).unwrap().unwrap());
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
         assert_eq!(None, instance.observe_transition(&Observed::Starting));
@@ -370,9 +393,15 @@ mod test {
     async fn test_destroy_from_running_stops_first() {
         let mut instance = make_instance();
         assert_eq!(None, instance.observe_transition(&Observed::Running));
-        assert_eq!(Action::Stop, instance.request_transition(Requested::Destroyed).unwrap().unwrap());
+        assert_eq!(
+            Action::Stop,
+            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+        );
         verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
-        assert_eq!(Action::Destroy, instance.observe_transition(&Observed::Stopped).unwrap());
+        assert_eq!(
+            Action::Destroy,
+            instance.observe_transition(&Observed::Stopped).unwrap()
+        );
         verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
     }
 
@@ -380,7 +409,10 @@ mod test {
     async fn test_destroy_from_stopped_destroys_immediately() {
         let mut instance = make_instance();
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
-        assert_eq!(Action::Destroy, instance.request_transition(Requested::Destroyed).unwrap().unwrap());
+        assert_eq!(
+            Action::Destroy,
+            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+        );
         verify_state(&instance, State::Destroyed, None);
     }
 }

@@ -339,7 +339,9 @@ impl Instance {
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
         let mut inner = self.internal.lock().await;
-        if let Some(action) = inner.state.request_transition(target.run_state)? {
+        if let Some(action) =
+            inner.state.request_transition(target.run_state)?
+        {
             info!(
                 &inner.log,
                 "transition to {:?}; action: {:#?}", target, action
