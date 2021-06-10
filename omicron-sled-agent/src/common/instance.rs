@@ -9,11 +9,15 @@ use omicron_common::model::ApiInstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    /// Update the VM state to cause it to run.
     Run,
+    /// Update the VM state to cause it to stop.
     Stop,
+    /// Invoke a reboot of the VM.
     Reboot,
+    /// Terminate the VM and associated service.
     Destroy,
 }
 
@@ -33,17 +37,44 @@ fn propolis_to_omicron_state(
     }
 }
 
+fn get_next_desired_state(
+    observed: &PropolisInstanceState,
+    requested: ApiInstanceStateRequested,
+) -> Option<ApiInstanceStateRequested> {
+    use ApiInstanceStateRequested as Requested;
+    use PropolisInstanceState as Observed;
+
+    match (requested, observed) {
+        (Requested::Running, Observed::Running) => None,
+        (Requested::Stopped, Observed::Stopped) => None,
+        (Requested::Destroyed, Observed::Destroyed) => None,
+
+        // Reboot requests.
+        // - "Stopping" is an expected state on the way to rebooting.
+        // - "Starting" expects "Running" to occur next.
+        // - Other observed states stop the expected transitions.
+        (Requested::Reboot, Observed::Stopping) => Some(requested),
+        (Requested::Reboot, Observed::Starting) => Some(Requested::Running),
+        (Requested::Reboot, _) => None,
+
+        (_, _) => Some(requested),
+    }
+}
+
 /// The instance state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
 #[derive(Clone, Debug)]
 pub struct InstanceState {
+    // Last known state reported from Propolis.
     current: ApiInstanceRuntimeState,
-    pending: Option<ApiInstanceRuntimeStateRequested>,
+
+    // Desired state, which we will attempt to poke the VM towards.
+    desired: Option<ApiInstanceRuntimeStateRequested>,
 }
 
 impl InstanceState {
     pub fn new(current: ApiInstanceRuntimeState) -> Self {
-        InstanceState { current, pending: None }
+        InstanceState { current, desired: None }
     }
 
     /// Returns the current instance state.
@@ -51,9 +82,9 @@ impl InstanceState {
         &self.current
     }
 
-    /// Returns the pending (desired) instance state, if any exists.
-    pub fn pending(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
-        &self.pending
+    /// Returns the desired (desired) instance state, if any exists.
+    pub fn desired(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
+        &self.desired
     }
 
     /// Update the known state of an instance based on an observed state from
@@ -62,26 +93,27 @@ impl InstanceState {
         &mut self,
         observed: &PropolisInstanceState,
     ) -> Option<Action> {
-        if matches!(self.current.run_state, ApiInstanceState::Rebooting) {
-            match observed {
-                PropolisInstanceState::Stopping
-                | PropolisInstanceState::Stopped => {
-                    // No-op; these cases are covered by "rebooting".
-                    return None;
-                }
-                PropolisInstanceState::Starting => {
-                    self.transition(
-                        propolis_to_omicron_state(observed),
-                        Some(ApiInstanceStateRequested::Running),
-                    );
-                    return None;
-                }
-                _ => {}
-            }
-        }
+        use ApiInstanceState as State;
+        use ApiInstanceStateRequested as Requested;
 
-        self.transition(propolis_to_omicron_state(observed), None);
-        None
+        let current = propolis_to_omicron_state(observed);
+        let desired = self
+            .desired
+            .as_ref()
+            .and_then(|s| get_next_desired_state(&observed, s.run_state));
+
+        self.transition(current, desired);
+
+        // Most commands to update Propolis are triggered via requests (from
+        // Nexus), but if the instance reports that it has been destroyed,
+        // we should clean it up.
+        match (current, desired) {
+            (State::Destroyed, _)
+            | (State::Stopped, Some(Requested::Destroyed)) => {
+                Some(Action::Destroy)
+            }
+            _ => None,
+        }
     }
 
     /// Attempts to move from the current state to the requested "target" state.
@@ -90,9 +122,9 @@ impl InstanceState {
     /// out this state transition.
     pub fn request_transition(
         &mut self,
-        target: &ApiInstanceRuntimeStateRequested,
+        target: ApiInstanceStateRequested,
     ) -> Result<Option<Action>, ApiError> {
-        match target.run_state {
+        match target {
             ApiInstanceStateRequested::Running => self.request_running(),
             ApiInstanceStateRequested::Stopped => self.request_stopped(),
             ApiInstanceStateRequested::Reboot => self.request_reboot(),
@@ -107,16 +139,15 @@ impl InstanceState {
     fn transition(
         &mut self,
         next: ApiInstanceState,
-        pending: Option<ApiInstanceStateRequested>,
+        desired: Option<ApiInstanceStateRequested>,
     ) {
-        // TODO: Deal with no-op transition?
         self.current = ApiInstanceRuntimeState {
             run_state: next,
             sled_uuid: self.current.sled_uuid,
             gen: self.current.gen.next(),
             time_updated: Utc::now(),
         };
-        self.pending = pending
+        self.desired = desired
             .map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
     }
 
@@ -194,7 +225,7 @@ impl InstanceState {
             ApiInstanceState::Starting | ApiInstanceState::Running => {
                 self.transition(
                     ApiInstanceState::Rebooting,
-                    Some(ApiInstanceStateRequested::Running),
+                    Some(ApiInstanceStateRequested::Reboot),
                 );
                 return Ok(Some(Action::Reboot));
             }
@@ -221,5 +252,167 @@ impl InstanceState {
             );
             return Ok(Some(Action::Stop));
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{Action, InstanceState};
+    use chrono::Utc;
+    use omicron_common::model::{
+        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState as State,
+        ApiInstanceStateRequested as Requested,
+    };
+    use propolis_client::api::InstanceState as Observed;
+
+    fn make_instance() -> InstanceState {
+        InstanceState::new(ApiInstanceRuntimeState {
+            run_state: State::Creating,
+            sled_uuid: uuid::Uuid::new_v4(),
+            gen: ApiGeneration::new(),
+            time_updated: Utc::now(),
+        })
+    }
+
+    fn verify_state(
+        instance: &InstanceState,
+        expected_current: State,
+        expected_desired: Option<Requested>,
+    ) {
+        assert_eq!(expected_current, instance.current().run_state);
+        match expected_desired {
+            Some(desired) => {
+                assert_eq!(
+                    desired,
+                    instance.desired().as_ref().unwrap().run_state
+                );
+            }
+            None => assert!(instance.desired().is_none()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_running_from_creating() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+    }
+
+    #[tokio::test]
+    async fn test_reboot() {
+        let mut instance = make_instance();
+
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+
+        // Normal reboot behavior:
+        // - Request Reboot
+        // - Observe Stopping, Starting, Running
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Stopping));
+        verify_state(&instance, State::Stopping, Some(Requested::Reboot));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Starting));
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+    }
+
+    #[tokio::test]
+    async fn test_reboot_skip_starting_converges_to_running() {
+        let mut instance = make_instance();
+
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+
+        // Unexpected reboot behavior:
+        // - Request Reboot
+        // - Observe Stopping, jump immediately to Running.
+        // - Ultimately, we should still end up "running".
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Stopping));
+        verify_state(&instance, State::Stopping, Some(Requested::Reboot));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+    }
+
+    #[tokio::test]
+    async fn test_reboot_skip_stopping_converges_to_running() {
+        let mut instance = make_instance();
+
+        assert_eq!(
+            Action::Run,
+            instance.request_transition(Requested::Running).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+
+        // Unexpected reboot behavior:
+        // - Request Reboot
+        // - Observe Starting then Running.
+        // - Ultimately, we should still end up "running".
+        assert_eq!(
+            Action::Reboot,
+            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Starting));
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+    }
+
+    #[tokio::test]
+    async fn test_destroy_from_running_stops_first() {
+        let mut instance = make_instance();
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        assert_eq!(
+            Action::Stop,
+            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
+        assert_eq!(
+            Action::Destroy,
+            instance.observe_transition(&Observed::Stopped).unwrap()
+        );
+        verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
+    }
+
+    #[tokio::test]
+    async fn test_destroy_from_stopped_destroys_immediately() {
+        let mut instance = make_instance();
+        assert_eq!(None, instance.observe_transition(&Observed::Stopped));
+        assert_eq!(
+            Action::Destroy,
+            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+        );
+        verify_state(&instance, State::Destroyed, None);
     }
 }
