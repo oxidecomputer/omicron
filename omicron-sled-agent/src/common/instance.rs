@@ -82,7 +82,7 @@ impl InstanceState {
         &self.current
     }
 
-    /// Returns the desired (desired) instance state, if any exists.
+    /// Returns the desired instance state, if any exists.
     pub fn desired(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
         &self.desired
     }
@@ -291,8 +291,8 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn test_running_from_creating() {
+    #[test]
+    fn test_running_from_creating() {
         let mut instance = make_instance();
 
         verify_state(&instance, State::Creating, None);
@@ -303,8 +303,8 @@ mod test {
         verify_state(&instance, State::Starting, Some(Requested::Running));
     }
 
-    #[tokio::test]
-    async fn test_reboot() {
+    #[test]
+    fn test_reboot() {
         let mut instance = make_instance();
 
         assert_eq!(
@@ -333,8 +333,8 @@ mod test {
         verify_state(&instance, State::Running, None);
     }
 
-    #[tokio::test]
-    async fn test_reboot_skip_starting_converges_to_running() {
+    #[test]
+    fn test_reboot_skip_starting_converges_to_running() {
         let mut instance = make_instance();
 
         assert_eq!(
@@ -361,8 +361,8 @@ mod test {
         verify_state(&instance, State::Running, None);
     }
 
-    #[tokio::test]
-    async fn test_reboot_skip_stopping_converges_to_running() {
+    #[test]
+    fn test_reboot_skip_stopping_converges_to_running() {
         let mut instance = make_instance();
 
         assert_eq!(
@@ -389,8 +389,8 @@ mod test {
         verify_state(&instance, State::Running, None);
     }
 
-    #[tokio::test]
-    async fn test_destroy_from_running_stops_first() {
+    #[test]
+    fn test_destroy_from_running_stops_first() {
         let mut instance = make_instance();
         assert_eq!(None, instance.observe_transition(&Observed::Running));
         assert_eq!(
@@ -405,8 +405,8 @@ mod test {
         verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
     }
 
-    #[tokio::test]
-    async fn test_destroy_from_stopped_destroys_immediately() {
+    #[test]
+    fn test_destroy_from_stopped_destroys_immediately() {
         let mut instance = make_instance();
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
         assert_eq!(
