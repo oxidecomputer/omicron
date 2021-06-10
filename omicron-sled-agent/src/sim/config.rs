@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 /**
- * How a [`SledAgent`](`super::SledAgent`) simulates object states and
+ * How a [`SledAgent`](`super::sled_agent::SledAgent`) simulates object states and
  * transitions
  */
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]

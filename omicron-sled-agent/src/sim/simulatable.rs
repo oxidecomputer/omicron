@@ -76,11 +76,11 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     ) -> Result<Option<Self::Action>, ApiError>;
 
     /// Updates the state in response to an update within the simulated
-    /// resource: whatever state was "pending" is observed immediately.
+    /// resource: whatever state was "desired" is observed immediately.
     ///
     /// Returns any actions that should be taken by the Sled Agent to continue
     /// altering the resource into a desired state.
-    fn execute_pending_transition(&mut self) -> Option<Self::Action>;
+    fn execute_desired_transition(&mut self) -> Option<Self::Action>;
 
     /// Returns the generation number for the current state.
     fn generation(&self) -> ApiGeneration;
@@ -88,8 +88,11 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// Returns the current state.
     fn current(&self) -> &Self::CurrentState;
 
-    /// Returns the "pending" (desired) state, if one exists.
-    fn pending(&self) -> &Option<Self::RequestedState>;
+    /// Returns the "desired" state, if one exists.
+    ///
+    /// If this returns None, either no state was requested, or the desired
+    /// state has been reached.
+    fn desired(&self) -> &Option<Self::RequestedState>;
 
     /// Returns true if the state `current` is a terminal state representing that
     /// the object has been destroyed.

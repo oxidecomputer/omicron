@@ -40,20 +40,20 @@ impl Simulatable for SimInstance {
         &mut self,
         target: &ApiInstanceRuntimeStateRequested,
     ) -> Result<Option<InstanceAction>, ApiError> {
-        self.state.request_transition(target)
+        self.state.request_transition(target.run_state)
     }
 
-    fn execute_pending_transition(&mut self) -> Option<InstanceAction> {
+    fn execute_desired_transition(&mut self) -> Option<InstanceAction> {
         if matches!(self.state.current().run_state, ApiInstanceState::Rebooting)
         {
             self.state.observe_transition(&PropolisInstanceState::Starting)
-        } else if let Some(pending) = self.state.pending() {
+        } else if let Some(desired) = self.state.desired() {
             // These operations would typically be triggered via responses from
             // Propolis, but for a simulated sled agent, this does not exist.
             //
             // Instead, we make transitions to new states based entirely on the
-            // value of "pending".
-            let observed = match pending.run_state {
+            // value of "desired".
+            let observed = match desired.run_state {
                 ApiInstanceStateRequested::Running => {
                     PropolisInstanceState::Running
                 }
@@ -63,7 +63,7 @@ impl Simulatable for SimInstance {
                 ApiInstanceStateRequested::Destroyed => {
                     PropolisInstanceState::Destroyed
                 }
-                _ => panic!("Unexpected pending state: {}", pending.run_state),
+                _ => panic!("Unexpected desired state: {}", desired.run_state),
             };
             self.state.observe_transition(&observed)
         } else {
@@ -79,8 +79,8 @@ impl Simulatable for SimInstance {
         self.state.current()
     }
 
-    fn pending(&self) -> &Option<Self::RequestedState> {
-        self.state.pending()
+    fn desired(&self) -> &Option<Self::RequestedState> {
+        self.state.desired()
     }
 
     fn ready_to_destroy(&self) -> bool {
