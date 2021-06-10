@@ -34,7 +34,7 @@ impl DiskState {
         &self.current
     }
 
-    /// Returns the desired (desired) disk state, if any exists.
+    /// Returns the desired disk state, if any exists.
     pub fn desired(&self) -> &Option<ApiDiskStateRequested> {
         &self.desired
     }
