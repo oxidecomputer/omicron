@@ -151,15 +151,16 @@ impl InstanceInternal {
         let action = self.state.observe_transition(&state);
         info!(self.log, "Next recommended action: {:?}", action);
 
+        // Take the next action, if any.
+        if let Some(action) = action {
+            self.take_action(action).await?;
+        }
+
         // Notify Nexus of the state change.
         self.nexus_client
             .notify_instance_updated(&self.properties.id, self.state.current())
             .await?;
 
-        // Take the next action, if any.
-        if let Some(action) = action {
-            self.take_action(action).await?;
-        }
         Ok(())
     }
 
@@ -215,7 +216,7 @@ impl Instance {
         initial_runtime: ApiInstanceRuntimeState,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, ApiError> {
-        // TODO: Launch in a Zone?
+        // TODO: Launch in a Zone.
 
         // Launch a new SMF service running Propolis.
         let manifest = "/opt/oxide/propolis-server/pkg/manifest.xml";
@@ -338,7 +339,7 @@ impl Instance {
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
         let mut inner = self.internal.lock().await;
-        if let Some(action) = inner.state.request_transition(&target)? {
+        if let Some(action) = inner.state.request_transition(target.run_state)? {
             info!(
                 &inner.log,
                 "transition to {:?}; action: {:#?}", target, action

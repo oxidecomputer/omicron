@@ -45,7 +45,7 @@ impl SledAgent {
         initial_runtime: ApiInstanceRuntimeState,
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        info!(&self.log, "instance_ensure {} -> {:#?}", instance_id, target);
+        info!(&self.log, "instance_ensure {} -> {:?}", instance_id, target);
         let mut instances = self.instances.lock().await;
 
         let instance = {

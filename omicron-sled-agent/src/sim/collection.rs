@@ -106,7 +106,7 @@ impl<S: Simulatable> SimObject<S> {
         &mut self,
         target: S::RequestedState,
     ) -> Result<Option<S::RequestedState>, ApiError> {
-        let dropped = self.object.pending().clone();
+        let dropped = self.object.desired().clone();
         let old_gen = self.object.generation();
         let action = self.object.request_transition(&target)?;
         if old_gen == self.object.generation() {
@@ -118,7 +118,7 @@ impl<S: Simulatable> SimObject<S> {
             "target" => ?target,
             "dropped" => ?dropped,
             "current" => ?self.object.current(),
-            "pending" => ?self.object.pending(),
+            "desired" => ?self.object.desired(),
             "action" => ?action,
         );
 
@@ -143,7 +143,7 @@ impl<S: Simulatable> SimObject<S> {
          *     could identify this case at compile time (e.g., using an enum),
          *     but that's not currently the case.
          */
-        if self.object.pending().is_some() {
+        if self.object.desired().is_some() {
             if let Some(ref mut tx) = self.channel_tx {
                 let result = tx.try_send(());
                 if let Err(error) = result {
@@ -158,13 +158,13 @@ impl<S: Simulatable> SimObject<S> {
 
     fn transition_finish(&mut self) {
         let current = self.object.current().clone();
-        let pending = self.object.pending().clone();
-        let action = self.object.execute_pending_transition();
+        let desired = self.object.desired().clone();
+        let action = self.object.execute_desired_transition();
         info!(self.log, "simulated transition finish";
             "state_before" => ?current,
-            "requested_state" => ?pending,
+            "requested_state" => ?desired,
             "state_after" => ?self.object.current(),
-            "pending_after" => ?self.object.pending(),
+            "desired_after" => ?self.object.desired(),
             "action" => ?action,
         );
     }
@@ -218,7 +218,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     }
 
     /**
-     * Complete a pending asynchronous state transition for object `id`.
+     * Complete a desired asynchronous state transition for object `id`.
      * This is invoked either by `sim_step()` (if the simulation mode is
      * `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
      * is `SimMode::Api).
@@ -229,7 +229,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
              * The object must be present in `objects` because it only gets
              * removed when it comes to rest in the "Destroyed" state, but we
              * can only get here if there's an asynchronous state transition
-             * pending.
+             * desired.
              *
              * We do as little as possible with the lock held.  In particular,
              * we want to finish this work before calling out to notify the
@@ -239,7 +239,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             let mut object = objects.remove(&id).unwrap();
             object.transition_finish();
             let after = object.object.current().clone();
-            if object.object.pending().is_none()
+            if object.object.desired().is_none()
                 && object.object.ready_to_destroy()
             {
                 (after, Some(object))
@@ -391,9 +391,9 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
         assert_eq!(&r1.run_state, &instance.object.current().run_state);
         assert_eq!(r1.gen, instance.object.current().gen);
@@ -417,7 +417,7 @@ mod test {
                 })
                 .unwrap();
             assert!(dropped.is_none());
-            assert!(instance.object.pending().is_none());
+            assert!(instance.object.desired().is_none());
             let rnext = instance.object.current().clone();
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
@@ -455,9 +455,9 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
         assert_eq!(&r1.run_state, &instance.object.current().run_state);
         assert_eq!(r1.gen, instance.object.current().gen);
@@ -475,7 +475,7 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.object.pending().is_some());
+        assert!(instance.object.desired().is_some());
         assert!(rx.try_next().is_ok());
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
@@ -488,7 +488,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
         assert_eq!(rprev.run_state, ApiInstanceState::Starting);
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
@@ -508,7 +508,7 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
@@ -528,7 +528,7 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.object.pending().is_some());
+        assert!(instance.object.desired().is_some());
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
@@ -540,7 +540,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
@@ -564,9 +564,9 @@ mod test {
          * There's no asynchronous transition going on yet so a
          * transition_finish() shouldn't change anything.
          */
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
         assert_eq!(&r1.run_state, &instance.object.current().run_state);
         assert_eq!(r1.gen, instance.object.current().gen);
@@ -591,7 +591,7 @@ mod test {
             })
             .unwrap();
         assert!(dropped.is_none());
-        assert!(instance.object.pending().is_some());
+        assert!(instance.object.desired().is_some());
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
@@ -624,7 +624,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
         assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
         rprev = rnext;
@@ -685,7 +685,7 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
-        assert!(instance.object.pending().is_some());
+        assert!(instance.object.desired().is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
 
@@ -697,13 +697,13 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Starting);
-        assert!(instance.object.pending().is_some());
+        assert!(instance.object.desired().is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
 
         /*
          * Begin a reboot.  Then, while it's still "Stopping", begin another
@@ -732,7 +732,7 @@ mod test {
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
@@ -767,7 +767,7 @@ mod test {
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
@@ -810,7 +810,7 @@ mod test {
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rnext.run_state, ApiInstanceState::Running);
-        assert!(instance.object.pending().is_none());
+        assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert_eq!(rprev.gen, rnext.gen);
@@ -832,7 +832,7 @@ mod test {
      * is implemented in `SimObject`, common to both.  So we don't bother
      * verifying dropped state, messages sent to the background task, or some
      * sanity checks around completion of async transitions when none is
-     * pending.
+     * desired.
      */
     #[tokio::test]
     async fn test_sim_disk_transition_to_detached_states() {

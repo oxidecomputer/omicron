@@ -21,12 +21,12 @@ pub enum Action {
 #[derive(Clone, Debug)]
 pub struct DiskState {
     current: ApiDiskRuntimeState,
-    pending: Option<ApiDiskStateRequested>,
+    desired: Option<ApiDiskStateRequested>,
 }
 
 impl DiskState {
     pub fn new(current: ApiDiskRuntimeState) -> Self {
-        DiskState { current, pending: None }
+        DiskState { current, desired: None }
     }
 
     /// Returns the current disk state.
@@ -34,9 +34,9 @@ impl DiskState {
         &self.current
     }
 
-    /// Returns the pending (desired) disk state, if any exists.
-    pub fn pending(&self) -> &Option<ApiDiskStateRequested> {
-        &self.pending
+    /// Returns the desired (desired) disk state, if any exists.
+    pub fn desired(&self) -> &Option<ApiDiskStateRequested> {
+        &self.desired
     }
 
     /// Update the known state of a disk based on an observed state from
@@ -78,7 +78,7 @@ impl DiskState {
     fn transition(
         &mut self,
         next: ApiDiskState,
-        pending: Option<ApiDiskStateRequested>,
+        desired: Option<ApiDiskStateRequested>,
     ) {
         // TODO: Deal with no-op transition?
         self.current = ApiDiskRuntimeState {
@@ -86,7 +86,7 @@ impl DiskState {
             gen: self.current.gen.next(),
             time_updated: Utc::now(),
         };
-        self.pending = pending;
+        self.desired = desired;
     }
 
     fn request_detach(&mut self) -> Result<Option<Action>, ApiError> {

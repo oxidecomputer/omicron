@@ -43,14 +43,14 @@ impl Simulatable for SimDisk {
         self.state.request_transition(target)
     }
 
-    fn execute_pending_transition(&mut self) -> Option<DiskAction> {
-        if let Some(pending) = self.state.pending() {
+    fn execute_desired_transition(&mut self) -> Option<DiskAction> {
+        if let Some(desired) = self.state.desired() {
             // These operations would typically be triggered via responses from
             // Propolis, but for a simulated sled agent, this does not exist.
             //
             // Instead, we make transitions to new states based entirely on the
-            // value of "pending".
-            let observed = match pending {
+            // value of "desired".
+            let observed = match desired {
                 ApiDiskStateRequested::Attached(uuid) => {
                     PropolisDiskState::Attached(*uuid)
                 }
@@ -74,8 +74,8 @@ impl Simulatable for SimDisk {
         self.state.current()
     }
 
-    fn pending(&self) -> &Option<Self::RequestedState> {
-        self.state.pending()
+    fn desired(&self) -> &Option<Self::RequestedState> {
+        self.state.desired()
     }
 
     fn ready_to_destroy(&self) -> bool {
