@@ -13,9 +13,7 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use omicron_common::backoff;
-use omicron_common::model::{
-    OximeterStartupInfo, ProducerEndpoint, ProducerId,
-};
+use omicron_common::model::{OximeterStartupInfo, ProducerEndpoint};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, trace, warn, Logger};
@@ -49,13 +47,13 @@ async fn collection_task(
     outbox: mpsc::Sender<ProducerResults>,
 ) {
     let client = Client::new();
-    let mut collection_timer = interval(*producer.interval());
+    let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
     debug!(
         log,
         "starting oximeter collection task";
         "collector_id" => ?id,
-        "interval" => ?producer.interval(),
+        "interval" => ?producer.interval,
     );
     loop {
         tokio::select! {
@@ -99,9 +97,9 @@ async fn collection_task(
                     log,
                     "collecting from producer";
                     "collector_id" => ?id,
-                    "producer_id" => ?producer.producer_id().producer_id,
+                    "producer_id" => ?producer.id,
                 );
-                let res = client.get(format!("http://{}{}", producer.address(), producer.collection_route()))
+                let res = client.get(format!("http://{}{}", producer.address, producer.collection_route()))
                     .send()
                     .await;
                 match res {
@@ -113,7 +111,7 @@ async fn collection_task(
                                     "collected {} total results",
                                     results.len();
                                     "collector_id" => ?id,
-                                    "producer_id" => ?producer.producer_id().producer_id,
+                                    "producer_id" => ?producer.id,
                                 );
                                 outbox.send(results).await.unwrap();
                             },
@@ -123,7 +121,7 @@ async fn collection_task(
                                     "failed to collect results from producer: {}",
                                     e.to_string();
                                     "collector_id" => ?id,
-                                    "producer_id" => ?producer.producer_id().producer_id,
+                                    "producer_id" => ?producer.id,
                                 );
                             }
                         }
@@ -134,7 +132,7 @@ async fn collection_task(
                             "failed to send collection request to producer: {}",
                             e.to_string();
                             "collector_id" => ?id,
-                            "producer_id" => ?producer.producer_id().producer_id,
+                            "producer_id" => ?producer.id,
                         );
                     }
                 }
@@ -245,7 +243,7 @@ struct OximeterAgent {
     // Handle to the TX-side of a channel for collecting results from the collection tasks
     result_sender: mpsc::Sender<ProducerResults>,
     // The actual tokio tasks running the collection on a timer.
-    collection_tasks: Arc<Mutex<BTreeMap<ProducerId, CollectionTask>>>,
+    collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTask>>>,
 }
 
 impl OximeterAgent {
@@ -287,12 +285,12 @@ impl OximeterAgent {
         &self,
         info: ProducerEndpoint,
     ) -> Result<(), Error> {
-        let id = info.producer_id();
+        let id = info.id;
         match self.collection_tasks.lock().unwrap().entry(id) {
             Entry::Vacant(value) => {
                 info!(self.log, "registered new metric producer";
-                      "producer_id" => info.producer_id().to_string(),
-                      "address" => info.address(),
+                      "producer_id" => id.to_string(),
+                      "address" => info.address,
                 );
 
                 // Build channel to control the task and receive results.

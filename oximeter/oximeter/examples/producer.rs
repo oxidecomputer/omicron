@@ -88,8 +88,12 @@ async fn main() {
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
     let registration_info =
         RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
-    let server_info =
-        ProducerEndpoint::new(address, "/collect", Duration::from_secs(10));
+    let server_info = ProducerEndpoint {
+        id: Uuid::new_v4().into(),
+        address,
+        base_route: "/collect".to_string(),
+        interval: Duration::from_secs(10),
+    };
     let config = ProducerServerConfig {
         server_info,
         registration_info,
