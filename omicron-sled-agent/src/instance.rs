@@ -113,25 +113,6 @@ async fn wait_for_http_server(
     }
 }
 
-fn instance_action_to_request(
-    action: &InstanceAction,
-) -> propolis_client::api::InstanceStateRequested {
-    match action {
-        InstanceAction::Run => {
-            propolis_client::api::InstanceStateRequested::Run
-        }
-        InstanceAction::Stop => {
-            propolis_client::api::InstanceStateRequested::Stop
-        }
-        InstanceAction::Reboot => {
-            propolis_client::api::InstanceStateRequested::Reboot
-        }
-        InstanceAction::Destroy => {
-            propolis_client::api::InstanceStateRequested::Stop
-        }
-    }
-}
-
 struct InstanceInternal {
     log: Logger,
     properties: propolis_client::api::InstanceProperties,
@@ -193,11 +174,26 @@ impl InstanceInternal {
         action: InstanceAction,
     ) -> Result<(), ApiError> {
         info!(self.log, "Taking action: {:#?}", action);
-        self.propolis_state_put(instance_action_to_request(&action)).await?;
-        if matches!(action, InstanceAction::Destroy) {
-            info!(self.log, "Finished taking DESTROY (stop) action");
-            // TODO: Need a way to clean up
-        }
+        let requested_state = match action {
+            InstanceAction::Run => {
+                propolis_client::api::InstanceStateRequested::Run
+            },
+            InstanceAction::Stop => {
+                propolis_client::api::InstanceStateRequested::Stop
+            },
+            InstanceAction::Reboot => {
+                propolis_client::api::InstanceStateRequested::Reboot
+            },
+            InstanceAction::Destroy => {
+                // Unlike the other actions, which update the Propolis state,
+                // the "destroy" action indicates that the service should be
+                // terminated.
+                info!(self.log, "Finished taking DESTROY (stop) action");
+                // TODO: Need a way to clean up
+                return Ok(());
+            },
+        };
+        self.propolis_state_put(requested_state).await?;
         Ok(())
     }
 }
