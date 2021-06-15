@@ -210,6 +210,41 @@ CREATE TABLE omicron.public.Sled (
     sled_agent_ip INET
 );
 
+/*
+ * Oximeter collector servers.
+ */
+CREATE TABLE omicron.public.Oximeter (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    ip INET NOT NULL,
+    port INT4 NOT NULL
+);
+
+/*
+ * Information about registered metric producers.
+ */
+CREATE TABLE omicron.public.MetricProducer (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    ip INET NOT NULL,
+    port INT4 NOT NULL,
+    interval FLOAT NOT NULL,
+    /* TODO: Is this length appropriate? */
+    route STRING(512)
+);
+
+/*
+ * Assignment of producers to oximeter collectors
+ */
+CREATE TABLE omicron.public.OximeterAssignment (
+    oximeter_id UUID NOT NULL REFERENCES omicron.public.Oximeter (id) ON DELETE CASCADE,
+    producer_id UUID NOT NULL REFERENCES omicron.public.MetricProducer (id) ON DELETE CASCADE,
+    time_created TIMESTAMPTZ NOT NULL,
+    CONSTRAINT "primary" PRIMARY KEY (oximeter_id, producer_id)
+);
+
 /*******************************************************************/
 
 /*

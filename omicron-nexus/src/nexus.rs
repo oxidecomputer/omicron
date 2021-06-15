@@ -41,6 +41,7 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
+use omicron_common::model::OximeterInfo;
 use omicron_common::model::ProducerEndpoint;
 use omicron_common::model::UpdateResult;
 use omicron_common::OximeterClient;
@@ -200,15 +201,27 @@ impl Nexus {
      */
     pub async fn upsert_oximeter_collector(
         &self,
-        collector: Arc<OximeterClient>,
-    ) {
+        oximeter_info: &OximeterInfo,
+    ) -> Result<(), ApiError> {
+        // Insert into the DB
+        self.db_datastore.oximeter_create(oximeter_info).await?;
+
+        let id = oximeter_info.collector_id;
+        let client_log =
+            self.log.new(o!("oximeter-collector" => id.to_string()));
+        let client = Arc::new(OximeterClient::new(
+            oximeter_info.collector_id,
+            oximeter_info.address,
+            client_log,
+        ));
         let mut clients = self.oximeter_collectors.lock().await;
         info!(
             self.log,
             "registered oximeter collector client";
-            "id" => collector.id.to_string(),
+            "id" => id.to_string(),
         );
-        clients.insert(collector.id, collector);
+        clients.insert(id, client);
+        Ok(())
     }
 
     pub fn datastore(&self) -> &db::DataStore {
@@ -1239,8 +1252,12 @@ impl Nexus {
         &self,
         producer_info: ProducerEndpoint,
     ) -> Result<(), ApiError> {
+        self.db_datastore.producer_endpoint_create(&producer_info).await?;
         let collector = self.next_collector().await?;
         collector.register_producer(&producer_info).await?;
+        self.db_datastore
+            .oximeter_assignment_create(collector.id, producer_info.id)
+            .await?;
         info!(
             self.log,
             "assigned collector to new producer";

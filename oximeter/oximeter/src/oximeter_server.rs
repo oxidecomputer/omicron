@@ -13,7 +13,7 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use omicron_common::backoff;
-use omicron_common::model::{OximeterStartupInfo, ProducerEndpoint};
+use omicron_common::model::{OximeterInfo, ProducerEndpoint};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, trace, warn, Logger};
@@ -391,7 +391,7 @@ impl Oximeter {
                     "http://{}/metrics/collectors",
                     config.nexus_address
                 ))
-                .json(&OximeterStartupInfo {
+                .json(&OximeterInfo {
                     address: server.local_addr(),
                     collector_id: agent.id,
                 })
