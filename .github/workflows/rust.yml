@@ -95,16 +95,21 @@ jobs:
       with:
         key: ${{ runner.os }}-cockroach-binary-v2
         path: "cockroachdb"
-    - name: Install ClickHouse
-      # Workflow environment variables are not propagated to the script by default
-      run: sudo CI=$CI ./tools/ci_download_clickhouse
+    - name: Configure GitHub cache for ClickHouse binaries
+      id: cache-clickhouse
+      # actions/cache@v2.1.4
+      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
+      with:
+        key: ${{ runner.os }}-clickhouse-binary
+        path: "clickhouse"
     - name: Build
       run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+    - name: Download ClickHouse
+      if: steps.cache-clickhouse.outputs.cache-hit != 'true'
+      run: ./tools/ci_download_clickhouse
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
-      # Put "./cockroachdb/bin" on the PATH for the test suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin" cargo +${{ matrix.toolchain }} test --locked --verbose
-    - name: Run ClickHouse client tests
-      run: cargo test --locked --verbose --features clickhouse-tests --package oximeter -- --test-threads 1 db::client
+      # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test suite.
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose

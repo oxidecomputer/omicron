@@ -56,23 +56,26 @@ See TODO.adoc for more info.
 1. CockroachDB v20.2.5.  The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.  On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.  Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
 With `cockroach` on your PATH, you can **build and run the whole test suite** with `cargo test`.  The test suite runs cleanly and should remain clean.
 
-2. ClickHouse >= v21.5.5. The test suite expects a running instance of the ClickHouse database server.
+2. ClickHouse >= v21.7.1. The test suite expects a running instance of the ClickHouse database server.
 (It currently _does not_ start the server automatically.) The script `./tools/ci_download_clickhouse`
-can be used to download and install the server on Linux platforms only. It's not currently possible
-to validate the downloaded binaries automatically on other platforms, so it must be done manually.
-Instructions can be found https://clickhouse.tech/docs/en/getting-started/install/#from-binaries-non-linux[here].
+can be used to download a pre-built binary for illumos, Linux, or macOS platforms. You may also install
+ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
-To **run Omicron** you need to run three programs:
+To **run Omicron** you need to run four programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
+* a ClickHouse server. You may use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
+the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
 
-The easiest way to start a CockroachDB cluster is to use the built in `omicron-dev` tool.  This tool assumes that the `cockroach` executable on your PATH comes from CockroachDB v20.2.5.
+The easiest way to start the required databases is to use the built in `omicron-dev` tool.
+This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH,
+and match the versions above.
 
 1. Start CockroachDB using `omicron-dev db-run`:
 +
@@ -129,7 +132,18 @@ omicron-dev: populated database
 +
 Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
 
-2. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
+2. Start the ClickHouse database server:
++
+[source,text]
+----
+$ cargo run --bin omicron-dev -- ch-run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.47s
+     Running `target/debug/omicron-dev ch-run`
+omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
+omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
+----
+
+3. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
@@ -138,11 +152,11 @@ $ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
 listening: http://127.0.0.1:12220
 ----
 
-3. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
+4. `sled-agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
