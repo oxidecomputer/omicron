@@ -14,6 +14,7 @@ pub mod sim;
 pub mod config;
 mod http_entrypoints;
 mod instance;
+mod instance_manager;
 pub mod server;
 mod sled_agent;
 

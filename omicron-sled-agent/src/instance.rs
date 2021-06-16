@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
 
+use crate::instance_manager::InstanceTicket;
 use crate::common::instance::{Action as InstanceAction, InstanceState};
 use propolis_client::Client as PropolisClient;
 
@@ -113,43 +114,77 @@ async fn wait_for_http_server(
     }
 }
 
-struct InstanceInternal {
+fn service_name() -> &'static str {
+    "svc:/system/illumos/propolis-server"
+}
+
+fn instance_name(id: &Uuid) -> String {
+    format!("vm-{}", id.to_string())
+}
+
+fn fmri_name(id: &Uuid) -> String {
+    format!("{}:{}", service_name(), instance_name(id))
+}
+
+// Action to be taken by the Sled Agent after monitoring Propolis for
+// state changes.
+enum Reaction {
+    Continue,
+    Terminate,
+}
+
+// State associated with a running instance.
+struct RunningState {
+    client: Arc<PropolisClient>,
+    ticket: InstanceTicket,
+    monitor_task: Option<JoinHandle<()>>,
+}
+
+// TODO: The things which are "Options" - is that just "running state"?
+struct InstanceInner {
     log: Logger,
     properties: propolis_client::api::InstanceProperties,
     state: InstanceState,
-    client: Arc<PropolisClient>,
     nexus_client: Arc<NexusClient>,
+    running_state: Option<RunningState>,
 }
 
-impl InstanceInternal {
+impl InstanceInner {
+    fn id(&self) -> &Uuid {
+        &self.properties.id
+    }
+
     async fn observe_state(
         &mut self,
         state: propolis_client::api::InstanceState,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Reaction, ApiError> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
         info!(self.log, "Next recommended action: {:?}", action);
 
-        // Take the next action, if any.
-        if let Some(action) = action {
-            self.take_action(action).await?;
-        }
-
         // Notify Nexus of the state change.
         self.nexus_client
             .notify_instance_updated(&self.properties.id, self.state.current())
             .await?;
 
-        Ok(())
+        if let Some(action) = action {
+            // Take the next action, if any.
+            self.take_action(action).await
+        } else {
+            Ok(Reaction::Continue)
+        }
     }
 
     async fn propolis_state_put(
         &self,
         request: propolis_client::api::InstanceStateRequested,
     ) -> Result<(), ApiError> {
-        self.client
+        self.running_state
+            .as_ref()
+            .expect("Propolis client should be initialized before usage")
+            .client
             .instance_state_put(self.properties.id, request)
             .await
             .map_err(|e| ApiError::InternalError {
@@ -161,7 +196,13 @@ impl InstanceInternal {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
         };
-        self.client.instance_ensure(&request).await.map_err(|e| {
+        self.running_state
+            .as_ref()
+            .expect("Propolis client should be initialized before usage")
+            .client
+            .instance_ensure(&request)
+            .await
+            .map_err(|e| {
             ApiError::InternalError {
                 message: format!("Failed to ensure instance: {}", e),
             }
@@ -172,7 +213,7 @@ impl InstanceInternal {
     async fn take_action(
         &self,
         action: InstanceAction,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Reaction, ApiError> {
         info!(self.log, "Taking action: {:#?}", action);
         let requested_state = match action {
             InstanceAction::Run => {
@@ -188,30 +229,61 @@ impl InstanceInternal {
                 // Unlike the other actions, which update the Propolis state,
                 // the "destroy" action indicates that the service should be
                 // terminated.
-                info!(self.log, "Finished taking DESTROY (stop) action");
-                // TODO: Need a way to clean up
-                return Ok(());
+                info!(self.log, "take_action: Taking the Destroy action");
+                return Ok(Reaction::Terminate);
             },
         };
         self.propolis_state_put(requested_state).await?;
-        Ok(())
+        Ok(Reaction::Continue)
     }
 }
 
-/// Describes state for a single running Propolis server.
+/// A reference to a single instance running a running Propolis server.
+///
+/// Cloning this object clones the reference - it does not create another
+/// instance.
+#[derive(Clone)]
 pub struct Instance {
-    internal: Arc<Mutex<InstanceInternal>>,
-    join_handle: JoinHandle<()>,
+    inner: Arc<Mutex<InstanceInner>>,
 }
 
 impl Instance {
-    /// Creates a new instance object.
-    pub async fn new(
+    /// Creates a new (not yet running) instance object.
+    pub fn new(
         log: Logger,
         id: Uuid,
         initial_runtime: ApiInstanceRuntimeState,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, ApiError> {
+        let instance = InstanceInner {
+            log: log.new(o!("instance id" => id.to_string())),
+            // TODO: Mostly lies.
+            properties: propolis_client::api::InstanceProperties {
+                id,
+                name: "Test instance".to_string(),
+                description: "Test description".to_string(),
+                image_id: Uuid::nil(),
+                bootrom_id: Uuid::nil(),
+                memory: 256,
+                vcpus: 2,
+            },
+            state: InstanceState::new(initial_runtime),
+            nexus_client,
+            running_state: None,
+        };
+
+        let inner= Arc::new(Mutex::new(instance));
+
+        Ok(Instance { inner })
+    }
+
+    /// Begins the execution of the instance's service (Propolis).
+    pub async fn start(
+        &self,
+        ticket: InstanceTicket,
+    ) -> Result<(), ApiError> {
+        let mut inner = self.inner.lock().await;
+        let log = &inner.log;
         // TODO: Launch in a Zone.
 
         // Launch a new SMF service running Propolis.
@@ -230,18 +302,15 @@ impl Instance {
             }
         })?;
 
-        let service = "svc:/system/illumos/propolis-server";
-        let instance = format!("vm-{}", id.to_string());
-        let fmri = format!("{}:{}", service, instance);
-        info!(log, "Instance::new adding service: {}", service);
-        smf::Config::add(service).run(&instance).map_err(|e| {
+        info!(log, "Instance::new adding service: {}", service_name());
+        smf::Config::add(service_name()).run(&instance_name(inner.id())).map_err(|e| {
             ApiError::InternalError {
                 message: format!("Cannot create propolis SMF service: {}", e),
             }
         })?;
 
+        let fmri = fmri_name(inner.id());
         info!(log, "Instance::new enabling FMRI: {}", fmri);
-
         // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
         // ".synchronous()", but it doesn't, because of an SMF bug.
         smf::Adm::new()
@@ -265,76 +334,124 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&log, &client).await?;
 
-        let instance = InstanceInternal {
-            log: log.new(o!("instance id" => id.to_string())),
-            // TODO: Mostly lies.
-            properties: propolis_client::api::InstanceProperties {
-                id,
-                name: "Test instance".to_string(),
-                description: "Test description".to_string(),
-                image_id: Uuid::nil(),
-                bootrom_id: Uuid::nil(),
-                memory: 256,
-                vcpus: 2,
-            },
-            state: InstanceState::new(initial_runtime),
-            client: client.clone(),
-            nexus_client,
-        };
+        inner.running_state = Some(
+            RunningState {
+                client,
+                ticket,
+                monitor_task: None,
+            }
+        );
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        instance.ensure().await?;
-
-        let internal = Arc::new(Mutex::new(instance));
+        inner.ensure().await?;
 
         // Monitor propolis for state changes in the background.
-        let internal_clone = internal.clone();
-        let join_handle: JoinHandle<()> = tokio::task::spawn(async move {
-            let r: Result<(), ApiError> = async {
-                let mut gen = 0;
-                loop {
-                    // State monitor always returns the most recent state/gen pair
-                    // known to Propolis.
-                    let response = client
-                        .instance_state_monitor(id, gen)
-                        .await
-                        .map_err(|e| ApiError::InternalError {
-                            message: format!(
-                                "Failed to monitor propolis: {}",
-                                e
-                            ),
-                        })?;
-                    internal_clone
-                        .lock()
-                        .await
-                        .observe_state(response.state)
-                        .await?;
+        let self_clone = self.clone();
+        inner.running_state.as_mut().unwrap().monitor_task =
+            Some(tokio::task::spawn(async move {
+                if let Err(e) = self_clone.monitor_state_task().await {
+                    let log = &self_clone.inner.lock().await.log;
+                    warn!(log, "State monitoring task failed: {}", e);
+                }
+            }));
 
-                    // Update the generation number we're asking for, to ensure the
-                    // Propolis will only return more recent values.
-                    gen = response.gen + 1;
+        Ok(())
+    }
+
+    // Terminate the Propolis service.
+    async fn stop(
+        &self
+    ) -> Result<(), ApiError> {
+        let mut inner = self.inner.lock().await;
+        let log = &inner.log;
+        let fmri = fmri_name(inner.id());
+
+        info!(log, "Instance::stop disabling service: {}", fmri);
+        smf::Adm::new()
+            .disable()
+            .synchronous()
+            .run(smf::AdmSelection::ByPattern(&[&fmri]))
+            .map_err(|e| ApiError::InternalError {
+                message: format!("Cannot disable propolis SMF service: {}", e),
+            })?;
+
+        info!(log, "Instance::stop deleting service: {}", fmri);
+        smf::Config::delete()
+            .run(fmri)
+            .map_err(|e| ApiError::InternalError {
+                message: format!("Cannot delete config for SMF service: {}", e),
+            })?;
+
+        info!(log, "Instance::stop removing self from instances map");
+        inner.running_state.as_mut().unwrap().ticket.terminate();
+
+        Ok(())
+    }
+
+    // Monitors propolis until explicitly told to disconnect.
+    //
+    // Intended to be spawned in a tokio task within [`Instance::start`].
+    async fn monitor_state_task(
+        &self,
+    ) -> Result<(), ApiError> {
+        // Grab the UUID and Propolis Client before we start looping, so we
+        // don't need to contend the lock to access them in steady state.
+        //
+        // They aren't modified after being initialized, so it's fine to grab
+        // a copy.
+        let (id, client) = {
+            let inner = self.inner.lock().await;
+            let id = inner.id().clone();
+            let client = inner.running_state.as_ref().unwrap().client.clone();
+            (id, client)
+        };
+
+        let mut gen = 0;
+        loop {
+            // State monitor always returns the most recent state/gen pair
+            // known to Propolis.
+            let response = client
+                .instance_state_monitor(id, gen)
+                .await
+                .map_err(|e| ApiError::InternalError {
+                    message: format!(
+                        "Failed to monitor propolis: {}",
+                        e
+                    ),
+                })?;
+           let reaction = self.inner
+                .lock()
+                .await
+                .observe_state(response.state)
+                .await?;
+
+            match reaction {
+                Reaction::Continue => {},
+                Reaction::Terminate => {
+                    return self.stop().await;
                 }
             }
-            .await;
-            if let Err(e) = r {
-                let log = &internal_clone.lock().await.log;
-                warn!(log, "State monitoring task failed: {}", e);
-            }
-        });
 
-        Ok(Instance { internal, join_handle })
+            // Update the generation number we're asking for, to ensure the
+            // Propolis will only return more recent values.
+            gen = response.gen + 1;
+        }
     }
 
     /// Transitions an instance object to a new state, taking any actions
     /// necessary to perform state transitions.
     ///
     /// Returns the new state after starting the transition.
+    ///
+    /// # Panics
+    ///
+    /// This method may panic if it has been invoked before [`Instance::start`].
     pub async fn transition(
         &self,
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        let mut inner = self.internal.lock().await;
+        let mut inner = self.inner.lock().await;
         if let Some(action) =
             inner.state.request_transition(target.run_state)?
         {
@@ -345,11 +462,5 @@ impl Instance {
             inner.take_action(action).await?;
         }
         Ok(inner.state.current().clone())
-    }
-}
-
-impl Drop for Instance {
-    fn drop(&mut self) {
-        self.join_handle.abort()
     }
 }
