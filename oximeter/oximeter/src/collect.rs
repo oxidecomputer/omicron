@@ -11,11 +11,12 @@ use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
-use omicron_common::model::{ProducerEndpoint, ProducerId};
+use omicron_common::model::ProducerEndpoint;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o};
+use uuid::Uuid;
 
 use crate::types;
 use crate::{Error, Producer};
@@ -57,7 +58,7 @@ pub type ProducerResults = Vec<Result<BTreeSet<types::Sample>, Error>>;
 #[derive(Clone)]
 pub struct Collector {
     producers: Arc<Mutex<ProducerList>>,
-    producer_id: ProducerId,
+    producer_id: Uuid,
 }
 
 impl Default for Collector {
@@ -69,11 +70,11 @@ impl Default for Collector {
 impl Collector {
     /// Construct a new `Collector`.
     pub fn new() -> Self {
-        Self::with_id(ProducerId::new())
+        Self::with_id(Uuid::new_v4())
     }
 
     /// Construct a new `Collector` with the given producer ID.
-    pub fn with_id(producer_id: ProducerId) -> Self {
+    pub fn with_id(producer_id: Uuid) -> Self {
         Self { producers: Arc::new(Mutex::new(vec![])), producer_id }
     }
 
@@ -101,7 +102,7 @@ impl Collector {
     }
 
     /// Return the producer ID associated with this collector.
-    pub fn producer_id(&self) -> ProducerId {
+    pub fn producer_id(&self) -> Uuid {
         self.producer_id
     }
 }
@@ -132,7 +133,7 @@ impl ProducerServer {
             .logging_config
             .to_logger("metric-server")
             .map_err(|msg| Error::ProducerServer(msg.to_string()))?;
-        let collector = Collector::with_id(config.server_info.producer_id());
+        let collector = Collector::with_id(config.server_info.id);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
             &config.dropshot_config,
@@ -160,7 +161,7 @@ impl ProducerServer {
             "starting oximeter metric server";
             "route" => config.server_info.collection_route(),
             "producer_id" => ?collector.producer_id(),
-            "address" => config.server_info.address(),
+            "address" => config.server_info.address,
         );
         Ok(Self { collector, server })
     }
@@ -190,6 +191,11 @@ fn metric_server_api() -> ApiDescription<Collector> {
     api
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+struct ProducerIdPathParams {
+    pub producer_id: Uuid,
+}
+
 // Implementation of the actual collection routine used by the `ProducerServer`.
 #[endpoint {
     method = GET,
@@ -197,10 +203,10 @@ fn metric_server_api() -> ApiDescription<Collector> {
 }]
 async fn collect_endpoint(
     request_context: Arc<RequestContext<Collector>>,
-    path_params: Path<ProducerId>,
+    path_params: Path<ProducerIdPathParams>,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let collector = request_context.context();
-    let producer_id = path_params.into_inner();
+    let producer_id = path_params.into_inner().producer_id;
     collect(collector, producer_id).await
 }
 
@@ -231,7 +237,7 @@ pub async fn register(
 /// Handle a request to pull available metric data from a [`Collector`].
 pub async fn collect(
     collector: &Collector,
-    producer_id: ProducerId,
+    producer_id: Uuid,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     if producer_id == collector.producer_id() {
         Ok(HttpResponseOk(collector.collect()))

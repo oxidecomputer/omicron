@@ -1244,7 +1244,7 @@ impl Nexus {
         info!(
             self.log,
             "assigned collector to new producer";
-            "producer_id" => ?producer_info.producer_id(),
+            "producer_id" => ?producer_info.id,
             "collector_id" => ?collector.id,
         );
         Ok(())
