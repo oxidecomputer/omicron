@@ -68,6 +68,10 @@ expectorate = "1.0.1"
 openapiv3 = "0.5.0"
 subprocess = "0.2.7"
 
+[dev-dependencies.oximeter]
+version = "0.1.0"
+path = "../oximeter/oximeter"
+
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

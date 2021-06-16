@@ -9,13 +9,18 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::dev;
 use omicron_common::model::ApiIdentityMetadata;
+use omicron_common::model::ProducerEndpoint;
+use slog::o;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
 use uuid::Uuid;
 
 const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
+pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
@@ -24,6 +29,8 @@ pub struct ControlPlaneTestContext {
     pub database: dev::db::CockroachInstance,
     pub logctx: LogContext,
     sled_agent: omicron_sled_agent::sim::Server,
+    oximeter: oximeter::Oximeter,
+    producer: oximeter::collect::ProducerServer,
 }
 
 impl ControlPlaneTestContext {
@@ -32,6 +39,8 @@ impl ControlPlaneTestContext {
         self.server.http_server_internal.close().await.unwrap();
         self.database.cleanup().await.unwrap();
         self.sled_agent.http_server.close().await.unwrap();
+        self.oximeter.close().await.unwrap();
+        self.producer.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
 }
@@ -91,12 +100,30 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     .await
     .unwrap();
 
+    // Set up an Oximeter collector server
+    let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
+    let oximeter =
+        start_oximeter(server.http_server_internal.local_addr(), collector_id)
+            .await
+            .unwrap();
+
+    // Set up a test metric producer server
+    let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
+    let producer = start_producer_server(
+        server.http_server_internal.local_addr(),
+        producer_id,
+    )
+    .await
+    .unwrap();
+
     ControlPlaneTestContext {
         server,
         external_client: testctx_external,
         internal_client: testctx_internal,
         database,
         sled_agent: sa,
+        oximeter,
+        producer,
         logctx,
     }
 }
@@ -119,6 +146,107 @@ pub async fn start_sled_agent(
     };
 
     omicron_sled_agent::sim::Server::start(&config, &log).await
+}
+
+pub async fn start_oximeter(
+    nexus_address: SocketAddr,
+    id: Uuid,
+) -> Result<oximeter::Oximeter, String> {
+    let db = oximeter::oximeter_server::DbConfig {
+        address: "[::1]:8123".parse().unwrap(),
+        batch_size: 10,
+        batch_interval: 10,
+    };
+    let config = oximeter::oximeter_server::Config {
+        id,
+        nexus_address,
+        db,
+        dropshot: ConfigDropshot {
+            bind_address: SocketAddr::new("::1".parse().unwrap(), 0),
+            ..Default::default()
+        },
+        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
+    };
+    oximeter::Oximeter::new(&config).await.map_err(|e| e.to_string())
+}
+
+#[derive(oximeter::Target)]
+struct IntegrationTarget {
+    pub name: String,
+}
+
+#[derive(oximeter::Metric)]
+struct IntegrationMetric {
+    pub name: String,
+    pub value: i64,
+}
+
+// A producer of simple counter metrics used in the integration tests
+struct IntegrationProducer {
+    pub target: IntegrationTarget,
+    pub metric: IntegrationMetric,
+}
+
+impl oximeter::Producer for IntegrationProducer {
+    fn produce(
+        &mut self,
+    ) -> Result<
+        Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
+        oximeter::Error,
+    > {
+        let sample =
+            oximeter::types::Sample::new(&self.target, &self.metric, None);
+        self.metric.value += 1;
+        Ok(Box::new(vec![sample].into_iter()))
+    }
+}
+
+pub async fn start_producer_server(
+    nexus_address: SocketAddr,
+    id: Uuid,
+) -> Result<oximeter::collect::ProducerServer, String> {
+    // Set up a producer server
+    let producer_address: SocketAddr = "[::1]:44444".parse().unwrap();
+    let server_info = ProducerEndpoint {
+        id,
+        address: producer_address,
+        base_route: "/collect".to_string(),
+        interval: Duration::from_secs(10),
+    };
+    let registration_info = oximeter::collect::RegistrationInfo::new(
+        nexus_address,
+        "/metrics/producers",
+    );
+    let config = oximeter::collect::ProducerServerConfig {
+        server_info,
+        registration_info,
+        dropshot_config: ConfigDropshot {
+            bind_address: producer_address,
+            ..Default::default()
+        },
+        logging_config: ConfigLogging::StderrTerminal {
+            level: ConfigLoggingLevel::Error,
+        },
+    };
+    let server = oximeter::collect::ProducerServer::start(&config)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Create and register an actual metric producer.
+    let producer = IntegrationProducer {
+        target: IntegrationTarget {
+            name: "integration-test-target".to_string(),
+        },
+        metric: IntegrationMetric {
+            name: "integration-test-metric".to_string(),
+            value: 0,
+        },
+    };
+    server
+        .collector()
+        .register_producer(Box::new(producer))
+        .map_err(|e| e.to_string())?;
+    Ok(server)
 }
 
 /** Returns whether the two identity metadata objects are identical. */

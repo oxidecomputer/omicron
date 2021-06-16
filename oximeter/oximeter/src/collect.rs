@@ -173,6 +173,11 @@ impl ProducerServer {
         })?)
     }
 
+    /// Close the server
+    pub async fn close(self) -> Result<(), Error> {
+        self.server.close().await.map_err(Error::ProducerServer)
+    }
+
     /// Return the [`Collector`] managed by this server.
     ///
     /// The collector is thread-safe and clonable, so the returned reference can be used throughout

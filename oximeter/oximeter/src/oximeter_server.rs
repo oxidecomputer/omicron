@@ -424,6 +424,11 @@ impl Oximeter {
     pub async fn serve_forever(self) -> Result<(), Error> {
         self.server.await.map_err(Error::OximeterServer)
     }
+
+    /// Shutdown the Oximeter server
+    pub async fn close(self) -> Result<(), Error> {
+        self.server.close().await.map_err(Error::OximeterServer)
+    }
 }
 
 // Build the HTTP API internal to the control plane
