@@ -27,10 +27,11 @@ pub struct ControlPlaneTestContext {
     pub internal_client: ClientTestContext,
     pub server: omicron_nexus::Server,
     pub database: dev::db::CockroachInstance,
+    pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
     sled_agent: omicron_sled_agent::sim::Server,
     oximeter: oximeter::Oximeter,
-    producer: oximeter::collect::ProducerServer,
+    producer: oximeter::ProducerServer,
 }
 
 impl ControlPlaneTestContext {
@@ -38,6 +39,7 @@ impl ControlPlaneTestContext {
         self.server.http_server_external.close().await.unwrap();
         self.server.http_server_internal.close().await.unwrap();
         self.database.cleanup().await.unwrap();
+        self.clickhouse.cleanup().await.unwrap();
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
@@ -74,6 +76,9 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     /* Start up CockroachDB. */
     let database = dev::test_setup_database(log).await;
 
+    /* Start ClickHouse database server. */
+    let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+
     config.database.url = database.pg_config().clone();
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
@@ -102,10 +107,13 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
 
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
-    let oximeter =
-        start_oximeter(server.http_server_internal.local_addr(), collector_id)
-            .await
-            .unwrap();
+    let oximeter = start_oximeter(
+        server.http_server_internal.local_addr(),
+        clickhouse.port(),
+        collector_id,
+    )
+    .await
+    .unwrap();
 
     // Set up a test metric producer server
     let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
@@ -121,6 +129,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
         external_client: testctx_external,
         internal_client: testctx_internal,
         database,
+        clickhouse,
         sled_agent: sa,
         oximeter,
         producer,
@@ -150,10 +159,11 @@ pub async fn start_sled_agent(
 
 pub async fn start_oximeter(
     nexus_address: SocketAddr,
+    db_port: u16,
     id: Uuid,
 ) -> Result<oximeter::Oximeter, String> {
     let db = oximeter::oximeter_server::DbConfig {
-        address: "[::1]:8123".parse().unwrap(),
+        address: SocketAddr::new("::1".parse().unwrap(), db_port),
         batch_size: 10,
         batch_interval: 10,
     };
@@ -204,20 +214,23 @@ impl oximeter::Producer for IntegrationProducer {
 pub async fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
-) -> Result<oximeter::collect::ProducerServer, String> {
-    // Set up a producer server
-    let producer_address: SocketAddr = "[::1]:44444".parse().unwrap();
+) -> Result<oximeter::ProducerServer, String> {
+    // Set up a producer server.
+    //
+    // This listens on any available port, and the ProducerServer internally updates this to the
+    // actual bound port of the Dropshot HTTP server.
+    let producer_address = SocketAddr::new("::1".parse().unwrap(), 0);
     let server_info = ProducerEndpoint {
         id,
         address: producer_address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let registration_info = oximeter::collect::RegistrationInfo::new(
+    let registration_info = oximeter::producer_server::RegistrationInfo::new(
         nexus_address,
         "/metrics/producers",
     );
-    let config = oximeter::collect::ProducerServerConfig {
+    let config = oximeter::producer_server::ProducerServerConfig {
         server_info,
         registration_info,
         dropshot_config: ConfigDropshot {
@@ -228,7 +241,7 @@ pub async fn start_producer_server(
             level: ConfigLoggingLevel::Error,
         },
     };
-    let server = oximeter::collect::ProducerServer::start(&config)
+    let server = oximeter::ProducerServer::start(&config)
         .await
         .map_err(|e| e.to_string())?;
 

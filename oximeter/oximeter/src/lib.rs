@@ -15,9 +15,11 @@ pub mod collect;
 pub mod db;
 pub mod histogram;
 pub mod oximeter_server;
+pub mod producer_server;
 pub mod traits;
 pub mod types;
 
 pub use oximeter_server::Oximeter;
+pub use producer_server::ProducerServer;
 pub use traits::{Metric, Producer, Target};
 pub use types::{Error, FieldType, FieldValue, Measurement, MeasurementType};
