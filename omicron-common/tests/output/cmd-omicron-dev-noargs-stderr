@@ -9,6 +9,7 @@ FLAGS:
     -V, --version    Prints version information
 
 SUBCOMMANDS:
+    ch-run         Run a ClickHouse database server for development
     db-populate    Populate an existing CockroachDB cluster with the Omicron schema
     db-run         Start a CockroachDB cluster for development
     db-wipe        Wipe the Omicron schema (and all data) from an existing CockroachDB cluster

@@ -1,69 +1,124 @@
 #!/bin/bash
 
-# This is used _only within GitHub CI_ to install the ClickHouse server
-# To install in any other context, see https://clickhouse.tech/docs/en/getting-started/install
+#
+# ci_download_clickhouse: fetches the appropriate ClickHouse binary tarball
+# based on the currently running operating system, unpacks it, and creates a
+# copy called "clickhouse", all in the current directory.
+#
 
-function main() {
-    set -o xtrace
-    set -o pipefail
-    set -o errexit
-    verify_github_ci
-    verify_linux
-    verify_root
-    add_clickhouse_apt_sources
-    install_clickhouse
-    sudo systemctl start clickhouse-server.service
+set -o pipefail
+set -o xtrace
+set -o errexit
+
+ARG0="$(basename ${BASH_SOURCE[0]})"
+
+# If you change this, you must also update the md5sums below
+CIDL_VERSION="v21.7"
+CIDL_MD5_DARWIN="501dafb3cf0b134832d0719dfefdd851"
+CIDL_MD5_LINUX=""95e3d042cec0a1c03edea01c5ee009ee
+CIDL_MD5_ILLUMOS="53c9417619cb84c8ed1e1a1bc0510a89"
+CIDL_ASSEMBLE_DIR="./clickhouse"
+
+# Download from manually-populated S3 bucket for now
+CIDL_URL_BASE="https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com"
+
+function main
+{
+	#
+	# Process command-line arguments.  We generally don't expect any, but
+	# we allow callers to specify a value to override OSTYPE, just for
+	# testing.
+	#
+	if [[ $# != 0 ]]; then
+		CIDL_OS="$1"
+		shift
+	else
+		CIDL_OS="$OSTYPE"
+	fi
+
+	if [[ $# != 0 ]]; then
+		echo "unexpected arguments" >&2
+		exit 2
+	fi
+
+	# Configure this program
+	configure_os "$CIDL_OS"
+	CIDL_URL="$CIDL_URL_BASE/$CIDL_FILE"
+
+	# Download the file.
+	echo "URL: $CIDL_URL"
+	echo "Local file: $CIDL_FILE"
+	do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
+	    fail "failed to download file"
+
+	# Verify the md5sum.
+	calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
+	    fail "failed to calculate md5sum"
+	if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
+		fail "md5sum mismatch \
+		    (expected $CIDL_MD5, found $calculated_md5)"
+	fi
+
+	# Unpack the tarball into a local directory
+	do_untar "$CIDL_FILE" "$CIDL_ASSEMBLE_DIR"
+
+	# Run the binary as a sanity-check.
+	"$CIDL_ASSEMBLE_DIR/clickhouse" server --version
 }
 
-function verify_github_ci() {
-    if ! [ "$CI" ]; then
-        echo "This script can only be used to install ClickHouse"
-        echo "within GitHub's CI. Please see the link below for"
-        echo "directions to install ClickHouse"
-        echo ""
-        echo "https://clickhouse.tech/docs/en/getting-started/install/"
-        exit 1
-    fi
+function fail
+{
+	echo "$ARG0: $@" >&2
+	exit 1
 }
 
-function verify_linux() {
-    case "$OSTYPE" in
-        linux*)
-            ;;
-        *)
-            echo "This script can only be used to install ClickHouse on"
-            echo "Linux platforms. See https://clickhouse.tech/docs/en/getting-started/install/#from-binaries-non-linux"
-            echo "for instructions to install manually on non-Linux platforms"
-            exit 0 # Return 0 to avoid erroring out on CI
-            ;;
-    esac
+function configure_os
+{
+	echo "current directory: $PWD"
+	echo "configuring based on OS: \"$1\""
+	case "$1" in
+		darwin*)
+            CIDL_PLATFORM="macos"
+			CIDL_MD5="$CIDL_MD5_DARWIN"
+			CIDL_MD5FUNC="do_md5"
+			;;
+		linux-gnu*) 
+            CIDL_PLATFORM="linux"
+			CIDL_MD5="$CIDL_MD5_LINUX"
+			CIDL_MD5FUNC="do_md5sum"
+			;;
+		solaris*)
+            CIDL_PLATFORM="illumos"
+			CIDL_MD5="$CIDL_MD5_ILLUMOS"
+			CIDL_MD5FUNC="do_md5sum"
+			;;
+		*)
+			fail "unsupported OS: $1"
+			;;
+	esac
+
+	CIDL_DIR="clickhouse-$CIDL_VERSION"
+	CIDL_FILE="$CIDL_DIR.$CIDL_PLATFORM.tar.gz"
 }
 
-function verify_root() {
-    if [ $(id -u) -ne 0 ]; then
-        echo "This script must be run as root"
-        exit 1
-    fi
+function do_download_curl
+{
+	curl --silent --show-error --fail --location --output "$2" "$1"
 }
 
-function add_clickhouse_apt_sources() {
-    apt-get install apt-transport-https ca-certificates dirmngr
-    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E0C56BD4
-    echo "deb https://repo.clickhouse.tech/deb/stable/ main/" | \
-            tee /etc/apt/sources.list.d/clickhouse.list
-    apt-get update
+function do_md5
+{
+	md5 < "$1"
 }
 
-function install_clickhouse() {
-    # ClickHouse clearly expects this to be installed by a human,
-    # since they prompt in the middle of installation to ask for
-    # the default users password.
-    apt-get install -y --no-install-recommends expect
-    expect -f - <<-EOI
-        spawn apt-get install -y --no-install-recommends clickhouse-server
-        expect "Enter password for default user:" { send "\r" }
-        wait
-EOI
+function do_md5sum
+{
+	md5sum < "$1" | awk '{print $1}'
 }
 
-main
+function do_untar
+{
+    mkdir -p "$2" && tar xzf "$1" -C "$2"
+}
+
+main "$@"

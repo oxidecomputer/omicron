@@ -339,42 +339,42 @@ fn error_for_schema_mismatch<'a, S: Schematized<'a>>(
     Error::SchemaMismatch { name: schema.name().to_string(), expected, actual }
 }
 
-// This set of tests is behind a configuration flag that must be explicitly enabled. These test
-// interaction with the database, and each test requires a clean slate. This requires at least
-// running everything with a single test thread. In addition, ClickHouse provides pretty weak
-// consistency, which means tests run quickly one after the other may still show some hysteresis.
-// This is possibly a problem for us more generally, but at least it requires these tests to be run
-// in a single thread.
-//
-// TODO-completeness We would like to run these tests on any platform currently tested in CI, which
-// includes macOS. ClickHouse provides pre-built macOS images, but it looks like that always pulls
-// from the `master` branch, with no obvious way to specify a commit. For now, just build on Linux,
-// with ClickHouse installed via the package manager. See `tools/ci_download_clickhouse` for
-// details on the installation procedure.
-#[cfg(all(test, target_os = "linux", feature = "clickhouse-tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::test_util;
+    use omicron_common::dev;
     use slog::o;
+
+    // NOTE: It's important that each test run the ClickHouse server with different ports.
+    // The tests each require a clean slate. Previously, we ran the tests in a different thread,
+    // but we now use a different instance of the server to avoid conflicts.
+    //
+    // This is at least partially because ClickHouse by default provides pretty weak consistency
+    // guarantees. There are options that allow controlling consistency behavior, but we've not yet
+    // explored or decided on these.
+    //
+    // TODO-robustness TODO-correctness: Figure out the ClickHouse options we need.
 
     #[tokio::test]
     async fn test_build_client() {
         let log = slog::Logger::root(slog::Discard, o!());
-        Client::new("[::1]:8123".parse().unwrap(), log)
+        let address: SocketAddr = "[::1]:8123".parse().unwrap();
+        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
             .await
-            .unwrap()
-            .wipe_db()
-            .await
-            .unwrap();
+            .expect("Failed to start ClickHouse");
+        Client::new(address, log).await.unwrap().wipe_db().await.unwrap();
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
     #[tokio::test]
     async fn test_client_insert() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let client =
-            Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
-        client.wipe_db().await.unwrap();
-        client.init_db().await.unwrap();
+        let address: SocketAddr = "[::1]:8124".parse().unwrap();
+        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+            .await
+            .expect("Failed to start ClickHouse");
+        let client = Client::new(address, log).await.unwrap();
         let samples = {
             let mut s = Vec::with_capacity(8);
             for _ in 0..s.capacity() {
@@ -383,7 +383,7 @@ mod tests {
             s
         };
         client.insert_samples(&samples).await.unwrap();
-        client.wipe_db().await.unwrap();
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
     // This is a target with the same name as that in `db/mod.rs` used for other tests, but with a
@@ -409,10 +409,11 @@ mod tests {
     #[tokio::test]
     async fn test_schema_mismatch() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let client =
-            Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
-        client.wipe_db().await.unwrap();
-        client.init_db().await.unwrap();
+        let address: SocketAddr = "[::1]:8125".parse().unwrap();
+        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+            .await
+            .expect("Failed to start ClickHouse");
+        let client = Client::new(address, log).await.unwrap();
         let sample = test_util::make_sample();
         client.insert_samples(&vec![sample]).await.unwrap();
 
@@ -429,16 +430,17 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric, None);
         let result = client.verify_sample_schema(&sample);
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        client.wipe_db().await.unwrap();
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
     #[tokio::test]
     async fn test_schema_update() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let client =
-            Client::new("[::1]:8123".parse().unwrap(), log).await.unwrap();
-        client.wipe_db().await.unwrap();
-        client.init_db().await.unwrap();
+        let address: SocketAddr = "[::1]:8126".parse().unwrap();
+        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+            .await
+            .expect("Failed to start ClickHouse");
+        let client = Client::new(address, log).await.unwrap();
         let sample = test_util::make_sample();
 
         // Verify that this sample is considered new, i.e., we return rows to update the target and
@@ -528,7 +530,6 @@ mod tests {
             .collect::<Vec<model::MetricSchema>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_metric_schema, schema[0]);
-
-        client.wipe_db().await.unwrap();
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 }
