@@ -5,8 +5,8 @@ mod common;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn test_oximeter() {
-    let context = common::test_setup("test_oximeter").await;
+async fn test_oximeter_database_records() {
+    let context = common::test_setup("test_oximeter_database_records").await;
     let db = &context.database;
 
     // Get a handle to the DB, for various tests
