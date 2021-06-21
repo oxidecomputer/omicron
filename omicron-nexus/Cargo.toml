@@ -51,7 +51,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.6"
+version = "1.7"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
