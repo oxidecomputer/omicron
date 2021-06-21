@@ -49,6 +49,9 @@
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+
 use super::db::sql_row_value;
 use crate::bail_unless;
 use crate::error::ApiError;
@@ -65,6 +68,9 @@ use crate::model::ApiInstanceRuntimeState;
 use crate::model::ApiInstanceState;
 use crate::model::ApiName;
 use crate::model::ApiProject;
+use crate::model::OximeterAssignment;
+use crate::model::OximeterInfo;
+use crate::model::ProducerEndpoint;
 use chrono::DateTime;
 use chrono::Utc;
 use std::convert::TryFrom;
@@ -266,5 +272,48 @@ impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
             sql_row_value(value, "attach_instance_id")?;
         ApiDiskState::try_from((disk_state_str, instance_uuid))
             .map_err(|e| ApiError::internal_error(&e))
+    }
+}
+
+/// Load a [`ProducerEndpoint`] from a row in the `MetricProducer` table, using
+/// the columns "id", "ip", "port", "interval", and "route"
+impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let id: Uuid = sql_row_value(value, "id")?;
+        let ip: IpAddr = sql_row_value(value, "ip")?;
+        let port: i32 = sql_row_value(value, "port")?;
+        let address = SocketAddr::new(ip, port as _);
+        let base_route: String = sql_row_value(value, "route")?;
+        let interval =
+            Duration::from_secs_f64(sql_row_value(value, "interval")?);
+        Ok(Self { id, address, base_route, interval })
+    }
+}
+
+/// Load an [`OximeterInfo`] from a row in the `Oximeter` table, using the
+/// columns "id", "ip", and "port".
+impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let collector_id: Uuid = sql_row_value(value, "id")?;
+        let ip: IpAddr = sql_row_value(value, "ip")?;
+        let port: i32 = sql_row_value(value, "port")?;
+        let address = SocketAddr::new(ip, port as _);
+        Ok(Self { collector_id, address })
+    }
+}
+
+/// Load an [`OximeterAssignment`] from a row in the `OximeterAssignment`
+/// table, using the columns "oximeter_id" and "producer_id"
+impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
+    type Error = ApiError;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let oximeter_id: Uuid = sql_row_value(value, "oximeter_id")?;
+        let producer_id: Uuid = sql_row_value(value, "producer_id")?;
+        Ok(Self { oximeter_id, producer_id })
     }
 }

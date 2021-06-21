@@ -251,9 +251,18 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
     let mut db_instance =
         dev::clickhouse::ClickHouseInstance::new(args.port).await?;
     println!(
-        "omicron-dev: running ClickHouse (PID: {}), full command is \"clickhouse {}\"",
-        db_instance.pid().expect("Failed to get process PID, it may not have started"),
+        "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")
+    );
+    println!(
+        "omicron-dev: ClickHouse is running with PID {}",
+        db_instance
+            .pid()
+            .expect("Failed to get process PID, it may not have started")
+    );
+    println!(
+        "omicron-dev: ClickHouse HTTP server listening on port {}",
+        db_instance.port()
     );
     println!(
         "omicron-dev: using {} for ClickHouse data storage",

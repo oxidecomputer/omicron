@@ -14,6 +14,9 @@ use omicron_common::model::ApiInstanceCreateParams;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceState;
 use omicron_common::model::ApiProjectCreateParams;
+use omicron_common::model::OximeterAssignment;
+use omicron_common::model::OximeterInfo;
+use omicron_common::model::ProducerEndpoint;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;
@@ -77,5 +80,30 @@ impl SqlSerialize for ApiDiskState {
         let attach_id = &self.attached_instance_id().map(|id| *id);
         output.set("attach_instance_id", attach_id);
         output.set("disk_state", &self.label());
+    }
+}
+
+impl SqlSerialize for OximeterInfo {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("id", &self.collector_id);
+        output.set("ip", &self.address.ip());
+        output.set("port", &i32::from(self.address.port()));
+    }
+}
+
+impl SqlSerialize for ProducerEndpoint {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("id", &self.id);
+        output.set("ip", &self.address.ip());
+        output.set("port", &i32::from(self.address.port()));
+        output.set("interval", &self.interval.as_secs_f64());
+        output.set("route", &self.base_route);
+    }
+}
+
+impl SqlSerialize for OximeterAssignment {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("oximeter_id", &self.oximeter_id);
+        output.set("producer_id", &self.producer_id);
     }
 }

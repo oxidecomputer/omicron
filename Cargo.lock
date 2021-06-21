@@ -1174,6 +1174,7 @@ dependencies = [
  "omicron-common",
  "omicron-sled-agent",
  "openapiv3",
+ "oximeter",
  "schemars",
  "serde",
  "serde_json",

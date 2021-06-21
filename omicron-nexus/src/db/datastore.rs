@@ -43,6 +43,9 @@ use omicron_common::model::DataPageParams;
 use omicron_common::model::DeleteResult;
 use omicron_common::model::ListResult;
 use omicron_common::model::LookupResult;
+use omicron_common::model::OximeterAssignment;
+use omicron_common::model::OximeterInfo;
+use omicron_common::model::ProducerEndpoint;
 use omicron_common::model::UpdateResult;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -609,6 +612,49 @@ impl DataStore {
                 ),
             })
         }
+    }
+
+    // Create a record for a new Oximeter instance
+    pub async fn oximeter_create(
+        &self,
+        info: &OximeterInfo,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let mut values = SqlValueSet::new();
+        values.set("time_created", &now);
+        values.set("time_modified", &now);
+        info.sql_serialize(&mut values);
+        sql_insert::<schema::Oximeter>(&client, &values).await
+    }
+
+    // Create a record for a new producer endpoint
+    pub async fn producer_endpoint_create(
+        &self,
+        producer: &ProducerEndpoint,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let mut values = SqlValueSet::new();
+        values.set("time_created", &now);
+        values.set("time_modified", &now);
+        producer.sql_serialize(&mut values);
+        sql_insert::<schema::MetricProducer>(&client, &values).await
+    }
+
+    // Create a record of an assignment of a producer to a collector
+    pub async fn oximeter_assignment_create(
+        &self,
+        oximeter_id: Uuid,
+        producer_id: Uuid,
+    ) -> Result<(), ApiError> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let mut values = SqlValueSet::new();
+        values.set("time_created", &now);
+        let reg = OximeterAssignment { oximeter_id, producer_id };
+        reg.sql_serialize(&mut values);
+        sql_insert::<schema::OximeterAssignment>(&client, &values).await
     }
 
     /*
