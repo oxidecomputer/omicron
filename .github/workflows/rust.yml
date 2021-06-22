@@ -95,17 +95,17 @@ jobs:
       with:
         key: ${{ runner.os }}-cockroach-binary-v2
         path: "cockroachdb"
-    - name: Configure GitHub cache for ClickHouse binaries
-      id: cache-clickhouse
+    #- name: Configure GitHub cache for ClickHouse binaries
+      #id: cache-clickhouse
       # actions/cache@v2.1.4
-      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
-      with:
-        key: ${{ runner.os }}-clickhouse-binary
-        path: "clickhouse"
+      #uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
+      #with:
+        #key: ${{ runner.os }}-clickhouse-binary
+        #path: "clickhouse"
     - name: Build
       run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download ClickHouse
-      if: steps.cache-clickhouse.outputs.cache-hit != 'true'
+      #if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'

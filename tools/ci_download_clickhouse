@@ -14,9 +14,9 @@ ARG0="$(basename ${BASH_SOURCE[0]})"
 
 # If you change this, you must also update the md5sums below
 CIDL_VERSION="v21.7"
-CIDL_MD5_DARWIN="501dafb3cf0b134832d0719dfefdd851"
-CIDL_MD5_LINUX=""95e3d042cec0a1c03edea01c5ee009ee
-CIDL_MD5_ILLUMOS="53c9417619cb84c8ed1e1a1bc0510a89"
+CIDL_MD5_DARWIN="a3f7edbc3505aa0eec181d704ed68dd2"
+CIDL_MD5_LINUX="6e2445e0484d98fe2ee22c3ea46022ff"
+CIDL_MD5_ILLUMOS="ee6566514310f715abf0d13eecbafdf5"
 CIDL_ASSEMBLE_DIR="./clickhouse"
 
 # Download from manually-populated S3 bucket for now
