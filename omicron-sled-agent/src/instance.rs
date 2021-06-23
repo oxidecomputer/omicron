@@ -8,12 +8,21 @@ use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 use std::time::Duration;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::instance_manager::InstanceTicket;
 use crate::common::instance::{Action as InstanceAction, InstanceState};
+
+// TODO: Do a pass, possibly re-naming these things...
+use crate::zone::{
+    boot_zone, create_address, create_vnic, clone_zone_from_base,
+    configure_child_zone, get_ip_address, find_physical_data_link,
+    run_propolis,
+};
 use propolis_client::Client as PropolisClient;
 
 // TODO(https://www.illumos.org/issues/13837): This is a hack;
@@ -29,13 +38,22 @@ use propolis_client::Client as PropolisClient;
 // We workaround this by querying for these properties in a loop.
 async fn wait_for_service_to_come_online(
     log: &Logger,
+    zone: Option<&str>,
     fmri: &str,
 ) -> Result<(), ApiError> {
     info!(log, "awaiting restarter/state online");
     let name = smf::PropertyName::new("restarter", "state").unwrap();
     let mut attempts = 0;
     loop {
-        let result = smf::Properties::new().lookup().run(&name, &fmri);
+        let mut p = smf::Properties::new();
+        let properties = {
+            if let Some(zone) = zone {
+                p.zone(zone)
+            } else {
+                &mut p
+            }
+        };
+        let result = properties.lookup().run(&name, &fmri);
 
         match result {
             Ok(value) => {
@@ -64,7 +82,7 @@ async fn wait_for_service_to_come_online(
                         ),
                     });
                 }
-                sleep(Duration::from_millis(1)).await;
+                sleep(Duration::from_millis(500)).await;
                 attempts += 1;
             }
         }
@@ -107,7 +125,7 @@ async fn wait_for_http_server(
                         ),
                     });
                 }
-                sleep(Duration::from_millis(1)).await;
+                sleep(Duration::from_millis(50)).await;
                 attempts += 1;
             }
         }
@@ -272,7 +290,7 @@ impl Instance {
             running_state: None,
         };
 
-        let inner= Arc::new(Mutex::new(instance));
+        let inner = Arc::new(Mutex::new(instance));
 
         Ok(Instance { inner })
     }
@@ -286,6 +304,64 @@ impl Instance {
         let log = &inner.log;
         // TODO: Launch in a Zone.
 
+        // XXX Hacks below
+
+        // TODO: NOT HERE! On setup, we should keep an eye out for straggler
+        // resources, including:
+        // - VNICs
+        // - Zones
+        // - VMMs
+        // - Other???
+
+        // Create the VNIC which will be attached to the zone.
+        let physical_dl = find_physical_data_link()?;
+        info!(log, "Saw physical DL: {}", physical_dl);
+        let vnic_name = format!("vnic_prop5"); // XXX Gonna need patching
+        create_vnic(&physical_dl, &vnic_name)?;
+        info!(log, "Created vnic: {}", vnic_name);
+
+        // Specify the IP address we'll use when communicating with the
+        // device.
+        let ip_net = get_ip_address(&physical_dl)?;
+        info!(log, "Saw IP address: {}", ip_net);
+
+        // TODO: Start by hardcoding it, allocate it properly later.
+        // let ip = ip_net.hosts().next().unwrap();
+        let ip = std::net::IpAddr::V4(
+            std::net::Ipv4Addr::from_str("192.168.1.5").unwrap()
+        );
+        info!(log, "Using IP address {}", ip);
+
+        // Create a zone for the propolis instance, using the previously
+        // configured VNIC.
+        let zone_name = format!("propolis-{}", inner.id());
+        configure_child_zone(&log, &zone_name, &vnic_name)?;
+        info!(log, "Configured child zone: {}", zone_name);
+
+        // Clone the zone from a base zone (faster than installing) and
+        // boot it up.
+        clone_zone_from_base(&zone_name)?;
+        info!(log, "Cloned child zone: {}", zone_name);
+        boot_zone(&zone_name)?;
+        info!(log, "Booted zone: {}", zone_name);
+
+        // Wait for the network services to come online, then create an address.
+        wait_for_service_to_come_online(&log, Some(&zone_name), "svc:/milestone/network:default").await?;
+        info!(log, "Network milestone ready for {}", zone_name);
+
+        let interface_name = format!("{}/omicron", vnic_name);
+        create_address(&zone_name, &ip, &interface_name)?;
+        info!(log, "Created address {} for zone: {}", ip, zone_name);
+
+        // Run Propolis in the Zone.
+        let port = 12400;
+        let server_addr = SocketAddr::new(ip, port);
+        run_propolis(&zone_name, inner.id(), &server_addr)?;
+        info!(log, "Started propolis in zone: {}", zone_name);
+
+        // XXX Hacks above
+
+/*
         // Launch a new SMF service running Propolis.
         let manifest = "/opt/oxide/propolis-server/pkg/manifest.xml";
 
@@ -320,12 +396,14 @@ impl Instance {
             .map_err(|e| ApiError::InternalError {
                 message: format!("Cannot enable propolis SMF service: {}", e),
             })?;
-        wait_for_service_to_come_online(&log, &fmri).await?;
+*/
+        // XXX ???
+//        wait_for_service_to_come_online(&log, Some(&zone_name), &fmri).await?;
 
         // TODO: IP ADDRESS??? Be less hardcoded?
-        let address = "127.0.0.1:12400";
+        // let address = "127.0.0.1:12400";
         let client = Arc::new(PropolisClient::new(
-            address.parse().unwrap(),
+            server_addr,
             log.clone(),
         ));
 

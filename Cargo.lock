@@ -877,6 +877,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
 
 [[package]]
+name = "itertools"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1200,6 +1209,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "ipnet",
  "omicron-common",
  "propolis-client",
  "schemars",
@@ -1211,6 +1221,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "uuid",
+ "zone",
 ]
 
 [[package]]
@@ -2842,4 +2853,28 @@ dependencies = [
  "proc-macro2",
  "syn",
  "synstructure",
+]
+
+[[package]]
+name = "zone"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7a73c1fee8461c8f40cdf8ab8b05d960fe5a0010cc13711857f1539103425ff"
+dependencies = [
+ "itertools",
+ "thiserror",
+ "zone_cfg_derive",
+]
+
+[[package]]
+name = "zone_cfg_derive"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61ac2a898023d86613a7efa7a4195e4b75240009e559acb17ddd7fa876d19527"
+dependencies = [
+ "heck",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]

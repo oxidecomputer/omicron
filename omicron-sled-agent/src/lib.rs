@@ -17,6 +17,7 @@ mod instance;
 mod instance_manager;
 pub mod server;
 mod sled_agent;
+mod zone;
 
 #[macro_use]
 extern crate slog;

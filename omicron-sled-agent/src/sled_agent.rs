@@ -25,14 +25,14 @@ impl SledAgent {
         id: &Uuid,
         log: Logger,
         nexus_client: Arc<NexusClient>,
-    ) -> SledAgent {
+    ) -> Result<SledAgent, ApiError> {
         info!(&log, "created sled agent"; "id" => ?id);
 
         let instances = InstanceManager::new(
             log.clone(),
             nexus_client.clone(),
-        );
-        SledAgent { instances }
+        )?;
+        Ok(SledAgent { instances })
     }
 
     pub async fn instance_ensure(

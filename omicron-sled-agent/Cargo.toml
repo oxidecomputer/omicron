@@ -10,6 +10,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" 
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
+ipnet = "2.3"
 omicron-common = { path = "../omicron-common" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fafae47a" }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
@@ -20,6 +21,7 @@ smf = "0.2"
 structopt = "0.3"
 tokio = { version = "1.6", features = [ "full" ] }
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
+zone = "0.1"
 
 [dev-dependencies]
 expectorate = "1.0.1"

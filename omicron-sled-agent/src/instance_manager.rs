@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::instance::Instance;
+use crate::zone::{create_base_zone, ensure_zpool_exists, ZONE_ZFS_POOL};
 
 struct InstanceManagerInternal {
     log: Logger,
@@ -32,12 +33,19 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: Arc<NexusClient>
-    ) -> InstanceManager {
-        InstanceManager {
+    ) -> Result<InstanceManager, ApiError> {
+        // Before we start creating instances, we need to ensure that the
+        // necessary ZFS and Zone resources are ready.
+        ensure_zpool_exists(ZONE_ZFS_POOL)?;
+
+        // Create a base zone, from which all running instance zones are cloned.
+        create_base_zone(&log)?;
+
+        Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log, nexus_client, instances: Mutex::new(BTreeMap::new())
             })
-        }
+        })
     }
 
     /// Idempotently ensures that the given Instance (described by

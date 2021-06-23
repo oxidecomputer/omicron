@@ -10,7 +10,7 @@ driver = "pci-virtio-block"
 disk = "/opt/oxide/propolis-server/blob/alpine.iso"
 pci-path = "0.4.0"
 
-[dev.net0]
-driver = "pci-virtio-viona"
-vnic = "vnic_prop0"
-pci-path = "0.5.0"
+# [dev.net0]
+# driver = "pci-virtio-viona"
+# vnic = "vnic_prop0"
+# pci-path = "0.5.0"
