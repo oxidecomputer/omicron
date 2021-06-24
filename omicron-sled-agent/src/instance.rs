@@ -6,22 +6,22 @@ use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
-use std::sync::Arc;
-use std::time::Duration;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use crate::instance_manager::InstanceTicket;
 use crate::common::instance::{Action as InstanceAction, InstanceState};
+use crate::instance_manager::InstanceTicket;
 
 // TODO: Do a pass, possibly re-naming these things...
 use crate::zone::{
-    boot_zone, create_address, create_vnic, clone_zone_from_base,
-    configure_child_zone, get_ip_address, find_physical_data_link,
-    run_propolis, VNIC_PREFIX, ZONE_PREFIX,
+    boot_zone, clone_zone_from_base, configure_child_zone, create_address,
+    create_vnic, find_physical_data_link, get_ip_address, run_propolis,
+    VNIC_PREFIX, ZONE_PREFIX,
 };
 use propolis_client::Client as PropolisClient;
 
@@ -220,11 +220,9 @@ impl InstanceInner {
             .client
             .instance_ensure(&request)
             .await
-            .map_err(|e| {
-            ApiError::InternalError {
+            .map_err(|e| ApiError::InternalError {
                 message: format!("Failed to ensure instance: {}", e),
-            }
-        })?;
+            })?;
         Ok(())
     }
 
@@ -236,20 +234,20 @@ impl InstanceInner {
         let requested_state = match action {
             InstanceAction::Run => {
                 propolis_client::api::InstanceStateRequested::Run
-            },
+            }
             InstanceAction::Stop => {
                 propolis_client::api::InstanceStateRequested::Stop
-            },
+            }
             InstanceAction::Reboot => {
                 propolis_client::api::InstanceStateRequested::Reboot
-            },
+            }
             InstanceAction::Destroy => {
                 // Unlike the other actions, which update the Propolis state,
                 // the "destroy" action indicates that the service should be
                 // terminated.
                 info!(self.log, "take_action: Taking the Destroy action");
                 return Ok(Reaction::Terminate);
-            },
+            }
         };
         self.propolis_state_put(requested_state).await?;
         Ok(Reaction::Continue)
@@ -296,10 +294,7 @@ impl Instance {
     }
 
     /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(
-        &self,
-        ticket: InstanceTicket,
-    ) -> Result<(), ApiError> {
+    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().await;
         let log = &inner.log;
         // TODO: Launch in a Zone.
@@ -316,7 +311,7 @@ impl Instance {
         let physical_dl = find_physical_data_link()?;
         info!(log, "Saw physical DL: {}", physical_dl);
         let vnic_name = format!("{}5", VNIC_PREFIX); // XXX Gonna need patching
-//        let vnic_name = format!("vnic-{}", inner.id().to_simple());
+                                                     //        let vnic_name = format!("vnic-{}", inner.id().to_simple());
         create_vnic(&physical_dl, &vnic_name)?;
         info!(log, "Created vnic: {}", vnic_name);
 
@@ -328,7 +323,7 @@ impl Instance {
         // TODO: Start by hardcoding it, allocate it properly later.
         // let ip = ip_net.hosts().next().unwrap();
         let ip = std::net::IpAddr::V4(
-            std::net::Ipv4Addr::from_str("192.168.1.5").unwrap()
+            std::net::Ipv4Addr::from_str("192.168.1.5").unwrap(),
         );
         info!(log, "Using IP address {}", ip);
 
@@ -346,7 +341,12 @@ impl Instance {
         info!(log, "Booted zone: {}", zone_name);
 
         // Wait for the network services to come online, then create an address.
-        wait_for_service_to_come_online(&log, Some(&zone_name), "svc:/milestone/network:default").await?;
+        wait_for_service_to_come_online(
+            &log,
+            Some(&zone_name),
+            "svc:/milestone/network:default",
+        )
+        .await?;
         info!(log, "Network milestone ready for {}", zone_name);
 
         let interface_name = format!("{}/omicron", vnic_name);
@@ -361,64 +361,56 @@ impl Instance {
 
         // XXX Hacks above
 
-/*
-        // Launch a new SMF service running Propolis.
-        let manifest = "/opt/oxide/propolis-server/pkg/manifest.xml";
+        /*
+                // Launch a new SMF service running Propolis.
+                let manifest = "/opt/oxide/propolis-server/pkg/manifest.xml";
 
-        // Import and enable the service as distinct steps.
-        //
-        // This allows the service to remain "transient", which avoids
-        // it being auto-initialized by SMF across reboots.
-        // Instead, the bootstrap agent remains responsible for verifying
-        // and enabling the services on each access.
-        info!(log, "Instance::new Importing {}", manifest);
-        smf::Config::import().run(manifest).map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Cannot import propolis SMF manifest: {}", e),
-            }
-        })?;
+                // Import and enable the service as distinct steps.
+                //
+                // This allows the service to remain "transient", which avoids
+                // it being auto-initialized by SMF across reboots.
+                // Instead, the bootstrap agent remains responsible for verifying
+                // and enabling the services on each access.
+                info!(log, "Instance::new Importing {}", manifest);
+                smf::Config::import().run(manifest).map_err(|e| {
+                    ApiError::InternalError {
+                        message: format!("Cannot import propolis SMF manifest: {}", e),
+                    }
+                })?;
 
-        info!(log, "Instance::new adding service: {}", service_name());
-        smf::Config::add(service_name()).run(&instance_name(inner.id())).map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Cannot create propolis SMF service: {}", e),
-            }
-        })?;
+                info!(log, "Instance::new adding service: {}", service_name());
+                smf::Config::add(service_name()).run(&instance_name(inner.id())).map_err(|e| {
+                    ApiError::InternalError {
+                        message: format!("Cannot create propolis SMF service: {}", e),
+                    }
+                })?;
 
-        let fmri = fmri_name(inner.id());
-        info!(log, "Instance::new enabling FMRI: {}", fmri);
-        // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
-        // ".synchronous()", but it doesn't, because of an SMF bug.
-        smf::Adm::new()
-            .enable()
-            .temporary()
-            .run(smf::AdmSelection::ByPattern(&[&fmri]))
-            .map_err(|e| ApiError::InternalError {
-                message: format!("Cannot enable propolis SMF service: {}", e),
-            })?;
-*/
+                let fmri = fmri_name(inner.id());
+                info!(log, "Instance::new enabling FMRI: {}", fmri);
+                // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
+                // ".synchronous()", but it doesn't, because of an SMF bug.
+                smf::Adm::new()
+                    .enable()
+                    .temporary()
+                    .run(smf::AdmSelection::ByPattern(&[&fmri]))
+                    .map_err(|e| ApiError::InternalError {
+                        message: format!("Cannot enable propolis SMF service: {}", e),
+                    })?;
+        */
         // XXX ???
-//        wait_for_service_to_come_online(&log, Some(&zone_name), &fmri).await?;
+        //        wait_for_service_to_come_online(&log, Some(&zone_name), &fmri).await?;
 
         // TODO: IP ADDRESS??? Be less hardcoded?
         // let address = "127.0.0.1:12400";
-        let client = Arc::new(PropolisClient::new(
-            server_addr,
-            log.clone(),
-        ));
+        let client = Arc::new(PropolisClient::new(server_addr, log.clone()));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
         wait_for_http_server(&log, &client).await?;
 
-        inner.running_state = Some(
-            RunningState {
-                client,
-                ticket,
-                monitor_task: None,
-            }
-        );
+        inner.running_state =
+            Some(RunningState { client, ticket, monitor_task: None });
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
@@ -438,9 +430,7 @@ impl Instance {
     }
 
     // Terminate the Propolis service.
-    async fn stop(
-        &self
-    ) -> Result<(), ApiError> {
+    async fn stop(&self) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().await;
         let log = &inner.log;
         let fmri = fmri_name(inner.id());
@@ -455,11 +445,11 @@ impl Instance {
             })?;
 
         info!(log, "Instance::stop deleting service: {}", fmri);
-        smf::Config::delete()
-            .run(fmri)
-            .map_err(|e| ApiError::InternalError {
+        smf::Config::delete().run(fmri).map_err(|e| {
+            ApiError::InternalError {
                 message: format!("Cannot delete config for SMF service: {}", e),
-            })?;
+            }
+        })?;
 
         info!(log, "Instance::stop removing self from instances map");
         inner.running_state.as_mut().unwrap().ticket.terminate();
@@ -470,9 +460,7 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(
-        &self,
-    ) -> Result<(), ApiError> {
+    async fn monitor_state_task(&self) -> Result<(), ApiError> {
         // Grab the UUID and Propolis Client before we start looping, so we
         // don't need to contend the lock to access them in steady state.
         //
@@ -493,19 +481,13 @@ impl Instance {
                 .instance_state_monitor(id, gen)
                 .await
                 .map_err(|e| ApiError::InternalError {
-                    message: format!(
-                        "Failed to monitor propolis: {}",
-                        e
-                    ),
+                    message: format!("Failed to monitor propolis: {}", e),
                 })?;
-           let reaction = self.inner
-                .lock()
-                .await
-                .observe_state(response.state)
-                .await?;
+            let reaction =
+                self.inner.lock().await.observe_state(response.state).await?;
 
             match reaction {
-                Reaction::Continue => {},
+                Reaction::Continue => {}
                 Reaction::Terminate => {
                     return self.stop().await;
                 }

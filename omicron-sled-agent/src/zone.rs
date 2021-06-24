@@ -2,9 +2,9 @@
 
 use ipnet::IpNet;
 use omicron_common::error::ApiError;
+use slog::Logger;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use slog::Logger;
 use uuid::Uuid;
 
 const PFEXEC: &str = "/usr/bin/pfexec";
@@ -20,14 +20,12 @@ pub const ZONE_PREFIX: &str = "propolis_inst";
 
 // Helper function for starting the process and checking the
 // exit code result.
-fn execute(command: &mut std::process::Command) -> Result<std::process::Output, ApiError> {
-    let output = command
-        .output()
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to execute {:?}: {}", command, e),
-            }
-        })?;
+fn execute(
+    command: &mut std::process::Command,
+) -> Result<std::process::Output, ApiError> {
+    let output = command.output().map_err(|e| ApiError::InternalError {
+        message: format!("Failed to execute {:?}: {}", command, e),
+    })?;
 
     if !output.status.success() {
         return Err(ApiError::InternalError {
@@ -52,30 +50,34 @@ pub fn ensure_zpool_exists(name: &str) -> Result<(), ApiError> {
 
     // If it doesn't exist, make it.
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command.args(&["create", "-o", &format!("mountpoint={}", ZONE_ZFS_POOL_MOUNTPOINT), name]);
+    let cmd = command.args(&[
+        "create",
+        "-o",
+        &format!("mountpoint={}", ZONE_ZFS_POOL_MOUNTPOINT),
+        name,
+    ]);
     execute(cmd)?;
     Ok(())
 }
 
 fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
-    Ok(zone::Adm::list().map_err(|e| {
-        ApiError::InternalError {
+    Ok(zone::Adm::list()
+        .map_err(|e| ApiError::InternalError {
             message: format!("Cannot list zones: {}", e),
-        }
-    })?.into_iter().find(|zone| {
-        zone.name() == name
-    }))
+        })?
+        .into_iter()
+        .find(|zone| zone.name() == name))
 }
 
 fn remove_zone(name: &str) -> Result<(), ApiError> {
     zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
         ApiError::InternalError {
-            message: format!("Cannot uninstall {}: {}", name, e)
+            message: format!("Cannot uninstall {}: {}", name, e),
         }
     })?;
     zone::Config::new(name).delete(/* force= */ true).run().map_err(|e| {
         ApiError::InternalError {
-            message: format!("Cannot delete {}: {}", name, e)
+            message: format!("Cannot delete {}: {}", name, e),
         }
     })?;
     Ok(())
@@ -85,31 +87,26 @@ pub fn find_physical_data_link() -> Result<String, ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["dladm", "show-phys", "-o", "LINK"]);
     let output = execute(cmd)?;
-    Ok(
-        String::from_utf8(output.stdout)
-            .map_err(|e| {
-                ApiError::InternalError {
-                    message: format!("Cannot parse dladm output as UTF-8: {}", e),
-                }
-            })?
-            .lines()
-            .filter(|s| *s != "LINK")
-            // TODO: This is arbitrary, but we're currently grabbing the first
-            // physical device. Should we have a more sophisticated method for
-            // selection?
-            .next()
-            .ok_or_else(|| {
-                ApiError::InternalError {
-                    message: format!("No physical devices found"),
-                }
-            })?
-            .to_string()
-    )
+    Ok(String::from_utf8(output.stdout)
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Cannot parse dladm output as UTF-8: {}", e),
+        })?
+        .lines()
+        .filter(|s| *s != "LINK")
+        // TODO: This is arbitrary, but we're currently grabbing the first
+        // physical device. Should we have a more sophisticated method for
+        // selection?
+        .next()
+        .ok_or_else(|| ApiError::InternalError {
+            message: format!("No physical devices found"),
+        })?
+        .to_string())
 }
 
 pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command.args(&["dladm", "create-vnic", "-l", physical, vnic_name]);
+    let cmd =
+        command.args(&["dladm", "create-vnic", "-l", physical, vnic_name]);
     execute(cmd)?;
     Ok(())
 }
@@ -136,7 +133,7 @@ pub fn create_base_zone(log: &Logger) -> Result<(), ApiError> {
     let mut cfg = zone::Config::create(
         name,
         /* overwrite= */ true,
-        zone::CreationOptions::Template("sparse".to_string())
+        zone::CreationOptions::Template("sparse".to_string()),
     );
     cfg.get_global()
         .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
@@ -149,21 +146,15 @@ pub fn create_base_zone(log: &Logger) -> Result<(), ApiError> {
         options: vec!["ro".to_string()],
         ..Default::default()
     });
-    cfg.run().map_err(|e| {
-        ApiError::InternalError {
-            message: format!("Failed to create base zone: {}", e),
-        }
+    cfg.run().map_err(|e| ApiError::InternalError {
+        message: format!("Failed to create base zone: {}", e),
     })?;
 
     // TODO: This process takes a little while...
     info!(log, "Installing base zone: {}", name);
-    zone::Adm::new(name)
-        .install(&[])
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to install base zone: {}", e),
-            }
-        })?;
+    zone::Adm::new(name).install(&[]).map_err(|e| ApiError::InternalError {
+        message: format!("Failed to install base zone: {}", e),
+    })?;
 
     Ok(())
 }
@@ -171,12 +162,16 @@ pub fn create_base_zone(log: &Logger) -> Result<(), ApiError> {
 /// Sets the configuration for a Propolis zone.
 ///
 /// This zone will be cloned as a child of the "base propolis zone".
-pub fn configure_child_zone(log: &Logger, name: &str, vnic: &str) -> Result<(), ApiError> {
+pub fn configure_child_zone(
+    log: &Logger,
+    name: &str,
+    vnic: &str,
+) -> Result<(), ApiError> {
     info!(log, "Creating child zone: {}", name);
     let mut cfg = zone::Config::create(
         name,
         /* overwrite= */ true,
-        zone::CreationOptions::Template("sparse".to_string())
+        zone::CreationOptions::Template("sparse".to_string()),
     );
     cfg.get_global()
         .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
@@ -189,26 +184,18 @@ pub fn configure_child_zone(log: &Logger, name: &str, vnic: &str) -> Result<(), 
         // TODO: read-only! Without this, we're failing to mount the block
         // device.
         options: vec!["rw".to_string()],
-//        options: vec!["ro".to_string()],
+        //        options: vec!["ro".to_string()],
         ..Default::default()
     });
     cfg.add_net(&zone::Net {
         physical: vnic.to_string(),
         ..Default::default()
     });
-    cfg.add_device(&zone::Device {
-        name: "/dev/vmm/*".to_string(),
-    });
-    cfg.add_device(&zone::Device {
-        name: "/dev/vmmctl".to_string(),
-    });
-    cfg.add_device(&zone::Device {
-        name: "/dev/viona".to_string(),
-    });
-    cfg.run().map_err(|e| {
-        ApiError::InternalError {
-            message: format!("Failed to create child zone: {}", e),
-        }
+    cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
+    cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
+    cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });
+    cfg.run().map_err(|e| ApiError::InternalError {
+        message: format!("Failed to create child zone: {}", e),
     })?;
 
     Ok(())
@@ -216,25 +203,19 @@ pub fn configure_child_zone(log: &Logger, name: &str, vnic: &str) -> Result<(), 
 
 /// Clones a zone (named `name`) from the base Propolis zone.
 pub fn clone_zone_from_base(name: &str) -> Result<(), ApiError> {
-    zone::Adm::new(name)
-        .clone(BASE_ZONE)
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to clone zone: {}", e),
-            }
-        })?;
+    zone::Adm::new(name).clone(BASE_ZONE).map_err(|e| {
+        ApiError::InternalError {
+            message: format!("Failed to clone zone: {}", e),
+        }
+    })?;
     Ok(())
 }
 
 /// Boots a zone (names `name`).
 pub fn boot_zone(name: &str) -> Result<(), ApiError> {
-    zone::Adm::new(name)
-        .boot()
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to boot zone: {}", e),
-            }
-        })?;
+    zone::Adm::new(name).boot().map_err(|e| ApiError::InternalError {
+        message: format!("Failed to boot zone: {}", e),
+    })?;
     Ok(())
 }
 
@@ -245,15 +226,11 @@ pub fn get_vnics() -> Result<Vec<String>, ApiError> {
     let output = execute(cmd)?;
 
     let vnics = String::from_utf8(output.stdout)
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to parse UTF-8 from dladm output: {}", e),
-            }
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Failed to parse UTF-8 from dladm output: {}", e),
         })?
         .lines()
-        .filter(|vnic| {
-            vnic.starts_with(VNIC_PREFIX)
-        })
+        .filter(|vnic| vnic.starts_with(VNIC_PREFIX))
         .map(|s| s.to_owned())
         .collect();
     Ok(vnics)
@@ -269,21 +246,14 @@ pub fn delete_vnic(name: &str) -> Result<(), ApiError> {
 
 /// Returns all zones that may be managed by the Sled Agent.
 pub fn get_zones() -> Result<Vec<zone::Zone>, ApiError> {
-    Ok(
-        zone::Adm::list()
-            .map_err(|e| {
-                ApiError::InternalError {
-                    message: format!("Failed to list zones: {}", e),
-                }
-            })?
-            .into_iter()
-            .filter(|z| {
-                z.name().starts_with(ZONE_PREFIX)
-            })
-            .collect()
-    )
+    Ok(zone::Adm::list()
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Failed to list zones: {}", e),
+        })?
+        .into_iter()
+        .filter(|z| z.name().starts_with(ZONE_PREFIX))
+        .collect())
 }
-
 
 /// Returns the default gateway accessible to the calling zone.
 // TODO: We could use this, invoking:
@@ -295,119 +265,120 @@ pub fn get_default_gateway() -> Result<IpAddr, ApiError> {
     let output = execute(cmd)?;
 
     let addr = String::from_utf8(output.stdout)
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to parse UTF-8 from route output: {}", e),
-            }
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Failed to parse UTF-8 from route output: {}", e),
         })?
         .lines()
         .find_map(|s| {
             Some(s.trim().strip_prefix("gateway:")?.trim().to_string())
         })
-        .ok_or_else(|| {
-            ApiError::InternalError {
-                message: format!("Route command succeeded, but did not contain gateway"),
-            }
+        .ok_or_else(|| ApiError::InternalError {
+            message: format!(
+                "Route command succeeded, but did not contain gateway"
+            ),
         })?;
 
-    IpAddr::from_str(&addr)
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to parse IP address from output: {}", e),
-            }
-        })
+    IpAddr::from_str(&addr).map_err(|e| ApiError::InternalError {
+        message: format!("Failed to parse IP address from output: {}", e),
+    })
 }
 
 /// Returns the IP address (plus subnet mask) of a physical device.
 pub fn get_ip_address(phys: &str) -> Result<IpNet, ApiError> {
     let mut command = std::process::Command::new("ipadm");
-    let cmd = command.args(&["show-addr", &format!("{}/", phys), "-p", "-o", "ADDR"]);
+    let cmd =
+        command.args(&["show-addr", &format!("{}/", phys), "-p", "-o", "ADDR"]);
     let output = execute(cmd)?;
     let out = String::from_utf8(output.stdout)
-        .map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Failed to parse UTF-8 from route output: {}", e),
-            }
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Failed to parse UTF-8 from route output: {}", e),
         })?
         .trim()
         .to_string();
 
     println!("Output from ipadm: {}", out);
-    Ok(
-        out
-            .parse()
-            .map_err(|e| {
-                ApiError::InternalError {
-                    message: format!("Failed to parse ipadm output as IP address: {}", e),
-                }
-            })?
-    )
+    Ok(out.parse().map_err(|e| ApiError::InternalError {
+        message: format!("Failed to parse ipadm output as IP address: {}", e),
+    })?)
 }
 
 /// Creates a static IP address within a Zone.
 // XXX Example: ipadm create-addr -t -T static -a 192.168.1.5/24 vnic_prop0/v4
-pub fn create_address(zone: &str, addr: &IpAddr, interface: &str) -> Result<(), ApiError> {
+pub fn create_address(
+    zone: &str,
+    addr: &IpAddr,
+    interface: &str,
+) -> Result<(), ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
-        "zlogin", zone, "ipadm", "create-addr", "-t", "-T", "static", "-a", &addr.to_string(), interface
+        "zlogin",
+        zone,
+        "ipadm",
+        "create-addr",
+        "-t",
+        "-T",
+        "static",
+        "-a",
+        &addr.to_string(),
+        interface,
     ]);
     execute(cmd)?;
     Ok(())
 }
 
 // TODO: Could we launch the SMF service, with a dependency on networking?
-pub fn run_propolis(zone: &str, id: &Uuid, addr: &SocketAddr) -> Result<(), ApiError> {
+pub fn run_propolis(
+    zone: &str,
+    id: &Uuid,
+    addr: &SocketAddr,
+) -> Result<(), ApiError> {
     // svccfg import /opt/oxide/propolis-server/pkg/manifest.xml
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command
-        .args(&[
-            "zlogin",
-            zone,
-            "svccfg",
-            "import",
-            "/opt/oxide/propolis-server/pkg/manifest.xml",
-        ]);
+    let cmd = command.args(&[
+        "zlogin",
+        zone,
+        "svccfg",
+        "import",
+        "/opt/oxide/propolis-server/pkg/manifest.xml",
+    ]);
     execute(cmd)?;
 
     // svccfg -s system/illumos/propolis-server setprop config/server_addr=192.168.1.5:12400
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command
-        .args(&[
-            "zlogin",
-            zone,
-            "svccfg",
-            "-s",
-            "system/illumos/propolis-server",
-            "setprop",
-            &format!("config/server_addr={}", addr),
-        ]);
+    let cmd = command.args(&[
+        "zlogin",
+        zone,
+        "svccfg",
+        "-s",
+        "system/illumos/propolis-server",
+        "setprop",
+        &format!("config/server_addr={}", addr),
+    ]);
     execute(cmd)?;
 
     // svccfg -s svc:/system/illumos/propolis-server add vm-<ID>
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command
-        .args(&[
-            "zlogin",
-            zone,
-            "svccfg",
-            "-s",
-            "svc:/system/illumos/propolis-server",
-            "add",
-            &format!("vm-{}", id),
-        ]);
+    let cmd = command.args(&[
+        "zlogin",
+        zone,
+        "svccfg",
+        "-s",
+        "svc:/system/illumos/propolis-server",
+        "add",
+        &format!("vm-{}", id),
+    ]);
     execute(cmd)?;
 
     // svcadm enable -st svc:/system/illumos/propolis-server:vm-<ID>
     let mut command = std::process::Command::new(PFEXEC);
-    let cmd = command
-        .args(&[
-            "zlogin",
-            zone,
-            "svcadm",
-            "enable",
-            "-st",
-            &format!("svc:/system/illumos/propolis-server:vm-{}", id),
-        ]);
+    let cmd = command.args(&[
+        "zlogin",
+        zone,
+        "svcadm",
+        "enable",
+        "-st",
+        &format!("svc:/system/illumos/propolis-server:vm-{}", id),
+    ]);
     execute(cmd)?;
 
     Ok(())

@@ -6,9 +6,9 @@ use omicron_common::model::{
 };
 use omicron_common::NexusClient;
 use slog::Logger;
-use std::sync::Mutex;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::instance::Instance;
@@ -32,7 +32,7 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        nexus_client: Arc<NexusClient>
+        nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, ApiError> {
         // Before we start creating instances, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -68,8 +68,10 @@ impl InstanceManager {
 
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
-                log, nexus_client, instances: Mutex::new(BTreeMap::new())
-            })
+                log,
+                nexus_client,
+                instances: Mutex::new(BTreeMap::new()),
+            }),
         })
     }
 
@@ -82,7 +84,10 @@ impl InstanceManager {
         initial_runtime: ApiInstanceRuntimeState,
         target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        info!(&self.inner.log, "instance_ensure {} -> {:?}", instance_id, target);
+        info!(
+            &self.inner.log,
+            "instance_ensure {} -> {:?}", instance_id, target
+        );
 
         let (instance, maybe_instance_ticket) = {
             let mut instances = self.inner.instances.lock().unwrap();
@@ -93,8 +98,10 @@ impl InstanceManager {
             } else {
                 // Instance does not exist - create it.
                 info!(&self.inner.log, "new instance");
-                let instance_log =
-                    self.inner.log.new(o!("instance" => instance_id.to_string()));
+                let instance_log = self
+                    .inner
+                    .log
+                    .new(o!("instance" => instance_id.to_string()));
                 instances.insert(
                     instance_id,
                     Instance::new(
@@ -105,7 +112,8 @@ impl InstanceManager {
                     )?,
                 );
                 let instance = instances.get_mut(&instance_id).unwrap().clone();
-                let ticket = Some(InstanceTicket::new(instance_id, self.inner.clone()));
+                let ticket =
+                    Some(InstanceTicket::new(instance_id, self.inner.clone()));
                 (instance, ticket)
             }
         };
@@ -132,15 +140,8 @@ pub struct InstanceTicket {
 }
 
 impl InstanceTicket {
-    fn new(
-        id: Uuid,
-        inner: Arc<InstanceManagerInternal>,
-    ) -> Self {
-        InstanceTicket {
-            id,
-            inner,
-            removed: false,
-        }
+    fn new(id: Uuid, inner: Arc<InstanceManagerInternal>) -> Self {
+        InstanceTicket { id, inner, removed: false }
     }
 
     /// Idempotently removes this instance from the tracked set of

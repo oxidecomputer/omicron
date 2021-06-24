@@ -400,10 +400,7 @@ mod test {
             instance.request_transition(Requested::Destroyed).unwrap().unwrap()
         );
         verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
-        assert_eq!(
-            None,
-            instance.observe_transition(&Observed::Stopped)
-        );
+        assert_eq!(None, instance.observe_transition(&Observed::Stopped));
         verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
         assert_eq!(
             Action::Destroy,

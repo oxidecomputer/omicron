@@ -37,7 +37,7 @@ impl Server {
         ));
         let sled_agent =
             SledAgent::new(&config.id, sa_log, nexus_client.clone())
-            .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
