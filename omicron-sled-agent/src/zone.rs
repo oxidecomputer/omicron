@@ -15,6 +15,9 @@ const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 const ZONE_ZFS_POOL_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_POOL: &str = "rpool/zone";
 
+pub const VNIC_PREFIX: &str = "vnic_propolis";
+pub const ZONE_PREFIX: &str = "propolis_inst";
+
 // Helper function for starting the process and checking the
 // exit code result.
 fn execute(command: &mut std::process::Command) -> Result<std::process::Output, ApiError> {
@@ -234,6 +237,53 @@ pub fn boot_zone(name: &str) -> Result<(), ApiError> {
         })?;
     Ok(())
 }
+
+/// Returns all VNICs that may be managed by the Sled Agent.
+pub fn get_vnics() -> Result<Vec<String>, ApiError> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["dladm", "show-vnic", "-p", "-o", "LINK"]);
+    let output = execute(cmd)?;
+
+    let vnics = String::from_utf8(output.stdout)
+        .map_err(|e| {
+            ApiError::InternalError {
+                message: format!("Failed to parse UTF-8 from dladm output: {}", e),
+            }
+        })?
+        .lines()
+        .filter(|vnic| {
+            vnic.starts_with(VNIC_PREFIX)
+        })
+        .map(|s| s.to_owned())
+        .collect();
+    Ok(vnics)
+}
+
+/// Remove a vnic from the sled.
+pub fn delete_vnic(name: &str) -> Result<(), ApiError> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["dladm", "delete-vnic", name]);
+    execute(cmd)?;
+    Ok(())
+}
+
+/// Returns all zones that may be managed by the Sled Agent.
+pub fn get_zones() -> Result<Vec<zone::Zone>, ApiError> {
+    Ok(
+        zone::Adm::list()
+            .map_err(|e| {
+                ApiError::InternalError {
+                    message: format!("Failed to list zones: {}", e),
+                }
+            })?
+            .into_iter()
+            .filter(|z| {
+                z.name().starts_with(ZONE_PREFIX)
+            })
+            .collect()
+    )
+}
+
 
 /// Returns the default gateway accessible to the calling zone.
 // TODO: We could use this, invoking:

@@ -22,6 +22,7 @@ structopt = "0.3"
 tokio = { version = "1.6", features = [ "full" ] }
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"
+# zone = { path = "../../zone/zone" }
 
 [dev-dependencies]
 expectorate = "1.0.1"

@@ -19,7 +19,7 @@ struct InstanceManagerInternal {
     nexus_client: Arc<NexusClient>,
 
     // TODO: Could hold enum of "Created/Running instance"
-    // would remove the "warning: might panic" messages.
+    // would remove the "warning: might panic" documentation of the current API
     instances: Mutex<BTreeMap<Uuid, Instance>>,
 }
 
@@ -40,6 +40,31 @@ impl InstanceManager {
 
         // Create a base zone, from which all running instance zones are cloned.
         create_base_zone(&log)?;
+
+        // Identify all existing zones which should be managed by the Sled
+        // Agent.
+        //
+        // NOTE: Currently, we're removing these zones. In the future, we should
+        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
+        // to leave the running Zones intact).
+        let zones = crate::zone::get_zones()?;
+        for z in zones {
+            warn!(log, "Deleting zone: {}", z.name());
+            zone::Adm::new(z.name()).halt().unwrap();
+            zone::Adm::new(z.name()).uninstall(true).unwrap();
+            zone::Config::new(z.name()).delete(true).run().unwrap();
+        }
+
+        // Identify all VNICs which should be managed by the Sled Agent.
+        //
+        // NOTE: Currently, we're removing these VNICs. In the future, we should
+        // identify if they're being used by the aforementioned existing zones,
+        // and track them once more.
+        let vnics = crate::zone::get_vnics()?;
+        for vnic in vnics {
+            warn!(log, "Deleting VNIC: {}", vnic);
+            crate::zone::delete_vnic(&vnic)?;
+        }
 
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {

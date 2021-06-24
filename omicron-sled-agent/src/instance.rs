@@ -21,7 +21,7 @@ use crate::common::instance::{Action as InstanceAction, InstanceState};
 use crate::zone::{
     boot_zone, create_address, create_vnic, clone_zone_from_base,
     configure_child_zone, get_ip_address, find_physical_data_link,
-    run_propolis,
+    run_propolis, VNIC_PREFIX, ZONE_PREFIX,
 };
 use propolis_client::Client as PropolisClient;
 
@@ -310,13 +310,13 @@ impl Instance {
         // resources, including:
         // - VNICs
         // - Zones
-        // - VMMs
         // - Other???
 
         // Create the VNIC which will be attached to the zone.
         let physical_dl = find_physical_data_link()?;
         info!(log, "Saw physical DL: {}", physical_dl);
-        let vnic_name = format!("vnic_prop5"); // XXX Gonna need patching
+        let vnic_name = format!("{}5", VNIC_PREFIX); // XXX Gonna need patching
+//        let vnic_name = format!("vnic-{}", inner.id().to_simple());
         create_vnic(&physical_dl, &vnic_name)?;
         info!(log, "Created vnic: {}", vnic_name);
 
@@ -334,7 +334,7 @@ impl Instance {
 
         // Create a zone for the propolis instance, using the previously
         // configured VNIC.
-        let zone_name = format!("propolis-{}", inner.id());
+        let zone_name = format!("{}{}", ZONE_PREFIX, inner.id());
         configure_child_zone(&log, &zone_name, &vnic_name)?;
         info!(log, "Configured child zone: {}", zone_name);
 
