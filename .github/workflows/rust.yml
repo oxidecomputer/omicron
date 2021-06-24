@@ -93,14 +93,14 @@ jobs:
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
-        key: ${{ runner.os }}-cockroach-binary-v2
+        key: ${{ runner.os }}-cockroach-binary-${{ hashFiles('tools/cockroachdb_checksums') }}
         path: "cockroachdb"
     - name: Configure GitHub cache for ClickHouse binaries
       id: cache-clickhouse
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
-        key: ${{ runner.os }}-clickhouse-binary
+        key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
         path: "clickhouse"
     - name: Build
       run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
