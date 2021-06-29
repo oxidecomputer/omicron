@@ -1,18 +1,21 @@
 //! Tools for managing ClickHouse during development
 
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use tempfile::TempDir;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
+    time::{sleep, Instant},
 };
 
 use crate::dev::poll;
+
+// Timeout used when starting up ClickHouse subprocess.
+const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse server process.
 #[derive(Debug)]
@@ -82,7 +85,7 @@ impl ClickHouseInstance {
                 }
             },
             &Duration::from_millis(500),
-            &Duration::from_secs(10),
+            &CLICKHOUSE_TIMEOUT,
         )
         .await?;
 
@@ -91,7 +94,7 @@ impl ClickHouseInstance {
         let port = if port != 0 {
             port
         } else {
-            discover_local_listening_port(&log_path).await?
+            discover_local_listening_port(&log_path, CLICKHOUSE_TIMEOUT).await?
         };
 
         Ok(Self {
@@ -170,25 +173,131 @@ impl Drop for ClickHouseInstance {
 // the HTTP server. This is only used if the port is chosen by the OS, not the caller.
 async fn discover_local_listening_port(
     path: &Path,
+    timeout: Duration,
+) -> Result<u16, anyhow::Error> {
+    let timeout = Instant::now() + timeout;
+    tokio::time::timeout_at(timeout, find_clickhouse_port_in_log(path))
+        .await
+        .context("Failed to find ClickHouse port within timeout")?
+}
+
+// Parse the clickhouse log for a port number.
+//
+// NOTE: This function loops forever until the expected line is found. It should be run under a
+// timeout, or some other mechanism for cancelling it.
+async fn find_clickhouse_port_in_log(
+    path: &Path,
 ) -> Result<u16, anyhow::Error> {
     let reader = BufReader::new(
         File::open(path).await.context("Failed to open ClickHouse log file")?,
     );
     const NEEDLE: &str = "<Information> Application: Listening for http://";
     let mut lines = reader.lines();
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .context("Failed to read line from ClickHouse log file")?
-    {
-        if let Some(needle_start) = line.find(&NEEDLE) {
-            let address_start = needle_start + NEEDLE.len();
-            let address: SocketAddr =
-                line[address_start..].trim().parse().context(
-                    "Failed to parse ClickHouse socket address from log",
-                )?;
-            return Ok(address.port());
+    loop {
+        let line = lines
+            .next_line()
+            .await
+            .context("Failed to read line from ClickHouse log file")?;
+        match line {
+            Some(line) => {
+                if let Some(needle_start) = line.find(&NEEDLE) {
+                    // The address is currently written as ":PORT", but may in the future be written as
+                    // "ADDR:PORT" or "HOST:PORT". Split on the colon, and parse the port number, rather
+                    // than assuming the address conforms to a specific syntax.
+                    let address_start = needle_start + NEEDLE.len();
+                    return line[address_start..]
+                        .trim()
+                        .split(':')
+                        .last()
+                        .context("ClickHouse log file does not contain the expected HTTP listening address")?
+                        .parse()
+                        .context("Failed to parse ClickHouse port number from log");
+                }
+            }
+            None => {
+                // Reached EOF, just sleep for an interval and check again.
+                sleep(Duration::from_millis(10)).await;
+            }
         }
     }
-    bail!("Failed to discover port from ClickHouse log file");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{discover_local_listening_port, CLICKHOUSE_TIMEOUT};
+    use std::{io::Write, time::Duration};
+    use tempfile::NamedTempFile;
+    use tokio::{task::spawn, time::sleep};
+
+    const EXPECTED_PORT: u16 = 12345;
+    const SLOW_WRITER_INTERVAL: Duration = Duration::from_millis(100);
+
+    #[tokio::test]
+    async fn test_discover_local_listening_port() {
+        // Write some data to a fake log file
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "A garbage line").unwrap();
+        writeln!(
+            file,
+            "<Information> Application: Listening for http://127.0.0.1:{}",
+            EXPECTED_PORT
+        )
+        .unwrap();
+        writeln!(file, "Another garbage line").unwrap();
+        file.flush().unwrap();
+
+        assert_eq!(
+            discover_local_listening_port(file.path(), CLICKHOUSE_TIMEOUT)
+                .await
+                .unwrap(),
+            EXPECTED_PORT
+        );
+    }
+
+    // A regression test for #131.
+    //
+    // The function `discover_local_listening_port` initially read from the log file until EOF, but
+    // there's no guarantee that ClickHouse has written the port we're searching for before the
+    // reader consumes the whole file. This test confirms that the file is read until the line is
+    // found, ignoring EOF, at least until the timeout is hit.
+    #[tokio::test]
+    async fn test_discover_local_listening_port_slow_write() {
+        assert_eq!(
+            read_log_file(CLICKHOUSE_TIMEOUT).await.unwrap(),
+            EXPECTED_PORT
+        );
+    }
+
+    // An extremely slow write test, to verify the timeout handling.
+    #[tokio::test]
+    async fn test_discover_local_listening_port_timeout() {
+        assert!(read_log_file(Duration::from_millis(1)).await.is_err());
+    }
+
+    async fn read_log_file(timeout: Duration) -> Result<u16, anyhow::Error> {
+        async fn write_and_wait(file: &mut NamedTempFile, line: String) {
+            writeln!(file, "{}", line).unwrap();
+            file.flush().unwrap();
+            sleep(SLOW_WRITER_INTERVAL).await;
+        }
+
+        // Start a task that slowly writes lines to the log file.
+        let mut file = NamedTempFile::new()?;
+        let path = file.path().to_path_buf();
+        let task = spawn(async move {
+            write_and_wait(&mut file, "A garbage line".to_string()).await;
+            write_and_wait(
+                &mut file,
+                format!(
+                "<Information> Application: Listening for http://127.0.0.1:{}",
+                EXPECTED_PORT
+            ),
+            )
+            .await;
+            write_and_wait(&mut file, "Another garbage line".to_string()).await;
+        });
+        let result = discover_local_listening_port(&path, timeout).await;
+        tokio::join!(task).0.unwrap();
+        result
+    }
 }
