@@ -2857,9 +2857,9 @@ dependencies = [
 
 [[package]]
 name = "zone"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a73c1fee8461c8f40cdf8ab8b05d960fe5a0010cc13711857f1539103425ff"
+checksum = "41f308411d82ac9426366a91b6a6169aa43e3cacdd108a18e4a7522d9ecd4693"
 dependencies = [
  "itertools",
  "thiserror",

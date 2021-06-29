@@ -7,7 +7,6 @@ use omicron_common::model::ApiInstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -144,6 +143,10 @@ fn fmri_name(id: &Uuid) -> String {
     format!("{}:{}", service_name(), instance_name(id))
 }
 
+fn zone_name(id: &Uuid) -> String {
+    format!("{}{}", ZONE_PREFIX, id)
+}
+
 // Action to be taken by the Sled Agent after monitoring Propolis for
 // state changes.
 enum Reaction {
@@ -161,6 +164,7 @@ struct RunningState {
 // TODO: The things which are "Options" - is that just "running state"?
 struct InstanceInner {
     log: Logger,
+    runtime_id: u64,
     properties: propolis_client::api::InstanceProperties,
     state: InstanceState,
     nexus_client: Arc<NexusClient>,
@@ -268,11 +272,13 @@ impl Instance {
     pub fn new(
         log: Logger,
         id: Uuid,
+        runtime_id: u64,
         initial_runtime: ApiInstanceRuntimeState,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, ApiError> {
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
+            runtime_id,
             // TODO: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
@@ -297,111 +303,59 @@ impl Instance {
     pub async fn start(&self, ticket: InstanceTicket) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().await;
         let log = &inner.log;
-        // TODO: Launch in a Zone.
-
-        // XXX Hacks below
-
-        // TODO: NOT HERE! On setup, we should keep an eye out for straggler
-        // resources, including:
-        // - VNICs
-        // - Zones
-        // - Other???
 
         // Create the VNIC which will be attached to the zone.
         let physical_dl = find_physical_data_link()?;
         info!(log, "Saw physical DL: {}", physical_dl);
-        let vnic_name = format!("{}5", VNIC_PREFIX); // XXX Gonna need patching
-                                                     //        let vnic_name = format!("vnic-{}", inner.id().to_simple());
+
+        // It would be preferable to use the UUID of the instance as a component
+        // of the "per-Zone, control plane VNIC", but VNIC names are somewhat
+        // restrictive. They must end with numerics, and they must be less than
+        // 32 characters.
+        //
+        // Instead, we just use a per-agent incrementing number.
+        let vnic_name = format!("{}{}", VNIC_PREFIX, inner.runtime_id);
         create_vnic(&physical_dl, &vnic_name)?;
         info!(log, "Created vnic: {}", vnic_name);
 
-        // Specify the IP address we'll use when communicating with the
-        // device.
-        let ip_net = get_ip_address(&physical_dl)?;
-        info!(log, "Saw IP address: {}", ip_net);
-
-        // TODO: Start by hardcoding it, allocate it properly later.
-        // let ip = ip_net.hosts().next().unwrap();
-        let ip = std::net::IpAddr::V4(
-            std::net::Ipv4Addr::from_str("192.168.1.5").unwrap(),
-        );
-        info!(log, "Using IP address {}", ip);
-
         // Create a zone for the propolis instance, using the previously
         // configured VNIC.
-        let zone_name = format!("{}{}", ZONE_PREFIX, inner.id());
-        configure_child_zone(&log, &zone_name, &vnic_name)?;
-        info!(log, "Configured child zone: {}", zone_name);
+        let zname = zone_name(inner.id());
+        configure_child_zone(&log, &zname, &vnic_name)?;
+        info!(log, "Configured child zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
         // boot it up.
-        clone_zone_from_base(&zone_name)?;
-        info!(log, "Cloned child zone: {}", zone_name);
-        boot_zone(&zone_name)?;
-        info!(log, "Booted zone: {}", zone_name);
+        clone_zone_from_base(&zname)?;
+        info!(log, "Cloned child zone: {}", zname);
+        boot_zone(&zname)?;
+        info!(log, "Booted zone: {}", zname);
 
         // Wait for the network services to come online, then create an address.
         wait_for_service_to_come_online(
             &log,
-            Some(&zone_name),
+            Some(&zname),
             "svc:/milestone/network:default",
         )
         .await?;
-        info!(log, "Network milestone ready for {}", zone_name);
+        info!(log, "Network milestone ready for {}", zname);
 
         let interface_name = format!("{}/omicron", vnic_name);
-        create_address(&zone_name, &ip, &interface_name)?;
-        info!(log, "Created address {} for zone: {}", ip, zone_name);
+        let ip = create_address(&zname, &interface_name)?;
+        info!(log, "Created address {} for zone: {}", ip, zname);
 
         // Run Propolis in the Zone.
         let port = 12400;
-        let server_addr = SocketAddr::new(ip, port);
-        run_propolis(&zone_name, inner.id(), &server_addr)?;
-        info!(log, "Started propolis in zone: {}", zone_name);
+        let server_addr = SocketAddr::new(ip.addr(), port);
+        run_propolis(&zname, inner.id(), &server_addr)?;
+        info!(log, "Started propolis in zone: {}", zname);
 
-        // XXX Hacks above
+        // This isn't strictly necessary - we wait for the HTTP server below -
+        // but it helps distinguish "online in SMF" from "responding to HTTP
+        // requests".
+        let fmri = fmri_name(inner.id());
+        wait_for_service_to_come_online(&log, Some(&zname), &fmri).await?;
 
-        /*
-                // Launch a new SMF service running Propolis.
-                let manifest = "/opt/oxide/propolis-server/pkg/manifest.xml";
-
-                // Import and enable the service as distinct steps.
-                //
-                // This allows the service to remain "transient", which avoids
-                // it being auto-initialized by SMF across reboots.
-                // Instead, the bootstrap agent remains responsible for verifying
-                // and enabling the services on each access.
-                info!(log, "Instance::new Importing {}", manifest);
-                smf::Config::import().run(manifest).map_err(|e| {
-                    ApiError::InternalError {
-                        message: format!("Cannot import propolis SMF manifest: {}", e),
-                    }
-                })?;
-
-                info!(log, "Instance::new adding service: {}", service_name());
-                smf::Config::add(service_name()).run(&instance_name(inner.id())).map_err(|e| {
-                    ApiError::InternalError {
-                        message: format!("Cannot create propolis SMF service: {}", e),
-                    }
-                })?;
-
-                let fmri = fmri_name(inner.id());
-                info!(log, "Instance::new enabling FMRI: {}", fmri);
-                // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
-                // ".synchronous()", but it doesn't, because of an SMF bug.
-                smf::Adm::new()
-                    .enable()
-                    .temporary()
-                    .run(smf::AdmSelection::ByPattern(&[&fmri]))
-                    .map_err(|e| ApiError::InternalError {
-                        message: format!("Cannot enable propolis SMF service: {}", e),
-                    })?;
-        */
-        // XXX ???
-        //        wait_for_service_to_come_online(&log, Some(&zone_name), &fmri).await?;
-
-        // TODO: IP ADDRESS??? Be less hardcoded?
-        // let address = "127.0.0.1:12400";
         let client = Arc::new(PropolisClient::new(server_addr, log.clone()));
 
         // Although the instance is online, the HTTP server may not be running
@@ -436,6 +390,18 @@ impl Instance {
         let fmri = fmri_name(inner.id());
 
         info!(log, "Instance::stop disabling service: {}", fmri);
+
+        // TODO: maybe de-dup with "deleting zone" in instance_manager.rs?
+
+        // TODO: REMOVE THE ZONE
+
+        let zname = zone_name(inner.id());
+        warn!(log, "Deleting zone: {}", zname);
+        zone::Adm::new(&zname).halt().unwrap();
+        zone::Adm::new(&zname).uninstall(true).unwrap();
+        zone::Config::new(&zname).delete(true).run().unwrap();
+
+        /*
         smf::Adm::new()
             .disable()
             .synchronous()
@@ -450,6 +416,7 @@ impl Instance {
                 message: format!("Cannot delete config for SMF service: {}", e),
             }
         })?;
+        */
 
         info!(log, "Instance::stop removing self from instances map");
         inner.running_state.as_mut().unwrap().ticket.terminate();

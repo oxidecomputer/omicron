@@ -40,6 +40,7 @@ fn execute(
     Ok(output)
 }
 
+/// Creates a new ZFS filesystem named `name`, unless one already exists.
 pub fn ensure_zpool_exists(name: &str) -> Result<(), ApiError> {
     // If the zpool exists, we're done.
     let mut command = std::process::Command::new("zfs");
@@ -83,6 +84,7 @@ fn remove_zone(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Returns the name of the first observed physical data link.
 pub fn find_physical_data_link() -> Result<String, ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["dladm", "show-phys", "-o", "LINK"]);
@@ -103,6 +105,7 @@ pub fn find_physical_data_link() -> Result<String, ApiError> {
         .to_string())
 }
 
+/// Creates a new VNIC atop a physical device.
 pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd =
@@ -150,7 +153,7 @@ pub fn create_base_zone(log: &Logger) -> Result<(), ApiError> {
         message: format!("Failed to create base zone: {}", e),
     })?;
 
-    // TODO: This process takes a little while...
+    // TODO: This process takes a little while... Consider optimizing.
     info!(log, "Installing base zone: {}", name);
     zone::Adm::new(name).install(&[]).map_err(|e| ApiError::InternalError {
         message: format!("Failed to install base zone: {}", e),
@@ -181,8 +184,8 @@ pub fn configure_child_zone(
         ty: "lofs".to_string(),
         dir: PROPOLIS_SVC_DIRECTORY.to_string(),
         special: PROPOLIS_SVC_DIRECTORY.to_string(),
-        // TODO: read-only! Without this, we're failing to mount the block
-        // device.
+        // TODO: Should be read-only! Without this, we're failing to mount the
+        // block device.
         options: vec!["rw".to_string()],
         //        options: vec!["ro".to_string()],
         ..Default::default()
@@ -306,9 +309,8 @@ pub fn get_ip_address(phys: &str) -> Result<IpNet, ApiError> {
 // XXX Example: ipadm create-addr -t -T static -a 192.168.1.5/24 vnic_prop0/v4
 pub fn create_address(
     zone: &str,
-    addr: &IpAddr,
     interface: &str,
-) -> Result<(), ApiError> {
+) -> Result<IpNet, ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
@@ -317,13 +319,34 @@ pub fn create_address(
         "create-addr",
         "-t",
         "-T",
-        "static",
-        "-a",
-        &addr.to_string(),
+        "dhcp",
         interface,
     ]);
     execute(cmd)?;
-    Ok(())
+
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&[
+        "zlogin",
+        zone,
+        "ipadm",
+        "show-addr",
+        "-p",
+        "-o",
+        "ADDR",
+        interface,
+    ]);
+    let output = execute(cmd)?;
+    String::from_utf8(output.stdout)
+        .map_err(|e| ApiError::InternalError {
+            message: format!("Cannot parse ipadm output as UTF-8: {}", e),
+        })?
+        .lines()
+        .find_map(|s| {
+            s.parse().ok()
+        })
+        .ok_or(ApiError::InternalError {
+            message: format!("Casnnot find a valid address"),
+        })
 }
 
 // TODO: Could we launch the SMF service, with a dependency on networking?
@@ -332,7 +355,7 @@ pub fn run_propolis(
     id: &Uuid,
     addr: &SocketAddr,
 ) -> Result<(), ApiError> {
-    // svccfg import /opt/oxide/propolis-server/pkg/manifest.xml
+    // Import the service manifest for Propolis.
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
@@ -343,7 +366,7 @@ pub fn run_propolis(
     ]);
     execute(cmd)?;
 
-    // svccfg -s system/illumos/propolis-server setprop config/server_addr=192.168.1.5:12400
+    // Set the desired address of the Propolis server.
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
@@ -356,7 +379,7 @@ pub fn run_propolis(
     ]);
     execute(cmd)?;
 
-    // svccfg -s svc:/system/illumos/propolis-server add vm-<ID>
+    // Create a new Propolis service instance.
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
@@ -369,14 +392,17 @@ pub fn run_propolis(
     ]);
     execute(cmd)?;
 
-    // svcadm enable -st svc:/system/illumos/propolis-server:vm-<ID>
+    // Turn on the server.
+    //
+    // TODO(https://www.illumos.org/issues/13837): Ideally, this should call
+    // ".synchronous()", but it doesn't, because of an SMF bug.
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
         zone,
         "svcadm",
         "enable",
-        "-st",
+        "-t",
         &format!("svc:/system/illumos/propolis-server:vm-{}", id),
     ]);
     execute(cmd)?;

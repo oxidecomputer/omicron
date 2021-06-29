@@ -7,8 +7,7 @@ use omicron_common::model::{
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex};
 use uuid::Uuid;
 
 use crate::instance::Instance;
@@ -21,6 +20,8 @@ struct InstanceManagerInternal {
     // TODO: Could hold enum of "Created/Running instance"
     // would remove the "warning: might panic" documentation of the current API
     instances: Mutex<BTreeMap<Uuid, Instance>>,
+
+    next_id: AtomicU64,
 }
 
 /// All instances currently running on the sled.
@@ -60,6 +61,8 @@ impl InstanceManager {
         // NOTE: Currently, we're removing these VNICs. In the future, we should
         // identify if they're being used by the aforementioned existing zones,
         // and track them once more.
+        //
+        // (dladm show-vnic -p -o ZONE,LINK) might help
         let vnics = crate::zone::get_vnics()?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
@@ -71,6 +74,7 @@ impl InstanceManager {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
+                next_id: AtomicU64::new(1),
             }),
         })
     }
@@ -107,6 +111,7 @@ impl InstanceManager {
                     Instance::new(
                         instance_log,
                         instance_id,
+                        self.inner.next_id.fetch_add(1, Ordering::SeqCst),
                         initial_runtime,
                         self.inner.nexus_client.clone(),
                     )?,
