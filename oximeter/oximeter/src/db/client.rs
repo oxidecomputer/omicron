@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use slog::{debug, error, trace, Logger};
 
-use crate::db::model;
-use crate::{types::Sample, Error};
+use crate::db::{model, query};
+use crate::{types::Sample, Error, Field, FieldValue, MeasurementType};
 
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
@@ -32,7 +32,31 @@ impl Client {
             client,
             schema: Mutex::new(BTreeMap::new()),
         };
+        // TODO-robustness: We may want to remove this init_db call.
+        //
+        // The call will always succeed (assuming the DB can be reached), since the statements for
+        // creating the database and tables have `IF NOT EXISTS` everywhere. It may be preferable
+        // to remove this call and change the statements to _fail_ if the DB is already
+        // initialized. This removes some of the "magic", and allows clients to know if the DB is
+        // already populated or not. It also means we can connect and do stuff (such as wipe)
+        // without first creating a bunch of data.
+        //
+        // For example, we really want to know if the DB is populated when we cold-start the rack,
+        // as that would indicate a serious problem. This should probably trigger an obvious error,
+        // rather than silently succeeding.
         out.init_db().await?;
+
+        // TODO-completeness: This is the only time we actually _get_ the schema from the DB. We
+        // insert new schema into the member data structures when we accept new samples, but never
+        // check the DB itself again. In other words, this implicitly assumes a unique connection
+        // to the DB -- that _this_ client instance sees any new schema before the database does.
+        // This is fine if there _is_ a single writing client, as in the case of a single oximeter
+        // server instance as the sole ingress point for new samples. But we've made the
+        // `insert_samples` method public to support testing, which means it's possible to have
+        // multiple writing clients.
+        //
+        // In any case, we may need to add calls to `get_schema` somewhere inside `insert_samples`,
+        // hopefully without many requests out to the database.
         out.get_schema().await?;
         Ok(out)
     }
@@ -133,6 +157,59 @@ impl Client {
         Ok(())
     }
 
+    /// Search for samples from timeseries matching the given criteria.
+    pub async fn filter_timeseries(
+        &self,
+        filter: &query::TimeseriesFilter,
+        measurement_type: MeasurementType, // TODO remove?
+    ) -> Result<Vec<model::Timeseries>, Error> {
+        let query = filter.as_select_query(measurement_type);
+        let body = self.execute_with_body(query).await?;
+        let schema =
+            self.schema_for_timeseries(&filter.timeseries_name).await?.unwrap();
+        let mut timeseries_by_key = BTreeMap::new();
+        for line in body.lines() {
+            let (key, sample) =
+                model::parse_timeseries_sample(line, measurement_type)?;
+            timeseries_by_key.entry(key).or_insert_with(Vec::new).push(sample);
+        }
+        timeseries_by_key
+            .into_iter()
+            .map(|(timeseries_key, samples)| {
+                reconstitute_from_schema(&timeseries_key, &schema).map(
+                    |(target, metric)| model::Timeseries {
+                        timeseries_key,
+                        target,
+                        metric,
+                        samples,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    /// Return the schema for a timeseries by name.
+    ///
+    /// Note
+    /// ----
+    /// This method may translate into a call to the database, if the requested metric cannot be
+    /// found in an internal cache.
+    pub async fn schema_for_timeseries<S: AsRef<str>>(
+        &self,
+        name: S,
+    ) -> Result<Option<model::TimeseriesSchema>, Error> {
+        {
+            let map = self.schema.lock().unwrap();
+            if let Some(s) = map.get(name.as_ref()) {
+                return Ok(Some(s.clone()));
+            }
+        }
+        // `get_schema` acquires the lock internally, so the above scope is required to avoid
+        // deadlock.
+        self.get_schema().await?;
+        Ok(self.schema.lock().unwrap().get(name.as_ref()).map(Clone::clone))
+    }
+
     // Verifies that the schema for a sample matches the schema in the database.
     //
     // If the schema does not match, an Err is returned (the caller skips the sample in this case).
@@ -173,7 +250,6 @@ impl Client {
     }
 
     // Initialize ClickHouse with the database and metric table schema.
-    #[allow(dead_code)]
     pub(crate) async fn init_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
@@ -186,8 +262,7 @@ impl Client {
     }
 
     // Wipe the ClickHouse database entirely.
-    #[allow(dead_code)]
-    pub(crate) async fn wipe_db(&self) -> Result<(), Error> {
+    pub async fn wipe_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
         let sql = include_str!("./db-wipe.sql").to_string();
         self.execute(sql).await
@@ -283,11 +358,49 @@ fn error_for_schema_mismatch(
     }
 }
 
+// Reconstitute a target and metric struct from a timeseries key and its schema, if possible.
+fn reconstitute_from_schema(
+    timeseries_key: &str,
+    schema: &model::TimeseriesSchema,
+) -> Result<(model::Target, model::Metric), Error> {
+    let (target_name, metric_name) =
+        schema.timeseries_name.split_once(':').unwrap();
+    let (target_fields, metric_fields): (Vec<_>, Vec<_>) = schema
+        .fields
+        .iter()
+        .zip(timeseries_key.split(':'))
+        .map(|(field, value_str)| {
+            FieldValue::parse_as_type(value_str, field.ty)
+                .map(|value| {
+                    (field.source, Field { name: field.name.clone(), value })
+                })
+                .expect("Failed to parse field value from timeseries key part")
+        })
+        .partition(|(source, _)| source == &model::FieldSource::Target);
+    let target = model::Target {
+        name: target_name.to_string(),
+        fields: target_fields.into_iter().map(|(_, field)| field).collect(),
+    };
+    let metric = model::Metric {
+        name: metric_name.to_string(),
+        fields: metric_fields.into_iter().map(|(_, field)| field).collect(),
+        measurement_type: schema.measurement_type,
+    };
+    assert_eq!(
+        target.fields.len() + metric.fields.len(),
+        schema.fields.len(),
+        "Missing a target or metric field in the timeseries key",
+    );
+    Ok((target, metric))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::test_util;
-    use omicron_common::dev;
+    use crate::db::{query, test_util};
+    use crate::types::FieldType;
+    use chrono::{Duration, Utc};
+    use omicron_common::dev::clickhouse::ClickHouseInstance;
     use slog::o;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
@@ -305,7 +418,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -319,7 +432,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -361,7 +474,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -391,7 +504,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -455,6 +568,169 @@ mod tests {
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
 
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    fn make_schema() -> (model::TimeseriesSchema, String) {
+        let schema = model::TimeseriesSchema {
+            timeseries_name: "some_target:some_metric".to_string(),
+            fields: vec![
+                model::Field {
+                    name: String::from("target_field2"),
+                    ty: FieldType::I64,
+                    source: model::FieldSource::Target,
+                },
+                model::Field {
+                    name: String::from("target_field1"),
+                    ty: FieldType::I64,
+                    source: model::FieldSource::Target,
+                },
+                model::Field {
+                    name: String::from("metric_field1"),
+                    ty: FieldType::I64,
+                    source: model::FieldSource::Metric,
+                },
+                model::Field {
+                    name: String::from("metric_field2"),
+                    ty: FieldType::I64,
+                    source: model::FieldSource::Metric,
+                },
+            ],
+            measurement_type: MeasurementType::F64,
+            created: Utc::now(),
+        };
+        (schema, "0:1:2:3".to_string())
+    }
+
+    #[test]
+    fn test_reconstitute_from_schema() {
+        let (schema, timeseries_key) = make_schema();
+        let (target, metric) =
+            reconstitute_from_schema(&timeseries_key, &schema).unwrap();
+        assert_eq!(target.name, "some_target");
+        assert_eq!(metric.name, "some_metric");
+        assert_eq!(
+            target.fields.iter().collect::<Vec<_>>(),
+            vec![
+                &Field {
+                    name: "target_field2".to_string(),
+                    value: FieldValue::I64(0)
+                },
+                &Field {
+                    name: "target_field1".to_string(),
+                    value: FieldValue::I64(1)
+                },
+            ],
+        );
+        assert_eq!(
+            metric.fields.iter().collect::<Vec<_>>(),
+            vec![
+                &Field {
+                    name: "metric_field1".to_string(),
+                    value: FieldValue::I64(2)
+                },
+                &Field {
+                    name: "metric_field2".to_string(),
+                    value: FieldValue::I64(3)
+                },
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_reconstitute_from_schema_empty_key() {
+        let (schema, _) = make_schema();
+        let _ = reconstitute_from_schema("", &schema);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_reconstitute_from_schema_missing_field() {
+        let (schema, _) = make_schema();
+        let missing_field = "1:2:3";
+        let _ = reconstitute_from_schema(missing_field, &schema);
+    }
+
+    async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
+    {
+        let log = slog::Logger::root(slog::Discard, o!());
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, log).await.unwrap();
+
+        // Create sample data
+        let interval = Duration::seconds(1);
+        let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);
+        let samples = test_util::generate_test_samples(
+            n_projects,
+            n_instances,
+            n_cpus,
+            n_samples,
+            interval,
+        );
+        assert_eq!(
+            samples.len(),
+            n_projects * n_instances * n_cpus * n_samples
+        );
+
+        client.insert_samples(&samples).await.unwrap();
+        (db, client, samples)
+    }
+
+    #[tokio::test]
+    async fn test_client_filter_timeseries_one() {
+        let (mut db, client, samples) = setup_filter_testcase().await;
+        let sample = samples.first().unwrap();
+        let filter = query::TimeseriesFilter {
+            timeseries_name: String::from("virtual_machine:cpu_busy"),
+            filters: vec![
+                query::FieldFilter::new(
+                    "project_id",
+                    &[sample.target_fields()[0].value.clone()],
+                )
+                .unwrap(),
+                query::FieldFilter::new(
+                    "instance_id",
+                    &[sample.target_fields()[1].value.clone()],
+                )
+                .unwrap(),
+                query::FieldFilter::new(
+                    "cpu_id",
+                    &[sample.metric_fields()[0].value.clone()],
+                )
+                .unwrap(),
+            ],
+            time_filter: None,
+        };
+        let results = client
+            .filter_timeseries(&filter, sample.measurement.measurement_type())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1, "Expected to find a single timeseries");
+        let timeseries = &results[0];
+        assert_eq!(
+            timeseries.samples.len(),
+            2,
+            "Expected 2 samples per timeseries"
+        );
+        assert_eq!(timeseries.timeseries_key, sample.timeseries_key());
+        // Less than 1us difference
+        assert!(
+            (sample.timestamp - timeseries.samples[0].timestamp)
+                <= Duration::nanoseconds(999)
+        );
+        assert_eq!(timeseries.samples[0].value, sample.measurement);
+        assert_eq!(timeseries.target.name, "virtual_machine");
+        assert_eq!(timeseries.target.fields[0], sample.target_fields()[0]);
+        assert_eq!(timeseries.target.fields[1], sample.target_fields()[1]);
+        assert_eq!(timeseries.metric.name, "cpu_busy");
+        assert_eq!(timeseries.metric.fields[0], sample.metric_fields()[0]);
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 }

@@ -1385,6 +1385,7 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "chrono",
  "dropshot",
@@ -1397,6 +1398,8 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
+ "slog-term",
  "structopt",
  "thiserror",
  "tokio",

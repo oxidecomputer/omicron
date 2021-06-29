@@ -48,6 +48,7 @@ pub enum FieldValue {
 }
 
 impl FieldValue {
+    /// Return the type associated with this field
     pub fn field_type(&self) -> FieldType {
         match self {
             FieldValue::String(_) => FieldType::String,
@@ -55,6 +56,31 @@ impl FieldValue {
             FieldValue::IpAddr(_) => FieldType::IpAddr,
             FieldValue::Uuid(_) => FieldType::Uuid,
             FieldValue::Bool(_) => FieldType::Bool,
+        }
+    }
+
+    /// Parse a field from a string, assuming it is of a certain type. An Err is returned if the
+    /// value cannot be parsed as that type.
+    pub fn parse_as_type(
+        s: &str,
+        field_type: FieldType,
+    ) -> Result<Self, Error> {
+        let make_err =
+            || Error::ParseError(s.to_string(), field_type.to_string());
+        match field_type {
+            FieldType::String => Ok(FieldValue::String(s.to_string())),
+            FieldType::I64 => {
+                Ok(FieldValue::I64(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::IpAddr => {
+                Ok(FieldValue::IpAddr(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::Uuid => {
+                Ok(FieldValue::Uuid(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::Bool => {
+                Ok(FieldValue::Bool(s.parse().map_err(|_| make_err())?))
+            }
         }
     }
 }
@@ -74,12 +100,6 @@ impl fmt::Display for FieldValue {
 impl From<i64> for FieldValue {
     fn from(value: i64) -> Self {
         FieldValue::I64(value)
-    }
-}
-
-impl From<&i64> for FieldValue {
-    fn from(value: &i64) -> Self {
-        FieldValue::I64(*value)
     }
 }
 
@@ -122,6 +142,15 @@ impl From<Uuid> for FieldValue {
 impl From<bool> for FieldValue {
     fn from(value: bool) -> Self {
         FieldValue::Bool(value)
+    }
+}
+
+impl<T> From<&T> for FieldValue
+where
+    T: Clone + Into<FieldValue>,
+{
+    fn from(value: &T) -> Self {
+        value.clone().into()
     }
 }
 
@@ -263,6 +292,14 @@ pub enum Error {
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
+
+    /// An error querying or filtering data
+    #[error("Invalid query or data filter: {0}")]
+    QueryError(String),
+
+    /// An error parsing a field or measurement from a string.
+    #[error("String '{0}' could not be parsed as type '{1}'")]
+    ParseError(String, String),
 }
 
 /// A cumulative or counter data type.
@@ -538,11 +575,14 @@ impl Sample {
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+
     use bytes::Bytes;
     use chrono::Utc;
+    use uuid::Uuid;
 
     use super::histogram::Histogram;
-    use super::{Cumulative, Measurement};
+    use super::{Cumulative, FieldType, FieldValue, Measurement};
     use crate::types;
     use crate::{Metric, Target};
 
@@ -641,5 +681,37 @@ mod tests {
         assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.timestamp, timestamp);
         assert_eq!(sample.measurement, Measurement::I64(m.value));
+    }
+
+    #[test]
+    fn test_field_value_parse_as_type() {
+        let as_string = "some string";
+        let as_i64 = "2";
+        let as_ipaddr = "::1";
+        let as_uuid = "3c937cd9-348f-42c2-bd44-d0a4dfffabd9";
+        let as_bool = "false";
+
+        assert_eq!(
+            FieldValue::parse_as_type(&as_string, FieldType::String).unwrap(),
+            FieldValue::from(&as_string),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_i64, FieldType::I64).unwrap(),
+            FieldValue::from(2_i64),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_ipaddr, FieldType::IpAddr).unwrap(),
+            FieldValue::from(as_ipaddr.parse::<IpAddr>().unwrap()),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_uuid, FieldType::Uuid).unwrap(),
+            FieldValue::from(as_uuid.parse::<Uuid>().unwrap()),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_bool, FieldType::Bool).unwrap(),
+            FieldValue::from(false),
+        );
+
+        assert!(FieldValue::parse_as_type(&as_string, FieldType::Uuid).is_err());
     }
 }
