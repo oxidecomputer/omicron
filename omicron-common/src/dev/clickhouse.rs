@@ -230,7 +230,6 @@ mod tests {
     use tokio::{task::spawn, time::sleep};
 
     const EXPECTED_PORT: u16 = 12345;
-    const SLOW_WRITER_INTERVAL: Duration = Duration::from_millis(100);
 
     #[tokio::test]
     async fn test_discover_local_listening_port() {
@@ -262,8 +261,10 @@ mod tests {
     // found, ignoring EOF, at least until the timeout is hit.
     #[tokio::test]
     async fn test_discover_local_listening_port_slow_write() {
+        // In this case the writer is slightly "slower" than the reader.
+        let writer_interval = Duration::from_millis(20);
         assert_eq!(
-            read_log_file(CLICKHOUSE_TIMEOUT).await.unwrap(),
+            read_log_file(CLICKHOUSE_TIMEOUT, writer_interval).await.unwrap(),
             EXPECTED_PORT
         );
     }
@@ -271,33 +272,89 @@ mod tests {
     // An extremely slow write test, to verify the timeout handling.
     #[tokio::test]
     async fn test_discover_local_listening_port_timeout() {
-        assert!(read_log_file(Duration::from_millis(1)).await.is_err());
+        // In this case, the writer is _much_ slower than the reader, so that the reader times out
+        // entirely before finding the desired line.
+        let reader_timeout = Duration::from_millis(1);
+        let writer_interval = Duration::from_millis(100);
+        assert!(read_log_file(reader_timeout, writer_interval).await.is_err());
     }
 
-    async fn read_log_file(timeout: Duration) -> Result<u16, anyhow::Error> {
-        async fn write_and_wait(file: &mut NamedTempFile, line: String) {
+    // Implementation of the above tests, simulating simultaneous reading/writing of the log file
+    //
+    // This uses Tokio's test utilities to manage time, rather than relying on timeouts.
+    async fn read_log_file(
+        reader_timeout: Duration,
+        writer_interval: Duration,
+    ) -> Result<u16, anyhow::Error> {
+        async fn write_and_wait(
+            file: &mut NamedTempFile,
+            line: String,
+            interval: Duration,
+        ) {
+            println!("Writing to log file");
             writeln!(file, "{}", line).unwrap();
             file.flush().unwrap();
-            sleep(SLOW_WRITER_INTERVAL).await;
+            sleep(interval).await;
         }
 
         // Start a task that slowly writes lines to the log file.
         let mut file = NamedTempFile::new()?;
         let path = file.path().to_path_buf();
-        let task = spawn(async move {
-            write_and_wait(&mut file, "A garbage line".to_string()).await;
+        let writer_task = spawn(async move {
+            for _ in 0..3 {
+                write_and_wait(
+                    &mut file,
+                    "A garbage line".to_string(),
+                    writer_interval,
+                )
+                .await;
+            }
             write_and_wait(
                 &mut file,
                 format!(
-                "<Information> Application: Listening for http://127.0.0.1:{}",
-                EXPECTED_PORT
-            ),
+                    "<Information> Application: Listening for http://127.0.0.1:{}",
+                    EXPECTED_PORT
+                ),
+                writer_interval,
             )
             .await;
-            write_and_wait(&mut file, "Another garbage line".to_string()).await;
+            write_and_wait(
+                &mut file,
+                "Another garbage line".to_string(),
+                writer_interval,
+            )
+            .await;
         });
-        let result = discover_local_listening_port(&path, timeout).await;
-        tokio::join!(task).0.unwrap();
-        result
+        println!("Starting reader task");
+        let reader_task = discover_local_listening_port(&path, reader_timeout);
+
+        // "Run" the test.
+        //
+        // We pause tokio's internal timer and advance it by the writer interval. This simulates
+        // the writer sleeping for a time between the write of each line, without explicitly
+        // sleeping the whole test thread. Note that the futures for the reader/writer tasks must
+        // be pinned to the stack, so that they may be polled on multiple passes through the select
+        // loop withouth consuming them.
+        tokio::time::pause();
+        tokio::pin!(writer_task);
+        tokio::pin!(reader_task);
+        let reader_result = loop {
+            tokio::select! {
+                reader_result = &mut reader_task => {
+                    println!("Reader finished");
+                    break reader_result;
+                },
+                writer_result = &mut writer_task => {
+                    println!("Writer finished");
+                    let _ = writer_result.unwrap();
+                },
+                _ = tokio::time::advance(writer_interval) => {
+                    println!("Advancing time by {:#?}", writer_interval);
+                }
+            }
+        };
+        // Resume Tokio's timer
+        tokio::time::resume();
+        reader_result
     }
 }

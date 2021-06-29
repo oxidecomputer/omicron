@@ -77,6 +77,9 @@ features = [ "serde", "v4" ]
 expectorate = "1.0.1"
 serde_urlencoded = "0.7.0"
 
+[features]
+tokio-test-util = [ "tokio/test-util" ]
+
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
