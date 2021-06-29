@@ -77,8 +77,9 @@ features = [ "serde", "v4" ]
 expectorate = "1.0.1"
 serde_urlencoded = "0.7.0"
 
-[features]
-tokio-test-util = [ "tokio/test-util" ]
+[dev-dependencies.tokio]
+version = "1.7"
+features = [ "test-util" ]
 
 #
 # Disable doc builds by default for our binaries to work around issue

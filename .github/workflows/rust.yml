@@ -112,5 +112,4 @@ jobs:
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test suite.
-      # Also, enable all features, to pick up the Tokio test-utils feature for `omicron-dev`
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose --all-features
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose

@@ -301,14 +301,12 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         let path = file.path().to_path_buf();
         let writer_task = spawn(async move {
-            for _ in 0..3 {
-                write_and_wait(
-                    &mut file,
-                    "A garbage line".to_string(),
-                    writer_interval,
-                )
-                .await;
-            }
+            write_and_wait(
+                &mut file,
+                "A garbage line".to_string(),
+                writer_interval,
+            )
+            .await;
             write_and_wait(
                 &mut file,
                 format!(
@@ -334,7 +332,7 @@ mod tests {
         // the writer sleeping for a time between the write of each line, without explicitly
         // sleeping the whole test thread. Note that the futures for the reader/writer tasks must
         // be pinned to the stack, so that they may be polled on multiple passes through the select
-        // loop withouth consuming them.
+        // loop without consuming them.
         tokio::time::pause();
         tokio::pin!(writer_task);
         tokio::pin!(reader_task);
