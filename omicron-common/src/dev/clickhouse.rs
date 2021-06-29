@@ -225,9 +225,9 @@ async fn find_clickhouse_port_in_log(
 #[cfg(test)]
 mod tests {
     use super::{discover_local_listening_port, CLICKHOUSE_TIMEOUT};
-    use std::{io::Write, time::Duration};
+    use std::{io::Write, sync::Arc, time::Duration};
     use tempfile::NamedTempFile;
-    use tokio::{task::spawn, time::sleep};
+    use tokio::{sync::Mutex, task::spawn, time::sleep};
 
     const EXPECTED_PORT: u16 = 12345;
 
@@ -298,9 +298,18 @@ mod tests {
         }
 
         // Start a task that slowly writes lines to the log file.
-        let mut file = NamedTempFile::new()?;
-        let path = file.path().to_path_buf();
+        //
+        // NOTE: This looks overly complicated, and it is. We have to wrap this in a mutex because
+        // both this function, and the writer task we're spawning, need access to the file. They
+        // may complete in any order, and so it's not possible to give one of them ownership over
+        // the `NamedTempFile`. If the owning task completes, that may delete the file before the
+        // other task accesses it. So we need interior mutability (because one of the references is
+        // mutable for writing), and _this_ scope must own it.
+        let file = Arc::new(Mutex::new(NamedTempFile::new()?));
+        let path = file.lock().await.path().to_path_buf();
+        let writer_file = file.clone();
         let writer_task = spawn(async move {
+            let mut file = writer_file.lock().await;
             write_and_wait(
                 &mut file,
                 "A garbage line".to_string(),
