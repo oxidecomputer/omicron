@@ -4,9 +4,9 @@
 <service_bundle type='manifest' name='propolis-server'>
 
 <service name='system/illumos/propolis-server' type='service' version='1'>
-  <dependency name='sled-agent' grouping='require_all' restart_on='none'
+  <dependency name='network' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/sled-agent' />
+  <service_fmri value='svc:/milestone/network:default' />
   </dependency>
 
   <exec_method type='method' name='start'
