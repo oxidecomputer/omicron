@@ -21,22 +21,6 @@ pub enum Action {
     Destroy,
 }
 
-fn propolis_to_omicron_state(
-    state: &PropolisInstanceState,
-) -> ApiInstanceState {
-    match state {
-        PropolisInstanceState::Creating => ApiInstanceState::Creating,
-        PropolisInstanceState::Starting => ApiInstanceState::Starting,
-        PropolisInstanceState::Running => ApiInstanceState::Running,
-        PropolisInstanceState::Stopping => ApiInstanceState::Stopping,
-        PropolisInstanceState::Stopped => ApiInstanceState::Stopped,
-        PropolisInstanceState::Rebooting => ApiInstanceState::Rebooting,
-        PropolisInstanceState::Repairing => ApiInstanceState::Repairing,
-        PropolisInstanceState::Failed => ApiInstanceState::Failed,
-        PropolisInstanceState::Destroyed => ApiInstanceState::Destroyed,
-    }
-}
-
 fn get_next_desired_state(
     observed: &PropolisInstanceState,
     requested: ApiInstanceStateRequested,
@@ -53,7 +37,7 @@ fn get_next_desired_state(
         // - "Stopping" is an expected state on the way to rebooting.
         // - "Starting" expects "Running" to occur next.
         // - Other observed states stop the expected transitions.
-        (Requested::Reboot, Observed::Stopping) => Some(requested),
+        (Requested::Reboot, Observed::Stopping) => Some(Requested::Reboot),
         (Requested::Reboot, Observed::Starting) => Some(Requested::Running),
         (Requested::Reboot, _) => None,
 
@@ -94,9 +78,29 @@ impl InstanceState {
         observed: &PropolisInstanceState,
     ) -> Option<Action> {
         use ApiInstanceState as State;
-        use ApiInstanceStateRequested as Requested;
+        use PropolisInstanceState as Observed;
 
-        let current = propolis_to_omicron_state(observed);
+        let current = match observed {
+            Observed::Creating => State::Creating,
+            Observed::Starting => State::Starting,
+            Observed::Running => State::Running,
+            Observed::Stopping => State::Stopping,
+            Observed::Stopped => State::Stopped,
+            Observed::Rebooting => State::Rebooting,
+            Observed::Repairing => State::Repairing,
+            Observed::Failed => State::Failed,
+            // NOTE: This is a bit of an odd one - we intentionally do *not*
+            // translate the "destroyed" propolis state to the destroyed instance
+            // API state.
+            //
+            // When a propolis instance reports that it has been destroyed,
+            // this does not necessarily mean the customer-visible instance
+            // should be torn down. Instead, it implies that the Propolis service
+            // should be stopped, but the VM could be allocated to a different
+            // machine.
+            Observed::Destroyed => State::Stopped,
+        };
+
         let desired = self
             .desired
             .as_ref()
@@ -107,12 +111,10 @@ impl InstanceState {
         // Most commands to update Propolis are triggered via requests (from
         // Nexus), but if the instance reports that it has been destroyed,
         // we should clean it up.
-        match (current, desired) {
-            (State::Destroyed, _)
-            | (State::Stopped, Some(Requested::Destroyed)) => {
-                Some(Action::Destroy)
-            }
-            _ => None,
+        if matches!(observed, Observed::Destroyed) {
+            Some(Action::Destroy)
+        } else {
+            None
         }
     }
 
@@ -398,11 +400,13 @@ mod test {
             instance.request_transition(Requested::Destroyed).unwrap().unwrap()
         );
         verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
+        assert_eq!(None, instance.observe_transition(&Observed::Stopped));
+        verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
         assert_eq!(
             Action::Destroy,
-            instance.observe_transition(&Observed::Stopped).unwrap()
+            instance.observe_transition(&Observed::Destroyed).unwrap()
         );
-        verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
+        verify_state(&instance, State::Stopped, None);
     }
 
     #[test]
