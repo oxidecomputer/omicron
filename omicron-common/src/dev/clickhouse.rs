@@ -336,15 +336,17 @@ mod tests {
         tokio::time::pause();
         tokio::pin!(writer_task);
         tokio::pin!(reader_task);
+        let mut poll_writer = true;
         let reader_result = loop {
             tokio::select! {
                 reader_result = &mut reader_task => {
                     println!("Reader finished");
                     break reader_result;
                 },
-                writer_result = &mut writer_task => {
+                writer_result = &mut writer_task, if poll_writer => {
                     println!("Writer finished");
                     let _ = writer_result.unwrap();
+                    poll_writer = false;
                 },
                 _ = tokio::time::advance(writer_interval) => {
                     println!("Advancing time by {:#?}", writer_interval);
