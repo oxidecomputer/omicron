@@ -137,7 +137,8 @@ impl BootstrapAgent {
         self.enable_service(service)
     }
 
-    // Verify, unpack, and enable a service.
+    // Verify and unpack a service.
+    // NOTE: Does not enable the service.
     fn extract<S, P1, P2>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
@@ -154,7 +155,7 @@ impl BootstrapAgent {
         let destination = destination.as_ref();
         let service = service.as_ref();
 
-        info!(&self.log, "Launching {} Service", service);
+        info!(&self.log, "Extracting {} Service", service);
         let tar_name = format!("{}.tar", service);
         let tar_path = tar_source.join(&tar_name);
 
