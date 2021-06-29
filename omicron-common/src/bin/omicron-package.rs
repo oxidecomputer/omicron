@@ -96,7 +96,9 @@ struct Args {
 
 fn build_rust_package(package: &str, release: bool) -> Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.arg("+nightly").arg("build").arg("-p").arg(package);
+    // We rely on the rust-toolchain.toml file for toolchain information,
+    // rather than specifying one within the packaging tool.
+    cmd.arg("build").arg("-p").arg(package);
     if release {
         cmd.arg("--release");
     }
