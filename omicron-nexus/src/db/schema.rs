@@ -6,11 +6,13 @@
  */
 
 use omicron_common::error::ApiError;
+use omicron_common::model;
 use omicron_common::model::ApiDisk;
 use omicron_common::model::ApiInstance;
 use omicron_common::model::ApiName;
 use omicron_common::model::ApiProject;
 use omicron_common::model::ApiResourceType;
+use omicron_common::model::{OximeterInfo, ProducerEndpoint};
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -119,6 +121,40 @@ impl Table for SagaNodeEvent {
     const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
+/** Describes the "Oximeter" table */
+pub struct Oximeter;
+impl Table for Oximeter {
+    type ModelType = OximeterInfo;
+    const TABLE_NAME: &'static str = "Oximeter";
+    const ALL_COLUMNS: &'static [&'static str] =
+        &["id", "time_created", "time_modified", "ip", "port"];
+}
+
+/** Describes the "MetricProducer" table */
+pub struct MetricProducer;
+impl Table for MetricProducer {
+    type ModelType = ProducerEndpoint;
+    const TABLE_NAME: &'static str = "MetricProducer";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "time_created",
+        "time_modified",
+        "ip",
+        "port",
+        "interval",
+        "route",
+    ];
+}
+
+/** Describes the "OximeterAssignment" table */
+pub struct OximeterAssignment;
+impl Table for OximeterAssignment {
+    type ModelType = model::OximeterAssignment;
+    const TABLE_NAME: &'static str = "OximeterAssignment";
+    const ALL_COLUMNS: &'static [&'static str] =
+        &["oximeter_id", "producer_id", "time_created"];
+}
+
 #[cfg(test)]
 mod test {
     use super::Disk;
@@ -127,6 +163,7 @@ mod test {
     use super::Saga;
     use super::SagaNodeEvent;
     use super::Table;
+    use super::{MetricProducer, Oximeter, OximeterAssignment};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -152,6 +189,9 @@ mod test {
         check_table_schema::<Instance>(&client).await;
         check_table_schema::<Saga>(&client).await;
         check_table_schema::<SagaNodeEvent>(&client).await;
+        check_table_schema::<Oximeter>(&client).await;
+        check_table_schema::<MetricProducer>(&client).await;
+        check_table_schema::<OximeterAssignment>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();

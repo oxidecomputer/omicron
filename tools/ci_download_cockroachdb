@@ -10,13 +10,12 @@ set -o pipefail
 set -o xtrace
 set -o errexit
 
+SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ARG0="$(basename ${BASH_SOURCE[0]})"
 
 # If you change this, you must also update the md5sums below
 CIDL_VERSION="v20.2.5"
-CIDL_MD5_DARWIN="4c4b84861c313884a4ef5fbbe57cb543"
-CIDL_MD5_LINUX="8fe4f47413e2c6570da0e661af716f9a"
-CIDL_MD5_ILLUMOS="2ee900af3bef860f627e4f8946dc6ba3"
+source "$SOURCE_DIR/cockroachdb_checksums"
 
 CIDL_ASSEMBLE_DIR="./cockroachdb"
 

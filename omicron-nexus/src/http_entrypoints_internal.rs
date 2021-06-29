@@ -13,9 +13,8 @@ use dropshot::TypedBody;
 use omicron_common::model::ApiDiskRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiSledAgentStartupInfo;
-use omicron_common::model::OximeterStartupInfo;
+use omicron_common::model::OximeterInfo;
 use omicron_common::model::ProducerEndpoint;
-use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -160,19 +159,12 @@ async fn cpapi_producers_post(
  }]
 async fn cpapi_collectors_post(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
-    oximeter_info: TypedBody<OximeterStartupInfo>,
+    oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let oximeter_info = oximeter_info.into_inner();
-    let id = oximeter_info.collector_id.to_string();
-    let client_log = context.log.new(o!("oximeter-collector" => id));
-    let client = Arc::new(OximeterClient::new(
-        oximeter_info.collector_id,
-        oximeter_info.address,
-        client_log,
-    ));
-    nexus.upsert_oximeter_collector(client).await;
+    nexus.upsert_oximeter_collector(&oximeter_info).await?;
     info!(
         context.log,
         "registered new oximeter metric collection server";

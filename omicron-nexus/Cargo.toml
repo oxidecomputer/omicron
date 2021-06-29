@@ -15,7 +15,7 @@ lazy_static = "1.4.0"
 libc = "0.2.97"
 newtype_derive = "0.1.6"
 serde_json = "1.0"
-serde_with = "1.9.1"
+serde_with = "1.9.4"
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
@@ -51,7 +51,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.6"
+version = "1.7"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -67,6 +67,10 @@ bytes = "1.0.1"
 expectorate = "1.0.1"
 openapiv3 = "0.5.0"
 subprocess = "0.2.7"
+
+[dev-dependencies.oximeter]
+version = "0.1.0"
+path = "../oximeter/oximeter"
 
 #
 # Disable doc builds by default for our binaries to work around issue

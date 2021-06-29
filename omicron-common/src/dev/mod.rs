@@ -8,6 +8,7 @@
  */
 #![cfg_attr(not(test), allow(dead_code))]
 
+pub mod clickhouse;
 pub mod db;
 pub mod poll;
 pub mod test_cmds;

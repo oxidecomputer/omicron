@@ -22,6 +22,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbRun { ref args } => cmd_db_run(args).await,
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
+        OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -49,6 +50,12 @@ enum OmicronDb {
     DbWipe {
         #[structopt(flatten)]
         args: DbWipeArgs,
+    },
+
+    /// Run a ClickHouse database server for development
+    ChRun {
+        #[structopt(flatten)]
+        args: ChRunArgs,
     },
 }
 
@@ -225,5 +232,65 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
     dev::db::wipe(&client).await?;
     println!("omicron-dev: wiped");
     client.cleanup().await.expect("connection failed");
+    Ok(())
+}
+
+#[derive(Debug, StructOpt)]
+struct ChRunArgs {
+    /// The HTTP port on which the server will listen
+    #[structopt(short, long, default_value = "8123")]
+    port: u16,
+}
+
+async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
+    // Start a stream listening for SIGINT
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
+
+    // Start the database server process, possibly on a specific port
+    let mut db_instance =
+        dev::clickhouse::ClickHouseInstance::new(args.port).await?;
+    println!(
+        "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
+        db_instance.cmdline().join(" ")
+    );
+    println!(
+        "omicron-dev: ClickHouse is running with PID {}",
+        db_instance
+            .pid()
+            .expect("Failed to get process PID, it may not have started")
+    );
+    println!(
+        "omicron-dev: ClickHouse HTTP server listening on port {}",
+        db_instance.port()
+    );
+    println!(
+        "omicron-dev: using {} for ClickHouse data storage",
+        db_instance.data_path().display()
+    );
+
+    // Wait for the DB to exit itself (an error), or for SIGINT
+    tokio::select! {
+        _ = db_instance.wait_for_shutdown() => {
+            db_instance.cleanup().await.context("clean up after shutdown")?;
+            bail!("omicron-dev: ClickHouse shutdown unexpectedly");
+        }
+        caught_signal = signal_stream.next() => {
+            assert_eq!(caught_signal.unwrap(), SIGINT);
+
+            // As above, we don't need to explicitly kill the DB process, since
+            // the shell will have delivered the signal to the whole process group.
+            eprintln!(
+                "omicron-dev: caught signal, shutting down and removing \
+                temporary directory"
+            );
+
+            // Remove the data directory.
+            db_instance
+                .wait_for_shutdown()
+                .await
+                .context("clean up after SIGINT shutdown")?;
+        }
+    }
     Ok(())
 }

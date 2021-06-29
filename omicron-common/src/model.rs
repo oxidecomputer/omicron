@@ -1417,12 +1417,19 @@ impl ProducerEndpoint {
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterStartupInfo {
+pub struct OximeterInfo {
     /// The ID for this oximeter instance.
     pub collector_id: Uuid,
 
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
+}
+
+/// An assignment of an Oximeter instance to a metric producer for collection.
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub struct OximeterAssignment {
+    pub oximeter_id: Uuid,
+    pub producer_id: Uuid,
 }
 
 #[cfg(test)]
