@@ -435,7 +435,7 @@ impl Instance {
         // a copy.
         let (id, client) = {
             let inner = self.inner.lock().await;
-            let id = inner.id().clone();
+            let id = *inner.id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };

@@ -28,8 +28,7 @@ impl SledAgent {
     ) -> Result<SledAgent, ApiError> {
         info!(&log, "created sled agent"; "id" => ?id);
 
-        let instances =
-            InstanceManager::new(log.clone(), nexus_client.clone())?;
+        let instances = InstanceManager::new(log.clone(), nexus_client)?;
         Ok(SledAgent { instances })
     }
 

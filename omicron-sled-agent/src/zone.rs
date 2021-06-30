@@ -94,13 +94,12 @@ pub fn find_physical_data_link() -> Result<String, ApiError> {
             message: format!("Cannot parse dladm output as UTF-8: {}", e),
         })?
         .lines()
-        .filter(|s| *s != "LINK")
         // TODO: This is arbitrary, but we're currently grabbing the first
         // physical device. Should we have a more sophisticated method for
         // selection?
-        .next()
+        .find(|s| *s != "LINK")
         .ok_or_else(|| ApiError::InternalError {
-            message: format!("No physical devices found"),
+            message: "No physical devices found".to_string(),
         })?
         .to_string())
 }
@@ -276,9 +275,8 @@ pub fn get_default_gateway() -> Result<IpAddr, ApiError> {
             Some(s.trim().strip_prefix("gateway:")?.trim().to_string())
         })
         .ok_or_else(|| ApiError::InternalError {
-            message: format!(
-                "Route command succeeded, but did not contain gateway"
-            ),
+            message: "Route command succeeded, but did not contain gateway"
+                .to_string(),
         })?;
 
     IpAddr::from_str(&addr).map_err(|e| ApiError::InternalError {
@@ -300,17 +298,14 @@ pub fn get_ip_address(phys: &str) -> Result<IpNet, ApiError> {
         .to_string();
 
     println!("Output from ipadm: {}", out);
-    Ok(out.parse().map_err(|e| ApiError::InternalError {
+    out.parse().map_err(|e| ApiError::InternalError {
         message: format!("Failed to parse ipadm output as IP address: {}", e),
-    })?)
+    })
 }
 
 /// Creates a static IP address within a Zone.
 // XXX Example: ipadm create-addr -t -T static -a 192.168.1.5/24 vnic_prop0/v4
-pub fn create_address(
-    zone: &str,
-    interface: &str,
-) -> Result<IpNet, ApiError> {
+pub fn create_address(zone: &str, interface: &str) -> Result<IpNet, ApiError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&[
         "zlogin",
@@ -341,11 +336,12 @@ pub fn create_address(
             message: format!("Cannot parse ipadm output as UTF-8: {}", e),
         })?
         .lines()
-        .find_map(|s| {
-            s.parse().ok()
-        })
+        .find_map(|s| s.parse().ok())
         .ok_or(ApiError::InternalError {
-            message: format!("Casnnot find a valid address"),
+            message: format!(
+                "Casnnot find a valid IP address on {}",
+                interface
+            ),
         })
 }
 

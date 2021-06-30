@@ -7,7 +7,10 @@ use omicron_common::model::{
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use uuid::Uuid;
 
 use crate::instance::Instance;
