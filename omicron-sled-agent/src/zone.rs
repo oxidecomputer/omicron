@@ -1,4 +1,4 @@
-//! API for interacting with Zones.
+//! API for interacting with Zones running Propolis.
 
 use ipnet::IpNet;
 use omicron_common::error::ApiError;
