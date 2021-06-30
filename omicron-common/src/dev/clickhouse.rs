@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use tempfile::TempDir;
+use thiserror::Error;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
@@ -15,7 +16,7 @@ use tokio::{
 use crate::dev::poll;
 
 // Timeout used when starting up ClickHouse subprocess.
-const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(10);
+const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse server process.
 #[derive(Debug)]
@@ -29,6 +30,21 @@ pub struct ClickHouseInstance {
     args: Vec<String>,
     // Subprocess handle
     child: Option<tokio::process::Child>,
+}
+
+#[derive(Debug, Error)]
+pub enum ClickHouseError {
+    #[error("Failed to open ClickHouse log file")]
+    Io(#[from] std::io::Error),
+
+    #[error("Invalid ClickHouse port number")]
+    InvalidPort,
+
+    #[error("Invalid ClickHouse listening address")]
+    InvalidAddress,
+
+    #[error("Failed to detect ClickHouse subprocess within timeout")]
+    Timeout,
 }
 
 impl ClickHouseInstance {
@@ -63,39 +79,44 @@ impl ClickHouseInstance {
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
             .spawn()?;
 
-        // Wait for the "status" file to become available, at least with a newline.
+        // Wait for the ClickHouse log file to become available, including the port number.
+        //
+        // We extract the port number from the log-file regardless of whether we know it already,
+        // as this is a more reliable check that the server is up and listening. Previously we only
+        // did this in the case we need to _learn_ the port, which introduces the possibility that
+        // we return from this function successfully, but the server itself is not yet ready to
+        // accept connections.
         let data_path = data_dir.path().to_path_buf();
-        let status_file = data_path.join("status");
-        poll::wait_for_condition(
+        let port = poll::wait_for_condition(
             || async {
-                let contents =
-                    match tokio::fs::read_to_string(&status_file).await {
-                        Ok(contents) => contents,
-                        Err(e) => match e.kind() {
-                            std::io::ErrorKind::NotFound => {
-                                return Err(poll::CondCheckError::NotYet)
+                let result = discover_local_listening_port(
+                    &log_path,
+                    CLICKHOUSE_TIMEOUT,
+                )
+                .await;
+                match result {
+                    // Successfully extracted the port, return it.
+                    Ok(port) => Ok(port),
+                    Err(e) => {
+                        match e {
+                            ClickHouseError::Io(ref inner) => {
+                                if matches!(
+                                    inner.kind(),
+                                    std::io::ErrorKind::NotFound
+                                ) {
+                                    return Err(poll::CondCheckError::NotYet);
+                                }
                             }
-                            _ => return Err(poll::CondCheckError::from(e)),
-                        },
-                    };
-                if !contents.is_empty() && contents.contains('\n') {
-                    Ok(())
-                } else {
-                    Err(poll::CondCheckError::NotYet)
+                            _ => {}
+                        }
+                        Err(poll::CondCheckError::from(e))
+                    }
                 }
             },
             &Duration::from_millis(500),
             &CLICKHOUSE_TIMEOUT,
         )
         .await?;
-
-        // Discover the HTTP port on which we're listening, if it's not provided explicitly by the
-        // caller.
-        let port = if port != 0 {
-            port
-        } else {
-            discover_local_listening_port(&log_path, CLICKHOUSE_TIMEOUT).await?
-        };
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -174,11 +195,11 @@ impl Drop for ClickHouseInstance {
 async fn discover_local_listening_port(
     path: &Path,
     timeout: Duration,
-) -> Result<u16, anyhow::Error> {
+) -> Result<u16, ClickHouseError> {
     let timeout = Instant::now() + timeout;
     tokio::time::timeout_at(timeout, find_clickhouse_port_in_log(path))
         .await
-        .context("Failed to find ClickHouse port within timeout")?
+        .map_err(|_| ClickHouseError::Timeout)?
 }
 
 // Parse the clickhouse log for a port number.
@@ -187,17 +208,12 @@ async fn discover_local_listening_port(
 // timeout, or some other mechanism for cancelling it.
 async fn find_clickhouse_port_in_log(
     path: &Path,
-) -> Result<u16, anyhow::Error> {
-    let reader = BufReader::new(
-        File::open(path).await.context("Failed to open ClickHouse log file")?,
-    );
+) -> Result<u16, ClickHouseError> {
+    let reader = BufReader::new(File::open(path).await?);
     const NEEDLE: &str = "<Information> Application: Listening for http://";
     let mut lines = reader.lines();
     loop {
-        let line = lines
-            .next_line()
-            .await
-            .context("Failed to read line from ClickHouse log file")?;
+        let line = lines.next_line().await?;
         match line {
             Some(line) => {
                 if let Some(needle_start) = line.find(&NEEDLE) {
@@ -209,9 +225,9 @@ async fn find_clickhouse_port_in_log(
                         .trim()
                         .split(':')
                         .last()
-                        .context("ClickHouse log file does not contain the expected HTTP listening address")?
+                        .ok_or_else(|| ClickHouseError::InvalidAddress)?
                         .parse()
-                        .context("Failed to parse ClickHouse port number from log");
+                        .map_err(|_| ClickHouseError::InvalidPort);
                 }
             }
             None => {
@@ -224,7 +240,9 @@ async fn find_clickhouse_port_in_log(
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_local_listening_port, CLICKHOUSE_TIMEOUT};
+    use super::{
+        discover_local_listening_port, ClickHouseError, CLICKHOUSE_TIMEOUT,
+    };
     use std::{io::Write, sync::Arc, time::Duration};
     use tempfile::NamedTempFile;
     use tokio::{sync::Mutex, task::spawn, time::sleep};
@@ -285,7 +303,7 @@ mod tests {
     async fn read_log_file(
         reader_timeout: Duration,
         writer_interval: Duration,
-    ) -> Result<u16, anyhow::Error> {
+    ) -> Result<u16, ClickHouseError> {
         async fn write_and_wait(
             file: &mut NamedTempFile,
             line: String,
