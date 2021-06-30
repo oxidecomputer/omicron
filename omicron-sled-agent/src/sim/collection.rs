@@ -542,7 +542,7 @@ mod test {
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.desired().is_none());
         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
         rprev = rnext;
         instance.transition_finish();
         let rnext = instance.object.current().clone();
@@ -626,7 +626,7 @@ mod test {
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.desired().is_none());
         assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-        assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
         rprev = rnext;
         instance.transition_finish();
         let rnext = instance.object.current().clone();
