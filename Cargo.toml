@@ -16,6 +16,7 @@ default-members = [
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
 ]
+resolver = "2"
 
 [profile.dev]
 panic = "abort"

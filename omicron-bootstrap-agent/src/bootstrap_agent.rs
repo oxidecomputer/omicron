@@ -137,7 +137,8 @@ impl BootstrapAgent {
         self.enable_service(service)
     }
 
-    // Verify, unpack, and enable a service.
+    // Verify and unpack a service.
+    // NOTE: Does not enable the service.
     fn extract<S, P1, P2>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
