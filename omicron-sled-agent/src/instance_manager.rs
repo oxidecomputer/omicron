@@ -14,14 +14,15 @@ use std::sync::{
 use uuid::Uuid;
 
 use crate::instance::Instance;
-use crate::zone::{create_base_zone, ensure_zpool_exists, ZONE_ZFS_POOL};
+use crate::illumos::{Dladm, Zones, Zfs, ZONE_ZFS_POOL};
 
 struct InstanceManagerInternal {
     log: Logger,
     nexus_client: Arc<NexusClient>,
 
-    // TODO: Could hold enum of "Created/Running instance"
-    // would remove the "warning: might panic" documentation of the current API
+    // TODO: If we held an object representing an enum of "Created OR Running"
+    // instance, we could avoid the methods within "instance.rs" that panic
+    // if the Propolis client hasn't been initialized.
     instances: Mutex<BTreeMap<Uuid, Instance>>,
 
     next_id: AtomicU64,
@@ -40,10 +41,10 @@ impl InstanceManager {
     ) -> Result<InstanceManager, ApiError> {
         // Before we start creating instances, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
-        ensure_zpool_exists(ZONE_ZFS_POOL)?;
+        Zfs::ensure_zpool(ZONE_ZFS_POOL)?;
 
         // Create a base zone, from which all running instance zones are cloned.
-        create_base_zone(&log)?;
+        Zones::create_base(&log)?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
@@ -51,12 +52,10 @@ impl InstanceManager {
         // NOTE: Currently, we're removing these zones. In the future, we should
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
-        let zones = crate::zone::get_zones()?;
+        let zones = Zones::get()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
-            zone::Adm::new(z.name()).halt().unwrap();
-            zone::Adm::new(z.name()).uninstall(true).unwrap();
-            zone::Config::new(z.name()).delete(true).run().unwrap();
+            Zones::halt_and_remove(z.name())?;
         }
 
         // Identify all VNICs which should be managed by the Sled Agent.
@@ -66,10 +65,10 @@ impl InstanceManager {
         // and track them once more.
         //
         // (dladm show-vnic -p -o ZONE,LINK) might help
-        let vnics = crate::zone::get_vnics()?;
+        let vnics = Dladm::get_vnics()?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
-            crate::zone::delete_vnic(&vnic)?;
+            Dladm::delete_vnic(&vnic)?;
         }
 
         Ok(InstanceManager {

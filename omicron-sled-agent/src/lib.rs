@@ -13,11 +13,11 @@ pub mod sim;
 // "Real" sled agent modules.
 pub mod config;
 mod http_entrypoints;
+mod illumos;
 mod instance;
 mod instance_manager;
 pub mod server;
 mod sled_agent;
-mod zone;
 
 #[macro_use]
 extern crate slog;

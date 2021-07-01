@@ -1,6 +1,7 @@
-//! Sled agent implementation
+//! API for controlling a single instance.
 
 use futures::lock::Mutex;
+use omicron_common::dev::poll;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
@@ -10,86 +11,18 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceState};
 use crate::instance_manager::InstanceTicket;
-
-// TODO: Do a pass, possibly re-naming these things...
-use crate::zone::{
-    boot_zone, clone_zone_from_base, configure_child_zone, create_address,
-    create_vnic, find_physical_data_link, get_ip_address, run_propolis,
+use crate::illumos::{
+    Dladm, Zones, wait_for_service,
     VNIC_PREFIX, ZONE_PREFIX,
 };
 use propolis_client::Client as PropolisClient;
 
-// TODO(https://www.illumos.org/issues/13837): This is a hack;
-// remove me when when fixed. Ideally, the ".synchronous()" argument
-// to "svcadm enable" would wait for the service to be online, which
-// would simplify all this stuff.
-//
-// Ideally, when "svccfg add" returns, these properties would be set,
-// but unfortunately, they are not. This means that when we invoke
-// "svcadm enable -s", it's possible for critical restarter
-// properties to not exist when the command returns.
-//
-// We workaround this by querying for these properties in a loop.
-async fn wait_for_service_to_come_online(
-    log: &Logger,
-    zone: Option<&str>,
-    fmri: &str,
-) -> Result<(), ApiError> {
-    info!(log, "awaiting restarter/state online");
-    let name = smf::PropertyName::new("restarter", "state").unwrap();
-    let mut attempts = 0;
-    loop {
-        let mut p = smf::Properties::new();
-        let properties = {
-            if let Some(zone) = zone {
-                p.zone(zone)
-            } else {
-                &mut p
-            }
-        };
-        let result = properties.lookup().run(&name, &fmri);
-
-        match result {
-            Ok(value) => {
-                if value.value()
-                    == &smf::PropertyValue::Astring("online".to_string())
-                {
-                    return Ok(());
-                }
-                warn!(
-                    log,
-                    "restarter/state property exists for {}, but it is: {:?}",
-                    fmri,
-                    value
-                );
-            }
-            Err(value) => {
-                warn!(
-                    log,
-                    "No restarter/state property of {} - {}", fmri, value
-                );
-                if attempts > 50 {
-                    return Err(ApiError::InternalError {
-                        message: format!(
-                            "Service never turned online: {}",
-                            value
-                        ),
-                    });
-                }
-                sleep(Duration::from_millis(500)).await;
-                attempts += 1;
-            }
-        }
-    }
-}
-
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
-// an acknowledgemen. This provides a hacky mechanism to "wait until the HTTP
+// an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
 // server is serving requests".
 //
 // TODO: Plausibly we could use SMF to accomplish this goal in a less hacky way.
@@ -97,38 +30,32 @@ async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
 ) -> Result<(), ApiError> {
-    info!(log, "awaiting HTTP server");
-    let mut attempts = 0;
-    loop {
-        // This request is nonsensical - we don't expect an instance to be using
-        // the nil UUID - but getting a response that isn't a connection-based
-        // error informs us the HTTP server is alive.
-        match client.instance_get(Uuid::nil()).await {
-            Ok(_) => return Ok(()),
-            Err(value) => {
-                if let propolis_client::Error::Status(_) = &value {
-                    info!(
-                        log,
-                        "successfully waited for HTTP server initialization"
-                    );
-                    // This means the propolis server responded to our garbage
-                    // request, instead of a connection error.
-                    return Ok(());
+    poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
+        || async {
+            // This request is nonsensical - we don't expect an instance to be
+            // using the nil UUID - but getting a response that isn't a
+            // connection-based error informs us the HTTP server is alive.
+            match client.instance_get(Uuid::nil()).await {
+                Ok(_) => return Ok(()),
+                Err(value) => {
+                    if let propolis_client::Error::Status(_) = &value {
+                        // This means the propolis server responded to our garbage
+                        // request, instead of a connection error.
+                        return Ok(());
+                    }
+                    warn!(log, "waiting for http server, saw error: {}", value);
+                    return Err(poll::CondCheckError::NotYet)
                 }
-                warn!(log, "waiting for http server, saw error: {}", value);
-                if attempts > 50 {
-                    return Err(ApiError::InternalError {
-                        message: format!(
-                            "Http server never came online: {}",
-                            value
-                        ),
-                    });
-                }
-                sleep(Duration::from_millis(50)).await;
-                attempts += 1;
             }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(10),
+    ).await
+     .map_err(|e| {
+        ApiError::InternalError {
+            message: format!("Failed to wait for HTTP server: {}", e),
         }
-    }
+     })
 }
 
 fn service_name() -> &'static str {
@@ -156,12 +83,36 @@ enum Reaction {
 
 // State associated with a running instance.
 struct RunningState {
+    // Connection to Propolis.
     client: Arc<PropolisClient>,
+    // Object representing membership in the "instance manager".
     ticket: InstanceTicket,
+    // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
 }
 
-// TODO: The things which are "Options" - is that just "running state"?
+impl Drop for RunningState {
+    fn drop(&mut self) {
+        if let Some(task) = self.monitor_task.take() {
+            // NOTE: We'd prefer to actually await the task, since it
+            // will be completed at this point, but async drop doesn't exist.
+            //
+            // At a minimum, this implementation ensures the background task
+            // is not executing after RunningState terminates.
+            //
+            // "InstanceManager" contains...
+            //      ... "Instance", which contains...
+            //      ... "InstanceInner", which contains...
+            //      ... "RunningState", which owns the "monitor_task".
+            //
+            // The "monitor_task" removes the instance from the
+            // "InstanceManager", triggering it's eventual drop.
+            // When this happens, the "monitor_task" exits anyway.
+            task.abort()
+        }
+    }
+}
+
 struct InstanceInner {
     log: Logger,
     runtime_id: u64,
@@ -305,7 +256,7 @@ impl Instance {
         let log = &inner.log;
 
         // Create the VNIC which will be attached to the zone.
-        let physical_dl = find_physical_data_link()?;
+        let physical_dl = Dladm::find_physical()?;
         info!(log, "Saw physical DL: {}", physical_dl);
 
         // It would be preferable to use the UUID of the instance as a component
@@ -315,25 +266,24 @@ impl Instance {
         //
         // Instead, we just use a per-agent incrementing number.
         let vnic_name = format!("{}{}", VNIC_PREFIX, inner.runtime_id);
-        create_vnic(&physical_dl, &vnic_name)?;
+        Dladm::create_vnic(&physical_dl, &vnic_name)?;
         info!(log, "Created vnic: {}", vnic_name);
 
         // Create a zone for the propolis instance, using the previously
         // configured VNIC.
         let zname = zone_name(inner.id());
-        configure_child_zone(&log, &zname, &vnic_name)?;
+        Zones::configure_child_zone(&log, &zname, &vnic_name)?;
         info!(log, "Configured child zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
         // boot it up.
-        clone_zone_from_base(&zname)?;
+        Zones::clone_from_base(&zname)?;
         info!(log, "Cloned child zone: {}", zname);
-        boot_zone(&zname)?;
+        Zones::boot(&zname)?;
         info!(log, "Booted zone: {}", zname);
 
         // Wait for the network services to come online, then create an address.
-        wait_for_service_to_come_online(
-            &log,
+        wait_for_service(
             Some(&zname),
             "svc:/milestone/network:default",
         )
@@ -341,20 +291,20 @@ impl Instance {
         info!(log, "Network milestone ready for {}", zname);
 
         let interface_name = format!("{}/omicron", vnic_name);
-        let ip = create_address(&zname, &interface_name)?;
+        let ip = Zones::create_address(&zname, &interface_name)?;
         info!(log, "Created address {} for zone: {}", ip, zname);
 
         // Run Propolis in the Zone.
         let port = 12400;
         let server_addr = SocketAddr::new(ip.addr(), port);
-        run_propolis(&zname, inner.id(), &server_addr)?;
+        Zones::run_propolis(&zname, inner.id(), &server_addr)?;
         info!(log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name(inner.id());
-        wait_for_service_to_come_online(&log, Some(&zname), &fmri).await?;
+        wait_for_service(Some(&zname), &fmri).await?;
 
         let client = Arc::new(PropolisClient::new(server_addr, log.clone()));
 
@@ -387,36 +337,10 @@ impl Instance {
     async fn stop(&self) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().await;
         let log = &inner.log;
-        let fmri = fmri_name(inner.id());
-
-        info!(log, "Instance::stop disabling service: {}", fmri);
-
-        // TODO: maybe de-dup with "deleting zone" in instance_manager.rs?
-
-        // TODO: REMOVE THE ZONE
 
         let zname = zone_name(inner.id());
         warn!(log, "Deleting zone: {}", zname);
-        zone::Adm::new(&zname).halt().unwrap();
-        zone::Adm::new(&zname).uninstall(true).unwrap();
-        zone::Config::new(&zname).delete(true).run().unwrap();
-
-        /*
-        smf::Adm::new()
-            .disable()
-            .synchronous()
-            .run(smf::AdmSelection::ByPattern(&[&fmri]))
-            .map_err(|e| ApiError::InternalError {
-                message: format!("Cannot disable propolis SMF service: {}", e),
-            })?;
-
-        info!(log, "Instance::stop deleting service: {}", fmri);
-        smf::Config::delete().run(fmri).map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Cannot delete config for SMF service: {}", e),
-            }
-        })?;
-        */
+        Zones::halt_and_remove(&zname).unwrap();
 
         info!(log, "Instance::stop removing self from instances map");
         inner.running_state.as_mut().unwrap().ticket.terminate();
@@ -442,7 +366,7 @@ impl Instance {
 
         let mut gen = 0;
         loop {
-            // State monitor always returns the most recent state/gen pair
+            // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response = client
                 .instance_state_monitor(id, gen)
