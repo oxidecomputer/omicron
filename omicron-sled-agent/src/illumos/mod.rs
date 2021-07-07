@@ -1,14 +1,9 @@
 //! Wrappers around illumos-specific commands.
 
-mod dladm;
-mod svc;
-mod zfs;
-mod zone;
-
-pub use self::dladm::{Dladm, VNIC_PREFIX};
-pub use self::svc::wait_for_service;
-pub use self::zone::{Zones, ZONE_PREFIX};
-pub use self::zfs::{Zfs, ZONE_ZFS_POOL};
+pub mod dladm;
+pub mod svc;
+pub mod zfs;
+pub mod zone;
 
 use omicron_common::error::ApiError;
 

@@ -1,9 +1,12 @@
 //! API for controlling multiple instances on a sled.
 
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
     ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
 };
+#[cfg(not(test))]
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -13,8 +16,8 @@ use std::sync::{
 };
 use uuid::Uuid;
 
+use crate::illumos::{dladm::Dladm, zfs::Zfs, zfs::ZONE_ZFS_POOL, zone::Zones};
 use crate::instance::Instance;
-use crate::illumos::{Dladm, Zones, Zfs, ZONE_ZFS_POOL};
 
 struct InstanceManagerInternal {
     log: Logger,
@@ -142,22 +145,30 @@ impl InstanceManager {
 /// Represents membership of an instance in the [`InstanceManager`].
 pub struct InstanceTicket {
     id: Uuid,
-    inner: Arc<InstanceManagerInternal>,
-    removed: bool,
+    inner: Option<Arc<InstanceManagerInternal>>,
 }
 
 impl InstanceTicket {
+    // Creates a new instance ticket for instance "id" to be removed
+    // from "inner" on destruction.
     fn new(id: Uuid, inner: Arc<InstanceManagerInternal>) -> Self {
-        InstanceTicket { id, inner, removed: false }
+        InstanceTicket { id, inner: Some(inner) }
+    }
+
+    // (Test-only) Creates a null ticket that does nothing.
+    //
+    // Useful when testing instances without the an entire instance manager.
+    #[cfg(test)]
+    pub(crate) fn null(id: Uuid) -> Self {
+        InstanceTicket { id, inner: None }
     }
 
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.
     pub fn terminate(&mut self) {
-        if !self.removed {
-            self.inner.instances.lock().unwrap().remove(&self.id);
-            self.removed = true;
+        if let Some(inner) = self.inner.take() {
+            inner.instances.lock().unwrap().remove(&self.id);
         }
     }
 }

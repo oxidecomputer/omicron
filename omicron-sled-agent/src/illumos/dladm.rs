@@ -1,6 +1,8 @@
 //! Utilities for poking at data links.
 
 use ipnet::IpNet;
+#[cfg(test)]
+use mockall::automock;
 use omicron_common::error::ApiError;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -12,6 +14,7 @@ pub const VNIC_PREFIX: &str = "vnic_propolis";
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
+#[cfg_attr(test, automock, allow(dead_code))]
 impl Dladm {
     /// Returns the name of the first observed physical data link.
     pub fn find_physical() -> Result<String, ApiError> {
@@ -34,7 +37,10 @@ impl Dladm {
     }
 
     /// Creates a new VNIC atop a physical device.
-    pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), ApiError> {
+    pub fn create_vnic(
+        physical: &str,
+        vnic_name: &str,
+    ) -> Result<(), ApiError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd =
             command.args(&["dladm", "create-vnic", "-l", physical, vnic_name]);
@@ -50,7 +56,10 @@ impl Dladm {
 
         let vnics = String::from_utf8(output.stdout)
             .map_err(|e| ApiError::InternalError {
-                message: format!("Failed to parse UTF-8 from dladm output: {}", e),
+                message: format!(
+                    "Failed to parse UTF-8 from dladm output: {}",
+                    e
+                ),
             })?
             .lines()
             .filter(|vnic| vnic.starts_with(VNIC_PREFIX))

@@ -1,6 +1,8 @@
 //! API for interacting with Zones running Propolis.
 
 use ipnet::IpNet;
+#[cfg(test)]
+use mockall::automock;
 use omicron_common::error::ApiError;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -26,24 +28,23 @@ fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
 
+#[cfg_attr(test, automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     pub fn halt_and_remove(name: &str) -> Result<(), ApiError> {
-        zone::Adm::new(name).halt().map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Cannot halt zone {}: {}", name, e),
-            }
+        zone::Adm::new(name).halt().map_err(|e| ApiError::InternalError {
+            message: format!("Cannot halt zone {}: {}", name, e),
         })?;
         zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
             ApiError::InternalError {
                 message: format!("Cannot uninstall {}: {}", name, e),
             }
         })?;
-        zone::Config::new(name).delete(/* force= */ true).run().map_err(|e| {
-            ApiError::InternalError {
+        zone::Config::new(name).delete(/* force= */ true).run().map_err(
+            |e| ApiError::InternalError {
                 message: format!("Cannot delete {}: {}", name, e),
-            }
-        })?;
+            },
+        )?;
         Ok(())
     }
 
@@ -54,13 +55,21 @@ impl Zones {
 
         info!(log, "Querying for prescence of zone: {}", name);
         if let Some(zone) = get_zone(name)? {
-            info!(log, "Found zone: {} in state {:?}", zone.name(), zone.state());
+            info!(
+                log,
+                "Found zone: {} in state {:?}",
+                zone.name(),
+                zone.state()
+            );
             if zone.state() == zone::State::Installed {
                 // TODO: Admittedly, the zone still might be messed up. However,
                 // for now, we assume that "installed" means "good to go".
                 return Ok(());
             } else {
-                info!(log, "Invalid state; uninstalling and deleting zone {}", name);
+                info!(
+                    log,
+                    "Invalid state; uninstalling and deleting zone {}", name
+                );
                 Zones::halt_and_remove(zone.name())?;
             }
         }
@@ -88,8 +97,10 @@ impl Zones {
 
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
-        zone::Adm::new(name).install(&[]).map_err(|e| ApiError::InternalError {
-            message: format!("Failed to install base zone: {}", e),
+        zone::Adm::new(name).install(&[]).map_err(|e| {
+            ApiError::InternalError {
+                message: format!("Failed to install base zone: {}", e),
+            }
         })?;
 
         Ok(())
@@ -167,7 +178,10 @@ impl Zones {
     }
 
     /// Creates a static IP address within a Zone.
-    pub fn create_address(zone: &str, interface: &str) -> Result<IpNet, ApiError> {
+    pub fn create_address(
+        zone: &str,
+        interface: &str,
+    ) -> Result<IpNet, ApiError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             "zlogin",

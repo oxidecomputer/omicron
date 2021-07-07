@@ -19,5 +19,8 @@ mod instance_manager;
 pub mod server;
 mod sled_agent;
 
+#[cfg(test)]
+mod mocks;
+
 #[macro_use]
 extern crate slog;
