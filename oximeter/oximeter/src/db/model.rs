@@ -432,35 +432,40 @@ fn unroll_from_source(
         FieldSource::Target(_) => &sample.target.fields,
         FieldSource::Metric(_) => &sample.metric.fields,
     };
-    for (field_name, field_value) in fields.iter() {
-        let (table_name, row_string) = match field_value {
+    for field in fields.iter() {
+        let source = source.clone();
+        let timeseries_key = sample.key.clone();
+        let field_name = field.name.clone();
+        let timestamp = sample.timestamp;
+
+        let (table_name, row_string) = match &field.value {
             FieldValue::Bool(inner) => {
                 let row = BoolFieldRow {
-                    source: source.clone(),
-                    timeseries_key: sample.key.clone(),
-                    field_name: field_name.clone(),
+                    source,
+                    timeseries_key,
+                    field_name,
                     field_value: DbBool::from(*inner),
-                    timestamp: sample.timestamp,
+                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
             FieldValue::I64(inner) => {
                 let row = I64FieldRow {
-                    source: source.clone(),
-                    timeseries_key: sample.key.clone(),
-                    field_name: field_name.clone(),
+                    source,
+                    timeseries_key,
+                    field_name,
                     field_value: *inner,
-                    timestamp: sample.timestamp,
+                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
             FieldValue::String(inner) => {
                 let row = StringFieldRow {
-                    source: source.clone(),
-                    timeseries_key: sample.key.clone(),
-                    field_name: field_name.clone(),
+                    source,
+                    timeseries_key,
+                    field_name,
                     field_value: inner.clone(),
-                    timestamp: sample.timestamp,
+                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -473,26 +478,26 @@ fn unroll_from_source(
                 // of these types from the database, we can just copy that implementation. See
                 // https://github.com/rust-lang/rust/issues/27709 for the tracking issue for
                 // stabilizing that function, which looks like it'll happen in the near future.
-                let addr = match inner {
+                let field_value = match inner {
                     IpAddr::V4(addr) => addr.to_ipv6_mapped(),
                     IpAddr::V6(addr) => *addr,
                 };
                 let row = IpAddrFieldRow {
-                    source: source.clone(),
-                    timeseries_key: sample.key.clone(),
-                    field_name: field_name.clone(),
-                    field_value: addr,
-                    timestamp: sample.timestamp,
+                    source,
+                    timeseries_key,
+                    field_name,
+                    field_value,
+                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
             FieldValue::Uuid(inner) => {
                 let row = UuidFieldRow {
-                    source: source.clone(),
-                    timeseries_key: sample.key.clone(),
-                    field_name: field_name.clone(),
+                    source,
+                    timeseries_key,
+                    field_name,
                     field_value: *inner,
-                    timestamp: sample.timestamp,
+                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -530,93 +535,97 @@ pub(crate) fn unroll_field_rows(
 /// Return the table name and serialized measurement row for a [`Sample`], to insert into
 /// ClickHouse.
 pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
+    let target_name = sample.target.name.clone();
+    let metric_name = sample.metric.name.clone();
+    let timeseries_key = sample.key.clone();
+    let timestamp = sample.timestamp;
     match sample.metric.measurement {
         Measurement::Bool(inner) => {
             let row = BoolMeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: DbBool::from(inner),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::I64(inner) => {
             let row = I64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::F64(inner) => {
             let row = F64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::String(ref inner) => {
             let row = StringMeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner.clone(),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::Bytes(ref inner) => {
             let row = BytesMeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner.clone(),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::CumulativeI64(inner) => {
             let row = CumulativeI64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner.value(),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::CumulativeF64(inner) => {
             let row = CumulativeF64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: inner.value(),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::HistogramI64(ref inner) => {
             let row = HistogramI64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: DbHistogram::from(inner),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Measurement::HistogramF64(ref inner) => {
             let row = HistogramF64MeasurementRow {
-                target_name: sample.target.name.clone(),
-                metric_name: sample.metric.name.clone(),
-                timeseries_key: sample.key.clone(),
-                timestamp: sample.timestamp,
+                target_name,
+                metric_name,
+                timeseries_key,
+                timestamp,
                 value: DbHistogram::from(inner),
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
@@ -633,9 +642,9 @@ pub(crate) fn schema_for(sample: &Sample) -> (TargetSchema, MetricSchema) {
             .target
             .fields
             .iter()
-            .map(|(name, value)| {
-                let name = name.to_string();
-                let ty = value.field_type();
+            .map(|field| {
+                let name = field.name.clone();
+                let ty = field.value.field_type();
                 Field { name, ty }
             })
             .collect(),
@@ -647,9 +656,9 @@ pub(crate) fn schema_for(sample: &Sample) -> (TargetSchema, MetricSchema) {
             .metric
             .fields
             .iter()
-            .map(|(name, value)| {
-                let name = name.to_string();
-                let ty = value.field_type();
+            .map(|field| {
+                let name = field.name.clone();
+                let ty = field.value.field_type();
                 Field { name, ty }
             })
             .collect(),
@@ -704,9 +713,9 @@ mod tests {
         } else {
             panic!("Expected the packed row to have a source matching FieldSource::Target");
         }
-        let (key, value) = sample.target.fields.iter().nth(0).unwrap();
-        assert_eq!(&unpacked.field_name, key);
-        if let FieldValue::String(v) = value {
+        let field = &sample.target.fields[0];
+        assert_eq!(unpacked.field_name, field.name);
+        if let FieldValue::String(v) = &field.value {
             assert_eq!(v, &unpacked.field_value);
         } else {
             panic!("Expected the packed row to have a field_value matching FieldValue::String");
