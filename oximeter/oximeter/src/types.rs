@@ -112,6 +112,24 @@ impl From<bool> for FieldValue {
     }
 }
 
+/// A `Field` is a named aspect of a target or metric.
+#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+pub struct Field {
+    pub name: String,
+    pub value: FieldValue,
+}
+
+impl Field {
+    /// Construct a field from its name and value.
+    pub fn new<S, T>(name: S, value: T) -> Self
+    where
+        S: AsRef<str>,
+        T: Into<FieldValue>,
+    {
+        Field { name: name.as_ref().to_string(), value: value.into() }
+    }
+}
+
 /// The data type of an individual measurement of a metric.
 #[derive(
     Clone,
@@ -313,8 +331,8 @@ pub struct Target {
     /// `':'` character.
     pub key: String,
 
-    /// The name and value for each field of the target.
-    pub fields: BTreeMap<String, FieldValue>,
+    /// The fields for this target
+    pub fields: Vec<Field>,
 }
 
 impl<T> From<&T> for Target
@@ -325,12 +343,7 @@ where
         Self {
             name: target.name().to_string(),
             key: target.key(),
-            fields: target
-                .field_names()
-                .iter()
-                .map(|x| x.to_string())
-                .zip(target.field_values())
-                .collect(),
+            fields: target.fields(),
         }
     }
 }
@@ -344,15 +357,15 @@ where
 /// See the [`Metric`](crate::traits::Metric) trait for more details on each field.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Metric {
-    /// The name of target.
+    /// The name of metric.
     pub name: String,
 
     /// The key for this metric, which its value of each field and its name, concatenated with a
     /// `':'` character.
     pub key: String,
 
-    /// The name and value for each field of the metric.
-    pub fields: BTreeMap<String, FieldValue>,
+    /// The fields for this metric
+    pub fields: Vec<Field>,
 
     /// The data type of a measurement from this metric.
     pub measurement_type: MeasurementType,
@@ -377,12 +390,7 @@ where
         Self {
             name: metric.name().to_string(),
             key: metric.key(),
-            fields: metric
-                .field_names()
-                .iter()
-                .map(|x| x.to_string())
-                .zip(metric.field_values())
-                .collect(),
+            fields: metric.fields(),
             measurement_type: metric.measurement_type(),
             measurement: metric.measure(),
         }
@@ -541,13 +549,7 @@ mod tests {
         let t2 = types::Target::from(&t);
         assert_eq!(t.name(), t2.name);
         assert_eq!(t.key(), t2.key);
-        let fields = t
-            .field_names()
-            .iter()
-            .map(|x| x.to_string())
-            .zip(t.field_values())
-            .collect();
-        assert_eq!(t2.fields, fields);
+        assert_eq!(t.fields(), t2.fields);
     }
 
     #[test]
@@ -556,13 +558,7 @@ mod tests {
         let m2 = types::Metric::from(&m);
         assert_eq!(m.name(), m2.name);
         assert_eq!(m.key(), m2.key);
-        let fields = m
-            .field_names()
-            .iter()
-            .map(|x| x.to_string())
-            .zip(m.field_values())
-            .collect();
-        assert_eq!(m2.fields, fields);
+        assert_eq!(m.fields(), m2.fields);
         assert_eq!(m.measurement_type(), m2.measurement_type);
     }
 
