@@ -327,10 +327,6 @@ pub struct Target {
     /// The name of target.
     pub name: String,
 
-    /// The key for this target, which its name and the value of each field, concatenated with a
-    /// `':'` character.
-    pub key: String,
-
     /// The fields for this target
     pub fields: Vec<Field>,
 }
@@ -340,11 +336,7 @@ where
     T: traits::Target,
 {
     fn from(target: &T) -> Self {
-        Self {
-            name: target.name().to_string(),
-            key: target.key(),
-            fields: target.fields(),
-        }
+        Self { name: target.name().to_string(), fields: target.fields() }
     }
 }
 
@@ -360,10 +352,6 @@ pub struct Metric {
     /// The name of metric.
     pub name: String,
 
-    /// The key for this metric, which its value of each field and its name, concatenated with a
-    /// `':'` character.
-    pub key: String,
-
     /// The fields for this metric
     pub fields: Vec<Field>,
 
@@ -376,7 +364,8 @@ pub struct Metric {
 
 impl PartialEq for Metric {
     fn eq(&self, other: &Metric) -> bool {
-        self.key == other.key && self.measurement_type == other.measurement_type
+        self.fields == other.fields
+            && self.measurement_type == other.measurement_type
     }
 }
 
@@ -389,7 +378,6 @@ where
     fn from(metric: &M) -> Self {
         Self {
             name: metric.name().to_string(),
-            key: metric.key(),
             fields: metric.fields(),
             measurement_type: metric.measurement_type(),
             measurement: metric.measure(),
@@ -548,7 +536,6 @@ mod tests {
         let t = Targ { good: false, id: 2 };
         let t2 = types::Target::from(&t);
         assert_eq!(t.name(), t2.name);
-        assert_eq!(t.key(), t2.key);
         assert_eq!(t.fields(), t2.fields);
     }
 
@@ -557,7 +544,6 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
         let m2 = types::Metric::from(&m);
         assert_eq!(m.name(), m2.name);
-        assert_eq!(m.key(), m2.key);
         assert_eq!(m.fields(), m2.fields);
         assert_eq!(m.measurement_type(), m2.measurement_type);
     }
@@ -568,8 +554,7 @@ mod tests {
         let m = Met { good: false, id: 2, value: 1 };
         let timestamp = Utc::now();
         let sample = types::Sample::new(&t, &m, Some(timestamp));
-        assert_eq!(sample.target.key, t.key());
-        assert_eq!(sample.metric.key, m.key());
+        assert_eq!(sample.key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.timestamp, timestamp);
         assert_eq!(sample.metric.measurement, Measurement::I64(m.value));
     }
