@@ -1,8 +1,6 @@
 //! Utilities for poking at data links.
 
 use ipnet::IpNet;
-#[cfg(test)]
-use mockall::automock;
 use omicron_common::error::ApiError;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -14,7 +12,7 @@ pub const VNIC_PREFIX: &str = "vnic_propolis";
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
-#[cfg_attr(test, automock, allow(dead_code))]
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Returns the name of the first observed physical data link.
     pub fn find_physical() -> Result<String, ApiError> {

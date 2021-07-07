@@ -20,14 +20,9 @@ use crate::common::instance::{Action as InstanceAction, InstanceState};
 use crate::instance_manager::InstanceTicket;
 
 #[cfg(not(test))]
-use crate::illumos::dladm::Dladm;
+use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::dladm::MockDladm as Dladm;
-
-#[cfg(test)]
-use crate::illumos::zone::MockZones as Zones;
-#[cfg(not(test))]
-use crate::illumos::zone::Zones;
+use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
@@ -242,6 +237,27 @@ pub struct Instance {
     inner: Arc<Mutex<InstanceInner>>,
 }
 
+#[cfg(test)]
+mockall::mock! {
+    pub Instance {
+        pub fn new(
+            log: Logger,
+            id: Uuid,
+            runtime_id: u64,
+            initial_runtime: ApiInstanceRuntimeState,
+            nexus_client: Arc<NexusClient>,
+        ) -> Result<Self, ApiError>;
+        pub async fn start(&self, ticket: InstanceTicket) -> Result<(), ApiError>;
+        pub async fn transition(
+            &self,
+            target: ApiInstanceRuntimeStateRequested,
+        ) -> Result<ApiInstanceRuntimeState, ApiError>;
+    }
+    impl Clone for Instance {
+        fn clone(&self) -> Self;
+    }
+}
+
 impl Instance {
     /// Creates a new (not yet running) instance object.
     pub fn new(
@@ -441,8 +457,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::MockDladm;
-    use crate::illumos::zone::MockZones;
+    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
     use dropshot::{
@@ -808,7 +823,8 @@ mod test {
         let mut nexus_client = MockNexusClient::default();
 
         // Set expectations about what will be seen (and when) by Nexus before
-        // the test begins.
+        // the test begins. We no longer have mutable access to "nexus_client"
+        // when "Instance::new" is invoked, so we have to prepare early.
         let mut seq = mockall::Sequence::new();
         let create_fut = expect_state_transition(
             &mut nexus_client,

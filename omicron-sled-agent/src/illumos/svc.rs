@@ -1,14 +1,12 @@
 //! Utilities for accessing services.
 
 use cfg_if::cfg_if;
-#[cfg(test)]
-use mockall::automock;
 
 use omicron_common::dev::poll;
 use omicron_common::error::ApiError;
 use std::time::Duration;
 
-#[cfg_attr(test, automock, allow(dead_code))]
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
 mod inner {
     use super::*;
 
