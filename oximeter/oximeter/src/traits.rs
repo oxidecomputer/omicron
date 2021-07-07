@@ -354,8 +354,7 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.target.key, t.key());
-        assert_eq!(sample.metric.key, m.key());
+        assert_eq!(sample.key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.metric.measurement, Measurement::I64(0));
         p.metric.value += 10;
         let sample = p.produce().unwrap().next().unwrap();
