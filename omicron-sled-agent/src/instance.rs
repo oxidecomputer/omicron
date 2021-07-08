@@ -1,14 +1,15 @@
 //! API for controlling a single instance.
 
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
+use crate::common::instance::{Action as InstanceAction, InstanceState};
+use crate::illumos::svc::wait_for_service;
+use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
+use crate::instance_manager::InstanceTicket;
 use futures::lock::Mutex;
 use omicron_common::dev::poll;
 use omicron_common::error::ApiError;
 use omicron_common::model::ApiInstanceRuntimeState;
 use omicron_common::model::ApiInstanceRuntimeStateRequested;
-#[cfg(not(test))]
-use omicron_common::NexusClient;
+use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,17 +17,15 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::common::instance::{Action as InstanceAction, InstanceState};
-use crate::instance_manager::InstanceTicket;
-
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
 use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
-use crate::illumos::svc::wait_for_service;
-use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
-use propolis_client::Client as PropolisClient;
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
+#[cfg(not(test))]
+use omicron_common::NexusClient;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP

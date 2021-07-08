@@ -4,16 +4,17 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use omicron_common::model::ApiSledAgentStartupInfo;
-#[cfg(not(test))]
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
+
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
+#[cfg(not(test))]
+use omicron_common::NexusClient;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent

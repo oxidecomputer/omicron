@@ -1,13 +1,10 @@
 //! API for controlling multiple instances on a sled.
 
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
+use crate::illumos::zfs::ZONE_ZFS_POOL;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
     ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
 };
-#[cfg(not(test))]
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -16,7 +13,11 @@ use std::sync::{
 };
 use uuid::Uuid;
 
-use crate::illumos::zfs::ZONE_ZFS_POOL;
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
+#[cfg(not(test))]
+use omicron_common::NexusClient;
+
 #[cfg(not(test))]
 use crate::{
     illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
