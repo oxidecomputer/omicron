@@ -231,6 +231,15 @@ pub struct Instance {
 
 impl Instance {
     /// Creates a new (not yet running) instance object.
+    ///
+    /// Arguments:
+    /// * `log`: Logger for dumping debug information.
+    /// * `id`: UUID of the instance to be created.
+    /// * `runtime_id`: A unique (to the sled) numeric ID which may be used to
+    /// refer to a VNIC. (This exists because of a restriction on VNIC name
+    /// lengths, otherwise the UUID would be used instead).
+    /// * `initial_runtime`: State of the instance at initialization time.
+    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
     pub fn new(
         log: Logger,
         id: Uuid,

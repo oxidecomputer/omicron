@@ -174,7 +174,7 @@ impl Zones {
             .collect())
     }
 
-    /// Creates a static IP address within a Zone.
+    /// Creates an IP address within a Zone.
     pub fn create_address(
         zone: &str,
         interface: &str,
