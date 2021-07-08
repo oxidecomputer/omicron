@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::histogram::Histogram;
 use crate::types::{Cumulative, Measurement, Sample};
-use crate::{Error, FieldType, FieldValue, MeasurementType};
+use crate::{Error, Field, FieldType, FieldValue, MeasurementType};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -65,6 +65,15 @@ pub trait Target {
 
     /// Return the values of the target's fields.
     fn field_values(&self) -> Vec<FieldValue>;
+
+    /// Return the target's fields, both name and value.
+    fn fields(&self) -> Vec<Field> {
+        self.field_names()
+            .iter()
+            .zip(self.field_values().into_iter())
+            .map(|(name, value)| Field { name: name.to_string(), value })
+            .collect()
+    }
 
     /// Return the key for this target.
     ///
@@ -133,6 +142,15 @@ pub trait Metric {
 
     /// Return the values of the metric's fields.
     fn field_values(&self) -> Vec<FieldValue>;
+
+    /// Return the metrics's fields, both name and value.
+    fn fields(&self) -> Vec<Field> {
+        self.field_names()
+            .iter()
+            .zip(self.field_values().into_iter())
+            .map(|(name, value)| Field { name: name.to_string(), value })
+            .collect()
+    }
 
     /// Return the key for this metric.
     ///
@@ -336,8 +354,7 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.target.key, t.key());
-        assert_eq!(sample.metric.key, m.key());
+        assert_eq!(sample.key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.metric.measurement, Measurement::I64(0));
         p.metric.value += 10;
         let sample = p.produce().unwrap().next().unwrap();

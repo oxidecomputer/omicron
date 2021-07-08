@@ -359,10 +359,13 @@ mod tests {
     #[tokio::test]
     async fn test_build_client() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let address: SocketAddr = "[::1]:8123".parse().unwrap();
-        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
         Client::new(address, log).await.unwrap().wipe_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
@@ -370,10 +373,13 @@ mod tests {
     #[tokio::test]
     async fn test_client_insert() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let address: SocketAddr = "[::1]:8124".parse().unwrap();
-        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
         let client = Client::new(address, log).await.unwrap();
         let samples = {
             let mut s = Vec::with_capacity(8);
@@ -409,10 +415,13 @@ mod tests {
     #[tokio::test]
     async fn test_schema_mismatch() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let address: SocketAddr = "[::1]:8125".parse().unwrap();
-        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
         let client = Client::new(address, log).await.unwrap();
         let sample = test_util::make_sample();
         client.insert_samples(&vec![sample]).await.unwrap();
@@ -436,10 +445,13 @@ mod tests {
     #[tokio::test]
     async fn test_schema_update() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let address: SocketAddr = "[::1]:8126".parse().unwrap();
-        let mut db = dev::clickhouse::ClickHouseInstance::new(address.port())
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = dev::clickhouse::ClickHouseInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
         let client = Client::new(address, log).await.unwrap();
         let sample = test_util::make_sample();
 
