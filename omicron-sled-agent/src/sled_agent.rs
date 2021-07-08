@@ -10,35 +10,37 @@ use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::instance_manager::InstanceManager;
+
 /// Describes an executing Sled Agent object.
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
-pub struct SledAgent {}
+pub struct SledAgent {
+    instances: InstanceManager,
+}
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
     pub fn new(
         id: &Uuid,
         log: Logger,
-        _nexus_client: Arc<NexusClient>,
+        nexus_client: Arc<NexusClient>,
     ) -> Result<SledAgent, ApiError> {
         info!(&log, "created sled agent"; "id" => ?id);
 
-        // TODO: Create an "instance manager" which handles all incoming
-        // requests.
-        Ok(SledAgent {})
+        Ok(SledAgent {
+            instances: InstanceManager::new(log.clone(), nexus_client)?
+        })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.
-    ///
-    /// NOTE: Not yet implemented.
     pub async fn instance_ensure(
         &self,
-        _instance_id: Uuid,
-        _initial_runtime: ApiInstanceRuntimeState,
-        _target: ApiInstanceRuntimeStateRequested,
+        instance_id: Uuid,
+        initial_runtime: ApiInstanceRuntimeState,
+        target: ApiInstanceRuntimeStateRequested,
     ) -> Result<ApiInstanceRuntimeState, ApiError> {
-        todo!("Instance ensure not yet implemented");
+        self.instances.ensure(instance_id, initial_runtime, target).await
     }
 
     /// Idempotently ensures that the given Disk is attached (or not) as

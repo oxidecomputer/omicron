@@ -10,15 +10,18 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" 
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
+ipnet = "2.3"
 omicron-common = { path = "../omicron-common" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fafae47a" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3d58a6398" }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
+smf = "0.2"
 structopt = "0.3"
 tokio = { version = "1.8", features = [ "full" ] }
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
+zone = "0.1"
 
 [dev-dependencies]
 expectorate = "1.0.1"

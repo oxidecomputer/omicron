@@ -878,6 +878,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47be2f14c678be2fdcab04ab1171db51b2762ce6f0a8ee87c8dd4a04ed216135"
 
 [[package]]
+name = "itertools"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,16 +1211,19 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "ipnet",
  "omicron-common",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3d58a6398)",
  "schemars",
  "serde",
  "serde_json",
  "slog",
+ "smf",
  "structopt",
  "subprocess",
  "tokio",
  "uuid",
+ "zone",
 ]
 
 [[package]]
@@ -1570,6 +1582,22 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3d58a6398#3d58a6398e08b88db5e9fe60e50ecb5e43a31c82"
+dependencies = [
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "propolis-client"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
 dependencies = [
  "reqwest",
@@ -1592,7 +1620,7 @@ dependencies = [
  "dropshot",
  "futures",
  "propolis",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=fafae47a)",
  "serde",
  "serde_derive",
  "structopt",
@@ -2843,4 +2871,28 @@ dependencies = [
  "proc-macro2",
  "syn",
  "synstructure",
+]
+
+[[package]]
+name = "zone"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41f308411d82ac9426366a91b6a6169aa43e3cacdd108a18e4a7522d9ecd4693"
+dependencies = [
+ "itertools",
+ "thiserror",
+ "zone_cfg_derive",
+]
+
+[[package]]
+name = "zone_cfg_derive"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61ac2a898023d86613a7efa7a4195e4b75240009e559acb17ddd7fa876d19527"
+dependencies = [
+ "heck",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
