@@ -29,7 +29,7 @@ impl SledAgent {
         info!(&log, "created sled agent"; "id" => ?id);
 
         Ok(SledAgent {
-            instances: InstanceManager::new(log.clone(), nexus_client)?
+            instances: InstanceManager::new(log.clone(), nexus_client)?,
         })
     }
 

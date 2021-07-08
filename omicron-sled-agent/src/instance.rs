@@ -14,10 +14,10 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceState};
-use crate::instance_manager::InstanceTicket;
-use crate::illumos::{dladm::Dladm, zone::Zones};
 use crate::illumos::svc::wait_for_service;
+use crate::illumos::{dladm::Dladm, zone::Zones};
 use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
+use crate::instance_manager::InstanceTicket;
 use propolis_client::Client as PropolisClient;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
