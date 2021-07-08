@@ -51,15 +51,22 @@ See TODO.adoc for more info.
 
 == Build and run
 
+Both normal execution and the test suite expect the prescence of some existing binaries (described below) to be locatable within the `$PATH` environment variable.
+However, once these have been provided, the codebase should be buildable with `cargo build`, and testable with `cargo test`.
+
 **Prerequisites:**
 
-1. CockroachDB v20.2.5.  The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.  On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.  Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
-With `cockroach` on your PATH, you can **build and run the whole test suite** with `cargo test`.  The test suite runs cleanly and should remain clean.
+1. CockroachDB v20.2.5.
 
-2. ClickHouse >= v21.7.1. The test suite expects a running instance of the ClickHouse database server.
-(It currently _does not_ start the server automatically.) The script `./tools/ci_download_clickhouse`
-can be used to download a pre-built binary for illumos, Linux, or macOS platforms. You may also install
-ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
+The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
+On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
+Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
+
+2. ClickHouse >= v21.7.1.
+
+The test suite expects a running instance of the ClickHouse database server.
+The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `clickhouse/clickhouse`) to your PATH.
+You may also install ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
