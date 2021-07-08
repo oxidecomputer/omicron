@@ -1,9 +1,12 @@
 //! API for controlling multiple instances on a sled.
 
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
     ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
 };
+#[cfg(not(test))]
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -14,9 +17,18 @@ use std::sync::{
 use uuid::Uuid;
 
 use crate::illumos::zfs::ZONE_ZFS_POOL;
+#[cfg(not(test))]
 use crate::{
     illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
     instance::Instance,
+};
+#[cfg(test)]
+use crate::{
+    illumos::{
+        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
+        zone::MockZones as Zones,
+    },
+    instance::MockInstance as Instance,
 };
 
 struct InstanceManagerInternal {
@@ -155,6 +167,14 @@ impl InstanceTicket {
         InstanceTicket { id, inner: Some(inner) }
     }
 
+    // (Test-only) Creates a null ticket that does nothing.
+    //
+    // Useful when testing instances without the an entire instance manager.
+    #[cfg(test)]
+    pub(crate) fn null(id: Uuid) -> Self {
+        InstanceTicket { id, inner: None }
+    }
+
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.
@@ -168,5 +188,206 @@ impl InstanceTicket {
 impl Drop for InstanceTicket {
     fn drop(&mut self) {
         self.terminate();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::illumos::{dladm::MockDladm, zfs::MockZfs, zone::MockZones};
+    use crate::instance::MockInstance;
+    use crate::mocks::MockNexusClient;
+    use chrono::Utc;
+    use omicron_common::model::{
+        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState,
+        ApiInstanceStateRequested,
+    };
+
+    static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
+
+    fn test_uuid() -> Uuid {
+        INST_UUID_STR.parse().unwrap()
+    }
+
+    fn logger() -> Logger {
+        dropshot::ConfigLogging::StderrTerminal {
+            level: dropshot::ConfigLoggingLevel::Info,
+        }
+        .to_logger("test-logger")
+        .unwrap()
+    }
+
+    fn new_runtime_state() -> ApiInstanceRuntimeState {
+        ApiInstanceRuntimeState {
+            run_state: ApiInstanceState::Creating,
+            sled_uuid: Uuid::new_v4(),
+            gen: ApiGeneration::new(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn ensure_instance() {
+        let log = logger();
+        let nexus_client = Arc::new(MockNexusClient::default());
+
+        // Creation of the instance manager incurs some "global" system
+        // checks - creation of the base zone, and cleanup of existing
+        // zones + vnics.
+
+        let zfs_ensure_zpool_ctx = MockZfs::ensure_zpool_context();
+        zfs_ensure_zpool_ctx.expect().return_once(|pool| {
+            assert_eq!(pool, ZONE_ZFS_POOL);
+            Ok(())
+        });
+
+        let zones_create_base_ctx = MockZones::create_base_context();
+        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+
+        let zones_get_ctx = MockZones::get_context();
+        zones_get_ctx.expect().return_once(|| Ok(vec![]));
+
+        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
+        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
+
+        let im = InstanceManager::new(log, nexus_client).unwrap();
+
+        // Verify that no instances exist.
+        assert!(im.inner.instances.lock().unwrap().is_empty());
+
+        // Insert a new instance, verify that it exists.
+        //
+        // In the process, we'll clone the instance reference out
+        // of the manager, "start" and "transition" it to the desired state.
+        //
+        // Note that we need to perform some manual intervention to hold onto
+        // the "InstanceTicket". Normally, the "Instance" object would drop
+        // the ticket at the end of the instance lifetime to imply tracking
+        // should stop.
+        let ticket = Arc::new(std::sync::Mutex::new(None));
+        let ticket_clone = ticket.clone();
+        let instance_new_ctx = MockInstance::new_context();
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _| {
+            let mut inst = MockInstance::default();
+            inst.expect_clone().return_once(move || {
+                let mut inst = MockInstance::default();
+                inst.expect_start().return_once(move |t| {
+                    // Grab hold of the ticket, so we don't try to remove the
+                    // instance immediately after "start" completes.
+                    let mut ticket_guard = ticket_clone.lock().unwrap();
+                    *ticket_guard = Some(t);
+                    Ok(())
+                });
+                inst.expect_transition().return_once(|_| {
+                    let mut rt_state = new_runtime_state();
+                    rt_state.run_state = ApiInstanceState::Running;
+                    Ok(rt_state)
+                });
+                inst
+            });
+            Ok(inst)
+        });
+        let rt_state = im
+            .ensure(
+                test_uuid(),
+                new_runtime_state(),
+                ApiInstanceRuntimeStateRequested {
+                    run_state: ApiInstanceStateRequested::Running,
+                },
+            )
+            .await
+            .unwrap();
+
+        // At this point, we can observe the expected state of the instance
+        // manager: contianing the created instance...
+        assert_eq!(rt_state.run_state, ApiInstanceState::Running);
+        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
+
+        // ... however, when we drop the ticket of the corresponding instance,
+        // the entry is automatically removed from the instance manager.
+        ticket.lock().unwrap().take();
+        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn ensure_instance_repeatedly() {
+        let log = logger();
+        let nexus_client = Arc::new(MockNexusClient::default());
+
+        // Instance Manager creation.
+
+        let zfs_ensure_zpool_ctx = MockZfs::ensure_zpool_context();
+        zfs_ensure_zpool_ctx.expect().return_once(|pool| {
+            assert_eq!(pool, ZONE_ZFS_POOL);
+            Ok(())
+        });
+
+        let zones_create_base_ctx = MockZones::create_base_context();
+        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+
+        let zones_get_ctx = MockZones::get_context();
+        zones_get_ctx.expect().return_once(|| Ok(vec![]));
+
+        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
+        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
+
+        let im = InstanceManager::new(log, nexus_client).unwrap();
+
+        let ticket = Arc::new(std::sync::Mutex::new(None));
+        let ticket_clone = ticket.clone();
+        let instance_new_ctx = MockInstance::new_context();
+        let mut seq = mockall::Sequence::new();
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _| {
+            let mut inst = MockInstance::default();
+            // First call to ensure (start + transition).
+            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
+                move || {
+                    let mut inst = MockInstance::default();
+                    inst.expect_start().return_once(move |t| {
+                        let mut ticket_guard = ticket_clone.lock().unwrap();
+                        *ticket_guard = Some(t);
+                        Ok(())
+                    });
+                    inst.expect_transition().return_once(|_| {
+                        let mut rt_state = new_runtime_state();
+                        rt_state.run_state = ApiInstanceState::Running;
+                        Ok(rt_state)
+                    });
+                    inst
+                },
+            );
+            // Next calls to ensure (transition only).
+            inst.expect_clone().times(2).in_sequence(&mut seq).returning(
+                move || {
+                    let mut inst = MockInstance::default();
+                    inst.expect_transition().returning(|_| {
+                        let mut rt_state = new_runtime_state();
+                        rt_state.run_state = ApiInstanceState::Running;
+                        Ok(rt_state)
+                    });
+                    inst
+                },
+            );
+            Ok(inst)
+        });
+
+        let id = test_uuid();
+        let rt = new_runtime_state();
+        let target = ApiInstanceRuntimeStateRequested {
+            run_state: ApiInstanceStateRequested::Running,
+        };
+
+        // Creates instance, start + transition.
+        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        // Transition only.
+        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        // Transition only.
+        im.ensure(id, rt, target).await.unwrap();
+
+        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
+        ticket.lock().unwrap().take();
+        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
     }
 }

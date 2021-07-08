@@ -26,6 +26,7 @@ fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
 
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     pub fn halt_and_remove(name: &str) -> Result<(), ApiError> {

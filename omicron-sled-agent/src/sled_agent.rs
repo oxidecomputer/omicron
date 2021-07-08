@@ -1,10 +1,13 @@
 //! Sled agent implementation
 
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
     ApiDiskRuntimeState, ApiDiskStateRequested, ApiInstanceRuntimeState,
     ApiInstanceRuntimeStateRequested,
 };
+#[cfg(not(test))]
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
@@ -33,7 +36,7 @@ impl SledAgent {
         })
     }
 
-    /// Idempotently ensures that a given Instance is running on the sled.
+    /// Idempotently ensures that a given Instances is running on the sled.
     pub async fn instance_ensure(
         &self,
         instance_id: Uuid,

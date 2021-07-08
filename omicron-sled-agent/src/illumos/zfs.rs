@@ -9,6 +9,7 @@ pub const ZONE_ZFS_POOL: &str = "rpool/zone";
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     pub fn ensure_zpool(name: &str) -> Result<(), ApiError> {
