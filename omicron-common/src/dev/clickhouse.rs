@@ -243,8 +243,8 @@ mod tests {
     use super::{
         discover_local_listening_port, ClickHouseError, CLICKHOUSE_TIMEOUT,
     };
-    use std::{io::Write, sync::Arc, time::Duration};
     use std::process::Stdio;
+    use std::{io::Write, sync::Arc, time::Duration};
     use tempfile::NamedTempFile;
     use tokio::{sync::Mutex, task::spawn, time::sleep};
 
