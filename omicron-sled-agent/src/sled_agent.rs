@@ -36,7 +36,7 @@ impl SledAgent {
         })
     }
 
-    /// Idempotently ensures that a given Instances is running on the sled.
+    /// Idempotently ensures that a given Instance is running on the sled.
     pub async fn instance_ensure(
         &self,
         instance_id: Uuid,
