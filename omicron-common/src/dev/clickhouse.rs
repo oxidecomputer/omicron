@@ -244,10 +244,22 @@ mod tests {
         discover_local_listening_port, ClickHouseError, CLICKHOUSE_TIMEOUT,
     };
     use std::{io::Write, sync::Arc, time::Duration};
+    use std::process::Stdio;
     use tempfile::NamedTempFile;
     use tokio::{sync::Mutex, task::spawn, time::sleep};
 
     const EXPECTED_PORT: u16 = 12345;
+
+    #[tokio::test]
+    async fn test_clickhouse_in_path() {
+        // With no arguments, we expect to see the default help message.
+        tokio::process::Command::new("clickhouse")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Cannot find 'clickhouse' on PATH. Refer to README.md for installation instructions");
+    }
 
     #[tokio::test]
     async fn test_discover_local_listening_port() {
