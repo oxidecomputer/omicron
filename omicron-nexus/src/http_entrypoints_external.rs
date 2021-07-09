@@ -130,6 +130,11 @@ pub fn external_api() -> NexusApiDescription {
  *    DELETE /projects/{project_name}   -> projects_delete_project()
  *    GET    /projects/{project_name}   -> projects_get_project()
  *    PUT    /projects/{project_name}   -> projects_put_project()
+ *
+ * Note that these function names end up in generated OpenAPI spec as the
+ * operationId for each endpoint, and therefore represent a contract with
+ * clients. Client generators use operationId to name API methods, so changing
+ * a function name is a breaking change from a client perspective.
  */
 
 /**
