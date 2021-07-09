@@ -389,6 +389,8 @@ impl Instance {
         let zname = zone_name(inner.id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&zname).unwrap();
+        let vnic_name = vnic_name(inner.runtime_id);
+        Dladm::delete_vnic(&vnic_name)?;
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
         Ok(())
@@ -880,6 +882,15 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
+        let dladm_delete_vnic_ctx = Dladm::delete_vnic_context();
+        dladm_delete_vnic_ctx
+            .expect()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|vnic| {
+                assert_eq!(vnic, vnic_name(0));
+                Ok(())
+            });
         inst.transition(ApiInstanceRuntimeStateRequested {
             run_state: ApiInstanceStateRequested::Stopped,
         })

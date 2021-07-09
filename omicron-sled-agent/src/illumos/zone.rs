@@ -6,7 +6,7 @@ use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-use crate::illumos::zfs::ZONE_ZFS_POOL_MOUNTPOINT;
+use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
 const BASE_ZONE: &str = "propolis_base";
@@ -84,7 +84,7 @@ impl Zones {
             zone::CreationOptions::Template("sparse".to_string()),
         );
         cfg.get_global()
-            .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
+            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         cfg.add_fs(&zone::Fs {
@@ -124,7 +124,7 @@ impl Zones {
             zone::CreationOptions::Template("sparse".to_string()),
         );
         cfg.get_global()
-            .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
+            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         cfg.add_fs(&zone::Fs {

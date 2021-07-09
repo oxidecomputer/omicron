@@ -1,6 +1,6 @@
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::zfs::ZONE_ZFS_POOL;
+use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use omicron_common::error::ApiError;
 use omicron_common::model::{
     ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
@@ -57,7 +57,7 @@ impl InstanceManager {
     ) -> Result<InstanceManager, ApiError> {
         // Before we start creating instances, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_zpool(ZONE_ZFS_POOL)?;
+        Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
 
         // Create a base zone, from which all running instance zones are cloned.
         Zones::create_base(&log)?;
@@ -237,9 +237,9 @@ mod test {
         // checks - creation of the base zone, and cleanup of existing
         // zones + vnics.
 
-        let zfs_ensure_zpool_ctx = MockZfs::ensure_zpool_context();
-        zfs_ensure_zpool_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_POOL);
+        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
+        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
+            assert_eq!(pool, ZONE_ZFS_DATASET);
             Ok(())
         });
 
@@ -319,9 +319,9 @@ mod test {
 
         // Instance Manager creation.
 
-        let zfs_ensure_zpool_ctx = MockZfs::ensure_zpool_context();
-        zfs_ensure_zpool_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_POOL);
+        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
+        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
+            assert_eq!(pool, ZONE_ZFS_DATASET);
             Ok(())
         });
 

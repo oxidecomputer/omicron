@@ -25,7 +25,8 @@ impl Dladm {
             // TODO: This is arbitrary, but we're currently grabbing the first
             // physical device. Should we have a more sophisticated method for
             // selection?
-            .find(|s| *s != "LINK")
+            .next()
+            .map(|s| s.trim())
             .ok_or_else(|| ApiError::InternalError {
                 message: "No physical devices found".to_string(),
             })?
