@@ -71,7 +71,7 @@ impl InstanceManager {
         let zones = Zones::get()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(z.name())?;
+            Zones::halt_and_remove(&log, z.name())?;
         }
 
         // Identify all VNICs which should be managed by the Sled Agent.
