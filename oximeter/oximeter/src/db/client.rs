@@ -1,7 +1,7 @@
 //! Rust client to ClickHouse database
 // Copyright 2021 Oxide Computer Company
 
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Mutex;
 
@@ -80,10 +80,17 @@ impl Client {
         &self,
         samples: &[Sample],
     ) -> Result<(), Error> {
-        trace!(self.log, "unrolling {} total samples", samples.len());
+        debug!(self.log, "unrolling {} total samples", samples.len());
+        let mut seen_timeseries = BTreeSet::new();
         let mut rows = BTreeMap::new();
         let mut new_schema = Vec::new();
+
+        let mut verify_time = std::time::Duration::new(0, 0);
+        let mut unroll_field_time = std::time::Duration::new(0, 0);
+        let mut unroll_measurement_time = std::time::Duration::new(0, 0);
+
         for sample in samples.iter() {
+            let start = std::time::Instant::now();
             match self.verify_sample_schema(sample) {
                 Err(_) => {
                     // Skip the sample, but otherwise do nothing. The error is logged in the above
@@ -92,22 +99,43 @@ impl Client {
                 }
                 Ok(schema) => {
                     if let Some(schema) = schema {
-                        trace!(self.log, "new timeseries schema: {}", schema);
+                        debug!(self.log, "new timeseries schema: {}", schema);
                         new_schema.push(schema);
                     }
                 }
             }
-            for (table_name, table_rows) in model::unroll_field_rows(sample) {
-                rows.entry(table_name)
-                    .or_insert_with(Vec::new)
-                    .extend(table_rows);
+            verify_time += std::time::Instant::now() - start;
+
+            let start = std::time::Instant::now();
+            if !seen_timeseries.contains(sample.timeseries_key.as_str()) {
+                for (table_name, table_rows) in model::unroll_field_rows(sample)
+                {
+                    rows.entry(table_name)
+                        .or_insert_with(Vec::new)
+                        .extend(table_rows);
+                }
             }
+            unroll_field_time += std::time::Instant::now() - start;
+
+            let start = std::time::Instant::now();
             let (table_name, measurement_row) =
                 model::unroll_measurement_row(sample);
+            unroll_measurement_time += std::time::Instant::now() - start;
+
             rows.entry(table_name)
                 .or_insert_with(Vec::new)
                 .push(measurement_row);
+
+            seen_timeseries.insert(sample.timeseries_key.as_str());
         }
+
+        debug!(
+            self.log,
+            "duration of sample unrolling operations";
+            "verify" => ?verify_time,
+            "unroll-field" => ?unroll_field_time,
+            "unroll-measurement" => ?unroll_measurement_time,
+        );
 
         // Insert the new schema into the database
         //
@@ -144,7 +172,7 @@ impl Client {
             // But we may want to check the actual error condition, and, if possible, continue
             // inserting any remaining data.
             self.execute(body).await?;
-            trace!(
+            debug!(
                 self.log,
                 "inserted {} rows into table {}",
                 rows.len(),
@@ -532,7 +560,7 @@ mod tests {
             .schema
             .lock()
             .unwrap()
-            .get(&sample.timeseries_name())
+            .get(&sample.timeseries_name)
             .expect(
                 "After inserting a new sample, its schema should be included",
             )
@@ -719,18 +747,63 @@ mod tests {
             2,
             "Expected 2 samples per timeseries"
         );
-        assert_eq!(timeseries.timeseries_key, sample.timeseries_key());
-        // Less than 1us difference
-        assert!(
-            (sample.timestamp - timeseries.samples[0].timestamp)
-                <= Duration::nanoseconds(999)
-        );
-        assert_eq!(timeseries.samples[0].value, sample.measurement);
+        assert_eq!(timeseries.timeseries_key, sample.timeseries_key);
+        assert!(timeseries.samples.iter().zip(samples.iter()).all(
+            |(first, second)| {
+                // Timestamps should be within 1us difference and measurements equal
+                let diff = first.timestamp - second.timestamp;
+                diff >= Duration::nanoseconds(-999)
+                    && diff <= Duration::nanoseconds(999)
+                    && (first.measurement == second.measurement)
+            }
+        ));
         assert_eq!(timeseries.target.name, "virtual_machine");
-        assert_eq!(timeseries.target.fields[0], sample.target_fields()[0]);
-        assert_eq!(timeseries.target.fields[1], sample.target_fields()[1]);
+        assert_eq!(&timeseries.target.fields, sample.target_fields());
         assert_eq!(timeseries.metric.name, "cpu_busy");
-        assert_eq!(timeseries.metric.fields[0], sample.metric_fields()[0]);
+        assert_eq!(&timeseries.metric.fields, sample.metric_fields());
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    #[tokio::test]
+    async fn test_field_record_count() {
+        // This test verifies that the number of records in the field tables is as expected.
+        //
+        // Because of the schema change, inserting field records per field per unique timeseries,
+        // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
+        let (mut db, client, samples) = setup_filter_testcase().await;
+
+        async fn assert_table_count(
+            client: &Client,
+            table: &str,
+            expected_count: usize,
+        ) {
+            let body = client
+                .execute_with_body(format!(
+                    "SELECT COUNT() FROM oximeter.{};",
+                    table
+                ))
+                .await
+                .unwrap();
+            let actual_count =
+                body.lines().next().unwrap().trim().parse::<usize>().expect(
+                    "Expected a count of the number of rows from ClickHouse",
+                );
+            assert_eq!(actual_count, expected_count);
+        }
+
+        // There should be (2 projects * 2 instances * 2 cpus) == 8 timeseries. For each of these
+        // timeseries, there are 2 UUID fields, `project_id` and `instance_id`. So 16 UUID records.
+        assert_table_count(&client, "fields_uuid", 16).await;
+
+        // However, there's only 1 i64 field, `cpu_id`.
+        assert_table_count(&client, "fields_i64", 8).await;
+
+        assert_table_count(
+            &client,
+            "measurements_cumulativef64",
+            samples.len(),
+        )
+        .await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 }

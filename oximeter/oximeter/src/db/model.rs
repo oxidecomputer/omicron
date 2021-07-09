@@ -208,8 +208,6 @@ macro_rules! define_field_row {
             pub timeseries_key: String,
             pub field_name: String,
             pub field_value: $value_type,
-            #[serde(with = "serde_timestamp")]
-            pub timestamp: DateTime<Utc>,
         }
 
         impl $name {
@@ -318,14 +316,13 @@ macro_rules! define_histogram_measurement_row {
 define_histogram_measurement_row! { HistogramI64MeasurementRow, DbHistogram<i64>, "histogrami64" }
 define_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64>, "histogramf64" }
 
-// Helper to collect the field rows from a sample, for both targets and metrics.
+// Helper to collect the field rows from a sample
 fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     for field in sample.fields() {
-        let timeseries_name = sample.timeseries_name();
-        let timeseries_key = sample.timeseries_key();
+        let timeseries_name = sample.timeseries_name.clone();
+        let timeseries_key = sample.timeseries_key.clone();
         let field_name = field.name.clone();
-        let timestamp = sample.timestamp;
         let (table_name, row_string) = match &field.value {
             FieldValue::Bool(inner) => {
                 let row = BoolFieldRow {
@@ -333,7 +330,6 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_key,
                     field_name,
                     field_value: DbBool::from(*inner),
-                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -343,7 +339,6 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_key,
                     field_name,
                     field_value: *inner,
-                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -353,7 +348,6 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_key,
                     field_name,
                     field_value: inner.clone(),
-                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -375,7 +369,6 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_key,
                     field_name,
                     field_value,
-                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -385,7 +378,6 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_key,
                     field_name,
                     field_value: *inner,
-                    timestamp,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -414,8 +406,8 @@ pub(crate) fn unroll_field_rows(
 /// Return the table name and serialized measurement row for a [`Sample`], to insert into
 /// ClickHouse.
 pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
-    let timeseries_name = sample.timeseries_name();
-    let timeseries_key = sample.timeseries_key();
+    let timeseries_name = sample.timeseries_name.clone();
+    let timeseries_key = sample.timeseries_key.clone();
     let timestamp = sample.timestamp;
     match sample.measurement {
         Measurement::Bool(inner) => {
@@ -520,7 +512,7 @@ pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
         }))
         .collect();
     TimeseriesSchema {
-        timeseries_name: sample.timeseries_name(),
+        timeseries_name: sample.timeseries_name.clone(),
         fields,
         measurement_type: sample.measurement.measurement_type(),
         created,
@@ -554,7 +546,7 @@ pub(crate) fn parse_timeseries_sample(
 ) -> Result<(String, TimeseriesSample), Error> {
     // TODO-cleanup: This is a pretty verbose way to dispatch parsing on the type. Most things are
     // the same -- is there a better way to do this?
-    let (key, timestamp, value) = match measurement_type {
+    let (key, timestamp, measurement) = match measurement_type {
         MeasurementType::Bool => {
             let sample = serde_json::from_str::<
                 DbTimeseriesScalarSample<'_, DbBool>,
@@ -665,14 +657,14 @@ pub(crate) fn parse_timeseries_sample(
             )
         }
     };
-    Ok((key, TimeseriesSample { timestamp, value }))
+    Ok((key, TimeseriesSample { timestamp, measurement }))
 }
 
 /// A single timestamped sample from a timeseries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeseriesSample {
     pub timestamp: DateTime<Utc>,
-    pub value: Measurement,
+    pub measurement: Measurement,
 }
 
 /// Information about a target, returned to clients in a query
@@ -735,7 +727,7 @@ mod tests {
         assert_eq!(out["oximeter.fields_i64"].len(), 1);
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
-        assert_eq!(unpacked.timeseries_name, sample.timeseries_name());
+        assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
         let field = &sample.target_fields()[0];
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
@@ -777,21 +769,21 @@ mod tests {
             parse_timeseries_sample(line, MeasurementType::Bool).unwrap();
         assert_eq!(key, "foo:bar");
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.value, true.into());
+        assert_eq!(sample.measurement, true.into());
 
         let line = r#"{"timeseries_key": "foo:bar", "timestamp": "2021-01-01 00:00:00.123456", "value": 2 }"#;
         let (key, sample) =
             parse_timeseries_sample(line, MeasurementType::I64).unwrap();
         assert_eq!(key, "foo:bar");
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.value, 2.into());
+        assert_eq!(sample.measurement, 2.into());
 
         let line = r#"{"timeseries_key": "foo:bar", "timestamp": "2021-01-01 00:00:00.123456", "value": 3.0 }"#;
         let (key, sample) =
             parse_timeseries_sample(line, MeasurementType::F64).unwrap();
         assert_eq!(key, "foo:bar");
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.value, 3.0.into());
+        assert_eq!(sample.measurement, 3.0.into());
     }
 
     #[test]
@@ -805,7 +797,7 @@ mod tests {
                 .unwrap();
         assert_eq!(key, "foo:bar");
         assert_eq!(sample.timestamp, timestamp);
-        if let Measurement::HistogramI64(hist) = sample.value {
+        if let Measurement::HistogramI64(hist) = sample.measurement {
             assert_eq!(hist.n_bins(), 3);
             assert_eq!(hist.n_samples(), 2);
         } else {

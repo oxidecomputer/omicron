@@ -124,23 +124,17 @@ impl FieldFilter {
         self.field_values[0].field_type().to_string().to_lowercase()
     }
 
-    fn as_where_fragment(&self, time_filter: Option<TimeFilter>) -> String {
+    fn as_where_fragment(&self) -> String {
         let field_value_fragment = self
             .field_values
             .iter()
             .map(|field| format!("(field_value = {})", field.as_db_str()))
             .collect::<Vec<_>>()
             .join(" OR ");
-        let time_filter_fragment = if let Some(filt) = time_filter {
-            format!(" AND {}", filt.as_where_fragment())
-        } else {
-            String::new()
-        };
         format!(
-            "field_name = '{field_name}' AND ({value_filter}){time_filter}",
+            "field_name = '{field_name}' AND ({value_filter})",
             field_name = self.field_name,
             value_filter = field_value_fragment,
-            time_filter = time_filter_fragment
         )
     }
 }
@@ -179,15 +173,15 @@ impl TimeseriesFilter {
             format!(
                 concat!(
                     "SELECT\n",
-                    "{timeseries_key},\n",
-                    "{timestamp}\n",
+                    "{timeseries_name},\n",
+                    "{timeseries_key}\n",
                     "FROM {table_name}\n",
                     "WHERE ({where_fragment})",
                 ),
+                timeseries_name = indent("timeseries_name", 4),
                 timeseries_key = indent("timeseries_key", 4),
-                timestamp = indent("timestamp", 4),
                 table_name = table_name,
-                where_fragment = filter.as_where_fragment(self.time_filter),
+                where_fragment = filter.as_where_fragment(),
             )
         };
         self.table_names()
@@ -218,8 +212,8 @@ impl TimeseriesFilter {
                         String::new()
                     } else {
                         format!(
-                            " ON filter{i}.timeseries_key = filter{j}.timeseries_key \
-                            AND filter{i}.timestamp = filter{j}.timestamp",
+                            " ON filter{i}.timeseries_name = filter{j}.timeseries_name \
+                            AND filter{i}.timeseries_key = filter{j}.timeseries_key",
                             i = i, j = i - 1,
                         )
                     };
@@ -236,26 +230,32 @@ impl TimeseriesFilter {
             // from the subquery aliased as filter0.
             format!(
                 "SELECT\n\
-                {timeseries_key},\n\
-                {timestamp}\n\
+                {timeseries_name},\n\
+                {timeseries_key}\n\
                 FROM\n\
                 {subqueries}",
+                timeseries_name = indent("filter0.timeseries_name", 4),
                 timeseries_key = indent("filter0.timeseries_key", 4),
-                timestamp = indent("filter0.timestamp", 4),
                 subqueries = subqueries,
             )
         };
+
+        let timestamp_filter = self
+            .time_filter
+            .map(|f| format!("AND {}", f.as_where_fragment()))
+            .unwrap_or_else(String::new);
 
         // Format the top-level query
         format!(
             "SELECT *\n\
             FROM {db_name}.measurements_{data_type}\n\
-            WHERE (timeseries_key, timestamp) IN (\n\
+            WHERE (timeseries_name, timeseries_key) IN (\n\
             {query}\n\
-            ) FORMAT JSONEachRow;",
+            ){timestamp_filter} FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
             data_type = measurement_type.as_db_str(),
             query = indent(&query, 4),
+            timestamp_filter = timestamp_filter,
         )
     }
 }
@@ -322,7 +322,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            filter.as_where_fragment(None),
+            filter.as_where_fragment(),
             "field_name = 'project_id' AND ((field_value = '44292322-34ed-4568-8b1a-3b48c58a2801'))",
         );
 
@@ -335,7 +335,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            filter.as_where_fragment(None),
+            filter.as_where_fragment(),
             "field_name = 'project_id' AND \
             ((field_value = '44292322-34ed-4568-8b1a-3b48c58a2801') OR (field_value = '4ddf0fdf-850e-44b7-b07a-0e6550d8c41b'))",
         );
@@ -347,39 +347,8 @@ mod tests {
 
         let filter = FieldFilter::new(&String::from("cpu_id"), &[0]).unwrap();
         assert_eq!(
-            filter.as_where_fragment(None),
+            filter.as_where_fragment(),
             "field_name = 'cpu_id' AND ((field_value = 0))"
-        );
-
-        let start = "2021-01-01 00:00:00.123456Z";
-        let end = "2021-01-02 00:00:00.123456Z";
-        let time_filter = TimeFilter::After(start.parse().unwrap());
-        assert_eq!(
-            filter.as_where_fragment(Some(time_filter)),
-            format!(
-                "field_name = 'cpu_id' AND ((field_value = 0)) AND timestamp >= '{}'",
-                start.strip_suffix('Z').unwrap()
-            ),
-        );
-
-        let time_filter = TimeFilter::Before(end.parse().unwrap());
-        assert_eq!(
-            filter.as_where_fragment(Some(time_filter)),
-            format!(
-                "field_name = 'cpu_id' AND ((field_value = 0)) AND timestamp <= '{}'",
-                end.strip_suffix('Z').unwrap()
-            ),
-        );
-
-        let time_filter =
-            TimeFilter::Between(start.parse().unwrap(), end.parse().unwrap());
-        assert_eq!(
-            filter.as_where_fragment(Some(time_filter)),
-            format!(
-                "field_name = 'cpu_id' AND ((field_value = 0)) AND timestamp >= '{}' AND timestamp <= '{}'",
-                start.strip_suffix('Z').unwrap(),
-                end.strip_suffix('Z').unwrap()
-            ),
         );
     }
 
@@ -406,7 +375,9 @@ mod tests {
         assert!(query.contains("AS filter0"));
         assert!(query.contains("AS filter1"));
         assert!(query
-            .contains("ON filter1.timeseries_key = filter0.timeseries_key"));
+            .contains("ON filter1.timeseries_name = filter0.timeseries_name"));
+        assert!(query
+            .contains("AND filter1.timeseries_key = filter0.timeseries_key"));
         println!("{}", filter.as_select_query(MeasurementType::F64));
     }
 

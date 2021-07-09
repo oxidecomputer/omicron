@@ -373,14 +373,6 @@ pub(crate) struct FieldSet {
 }
 
 impl FieldSet {
-    pub fn key(&self) -> String {
-        self.fields
-            .iter()
-            .map(|field| field.value.to_string())
-            .collect::<Vec<_>>()
-            .join(":")
-    }
-
     fn from_target(target: &impl traits::Target) -> Self {
         Self { name: target.name().to_string(), fields: target.fields() }
     }
@@ -469,6 +461,12 @@ pub struct Sample {
     /// The measured value of the metric at this sample
     pub measurement: Measurement,
 
+    /// The name of the timeseries this sample belongs to
+    pub timeseries_name: String,
+
+    /// The key of the timeseries this sample belongs to
+    pub timeseries_key: String,
+
     // Target name and fields
     target: FieldSet,
 
@@ -496,8 +494,8 @@ impl Ord for Sample {
     /// Samples are ordered by their target and metric keys, which include the field values of
     /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
     fn cmp(&self, other: &Sample) -> Ordering {
-        self.timeseries_key()
-            .cmp(&other.timeseries_key())
+        self.timeseries_key
+            .cmp(&other.timeseries_key)
             .then(self.timestamp.cmp(&other.timestamp))
     }
 }
@@ -526,22 +524,12 @@ impl Sample {
     {
         Self {
             timestamp: timestamp.unwrap_or_else(Utc::now),
+            timeseries_name: format!("{}:{}", target.name(), metric.name()),
+            timeseries_key: format!("{}:{}", target.key(), metric.key()),
             target: FieldSet::from_target(target),
             metric: FieldSet::from_metric(metric),
             measurement: metric.measure(),
         }
-    }
-
-    /// Return the timeseries key for this sample, the concatenation of the target/metric field
-    /// values.
-    pub fn timeseries_key(&self) -> String {
-        format!("{}:{}", self.target.key(), self.metric.key())
-    }
-
-    /// Return the name of the timeseries for this sample, the concatenation of the target/metric
-    /// names.
-    pub fn timeseries_name(&self) -> String {
-        format!("{}:{}", self.target.name, self.metric.name)
     }
 
     /// Return the fields for this sample.
@@ -675,10 +663,10 @@ mod tests {
         let timestamp = Utc::now();
         let sample = types::Sample::new(&t, &m, Some(timestamp));
         assert_eq!(
-            sample.timeseries_name(),
+            sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
-        assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
+        assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.timestamp, timestamp);
         assert_eq!(sample.measurement, Measurement::I64(m.value));
     }

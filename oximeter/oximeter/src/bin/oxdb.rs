@@ -11,9 +11,13 @@ use oximeter::{
     types::{Cumulative, FieldValue, Sample},
     Metric, Target,
 };
-use slog::{debug, info, o, trace, Drain, Level, Logger};
+use slog::{debug, info, o, Drain, Level, Logger};
 use structopt::StructOpt;
 use uuid::Uuid;
+
+// Samples are inserted in chunks of this size, to avoid large allocations when inserting huge
+// numbers of timeseries.
+const INSERT_CHUNK_SIZE: usize = 100_000;
 
 /// A target identifying a single virtual machine instance
 #[derive(Debug, Clone, Copy, Target)]
@@ -128,11 +132,11 @@ enum Subcommand {
 
         /// The start time to which the search is constrained. None means the beginning of time.
         #[structopt(long)]
-        start: Option<DateTime<Utc>>,
+        after: Option<DateTime<Utc>>,
 
         /// The stop time to which the search is constrained. None means the current time.
         #[structopt(long)]
-        stop: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
     },
 }
 
@@ -199,6 +203,27 @@ fn describe_data() {
     }
 }
 
+async fn insert_samples(
+    client: &Client,
+    samples: &Vec<Sample>,
+    log: &Logger,
+    dry_run: bool,
+) -> Result<(), anyhow::Error> {
+    debug!(
+        log,
+        "inserting {} simulated samples data into database",
+        samples.len();
+        "dry_run" => dry_run
+    );
+    if !dry_run {
+        client
+            .insert_samples(&samples)
+            .await
+            .context("Failed to insert samples")?;
+    }
+    Ok(())
+}
+
 async fn populate(
     port: u16,
     log: Logger,
@@ -217,7 +242,8 @@ async fn populate(
         "n_timeseries" => n_timeseries,
     );
 
-    let mut samples = Vec::with_capacity(args.n_samples * n_timeseries);
+    let chunk_size = (args.n_samples * n_timeseries).min(INSERT_CHUNK_SIZE);
+    let mut samples = Vec::with_capacity(chunk_size);
     for _ in 0..args.n_projects {
         let project_id = Uuid::new_v4();
         for _ in 0..args.n_instances {
@@ -240,18 +266,18 @@ async fn populate(
                         &cpu_busy,
                         Some(start_time + args.interval * sample as i32),
                     );
-                    trace!(log, "generated sample"; "sample" => ?sample);
                     samples.push(sample);
+                    if samples.len() == chunk_size {
+                        insert_samples(&client, &samples, &log, args.dry_run)
+                            .await?;
+                        samples.clear();
+                    }
                 }
             }
         }
     }
-    debug!(log, "inserting simulated data into database"; "dry_run" => args.dry_run);
-    if !args.dry_run {
-        client
-            .insert_samples(&samples)
-            .await
-            .context("Failed to insert samples")?;
+    if !samples.is_empty() {
+        insert_samples(&client, &samples, &log, args.dry_run).await?;
     }
     Ok(())
 }
@@ -266,8 +292,8 @@ async fn query(
     log: Logger,
     timeseries_name: String,
     filters: Vec<Filter>,
-    start: Option<DateTime<Utc>>,
-    stop: Option<DateTime<Utc>>,
+    after: Option<DateTime<Utc>>,
+    before: Option<DateTime<Utc>>,
 ) -> Result<(), anyhow::Error> {
     let client = make_client(port, &log).await?;
     let schema = client
@@ -299,12 +325,12 @@ async fn query(
         })
         .collect::<Result<Vec<_>, _>>()
         .context("Failed to build query filters")?;
-    let time_filter = match (start, stop) {
+    let time_filter = match (after, before) {
         (None, None) => None,
-        (Some(start), None) => Some(query::TimeFilter::After(start)),
-        (None, Some(end)) => Some(query::TimeFilter::Before(end)),
-        (Some(start), Some(end)) => {
-            Some(query::TimeFilter::Between(start, end))
+        (Some(after), None) => Some(query::TimeFilter::After(after)),
+        (None, Some(before)) => Some(query::TimeFilter::Before(before)),
+        (Some(after), Some(before)) => {
+            Some(query::TimeFilter::Between(after, before))
         }
     };
     let filters = query::TimeseriesFilter {
@@ -313,8 +339,13 @@ async fn query(
         time_filter,
     };
     println!(
-        "{:#?}",
-        client.filter_timeseries(&filters, schema.measurement_type).await?
+        "{}",
+        serde_json::to_string(
+            &client
+                .filter_timeseries(&filters, schema.measurement_type)
+                .await?
+        )
+        .unwrap()
     );
     Ok(())
 }
@@ -335,8 +366,8 @@ async fn main() {
             populate(args.port, log, populate_args).await.unwrap();
         }
         Subcommand::Wipe => wipe_db(args.port, log).await.unwrap(),
-        Subcommand::Query { timeseries_name, filters, start, stop } => {
-            query(args.port, log, timeseries_name, filters, start, stop)
+        Subcommand::Query { timeseries_name, filters, after, before } => {
+            query(args.port, log, timeseries_name, filters, after, before)
                 .await
                 .unwrap();
         }
