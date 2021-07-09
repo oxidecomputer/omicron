@@ -38,8 +38,10 @@ impl Zones {
         if let Some(zone) = get_zone(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
             if zone.state() == zone::State::Running {
-                zone::Adm::new(name).halt().map_err(|e| ApiError::InternalError {
-                    message: format!("Cannot halt zone {}: {}", name, e),
+                zone::Adm::new(name).halt().map_err(|e| {
+                    ApiError::InternalError {
+                        message: format!("Cannot halt zone {}: {}", name, e),
+                    }
                 })?;
             }
             zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {

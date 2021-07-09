@@ -20,14 +20,21 @@ impl Zfs {
 
         // If the list command returns any valid output, validate it.
         if let Ok(output) = execute(cmd) {
-            let stdout = String::from_utf8(output.stdout)
-                .map_err(|e| ApiError::InternalError {
-                    message: format!("Cannot parse 'zfs list' output as UTF-8: {}", e),
-                })?;
+            let stdout = String::from_utf8(output.stdout).map_err(|e| {
+                ApiError::InternalError {
+                    message: format!(
+                        "Cannot parse 'zfs list' output as UTF-8: {}",
+                        e
+                    ),
+                }
+            })?;
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if values != &[name, "filesystem", ZONE_ZFS_DATASET_MOUNTPOINT] {
                 return Err(ApiError::InternalError {
-                    message: format!("{} exists, but has unexpected values: {:?}", name, values),
+                    message: format!(
+                        "{} exists, but has unexpected values: {:?}",
+                        name, values
+                    ),
                 });
             }
             return Ok(());
