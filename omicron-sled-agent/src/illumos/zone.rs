@@ -12,6 +12,11 @@ use crate::illumos::{execute, PFEXEC};
 const BASE_ZONE: &str = "propolis_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 
+const IPADM: &str = "/usr/sbin/ipadm";
+const SVCADM: &str = "/usr/sbin/svcadm";
+const SVCCFG: &str = "/usr/sbin/svccfg";
+const ZLOGIN: &str = "/usr/sbin/zlogin";
+
 pub const ZONE_PREFIX: &str = "propolis_instance_";
 
 fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
@@ -182,9 +187,9 @@ impl Zones {
     ) -> Result<IpNet, ApiError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "ipadm",
+            IPADM,
             "create-addr",
             "-t",
             "-T",
@@ -195,9 +200,9 @@ impl Zones {
 
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "ipadm",
+            IPADM,
             "show-addr",
             "-p",
             "-o",
@@ -228,9 +233,9 @@ impl Zones {
         // Import the service manifest for Propolis.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "import",
             "/opt/oxide/propolis-server/pkg/manifest.xml",
         ]);
@@ -239,9 +244,9 @@ impl Zones {
         // Set the desired address of the Propolis server.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "-s",
             "system/illumos/propolis-server",
             "setprop",
@@ -252,9 +257,9 @@ impl Zones {
         // Create a new Propolis service instance.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "-s",
             "svc:/system/illumos/propolis-server",
             "add",
@@ -268,9 +273,9 @@ impl Zones {
         // ".synchronous()", but it doesn't, because of an SMF bug.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svcadm",
+            SVCADM,
             "enable",
             "-t",
             &format!("svc:/system/illumos/propolis-server:vm-{}", id),
