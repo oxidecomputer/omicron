@@ -68,10 +68,6 @@ such that Nexus may be notified if the VM changes state.
 
 = TODOs
 
-* (Correctness) The Propolis package directory is mounted as a read-write
-loopback filesystem within running zone. This is currently mandatory to allow
-mounting of the disk image. However, once we begin booting images from the
-storage subsystem, this LOFS should be mounted read-only to avoid modification.
 * (Correctness) Plumbing of Nexus-customizable InstanceProperties, such as
 image, bootrom, memory, vcpus.
 * (Correctness) Integration of OPTE to manage the network and apply policy

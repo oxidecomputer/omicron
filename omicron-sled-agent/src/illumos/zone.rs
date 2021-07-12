@@ -125,10 +125,7 @@ impl Zones {
             ty: "lofs".to_string(),
             dir: PROPOLIS_SVC_DIRECTORY.to_string(),
             special: PROPOLIS_SVC_DIRECTORY.to_string(),
-            // TODO: Should be read-only! However, with that setting, we're
-            // failing to mount the block device.
-            options: vec!["rw".to_string()],
-            //        options: vec!["ro".to_string()],
+            options: vec!["ro".to_string()],
             ..Default::default()
         });
         cfg.add_net(&zone::Net {
@@ -212,7 +209,7 @@ impl Zones {
             .find_map(|s| s.parse().ok())
             .ok_or(ApiError::InternalError {
                 message: format!(
-                    "Casnnot find a valid IP address on {}",
+                    "Cannot find a valid IP address on {}",
                     interface
                 ),
             })
