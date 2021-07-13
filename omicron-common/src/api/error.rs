@@ -260,7 +260,7 @@ macro_rules! bail_unless {
 
 #[cfg(test)]
 mod test {
-    use super::Error;
+    use super::ApiError;
 
     #[test]
     fn test_bail_unless() {

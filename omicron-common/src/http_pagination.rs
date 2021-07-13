@@ -517,8 +517,8 @@ mod test {
     use super::ApiScanByName;
     use super::ApiScanByNameOrId;
     use super::ScanParams;
-    use crate::model::ApiIdentityMetadata;
-    use crate::model::ApiObjectIdentity;
+    use crate::api::ApiIdentityMetadata;
+    use crate::api::ApiObjectIdentity;
     use api_identity::ApiObjectIdentity;
     use chrono::Utc;
     use dropshot::PaginationOrder;
