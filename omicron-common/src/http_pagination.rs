@@ -38,10 +38,10 @@
  * each resource paginated that way).  Where possible, we should share code.
  */
 
-use crate::model::ApiName;
-use crate::model::ApiObjectIdentity;
-use crate::model::DataPageParams;
-use crate::model::PaginationOrder;
+use crate::api::ApiName;
+use crate::api::ApiObjectIdentity;
+use crate::api::DataPageParams;
+use crate::api::PaginationOrder;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;

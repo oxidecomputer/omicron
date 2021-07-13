@@ -2,8 +2,8 @@
 
 use cfg_if::cfg_if;
 
+use omicron_common::api::ApiError;
 use omicron_common::dev::poll;
-use omicron_common::error::ApiError;
 use std::time::Duration;
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]

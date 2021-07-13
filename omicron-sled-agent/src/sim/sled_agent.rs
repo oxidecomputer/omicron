@@ -2,11 +2,11 @@
  * Simulated sled agent implementation
  */
 
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiDiskRuntimeState;
-use omicron_common::model::ApiDiskStateRequested;
-use omicron_common::model::ApiInstanceRuntimeState;
-use omicron_common::model::ApiInstanceRuntimeStateRequested;
+use omicron_common::api::ApiDiskRuntimeState;
+use omicron_common::api::ApiDiskStateRequested;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiInstanceRuntimeState;
+use omicron_common::api::ApiInstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;

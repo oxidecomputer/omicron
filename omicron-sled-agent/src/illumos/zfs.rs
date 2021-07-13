@@ -1,7 +1,7 @@
 //! Utilities for poking at ZFS.
 
 use crate::illumos::{execute, PFEXEC};
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 
 pub const ZONE_ZFS_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_DATASET: &str = "rpool/zone";

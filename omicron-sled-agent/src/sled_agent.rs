@@ -1,7 +1,7 @@
 //! Sled agent implementation
 
-use omicron_common::error::ApiError;
-use omicron_common::model::{
+use omicron_common::api::ApiError;
+use omicron_common::api::{
     ApiDiskRuntimeState, ApiDiskStateRequested, ApiInstanceRuntimeState,
     ApiInstanceRuntimeStateRequested,
 };

@@ -8,9 +8,9 @@ use hyper::Body;
 use slog::Logger;
 use uuid::Uuid;
 
-use crate::error::ApiError;
+use crate::api::ApiError;
+use crate::api::ProducerEndpoint;
 use crate::http_client::HttpClient;
-use crate::model::ProducerEndpoint;
 
 /// Client of an oximeter server
 pub struct Client {

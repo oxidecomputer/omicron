@@ -1,8 +1,8 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
-use omicron_common::error::ApiError;
-use omicron_common::model::{
+use omicron_common::api::ApiError;
+use omicron_common::api::{
     ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
 };
 use slog::Logger;
@@ -199,7 +199,7 @@ mod test {
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
-    use omicron_common::model::{
+    use omicron_common::api::{
         ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState,
         ApiInstanceStateRequested,
     };

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiGeneration;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiGeneration;
 use omicron_common::NexusClient;
 use std::fmt;
 use std::sync::Arc;

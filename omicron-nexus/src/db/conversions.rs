@@ -6,17 +6,17 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::model::ApiDiskCreateParams;
-use omicron_common::model::ApiDiskRuntimeState;
-use omicron_common::model::ApiDiskState;
-use omicron_common::model::ApiIdentityMetadataCreateParams;
-use omicron_common::model::ApiInstanceCreateParams;
-use omicron_common::model::ApiInstanceRuntimeState;
-use omicron_common::model::ApiInstanceState;
-use omicron_common::model::ApiProjectCreateParams;
-use omicron_common::model::OximeterAssignment;
-use omicron_common::model::OximeterInfo;
-use omicron_common::model::ProducerEndpoint;
+use omicron_common::api::ApiDiskCreateParams;
+use omicron_common::api::ApiDiskRuntimeState;
+use omicron_common::api::ApiDiskState;
+use omicron_common::api::ApiIdentityMetadataCreateParams;
+use omicron_common::api::ApiInstanceCreateParams;
+use omicron_common::api::ApiInstanceRuntimeState;
+use omicron_common::api::ApiInstanceState;
+use omicron_common::api::ApiProjectCreateParams;
+use omicron_common::api::OximeterAssignment;
+use omicron_common::api::OximeterInfo;
+use omicron_common::api::ProducerEndpoint;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;

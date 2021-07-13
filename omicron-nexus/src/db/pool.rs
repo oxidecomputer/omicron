@@ -26,7 +26,7 @@
 
 use super::Config as DbConfig;
 use bb8_postgres::PostgresConnectionManager;
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 use std::ops::Deref;
 
 #[derive(Debug)]

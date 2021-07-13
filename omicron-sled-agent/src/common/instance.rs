@@ -1,11 +1,11 @@
 //! Describes the states of VM instances.
 
 use chrono::Utc;
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiInstanceRuntimeState;
-use omicron_common::model::ApiInstanceRuntimeStateRequested;
-use omicron_common::model::ApiInstanceState;
-use omicron_common::model::ApiInstanceStateRequested;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiInstanceRuntimeState;
+use omicron_common::api::ApiInstanceRuntimeStateRequested;
+use omicron_common::api::ApiInstanceState;
+use omicron_common::api::ApiInstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
@@ -261,7 +261,7 @@ impl InstanceState {
 mod test {
     use super::{Action, InstanceState};
     use chrono::Utc;
-    use omicron_common::model::{
+    use omicron_common::api::{
         ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState as State,
         ApiInstanceStateRequested as Requested,
     };
