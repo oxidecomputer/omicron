@@ -3,11 +3,11 @@
  */
 
 use futures::StreamExt;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiResourceType;
 use omicron_common::api::DataPageParams;
+use omicron_common::api::Error;
 use omicron_common::api::ListResult;
 use omicron_common::api::LookupResult;
+use omicron_common::api::ResourceType;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::sql_row_value;
 use omicron_common::db::DbError;
@@ -98,17 +98,14 @@ pub async fn sql_fetch_page_by<'a, L, T, R>(
 where
     L: LookupKey<'a, T>,
     T: Table,
-    R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = ApiError>
-        + Send
-        + 'static,
+    R: for<'d> TryFrom<&'d tokio_postgres::Row, Error = Error> + Send + 'static,
 {
     let mut s = SqlString::new();
     s.push_str("TRUE");
     let rows =
         sql_fetch_page_raw::<L, T>(client, scope_key, pagparams, columns, s)
             .await?;
-    let list =
-        rows.iter().map(R::try_from).collect::<Vec<Result<R, ApiError>>>();
+    let list = rows.iter().map(R::try_from).collect::<Vec<Result<R, Error>>>();
     Ok(futures::stream::iter(list).boxed())
 }
 
@@ -122,7 +119,7 @@ async fn sql_fetch_page_raw<'a, 'b, L, T>(
     pagparams: &DataPageParams<'b, L::ItemKey>,
     columns: &'static [&'static str],
     extra_cond_sql: SqlString<'b>,
-) -> Result<Vec<tokio_postgres::Row>, ApiError>
+) -> Result<Vec<tokio_postgres::Row>, Error>
 where
     L: LookupKey<'a, T>,
     T: Table,
@@ -157,13 +154,11 @@ pub async fn sql_paginate<'a, L, T, R>(
     scope_key: L::ScopeKey,
     columns: &'static [&'static str],
     extra_cond: SqlString<'a>,
-) -> Result<Vec<R>, ApiError>
+) -> Result<Vec<R>, Error>
 where
     L: LookupKey<'a, T>,
     T: Table,
-    R: for<'b> TryFrom<&'b tokio_postgres::Row, Error = ApiError>
-        + Send
-        + 'static,
+    R: for<'b> TryFrom<&'b tokio_postgres::Row, Error = Error> + Send + 'static,
 {
     let mut results = Vec::new();
     let mut last_row_marker = None;
@@ -206,7 +201,7 @@ where
             &mut rows
                 .iter()
                 .map(R::try_from)
-                .collect::<Result<Vec<R>, ApiError>>()?,
+                .collect::<Result<Vec<R>, Error>>()?,
         );
     }
 }
@@ -237,7 +232,7 @@ pub struct UpdatePrecond {
 /// Besides the usual database errors, there are a few common cases here:
 ///
 /// * The specified row was not found.  In this case, a suitable
-///   [`ApiError::ObjectNotFound`] error is returned.
+///   [`Error::ObjectNotFound`] error is returned.
 ///
 /// * The specified row was found and updated.  In this case, an
 ///   [`UpdatePrecond`] is returned with `updated = true`.
@@ -264,7 +259,7 @@ pub async fn sql_update_precond<'a, 'b, T, L>(
     precond_columns: &'b [&'static str],
     update_values: &SqlValueSet,
     precond_sql: SqlString<'a>,
-) -> Result<UpdatePrecond, ApiError>
+) -> Result<UpdatePrecond, Error>
 where
     T: Table,
     L: LookupKey<'a, T>,
@@ -496,24 +491,24 @@ where
 
 /**
  * Given a [`DbError`] while creating an instance of type `rtype`, produce an
- * appropriate [`ApiError`]
+ * appropriate [`Error`]
  *
  * This looks for the specific case of a uniqueness constraint violation and
- * reports a suitable [`ApiError::ObjectAlreadyExists`] for it.  Otherwise, we
+ * reports a suitable [`Error::ObjectAlreadyExists`] for it.  Otherwise, we
  * fall back to [`sql_error_generic`].
  */
 fn sql_error_on_create(
-    rtype: ApiResourceType,
+    rtype: ResourceType,
     unique_value: &str,
     e: DbError,
-) -> ApiError {
+) -> Error {
     if let Some(code) = e.db_source().and_then(|s| s.code()) {
         if *code == tokio_postgres::error::SqlState::UNIQUE_VIOLATION {
             /*
              * TODO-debuggability it would be nice to preserve the DbError here
              * so that the SQL is visible in the log.
              */
-            return ApiError::ObjectAlreadyExists {
+            return Error::ObjectAlreadyExists {
                 type_name: rtype,
                 object_name: unique_value.to_owned(),
             };
@@ -528,13 +523,13 @@ fn sql_error_on_create(
  *
  * This function expects any conflict error is on the name.  The caller should
  * provide this in `unique_value` and it will be returned with an
- * [`ApiError::ObjectAlreadyExists`] error.
+ * [`Error::ObjectAlreadyExists`] error.
  */
 pub async fn sql_insert_unique<R>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,
     unique_value: &str,
-) -> Result<R::ModelType, ApiError>
+) -> Result<R::ModelType, Error>
 where
     R: ResourceTable,
 {
@@ -577,7 +572,7 @@ where
 pub async fn sql_insert<T>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,
-) -> Result<(), ApiError>
+) -> Result<(), Error>
 where
     T: Table,
 {
@@ -609,7 +604,7 @@ where
 /// Idempotently insert a database record.  This is intended for cases where the
 /// record may conflict with an existing record with the same id, which should
 /// be ignored, or with an existing record with the same name, which should
-/// produce an [`ApiError::ObjectAlreadyExists`] error.
+/// produce an [`Error::ObjectAlreadyExists`] error.
 ///
 /// This function is intended for use (indirectly) by sagas that want to create
 /// a record.  Most sagas also want the contents of the record they inserted.
@@ -624,14 +619,14 @@ where
 ///
 /// In the event of a conflict on name, `unique_value` should contain the name
 /// that the caller is trying to insert.  This is provided in the returned
-/// [`ApiError::ObjectAlreadyExists`] error.
+/// [`Error::ObjectAlreadyExists`] error.
 ///
 pub async fn sql_insert_unique_idempotent<'a, R>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,
     unique_value: &'a str,
     ignore_conflicts_on: &'static str,
-) -> Result<(), ApiError>
+) -> Result<(), Error>
 where
     R: ResourceTable,
 {
@@ -819,16 +814,17 @@ where
 }
 
 ///
-/// Verifies that the given error is _not_ an `ApiObject::ObjectNotFound`.
-/// If it is, then it's converted to an `ApiError::InternalError` instead,
+/// Verifies that the given error is _not_ an `Object::ObjectNotFound`.
+/// If it is, then it's converted to an `Error::InternalError` instead,
 /// on the assumption that an `ObjectNotFound` in this context is neither
 /// expected nor appropriate for the caller.
 ///
-fn sql_error_not_missing(e: ApiError) -> ApiError {
+fn sql_error_not_missing(e: Error) -> Error {
     match e {
-        e @ ApiError::ObjectNotFound { .. } => ApiError::internal_error(
-            &format!("unexpected ObjectNotFound: {:#}", e),
-        ),
+        e @ Error::ObjectNotFound { .. } => Error::internal_error(&format!(
+            "unexpected ObjectNotFound: {:#}",
+            e
+        )),
         e => e,
     }
 }

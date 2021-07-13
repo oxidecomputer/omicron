@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
 use omicron_common::NexusClient;
 use std::fmt;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     fn request_transition(
         &mut self,
         target: &Self::RequestedState,
-    ) -> Result<Option<Self::Action>, ApiError>;
+    ) -> Result<Option<Self::Action>, Error>;
 
     /// Updates the state in response to an update within the simulated
     /// resource: whatever state was "desired" is observed immediately.
@@ -83,7 +83,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     fn execute_desired_transition(&mut self) -> Option<Self::Action>;
 
     /// Returns the generation number for the current state.
-    fn generation(&self) -> ApiGeneration;
+    fn generation(&self) -> Generation;
 
     /// Returns the current state.
     fn current(&self) -> &Self::CurrentState;
@@ -104,5 +104,5 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
         nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
-    ) -> Result<(), ApiError>;
+    ) -> Result<(), Error>;
 }

@@ -6,7 +6,7 @@ use crate::db;
 use crate::db::schema;
 use crate::db::sql::Table;
 use crate::db::sql_operations::sql_paginate;
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
@@ -115,7 +115,7 @@ async fn list_unfinished_sagas(
     log: &slog::Logger,
     pool: &db::Pool,
     sec_id: &db::SecId,
-) -> Result<Vec<db::saga_types::Saga>, ApiError> {
+) -> Result<Vec<db::saga_types::Saga>, Error> {
     /*
      * For now, we do the simplest thing: we fetch all the sagas that the
      * caller's going to need before returning any of them.  This is easier to
@@ -156,7 +156,7 @@ async fn recover_saga<T>(
     sec_client: &steno::SecClient,
     templates: &BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<T>>>,
     saga: db::saga_types::Saga,
-) -> Result<(), ApiError>
+) -> Result<(), Error>
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
@@ -167,7 +167,7 @@ where
         "template_name" => template_name,
     );
     let template = templates.get(template_name).ok_or_else(|| {
-        ApiError::internal_error(&format!(
+        Error::internal_error(&format!(
             "saga {} uses unknown template {:?}",
             saga.id, template_name,
         ))
@@ -196,13 +196,13 @@ where
              * TODO-robustness We want to differentiate between retryable and
              * not here
              */
-            ApiError::internal_error(&format!(
+            Error::internal_error(&format!(
                 "failed to resume saga: {:#}",
                 error
             ))
         })?;
     sec_client.saga_start(saga_id).await.map_err(|error| {
-        ApiError::internal_error(&format!("failed to start saga: {:#}", error))
+        Error::internal_error(&format!("failed to start saga: {:#}", error))
     })?;
     info!(log, "recovering saga: done"; "saga_id" => ?saga.id);
     Ok(())
@@ -214,7 +214,7 @@ where
 pub async fn load_saga_log(
     pool: &db::Pool,
     saga: &db::saga_types::Saga,
-) -> Result<Vec<steno::SagaNodeEvent>, ApiError> {
+) -> Result<Vec<steno::SagaNodeEvent>, Error> {
     let client = pool.acquire().await?;
     let mut extra_sql = db::sql::SqlString::new();
     extra_sql.push_str("TRUE");

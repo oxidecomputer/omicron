@@ -5,12 +5,10 @@
  * ./sql.rs.
  */
 
-use omicron_common::api::ApiDisk;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiInstance;
-use omicron_common::api::ApiName;
-use omicron_common::api::ApiProject;
-use omicron_common::api::ApiResourceType;
+use omicron_common::api;
+use omicron_common::api::Error;
+use omicron_common::api::Name;
+use omicron_common::api::ResourceType;
 use omicron_common::api::{OximeterInfo, ProducerEndpoint};
 use uuid::Uuid;
 
@@ -22,7 +20,7 @@ use crate::db;
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
-    type ModelType = ApiProject;
+    type ModelType = api::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -35,13 +33,13 @@ impl Table for Project {
 }
 
 impl ResourceTable for Project {
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Project;
+    const RESOURCE_TYPE: ResourceType = ResourceType::Project;
 }
 
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
-    type ModelType = ApiInstance;
+    type ModelType = api::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -62,13 +60,13 @@ impl Table for Instance {
 }
 
 impl ResourceTable for Instance {
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Instance;
+    const RESOURCE_TYPE: ResourceType = ResourceType::Instance;
 }
 
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
-    type ModelType = ApiDisk;
+    type ModelType = api::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -88,7 +86,7 @@ impl Table for Disk {
 }
 
 impl ResourceTable for Disk {
-    const RESOURCE_TYPE: ApiResourceType = ApiResourceType::Disk;
+    const RESOURCE_TYPE: ResourceType = ResourceType::Disk;
 }
 
 /** Describes the "Saga" table */
@@ -271,8 +269,8 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueId {
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
-    ) -> ApiError {
-        ApiError::not_found_by_id(R::RESOURCE_TYPE, item_key)
+    ) -> Error {
+        Error::not_found_by_id(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -290,8 +288,8 @@ impl<'a, T: Table> LookupKey<'a, T> for LookupGenericByUniqueId {
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
-    ) -> ApiError {
-        ApiError::internal_error(&format!(
+    ) -> Error {
+        Error::internal_error(&format!(
             "table {:?}: expected row with id {:?}, but found none",
             T::TABLE_NAME,
             item_key,
@@ -310,14 +308,14 @@ pub struct LookupByUniqueName;
 impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueName {
     type ScopeKey = ();
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &[];
-    type ItemKey = ApiName;
+    type ItemKey = Name;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
-    ) -> ApiError {
-        ApiError::not_found_by_name(R::RESOURCE_TYPE, item_key)
+    ) -> Error {
+        Error::not_found_by_name(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -329,14 +327,14 @@ pub struct LookupByUniqueNameInProject;
 impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueNameInProject {
     type ScopeKey = (&'a Uuid,);
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &["project_id"];
-    type ItemKey = ApiName;
+    type ItemKey = Name;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
-    ) -> ApiError {
-        ApiError::not_found_by_name(R::RESOURCE_TYPE, item_key)
+    ) -> Error {
+        Error::not_found_by_name(R::RESOURCE_TYPE, item_key)
     }
 }
 
@@ -356,18 +354,18 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByAttachedInstance {
     type ScopeKey = (&'a Uuid,);
     const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] =
         &["attach_instance_id"];
-    type ItemKey = ApiName;
+    type ItemKey = Name;
     const ITEM_KEY_COLUMN_NAME: &'static str = "name";
 
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         _item_key: &Self::ItemKey,
-    ) -> ApiError {
+    ) -> Error {
         /*
          * This is not a supported API operation, so we do not have an
          * appropriate NotFound error.
          */
-        ApiError::internal_error("attempted lookup attached instance")
+        Error::internal_error("attempted lookup attached instance")
     }
 }
 
@@ -386,9 +384,9 @@ impl<'a> LookupKey<'a, SagaNodeEvent> for LookupSagaNodeEvent {
     fn where_select_error(
         _scope_key: Self::ScopeKey,
         _item_key: &Self::ItemKey,
-    ) -> ApiError {
+    ) -> Error {
         /* There's no reason to ever use this function. */
-        ApiError::internal_error(
+        Error::internal_error(
             "unexpected lookup for saga node unexpectedly found no rows",
         )
     }

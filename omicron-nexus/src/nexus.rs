@@ -11,36 +11,36 @@ use chrono::Utc;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
-use omicron_common::api::ApiDisk;
-use omicron_common::api::ApiDiskAttachment;
-use omicron_common::api::ApiDiskCreateParams;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskState;
-use omicron_common::api::ApiDiskStateRequested;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
-use omicron_common::api::ApiIdentityMetadata;
-use omicron_common::api::ApiInstance;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiInstanceStateRequested;
-use omicron_common::api::ApiName;
-use omicron_common::api::ApiProject;
-use omicron_common::api::ApiProjectCreateParams;
-use omicron_common::api::ApiProjectUpdateParams;
-use omicron_common::api::ApiRack;
-use omicron_common::api::ApiResourceType;
-use omicron_common::api::ApiSagaView;
-use omicron_common::api::ApiSled;
 use omicron_common::api::CreateResult;
 use omicron_common::api::DataPageParams;
 use omicron_common::api::DeleteResult;
+use omicron_common::api::Disk;
+use omicron_common::api::DiskAttachment;
+use omicron_common::api::DiskCreateParams;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::DiskState;
+use omicron_common::api::DiskStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
+use omicron_common::api::IdentityMetadata;
+use omicron_common::api::Instance;
+use omicron_common::api::InstanceCreateParams;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
+use omicron_common::api::InstanceState;
+use omicron_common::api::InstanceStateRequested;
 use omicron_common::api::ListResult;
 use omicron_common::api::LookupResult;
+use omicron_common::api::Name;
 use omicron_common::api::OximeterInfo;
 use omicron_common::api::ProducerEndpoint;
+use omicron_common::api::Project;
+use omicron_common::api::ProjectCreateParams;
+use omicron_common::api::ProjectUpdateParams;
+use omicron_common::api::Rack;
+use omicron_common::api::ResourceType;
+use omicron_common::api::SagaView;
+use omicron_common::api::Sled;
 use omicron_common::api::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_common::collection::collection_page;
@@ -69,7 +69,7 @@ pub trait TestInterfaces {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, Error>;
 
     /**
      * Returns the SledAgentClient for a Disk from its id.
@@ -77,7 +77,7 @@ pub trait TestInterfaces {
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError>;
+    ) -> Result<Arc<SledAgentClient>, Error>;
 }
 
 /**
@@ -91,7 +91,7 @@ pub struct Nexus {
     log: Logger,
 
     /** cached rack identity metadata */
-    api_rack_identity: ApiIdentityMetadata,
+    api_rack_identity: IdentityMetadata,
 
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
@@ -154,9 +154,9 @@ impl Nexus {
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
-            api_rack_identity: ApiIdentityMetadata {
+            api_rack_identity: IdentityMetadata {
                 id: *rack_id,
-                name: ApiName::try_from(format!("rack-{}", *rack_id)).unwrap(),
+                name: Name::try_from(format!("rack-{}", *rack_id)).unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -202,7 +202,7 @@ impl Nexus {
     pub async fn upsert_oximeter_collector(
         &self,
         oximeter_info: &OximeterInfo,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         // Insert into the DB
         self.db_datastore.oximeter_create(oximeter_info).await?;
 
@@ -236,7 +236,7 @@ impl Nexus {
         saga_template: Arc<SagaTemplate<S>>,
         template_name: &str,
         saga_params: Arc<P>,
-    ) -> Result<SagaResultOk, ApiError>
+    ) -> Result<SagaResultOk, Error>
     where
         S: SagaType<
             ExecContextType = Arc<SagaContext>,
@@ -268,22 +268,20 @@ impl Nexus {
                  * depending on the failure mode.  We need more information from
                  * Steno.
                  */
-                ApiError::internal_error(&format!("{:#}", error))
+                Error::internal_error(&format!("{:#}", error))
             })?;
 
         self.sec_client
             .saga_start(saga_id)
             .await
             .context("starting saga")
-            .map_err(|error| {
-                ApiError::internal_error(&format!("{:#}", error))
-            })?;
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
         let result = future.await;
         result.kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<ApiError>().unwrap_or_else(|e| {
+            saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
-                ApiError::InternalError { message: e.to_string() }
+                Error::InternalError { message: e.to_string() }
             })
         })
     }
@@ -294,42 +292,39 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
-        new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
+        new_project: &ProjectCreateParams,
+    ) -> CreateResult<Project> {
         let id = Uuid::new_v4();
         Ok(self.db_datastore.project_create_with_id(&id, new_project).await?)
     }
 
-    pub async fn project_fetch(
-        &self,
-        name: &ApiName,
-    ) -> LookupResult<ApiProject> {
+    pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
         Ok(self.db_datastore.project_fetch(name).await?)
     }
 
     pub async fn projects_list_by_name(
         &self,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiProject> {
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<Project> {
         self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult<Project> {
         self.db_datastore.projects_list_by_id(pagparams).await
     }
 
-    pub async fn project_delete(&self, name: &ApiName) -> DeleteResult {
+    pub async fn project_delete(&self, name: &Name) -> DeleteResult {
         self.db_datastore.project_delete(name).await
     }
 
     pub async fn project_update(
         &self,
-        name: &ApiName,
-        new_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject> {
+        name: &Name,
+        new_params: &ProjectUpdateParams,
+    ) -> UpdateResult<Project> {
         Ok(self.db_datastore.project_update(name, new_params).await?)
     }
 
@@ -339,9 +334,9 @@ impl Nexus {
 
     pub async fn project_list_disks(
         &self,
-        project_name: &ApiName,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDisk> {
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<Disk> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_disks(&project_id, pagparams).await
@@ -349,9 +344,9 @@ impl Nexus {
 
     pub async fn project_create_disk(
         &self,
-        project_name: &ApiName,
-        params: &ApiDiskCreateParams,
-    ) -> CreateResult<ApiDisk> {
+        project_name: &Name,
+        params: &DiskCreateParams,
+    ) -> CreateResult<Disk> {
         let project = self.project_fetch(project_name).await?;
 
         /*
@@ -359,7 +354,7 @@ impl Nexus {
          * snapshot id.
          */
         if params.snapshot_id.is_some() {
-            return Err(ApiError::InvalidValue {
+            return Err(Error::InvalidValue {
                 label: String::from("snapshot_id"),
                 message: String::from("snapshots are not yet supported"),
             });
@@ -372,9 +367,9 @@ impl Nexus {
                 &disk_id,
                 &project.identity.id,
                 params,
-                &ApiDiskRuntimeState {
-                    disk_state: ApiDiskState::Creating,
-                    gen: ApiGeneration::new(),
+                &DiskRuntimeState {
+                    disk_state: DiskState::Creating,
+                    gen: Generation::new(),
                     time_updated: Utc::now(),
                 },
             )
@@ -394,8 +389,8 @@ impl Nexus {
         self.db_datastore
             .disk_update_runtime(
                 &disk_id,
-                &ApiDiskRuntimeState {
-                    disk_state: ApiDiskState::Detached,
+                &DiskRuntimeState {
+                    disk_state: DiskState::Detached,
                     gen: disk_created.runtime.gen.next(),
                     time_updated: Utc::now(),
                 },
@@ -407,9 +402,9 @@ impl Nexus {
 
     pub async fn project_lookup_disk(
         &self,
-        project_name: &ApiName,
-        disk_name: &ApiName,
-    ) -> LookupResult<ApiDisk> {
+        project_name: &Name,
+        disk_name: &Name,
+    ) -> LookupResult<Disk> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
@@ -417,14 +412,14 @@ impl Nexus {
 
     pub async fn project_delete_disk(
         &self,
-        project_name: &ApiName,
-        disk_name: &ApiName,
+        project_name: &Name,
+        disk_name: &Name,
     ) -> DeleteResult {
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        bail_unless!(disk.runtime.disk_state != ApiDiskState::Destroyed);
+        bail_unless!(disk.runtime.disk_state != DiskState::Destroyed);
 
         if disk.runtime.disk_state.is_attached() {
-            return Err(ApiError::InvalidRequest {
+            return Err(Error::InvalidRequest {
                 message: String::from("disk is attached"),
             });
         }
@@ -458,14 +453,14 @@ impl Nexus {
      * TODO-design This interface should not exist.  See
      * SagaContext::alloc_server().
      */
-    pub async fn sled_allocate(&self) -> Result<Uuid, ApiError> {
+    pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
         let sleds = self.sled_agents.lock().await;
 
         /* TODO replace this with a real allocation policy. */
         sleds
             .values()
             .next()
-            .ok_or_else(|| ApiError::ServiceUnavailable {
+            .ok_or_else(|| Error::ServiceUnavailable {
                 message: String::from("no sleds available for new Instance"),
             })
             .map(|s| s.id)
@@ -473,9 +468,9 @@ impl Nexus {
 
     pub async fn project_list_instances(
         &self,
-        project_name: &ApiName,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiInstance> {
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_instances(&project_id, pagparams).await
@@ -483,9 +478,9 @@ impl Nexus {
 
     pub async fn project_create_instance(
         self: &Arc<Self>,
-        project_name: &ApiName,
-        params: &ApiInstanceCreateParams,
-    ) -> CreateResult<ApiInstance> {
+        project_name: &Name,
+        params: &InstanceCreateParams,
+    ) -> CreateResult<Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
@@ -504,7 +499,7 @@ impl Nexus {
         /* TODO-error more context would be useful  */
         let instance_id = saga_outputs
             .lookup_output::<Uuid>("instance_id")
-            .map_err(|e| ApiError::InternalError { message: e.to_string() })?;
+            .map_err(|e| Error::InternalError { message: e.to_string() })?;
         /*
          * TODO-correctness TODO-robustness TODO-design It's not quite correct
          * to take this instance id and look it up again.  It's possible that
@@ -515,21 +510,21 @@ impl Nexus {
          * user created.
          *
          * How can we fix this?  Right now we have internal representations like
-         * ApiInstance and analaogous end-user-facing representations like
-         * ApiInstanceView.  The former is not even serializable.  The saga
+         * Instance and analaogous end-user-facing representations like
+         * InstanceView.  The former is not even serializable.  The saga
          * _could_ emit the View version, but that's not great for two (related)
          * reasons: (1) other sagas might want to provision instances and get
          * back the internal representation to do other things with the
          * newly-created instance, and (2) even within a saga, it would be
-         * useful to pass a single ApiInstance representation along the saga,
+         * useful to pass a single Instance representation along the saga,
          * but they probably would want the internal representation, not the
          * view.
          *
-         * The saga could emit an ApiInstance directly.  Today, ApiInstance
+         * The saga could emit an Instance directly.  Today, Instance
          * etc. aren't supposed to even be serializable -- we wanted to be able
          * to have other datastore state there if needed.  We could have a third
-         * ApiInstanceInternalView...but that's starting to feel pedantic.  We
-         * could just make ApiInstance serializable, store that, and call it a
+         * InstanceInternalView...but that's starting to feel pedantic.  We
+         * could just make Instance serializable, store that, and call it a
          * day.  Does it matter that we might have many copies of the same
          * objects in memory?
          *
@@ -558,8 +553,8 @@ impl Nexus {
      */
     pub async fn project_destroy_instance(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
+        project_name: &Name,
+        instance_name: &Name,
     ) -> DeleteResult {
         /*
          * TODO-robustness We need to figure out what to do with Destroyed
@@ -577,9 +572,9 @@ impl Nexus {
 
     pub async fn project_lookup_instance(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance> {
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> LookupResult<Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore
@@ -589,8 +584,8 @@ impl Nexus {
 
     fn check_runtime_change_allowed(
         &self,
-        runtime: &ApiInstanceRuntimeState,
-    ) -> Result<(), ApiError> {
+        runtime: &InstanceRuntimeState,
+    ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
          * already in the desired state (or moving to it), and we will issue a
@@ -599,22 +594,22 @@ impl Nexus {
          * to change the state of an instance that's failed or destroyed.
          */
         let allowed = match runtime.run_state {
-            ApiInstanceState::Creating => true,
-            ApiInstanceState::Starting => true,
-            ApiInstanceState::Running => true,
-            ApiInstanceState::Stopping => true,
-            ApiInstanceState::Stopped => true,
-            ApiInstanceState::Rebooting => true,
+            InstanceState::Creating => true,
+            InstanceState::Starting => true,
+            InstanceState::Running => true,
+            InstanceState::Stopping => true,
+            InstanceState::Stopped => true,
+            InstanceState::Rebooting => true,
 
-            ApiInstanceState::Repairing => false,
-            ApiInstanceState::Failed => false,
-            ApiInstanceState::Destroyed => false,
+            InstanceState::Repairing => false,
+            InstanceState::Failed => false,
+            InstanceState::Destroyed => false,
         };
 
         if allowed {
             Ok(())
         } else {
-            Err(ApiError::InvalidRequest {
+            Err(Error::InvalidRequest {
                 message: format!(
                     "instance state cannot be changed from state \"{}\"",
                     runtime.run_state
@@ -626,12 +621,12 @@ impl Nexus {
     pub async fn sled_client(
         &self,
         sled_uuid: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, Error> {
         let sled_agents = self.sled_agents.lock().await;
         Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
             let message =
                 format!("no sled agent for sled_uuid \"{}\"", sled_uuid);
-            ApiError::ServiceUnavailable { message }
+            Error::ServiceUnavailable { message }
         })?))
     }
 
@@ -640,8 +635,8 @@ impl Nexus {
      */
     async fn instance_sled(
         &self,
-        instance: &ApiInstance,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+        instance: &Instance,
+    ) -> Result<Arc<SledAgentClient>, Error> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
     }
@@ -651,9 +646,9 @@ impl Nexus {
      */
     pub async fn instance_reboot(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> UpdateResult<Instance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
          * runtime state of "reboot". We cannot simply stop the Instance and
@@ -674,8 +669,8 @@ impl Nexus {
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             },
         )
         .await?;
@@ -687,9 +682,9 @@ impl Nexus {
      */
     pub async fn instance_start(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> UpdateResult<Instance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -697,8 +692,8 @@ impl Nexus {
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             },
         )
         .await?;
@@ -710,9 +705,9 @@ impl Nexus {
      */
     pub async fn instance_stop(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-    ) -> UpdateResult<ApiInstance> {
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> UpdateResult<Instance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -720,8 +715,8 @@ impl Nexus {
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Stopped,
+            InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Stopped,
             },
         )
         .await?;
@@ -734,10 +729,10 @@ impl Nexus {
      */
     async fn instance_set_runtime(
         &self,
-        instance: &ApiInstance,
+        instance: &Instance,
         sa: Arc<SledAgentClient>,
-        requested: ApiInstanceRuntimeStateRequested,
-    ) -> Result<(), ApiError> {
+        requested: InstanceRuntimeStateRequested,
+    ) -> Result<(), Error> {
         /*
          * Ask the sled agent to begin the state change.  Then update the
          * database to reflect the new intermediate state.  If this update is
@@ -763,10 +758,10 @@ impl Nexus {
      */
     pub async fn instance_list_disks(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDiskAttachment> {
+        project_name: &Name,
+        instance_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         self.db_datastore
@@ -779,10 +774,10 @@ impl Nexus {
      */
     pub async fn instance_get_disk(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-        disk_name: &ApiName,
-    ) -> LookupResult<ApiDiskAttachment> {
+        project_name: &Name,
+        instance_name: &Name,
+        disk_name: &Name,
+    ) -> LookupResult<DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
@@ -790,7 +785,7 @@ impl Nexus {
             disk.runtime.disk_state.attached_instance_id()
         {
             if instance_id == &instance.identity.id {
-                return Ok(ApiDiskAttachment {
+                return Ok(DiskAttachment {
                     instance_id: instance.identity.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
@@ -799,8 +794,8 @@ impl Nexus {
             }
         }
 
-        Err(ApiError::not_found_other(
-            ApiResourceType::DiskAttachment,
+        Err(Error::not_found_other(
+            ResourceType::DiskAttachment,
             format!(
                 "disk \"{}\" is not attached to instance \"{}\"",
                 disk_name.as_str(),
@@ -814,25 +809,25 @@ impl Nexus {
      */
     pub async fn instance_attach_disk(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-        disk_name: &ApiName,
-    ) -> CreateResult<ApiDiskAttachment> {
+        project_name: &Name,
+        instance_name: &Name,
+        disk_name: &Name,
+    ) -> CreateResult<DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
         let instance_id = &instance.identity.id;
 
         fn disk_attachment_for(
-            instance: &ApiInstance,
-            disk: &ApiDisk,
-        ) -> CreateResult<ApiDiskAttachment> {
+            instance: &Instance,
+            disk: &Disk,
+        ) -> CreateResult<DiskAttachment> {
             let instance_id = &instance.identity.id;
             assert_eq!(
                 instance_id,
                 disk.runtime.disk_state.attached_instance_id().unwrap()
             );
-            Ok(ApiDiskAttachment {
+            Ok(DiskAttachment {
                 instance_id: *instance_id,
                 disk_id: disk.identity.id,
                 disk_name: disk.identity.name.clone(),
@@ -840,14 +835,12 @@ impl Nexus {
             })
         }
 
-        fn disk_attachment_error(
-            disk: &ApiDisk,
-        ) -> CreateResult<ApiDiskAttachment> {
+        fn disk_attachment_error(disk: &Disk) -> CreateResult<DiskAttachment> {
             let disk_status = match disk.runtime.disk_state {
-                ApiDiskState::Destroyed => "disk is destroyed",
-                ApiDiskState::Faulted => "disk is faulted",
-                ApiDiskState::Creating => "disk is detached",
-                ApiDiskState::Detached => "disk is detached",
+                DiskState::Destroyed => "disk is destroyed",
+                DiskState::Faulted => "disk is faulted",
+                DiskState::Creating => "disk is detached",
+                DiskState::Detached => "disk is detached",
 
                 /*
                  * It would be nice to provide a more specific message here, but
@@ -855,13 +848,13 @@ impl Nexus {
                  * other instance's name.  Getting that would require another
                  * database hit, which doesn't seem worth it for this.
                  */
-                ApiDiskState::Attaching(_) => {
+                DiskState::Attaching(_) => {
                     "disk is attached to another instance"
                 }
-                ApiDiskState::Attached(_) => {
+                DiskState::Attached(_) => {
                     "disk is attached to another instance"
                 }
-                ApiDiskState::Detaching(_) => {
+                DiskState::Detaching(_) => {
                     "disk is attached to another instance"
                 }
             };
@@ -870,7 +863,7 @@ impl Nexus {
                 disk.identity.name.as_str(),
                 disk_status
             );
-            Err(ApiError::InvalidRequest { message })
+            Err(Error::InvalidRequest { message })
         }
 
         match &disk.runtime.disk_state {
@@ -878,7 +871,7 @@ impl Nexus {
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
              */
-            ApiDiskState::Attached(id) if id == instance_id => {
+            DiskState::Attached(id) if id == instance_id => {
                 return disk_attachment_for(&instance, &disk);
             }
 
@@ -891,26 +884,26 @@ impl Nexus {
              * look up the other instance by id (and gracefully handle it not
              * existing).
              */
-            ApiDiskState::Attached(id) => {
+            DiskState::Attached(id) => {
                 assert_ne!(id, instance_id);
                 return disk_attachment_error(&disk);
             }
-            ApiDiskState::Detaching(_) => {
+            DiskState::Detaching(_) => {
                 return disk_attachment_error(&disk);
             }
-            ApiDiskState::Attaching(id) if id != instance_id => {
+            DiskState::Attaching(id) if id != instance_id => {
                 return disk_attachment_error(&disk);
             }
-            ApiDiskState::Destroyed => {
+            DiskState::Destroyed => {
                 return disk_attachment_error(&disk);
             }
-            ApiDiskState::Faulted => {
+            DiskState::Faulted => {
                 return disk_attachment_error(&disk);
             }
 
-            ApiDiskState::Creating => (),
-            ApiDiskState::Detached => (),
-            ApiDiskState::Attaching(id) => {
+            DiskState::Creating => (),
+            DiskState::Detached => (),
+            DiskState::Attaching(id) => {
                 assert_eq!(id, instance_id);
             }
         }
@@ -918,7 +911,7 @@ impl Nexus {
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            ApiDiskStateRequested::Attached(*instance_id),
+            DiskStateRequested::Attached(*instance_id),
         )
         .await?;
         let disk = self.db_datastore.disk_fetch(&disk.identity.id).await?;
@@ -930,9 +923,9 @@ impl Nexus {
      */
     pub async fn instance_detach_disk(
         &self,
-        project_name: &ApiName,
-        instance_name: &ApiName,
-        disk_name: &ApiName,
+        project_name: &Name,
+        instance_name: &Name,
+        disk_name: &Name,
     ) -> DeleteResult {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
@@ -944,41 +937,41 @@ impl Nexus {
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
              */
-            ApiDiskState::Creating => return Ok(()),
-            ApiDiskState::Detached => return Ok(()),
-            ApiDiskState::Destroyed => return Ok(()),
-            ApiDiskState::Faulted => return Ok(()),
-            ApiDiskState::Detaching(id) if id == instance_id => return Ok(()),
+            DiskState::Creating => return Ok(()),
+            DiskState::Detached => return Ok(()),
+            DiskState::Destroyed => return Ok(()),
+            DiskState::Faulted => return Ok(()),
+            DiskState::Detaching(id) if id == instance_id => return Ok(()),
 
             /*
              * This operation is not allowed if the disk is attached to some
              * other instance.
              */
-            ApiDiskState::Attaching(id) if id != instance_id => {
-                return Err(ApiError::InvalidRequest {
+            DiskState::Attaching(id) if id != instance_id => {
+                return Err(Error::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
             }
-            ApiDiskState::Attached(id) if id != instance_id => {
-                return Err(ApiError::InvalidRequest {
+            DiskState::Attached(id) if id != instance_id => {
+                return Err(Error::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
             }
-            ApiDiskState::Detaching(_) => {
-                return Err(ApiError::InvalidRequest {
+            DiskState::Detaching(_) => {
+                return Err(Error::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
                 });
             }
 
             /* These are the cases where we have to do something. */
-            ApiDiskState::Attaching(_) => (),
-            ApiDiskState::Attached(_) => (),
+            DiskState::Attaching(_) => (),
+            DiskState::Attached(_) => (),
         }
 
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            ApiDiskStateRequested::Detached,
+            DiskStateRequested::Detached,
         )
         .await?;
         Ok(())
@@ -990,10 +983,10 @@ impl Nexus {
      */
     async fn disk_set_runtime(
         &self,
-        disk: &ApiDisk,
+        disk: &Disk,
         sa: Arc<SledAgentClient>,
-        requested: ApiDiskStateRequested,
-    ) -> Result<(), ApiError> {
+        requested: DiskStateRequested,
+    ) -> Result<(), Error> {
         /*
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
@@ -1011,14 +1004,14 @@ impl Nexus {
      * Racks.  We simulate just one for now.
      */
 
-    fn as_rack(&self) -> ApiRack {
-        ApiRack { identity: self.api_rack_identity.clone() }
+    fn as_rack(&self) -> Rack {
+        Rack { identity: self.api_rack_identity.clone() }
     }
 
     pub async fn racks_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiRack> {
+    ) -> ListResult<Rack> {
         if let Some(marker) = pagparams.marker {
             if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
@@ -1028,11 +1021,11 @@ impl Nexus {
         Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
     }
 
-    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<ApiRack> {
+    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<Rack> {
         if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
-            Err(ApiError::not_found_by_id(ApiResourceType::Rack, rack_id))
+            Err(Error::not_found_by_id(ResourceType::Rack, rack_id))
         }
     }
 
@@ -1040,23 +1033,23 @@ impl Nexus {
      * Sleds.
      * TODO-completeness: Eventually, we'll want sleds to be stored in the
      * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an ApiSled for each SledAgentClient
+     * them, etc.  For now, we expose an Sled for each SledAgentClient
      * that we've got.
      */
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiSled> {
+    ) -> ListResult<Sled> {
         let sled_agents = self.sled_agents.lock().await;
         let sleds = collection_page(&sled_agents, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sa| {
                 let sa = sa.unwrap();
-                Ok(ApiSled {
-                    identity: ApiIdentityMetadata {
+                Ok(Sled {
+                    identity: IdentityMetadata {
                         /* TODO-correctness cons up real metadata here */
                         id: sa.id,
-                        name: ApiName::try_from(format!("sled-{}", sa.id))
+                        name: Name::try_from(format!("sled-{}", sa.id))
                             .unwrap(),
                         description: String::from(""),
                         time_created: Utc::now(),
@@ -1065,22 +1058,22 @@ impl Nexus {
                     service_address: sa.service_address,
                 })
             })
-            .collect::<Vec<Result<ApiSled, ApiError>>>()
+            .collect::<Vec<Result<Sled, Error>>>()
             .await;
         Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<ApiSled> {
+    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<Sled> {
         let nexuses = self.sled_agents.lock().await;
         let sa = nexuses.get(sled_id).ok_or_else(|| {
-            ApiError::not_found_by_id(ApiResourceType::Sled, sled_id)
+            Error::not_found_by_id(ResourceType::Sled, sled_id)
         })?;
 
-        Ok(ApiSled {
-            identity: ApiIdentityMetadata {
+        Ok(Sled {
+            identity: IdentityMetadata {
                 /* TODO-correctness cons up real metadata here */
                 id: sa.id,
-                name: ApiName::try_from(format!("sled-{}", sa.id)).unwrap(),
+                name: Name::try_from(format!("sled-{}", sa.id)).unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -1096,7 +1089,7 @@ impl Nexus {
     pub async fn sagas_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiSagaView> {
+    ) -> ListResult<SagaView> {
         /*
          * The endpoint we're serving only supports `ApiScanById`, which only
          * supports an ascending scan.
@@ -1110,19 +1103,19 @@ impl Nexus {
             .saga_list(marker, pagparams.limit)
             .await
             .into_iter()
-            .map(ApiSagaView::from)
+            .map(SagaView::from)
             .map(Ok);
         Ok(futures::stream::iter(saga_list).boxed())
     }
 
-    pub async fn saga_get(&self, id: Uuid) -> LookupResult<ApiSagaView> {
+    pub async fn saga_get(&self, id: Uuid) -> LookupResult<SagaView> {
         self.sec_client
             .saga_get(steno::SagaId::from(id))
             .await
-            .map(ApiSagaView::from)
+            .map(SagaView::from)
             .map(Ok)
             .map_err(|_: ()| {
-                ApiError::not_found_by_id(ApiResourceType::SagaDbg, &id)
+                Error::not_found_by_id(ResourceType::SagaDbg, &id)
             })?
     }
 
@@ -1137,8 +1130,8 @@ impl Nexus {
     pub async fn notify_instance_updated(
         &self,
         id: &Uuid,
-        new_runtime_state: &ApiInstanceRuntimeState,
-    ) -> Result<(), ApiError> {
+        new_runtime_state: &InstanceRuntimeState,
+    ) -> Result<(), Error> {
         let log = &self.log;
 
         let result = self
@@ -1169,7 +1162,7 @@ impl Nexus {
              * and in that case, we'd need some async task for cleaning these
              * up.
              */
-            Err(ApiError::ObjectNotFound { .. }) => {
+            Err(Error::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent instance updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => %new_runtime_state.run_state);
@@ -1180,7 +1173,7 @@ impl Nexus {
              * If the datastore is unavailable, propagate that to the caller.
              * TODO-robustness Really this should be any _transient_ error.  How
              * can we distinguish?  Maybe datastore should emit something
-             * different from ApiError with an Into<ApiError>.
+             * different from Error with an Into<Error>.
              */
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";
@@ -1195,8 +1188,8 @@ impl Nexus {
     pub async fn notify_disk_updated(
         &self,
         id: &Uuid,
-        new_state: &ApiDiskRuntimeState,
-    ) -> Result<(), ApiError> {
+        new_state: &DiskRuntimeState,
+    ) -> Result<(), Error> {
         let log = &self.log;
 
         let result = self.db_datastore.disk_update_runtime(id, new_state).await;
@@ -1225,7 +1218,7 @@ impl Nexus {
              * and in that case, we'd need some async task for cleaning these
              * up.
              */
-            Err(ApiError::ObjectNotFound { .. }) => {
+            Err(Error::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent disk updated by sled agent";
                     "instance_id" => %id,
                     "new_state" => ?new_state);
@@ -1251,7 +1244,7 @@ impl Nexus {
     pub async fn assign_producer(
         &self,
         producer_info: ProducerEndpoint,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         self.db_datastore.producer_endpoint_create(&producer_info).await?;
         let collector = self.next_collector().await?;
         collector.register_producer(&producer_info).await?;
@@ -1270,7 +1263,7 @@ impl Nexus {
     /**
      * Return an oximeter collector to assign a newly-registered producer
      */
-    async fn next_collector(&self) -> Result<Arc<OximeterClient>, ApiError> {
+    async fn next_collector(&self) -> Result<Arc<OximeterClient>, Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         self.oximeter_collectors
             .lock()
@@ -1280,7 +1273,7 @@ impl Nexus {
             .map(Arc::clone)
             .ok_or_else(|| {
                 warn!(self.log, "no collectors available to assign producer");
-                ApiError::ServiceUnavailable {
+                Error::ServiceUnavailable {
                     message: String::from(
                         "no collectors available to assign producer",
                     ),
@@ -1294,7 +1287,7 @@ impl TestInterfaces for Nexus {
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, Error> {
         let instance = self.db_datastore.instance_fetch(id).await?;
         self.instance_sled(&instance).await
     }
@@ -1302,7 +1295,7 @@ impl TestInterfaces for Nexus {
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, ApiError> {
+    ) -> Result<Arc<SledAgentClient>, Error> {
         let disk = self.db_datastore.disk_fetch(id).await?;
         let instance_id =
             disk.runtime.disk_state.attached_instance_id().unwrap();

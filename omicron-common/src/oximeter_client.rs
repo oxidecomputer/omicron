@@ -8,7 +8,7 @@ use hyper::Body;
 use slog::Logger;
 use uuid::Uuid;
 
-use crate::api::ApiError;
+use crate::api::Error;
 use crate::api::ProducerEndpoint;
 use crate::http_client::HttpClient;
 
@@ -35,7 +35,7 @@ impl Client {
     pub async fn register_producer(
         &self,
         info: &ProducerEndpoint,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         self.client
             .request(
                 Method::POST,

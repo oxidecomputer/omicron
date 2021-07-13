@@ -5,7 +5,7 @@
  * here is used by the model conversions, which have to live in this crate.
  */
 
-use crate::api::ApiError;
+use crate::api::Error;
 use std::fmt;
 use thiserror::Error;
 use tokio_postgres::types::FromSql;
@@ -16,7 +16,7 @@ use tokio_postgres::types::FromSql;
 pub fn sql_row_value<'a, I, T>(
     row: &'a tokio_postgres::Row,
     idx: I,
-) -> Result<T, ApiError>
+) -> Result<T, Error>
 where
     I: tokio_postgres::row::RowIndex + fmt::Display,
     T: FromSql<'a>,
@@ -57,9 +57,9 @@ impl DbError {
     }
 }
 
-/** Given an arbitrary [`DbError`], produce an [`ApiError`] for the problem. */
+/** Given an arbitrary [`DbError`], produce an [`Error`] for the problem. */
 /*
- * This could potentially be an `impl From<DbError> for ApiError`.  However,
+ * This could potentially be an `impl From<DbError> for Error`.  However,
  * there are multiple different ways to do this transformation, depending on
  * what the caller is doing.  See `sql_error_on_create()`.  If we impl'd `From`
  * here, it would be easy to use this version instead of a more appropriate one
@@ -76,7 +76,7 @@ impl DbError {
  * But it would still have the problem of being easy to misuse.  Right now, you
  * at least have to explicitly opt into a conversion.
  */
-pub fn sql_error_generic(e: DbError) -> ApiError {
+pub fn sql_error_generic(e: DbError) -> Error {
     use tokio_postgres::error::SqlState;
 
     /*
@@ -91,7 +91,7 @@ pub fn sql_error_generic(e: DbError) -> ApiError {
 
     /*
      * Determine whether the problem was transient or not and construct an
-     * appropriate ApiError.
+     * appropriate Error.
      * TODO-cleanup Is there a better supported way to determine if the problem
      * was transient?
      * TODO-resilience need to audit the list below to see what other ones we've
@@ -101,9 +101,9 @@ pub fn sql_error_generic(e: DbError) -> ApiError {
         if sqlstate == &SqlState::CONNECTION_EXCEPTION
             || sqlstate == &SqlState::CONNECTION_DOES_NOT_EXIST
         {
-            ApiError::unavail
+            Error::unavail
         } else {
-            ApiError::internal_error
+            Error::internal_error
         }
     } else {
         /*
@@ -112,7 +112,7 @@ pub fn sql_error_generic(e: DbError) -> ApiError {
          * fail).  The "kind" inside the tokio_postgres error would tell us
          * this, but we don't have any way to get that.
          */
-        ApiError::internal_error
+        Error::internal_error
     };
 
     /*

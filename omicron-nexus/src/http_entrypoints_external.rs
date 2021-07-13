@@ -17,21 +17,21 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use omicron_common::api::to_view_list;
-use omicron_common::api::ApiDiskAttachment;
-use omicron_common::api::ApiDiskCreateParams;
-use omicron_common::api::ApiDiskView;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceView;
-use omicron_common::api::ApiName;
-use omicron_common::api::ApiObject;
-use omicron_common::api::ApiProjectCreateParams;
-use omicron_common::api::ApiProjectUpdateParams;
-use omicron_common::api::ApiProjectView;
-use omicron_common::api::ApiRackView;
-use omicron_common::api::ApiSagaView;
-use omicron_common::api::ApiSledView;
 use omicron_common::api::DataPageParams;
+use omicron_common::api::DiskAttachment;
+use omicron_common::api::DiskCreateParams;
+use omicron_common::api::DiskView;
+use omicron_common::api::InstanceCreateParams;
+use omicron_common::api::InstanceView;
+use omicron_common::api::Name;
+use omicron_common::api::Object;
 use omicron_common::api::PaginationOrder;
+use omicron_common::api::ProjectCreateParams;
+use omicron_common::api::ProjectUpdateParams;
+use omicron_common::api::ProjectView;
+use omicron_common::api::RackView;
+use omicron_common::api::SagaView;
+use omicron_common::api::SledView;
 use omicron_common::http_pagination::data_page_params_for;
 use omicron_common::http_pagination::data_page_params_nameid_id;
 use omicron_common::http_pagination::data_page_params_nameid_name;
@@ -147,7 +147,7 @@ pub fn external_api() -> NexusApiDescription {
 async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<ApiProjectView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<ProjectView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -179,8 +179,8 @@ async fn projects_get(
 }]
 async fn projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_project: TypedBody<ApiProjectCreateParams>,
-) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
+    new_project: TypedBody<ProjectCreateParams>,
+) -> Result<HttpResponseCreated<ProjectView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let project = nexus.project_create(&new_project.into_inner()).await?;
@@ -193,7 +193,7 @@ async fn projects_post(
 #[derive(Deserialize, JsonSchema)]
 struct ProjectPathParam {
     /// The project's unique ID.
-    project_name: ApiName,
+    project_name: Name,
 }
 
 /**
@@ -206,7 +206,7 @@ struct ProjectPathParam {
 async fn projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
+) -> Result<HttpResponseOk<ProjectView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -250,8 +250,8 @@ async fn projects_delete_project(
 async fn projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    updated_project: TypedBody<ApiProjectUpdateParams>,
-) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
+    updated_project: TypedBody<ProjectUpdateParams>,
+) -> Result<HttpResponseOk<ProjectView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -277,7 +277,7 @@ async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<ApiDiskView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<DiskView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -305,8 +305,8 @@ async fn project_disks_get(
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_disk: TypedBody<ApiDiskCreateParams>,
-) -> Result<HttpResponseCreated<ApiDiskView>, HttpError> {
+    new_disk: TypedBody<DiskCreateParams>,
+) -> Result<HttpResponseCreated<DiskView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -322,8 +322,8 @@ async fn project_disks_post(
  */
 #[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
-    project_name: ApiName,
-    disk_name: ApiName,
+    project_name: Name,
+    disk_name: Name,
 }
 
 /**
@@ -336,7 +336,7 @@ struct DiskPathParam {
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseOk<ApiDiskView>, HttpError> {
+) -> Result<HttpResponseOk<DiskView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -381,7 +381,7 @@ async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<ApiInstanceView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<InstanceView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -415,8 +415,8 @@ async fn project_instances_get(
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_instance: TypedBody<ApiInstanceCreateParams>,
-) -> Result<HttpResponseCreated<ApiInstanceView>, HttpError> {
+    new_instance: TypedBody<InstanceCreateParams>,
+) -> Result<HttpResponseCreated<InstanceView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -433,8 +433,8 @@ async fn project_instances_post(
  */
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
-    project_name: ApiName,
-    instance_name: ApiName,
+    project_name: Name,
+    instance_name: Name,
 }
 
 /**
@@ -447,7 +447,7 @@ struct InstancePathParam {
 async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseOk<InstanceView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -488,7 +488,7 @@ async fn project_instances_delete_instance(
 async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -508,7 +508,7 @@ async fn project_instances_instance_reboot(
 async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -529,7 +529,7 @@ async fn project_instances_instance_start(
 async fn project_instances_instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -550,7 +550,7 @@ async fn project_instances_instance_stop(
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Vec<ApiDiskAttachment>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<DiskAttachment>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -573,9 +573,9 @@ async fn instance_disks_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct InstanceDiskPathParam {
-    project_name: ApiName,
-    instance_name: ApiName,
-    disk_name: ApiName,
+    project_name: Name,
+    instance_name: Name,
+    disk_name: Name,
 }
 
 /**
@@ -588,7 +588,7 @@ struct InstanceDiskPathParam {
 async fn instance_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseOk<ApiDiskAttachment>, HttpError> {
+) -> Result<HttpResponseOk<DiskAttachment>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -611,7 +611,7 @@ async fn instance_disks_get_disk(
 async fn instance_disks_put_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseCreated<ApiDiskAttachment>, HttpError> {
+) -> Result<HttpResponseCreated<DiskAttachment>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -661,7 +661,7 @@ async fn instance_disks_delete_disk(
 async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<ApiRackView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<RackView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -690,7 +690,7 @@ struct RackPathParam {
 async fn hardware_racks_get_rack(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
-) -> Result<HttpResponseOk<ApiRackView>, HttpError> {
+) -> Result<HttpResponseOk<RackView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -712,7 +712,7 @@ async fn hardware_racks_get_rack(
 async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<ApiSledView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<SledView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -741,7 +741,7 @@ struct SledPathParam {
 async fn hardware_sleds_get_sled(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
-) -> Result<HttpResponseOk<ApiSledView>, HttpError> {
+) -> Result<HttpResponseOk<SledView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -763,7 +763,7 @@ async fn hardware_sleds_get_sled(
 async fn sagas_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<ApiSagaView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -791,7 +791,7 @@ struct SagaPathParam {
 async fn sagas_get_saga(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SagaPathParam>,
-) -> Result<HttpResponseOk<ApiSagaView>, HttpError> {
+) -> Result<HttpResponseOk<SagaView>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

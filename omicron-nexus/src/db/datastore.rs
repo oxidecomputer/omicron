@@ -20,30 +20,19 @@
 
 use super::Pool;
 use chrono::Utc;
-use omicron_common::api::ApiDisk;
-use omicron_common::api::ApiDiskAttachment;
-use omicron_common::api::ApiDiskCreateParams;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskState;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
-use omicron_common::api::ApiInstance;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiName;
-use omicron_common::api::ApiProject;
-use omicron_common::api::ApiProjectCreateParams;
-use omicron_common::api::ApiProjectUpdateParams;
-use omicron_common::api::ApiResourceType;
+use omicron_common::api;
 use omicron_common::api::CreateResult;
 use omicron_common::api::DataPageParams;
 use omicron_common::api::DeleteResult;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
 use omicron_common::api::ListResult;
 use omicron_common::api::LookupResult;
+use omicron_common::api::Name;
 use omicron_common::api::OximeterAssignment;
 use omicron_common::api::OximeterInfo;
 use omicron_common::api::ProducerEndpoint;
+use omicron_common::api::ResourceType;
 use omicron_common::api::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
@@ -89,8 +78,8 @@ impl DataStore {
     pub async fn project_create_with_id(
         &self,
         new_id: &Uuid,
-        new_project: &ApiProjectCreateParams,
-    ) -> CreateResult<ApiProject> {
+        new_project: &api::ProjectCreateParams,
+    ) -> CreateResult<api::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -109,8 +98,8 @@ impl DataStore {
     /// Fetch metadata for a project
     pub async fn project_fetch(
         &self,
-        project_name: &ApiName,
-    ) -> LookupResult<ApiProject> {
+        project_name: &Name,
+    ) -> LookupResult<api::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueName, Project>(
             &client,
@@ -126,7 +115,7 @@ impl DataStore {
      * depend on the Project (Disks, Instances).  We can do this with a
      * generation counter that gets bumped when these resources are created.
      */
-    pub async fn project_delete(&self, project_name: &ApiName) -> DeleteResult {
+    pub async fn project_delete(&self, project_name: &Name) -> DeleteResult {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         sql_execute_maybe_one(
@@ -140,12 +129,7 @@ impl DataStore {
             )
             .as_str(),
             &[&now, &project_name],
-            || {
-                ApiError::not_found_by_name(
-                    ApiResourceType::Project,
-                    project_name,
-                )
-            },
+            || Error::not_found_by_name(ResourceType::Project, project_name),
         )
         .await
     }
@@ -153,8 +137,8 @@ impl DataStore {
     /// Look up the id for a project based on its name
     pub async fn project_lookup_id_by_name(
         &self,
-        name: &ApiName,
-    ) -> Result<Uuid, ApiError> {
+        name: &Name,
+    ) -> Result<Uuid, Error> {
         let client = self.pool.acquire().await?;
         let row = sql_fetch_row_raw::<LookupByUniqueName, Project>(
             &client,
@@ -170,7 +154,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<ApiProject> {
+    ) -> ListResult<api::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
@@ -183,8 +167,8 @@ impl DataStore {
     /// List a page of projects by name
     pub async fn projects_list_by_name(
         &self,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiProject> {
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<api::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueName,
@@ -197,9 +181,9 @@ impl DataStore {
     /// Updates a project by name (clobbering update -- no etag)
     pub async fn project_update(
         &self,
-        project_name: &ApiName,
-        update_params: &ApiProjectUpdateParams,
-    ) -> UpdateResult<ApiProject> {
+        project_name: &Name,
+        update_params: &api::ProjectUpdateParams,
+    ) -> UpdateResult<api::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -225,10 +209,10 @@ impl DataStore {
         params.push(project_name);
 
         let row = sql_query_maybe_one(&client, sql.as_str(), &params, || {
-            ApiError::not_found_by_name(ApiResourceType::Project, project_name)
+            Error::not_found_by_name(ResourceType::Project, project_name)
         })
         .await?;
-        Ok(ApiProject::try_from(&row)?)
+        Ok(api::Project::try_from(&row)?)
     }
 
     /*
@@ -264,9 +248,9 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         project_id: &Uuid,
-        params: &ApiInstanceCreateParams,
-        runtime_initial: &ApiInstanceRuntimeState,
-    ) -> CreateResult<ApiInstance> {
+        params: &api::InstanceCreateParams,
+        runtime_initial: &api::InstanceRuntimeState,
+    ) -> CreateResult<api::Instance> {
         let client = self.pool.acquire().await?;
         let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
@@ -290,7 +274,7 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state == ApiInstanceState::Creating,
+            instance.runtime.run_state == api::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
         );
@@ -305,8 +289,8 @@ impl DataStore {
     pub async fn project_list_instances(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiInstance> {
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<api::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -319,7 +303,7 @@ impl DataStore {
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
-    ) -> LookupResult<ApiInstance> {
+    ) -> LookupResult<api::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Instance>(&client, (), instance_id)
             .await
@@ -328,8 +312,8 @@ impl DataStore {
     pub async fn instance_fetch_by_name(
         &self,
         project_id: &Uuid,
-        instance_name: &ApiName,
-    ) -> LookupResult<ApiInstance> {
+        instance_name: &Name,
+    ) -> LookupResult<api::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
@@ -351,8 +335,8 @@ impl DataStore {
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
-        new_runtime: &ApiInstanceRuntimeState,
-    ) -> Result<bool, ApiError> {
+        new_runtime: &api::InstanceRuntimeState,
+    ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
         let mut values = SqlValueSet::new();
@@ -394,14 +378,14 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        ApiInstanceState::Destroyed.sql_serialize(&mut values);
+        api::InstanceState::Destroyed.sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
 
-        let stopped = ApiInstanceState::Stopped.to_string();
+        let stopped = api::InstanceState::Stopped.to_string();
         let p1 = cond_sql.next_param(&stopped);
-        let failed = ApiInstanceState::Failed.to_string();
+        let failed = api::InstanceState::Failed.to_string();
         let p2 = cond_sql.next_param(&failed);
         cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
 
@@ -418,14 +402,14 @@ impl DataStore {
         let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         let variant: &str = sql_row_value(&row, "found_instance_state")?;
-        let instance_state = ApiInstanceState::try_from(variant)
-            .map_err(|e| ApiError::internal_error(&e))?;
+        let instance_state = api::InstanceState::try_from(variant)
+            .map_err(|e| Error::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);
 
         if update.updated {
             Ok(())
         } else {
-            Err(ApiError::InvalidRequest {
+            Err(Error::InvalidRequest {
                 message: format!(
                     "instance cannot be deleted in state \"{}\"",
                     instance_state
@@ -444,10 +428,10 @@ impl DataStore {
     pub async fn instance_list_disks(
         &self,
         instance_id: &Uuid,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDiskAttachment> {
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<api::DiskAttachment> {
         let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<LookupByAttachedInstance, Disk, ApiDiskAttachment>(
+        sql_fetch_page_by::<LookupByAttachedInstance, Disk, api::DiskAttachment>(
             &client,
             (instance_id,),
             pagparams,
@@ -460,9 +444,9 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
         project_id: &Uuid,
-        params: &ApiDiskCreateParams,
-        runtime_initial: &ApiDiskRuntimeState,
-    ) -> CreateResult<ApiDisk> {
+        params: &api::DiskCreateParams,
+        runtime_initial: &api::DiskRuntimeState,
+    ) -> CreateResult<api::Disk> {
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
@@ -489,7 +473,7 @@ impl DataStore {
             .await?;
 
         bail_unless!(
-            disk.runtime.disk_state == ApiDiskState::Creating,
+            disk.runtime.disk_state == api::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             disk.runtime.disk_state
         );
@@ -504,8 +488,8 @@ impl DataStore {
     pub async fn project_list_disks(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, ApiName>,
-    ) -> ListResult<ApiDisk> {
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<api::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -518,8 +502,8 @@ impl DataStore {
     pub async fn disk_update_runtime(
         &self,
         disk_id: &Uuid,
-        new_runtime: &ApiDiskRuntimeState,
-    ) -> Result<bool, ApiError> {
+        new_runtime: &api::DiskRuntimeState,
+    ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
         let mut values = SqlValueSet::new();
@@ -544,7 +528,7 @@ impl DataStore {
         Ok(update.updated)
     }
 
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<ApiDisk> {
+    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -552,8 +536,8 @@ impl DataStore {
     pub async fn disk_fetch_by_name(
         &self,
         project_id: &Uuid,
-        disk_name: &ApiName,
-    ) -> LookupResult<ApiDisk> {
+        disk_name: &Name,
+    ) -> LookupResult<api::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
@@ -569,12 +553,12 @@ impl DataStore {
 
         let mut values = SqlValueSet::new();
         values.set("time_deleted", &now);
-        ApiDiskState::Destroyed.sql_serialize(&mut values);
+        api::DiskState::Destroyed.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
-        let disk_state_detached = ApiDiskState::Detached.to_string();
+        let disk_state_detached = api::DiskState::Detached.to_string();
         let p1 = cond_sql.next_param(&disk_state_detached);
-        let disk_state_faulted = ApiDiskState::Faulted.to_string();
+        let disk_state_faulted = api::DiskState::Faulted.to_string();
         let p2 = cond_sql.next_param(&disk_state_faulted);
         cond_sql.push_str(&format!("disk_state in ({}, {})", p1, p2));
 
@@ -593,19 +577,19 @@ impl DataStore {
         bail_unless!(found_id == *disk_id);
 
         // TODO-cleanup It would be nice to use
-        // ApiDiskState::try_from(&tokio_postgres::Row), but the column names
+        // api::DiskState::try_from(&tokio_postgres::Row), but the column names
         // are different here.
         let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
         let attach_instance_id: Option<Uuid> =
             sql_row_value(&row, "found_attach_instance_id")?;
         let found_disk_state =
-            ApiDiskState::try_from((disk_state_str, attach_instance_id))
-                .map_err(|e| ApiError::internal_error(&e))?;
+            api::DiskState::try_from((disk_state_str, attach_instance_id))
+                .map_err(|e| Error::internal_error(&e))?;
 
         if update.updated {
             Ok(())
         } else {
-            Err(ApiError::InvalidRequest {
+            Err(Error::InvalidRequest {
                 message: format!(
                     "disk cannot be deleted in state \"{}\"",
                     found_disk_state
@@ -618,7 +602,7 @@ impl DataStore {
     pub async fn oximeter_create(
         &self,
         info: &OximeterInfo,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -632,7 +616,7 @@ impl DataStore {
     pub async fn producer_endpoint_create(
         &self,
         producer: &ProducerEndpoint,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -647,7 +631,7 @@ impl DataStore {
         &self,
         oximeter_id: Uuid,
         producer_id: Uuid,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -664,7 +648,7 @@ impl DataStore {
     pub async fn saga_create(
         &self,
         saga: &db::saga_types::Saga,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
         saga.sql_serialize(&mut values);
@@ -674,7 +658,7 @@ impl DataStore {
     pub async fn saga_create_event(
         &self,
         event: &db::saga_types::SagaNodeEvent,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
         event.sql_serialize(&mut values);
@@ -688,8 +672,8 @@ impl DataStore {
         saga_id: steno::SagaId,
         new_state: steno::SagaCachedState,
         current_sec: db::saga_types::SecId,
-        current_adopt_generation: ApiGeneration,
-    ) -> Result<(), ApiError> {
+        current_adopt_generation: Generation,
+    ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
         let mut values = SqlValueSet::new();
         values.set("saga_state", &new_state.to_string());
@@ -716,7 +700,7 @@ impl DataStore {
         let found_sec: Option<&str> = sql_row_value(row, "found_current_sec")
             .unwrap_or(Some("(unknown)"));
         let found_gen =
-            sql_row_value::<_, ApiGeneration>(row, "found_adopt_generation")
+            sql_row_value::<_, Generation>(row, "found_adopt_generation")
                 .map(|i| i.to_string())
                 .unwrap_or_else(|_| "(unknown)".to_owned());
         let found_saga_state =

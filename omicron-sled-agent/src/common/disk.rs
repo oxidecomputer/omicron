@@ -1,10 +1,10 @@
 //! Describes the states of network-attached storage.
 
 use chrono::Utc;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskState;
-use omicron_common::api::ApiDiskStateRequested;
-use omicron_common::api::ApiError;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::DiskState;
+use omicron_common::api::DiskStateRequested;
+use omicron_common::api::Error;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;
 
@@ -19,23 +19,23 @@ pub enum Action {
 /// The disk state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
 #[derive(Clone, Debug)]
-pub struct DiskState {
-    current: ApiDiskRuntimeState,
-    desired: Option<ApiDiskStateRequested>,
+pub struct DiskStates {
+    current: DiskRuntimeState,
+    desired: Option<DiskStateRequested>,
 }
 
-impl DiskState {
-    pub fn new(current: ApiDiskRuntimeState) -> Self {
-        DiskState { current, desired: None }
+impl DiskStates {
+    pub fn new(current: DiskRuntimeState) -> Self {
+        DiskStates { current, desired: None }
     }
 
     /// Returns the current disk state.
-    pub fn current(&self) -> &ApiDiskRuntimeState {
+    pub fn current(&self) -> &DiskRuntimeState {
         &self.current
     }
 
     /// Returns the desired disk state, if any exists.
-    pub fn desired(&self) -> &Option<ApiDiskStateRequested> {
+    pub fn desired(&self) -> &Option<DiskStateRequested> {
         &self.desired
     }
 
@@ -46,10 +46,10 @@ impl DiskState {
         observed: &PropolisDiskState,
     ) -> Option<Action> {
         let next = match observed {
-            PropolisDiskState::Attached(uuid) => ApiDiskState::Attached(*uuid),
-            PropolisDiskState::Detached => ApiDiskState::Detached,
-            PropolisDiskState::Destroyed => ApiDiskState::Destroyed,
-            PropolisDiskState::Faulted => ApiDiskState::Faulted,
+            PropolisDiskState::Attached(uuid) => DiskState::Attached(*uuid),
+            PropolisDiskState::Detached => DiskState::Detached,
+            PropolisDiskState::Destroyed => DiskState::Destroyed,
+            PropolisDiskState::Faulted => DiskState::Faulted,
         };
         self.transition(next, None);
         None
@@ -61,13 +61,13 @@ impl DiskState {
     /// out this state transition.
     pub fn request_transition(
         &mut self,
-        target: &ApiDiskStateRequested,
-    ) -> Result<Option<Action>, ApiError> {
+        target: &DiskStateRequested,
+    ) -> Result<Option<Action>, Error> {
         match target {
-            ApiDiskStateRequested::Detached => self.request_detach(),
-            ApiDiskStateRequested::Attached(uuid) => self.request_attach(*uuid),
-            ApiDiskStateRequested::Destroyed => self.request_destroy(),
-            ApiDiskStateRequested::Faulted => self.request_fault(),
+            DiskStateRequested::Detached => self.request_detach(),
+            DiskStateRequested::Attached(uuid) => self.request_attach(*uuid),
+            DiskStateRequested::Destroyed => self.request_destroy(),
+            DiskStateRequested::Faulted => self.request_fault(),
         }
     }
 
@@ -77,11 +77,11 @@ impl DiskState {
     // This transition always succeeds.
     fn transition(
         &mut self,
-        next: ApiDiskState,
-        desired: Option<ApiDiskStateRequested>,
+        next: DiskState,
+        desired: Option<DiskStateRequested>,
     ) {
         // TODO: Deal with no-op transition?
-        self.current = ApiDiskRuntimeState {
+        self.current = DiskRuntimeState {
             disk_state: next,
             gen: self.current.gen.next(),
             time_updated: Utc::now(),
@@ -89,26 +89,26 @@ impl DiskState {
         self.desired = desired;
     }
 
-    fn request_detach(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_detach(&mut self) -> Result<Option<Action>, Error> {
         match self.current.disk_state {
             // Already detached or can detach immediately.
-            ApiDiskState::Creating | ApiDiskState::Detached => {
-                self.transition(ApiDiskState::Detached, None);
+            DiskState::Creating | DiskState::Detached => {
+                self.transition(DiskState::Detached, None);
                 return Ok(None);
             }
             // Currently attached - enter detached through detaching.
-            ApiDiskState::Attaching(uuid)
-            | ApiDiskState::Attached(uuid)
-            | ApiDiskState::Detaching(uuid) => {
+            DiskState::Attaching(uuid)
+            | DiskState::Attached(uuid)
+            | DiskState::Detaching(uuid) => {
                 self.transition(
-                    ApiDiskState::Detaching(uuid),
-                    Some(ApiDiskStateRequested::Detached),
+                    DiskState::Detaching(uuid),
+                    Some(DiskStateRequested::Detached),
                 );
                 return Ok(Some(Action::Detach(uuid)));
             }
             // Cannot detach.
-            ApiDiskState::Destroyed | ApiDiskState::Faulted => {
-                return Err(ApiError::InvalidRequest {
+            DiskState::Destroyed | DiskState::Faulted => {
+                return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot detach from {}",
                         self.current.disk_state
@@ -118,34 +118,31 @@ impl DiskState {
         };
     }
 
-    fn request_attach(
-        &mut self,
-        uuid: Uuid,
-    ) -> Result<Option<Action>, ApiError> {
+    fn request_attach(&mut self, uuid: Uuid) -> Result<Option<Action>, Error> {
         match self.current.disk_state {
             // Currently attached - only legal to attach to current ID
             // (which is a no-op anyway).
-            ApiDiskState::Attaching(id) | ApiDiskState::Attached(id) => {
+            DiskState::Attaching(id) | DiskState::Attached(id) => {
                 if uuid != id {
-                    return Err(ApiError::InvalidRequest {
+                    return Err(Error::InvalidRequest {
                         message: "disk is already attached".to_string(),
                     });
                 }
                 return Ok(None);
             }
             // Not attached - enter attached through attaching.
-            ApiDiskState::Creating | ApiDiskState::Detached => {
+            DiskState::Creating | DiskState::Detached => {
                 self.transition(
-                    ApiDiskState::Attaching(uuid),
-                    Some(ApiDiskStateRequested::Attached(uuid)),
+                    DiskState::Attaching(uuid),
+                    Some(DiskStateRequested::Attached(uuid)),
                 );
                 return Ok(Some(Action::Attach(uuid)));
             }
             // Cannot attach.
-            ApiDiskState::Detaching(_)
-            | ApiDiskState::Destroyed
-            | ApiDiskState::Faulted => {
-                return Err(ApiError::InvalidRequest {
+            DiskState::Detaching(_)
+            | DiskState::Destroyed
+            | DiskState::Faulted => {
+                return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot attach from {}",
                         self.current.disk_state
@@ -155,30 +152,30 @@ impl DiskState {
         }
     }
 
-    fn request_destroy(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_destroy(&mut self) -> Result<Option<Action>, Error> {
         if self.current.disk_state.is_attached() {
             let id = *self.current.disk_state.attached_instance_id().unwrap();
             self.transition(
-                ApiDiskState::Detaching(id),
-                Some(ApiDiskStateRequested::Destroyed),
+                DiskState::Detaching(id),
+                Some(DiskStateRequested::Destroyed),
             );
             return Ok(Some(Action::Detach(id)));
         } else {
-            self.transition(ApiDiskState::Destroyed, None);
+            self.transition(DiskState::Destroyed, None);
             return Ok(Some(Action::Destroy));
         }
     }
 
-    fn request_fault(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_fault(&mut self) -> Result<Option<Action>, Error> {
         if self.current.disk_state.is_attached() {
             let id = *self.current.disk_state.attached_instance_id().unwrap();
             self.transition(
-                ApiDiskState::Detaching(id),
-                Some(ApiDiskStateRequested::Faulted),
+                DiskState::Detaching(id),
+                Some(DiskStateRequested::Faulted),
             );
             return Ok(Some(Action::Detach(id)));
         } else {
-            self.transition(ApiDiskState::Faulted, None);
+            self.transition(DiskState::Faulted, None);
             // Unlike "destroy", no action necessary to identify that
             // the attached disk is now faulted.
             return Ok(None);

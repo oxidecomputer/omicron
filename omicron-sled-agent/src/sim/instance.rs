@@ -5,47 +5,46 @@
 use super::simulatable::Simulatable;
 
 use async_trait::async_trait;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiInstanceStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
+use omicron_common::api::InstanceState;
+use omicron_common::api::InstanceStateRequested;
 use omicron_common::NexusClient;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::instance::{Action as InstanceAction, InstanceState};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 
 /**
  * Simulated Instance (virtual machine), as created by the external Oxide API
  */
 #[derive(Debug)]
 pub struct SimInstance {
-    state: InstanceState,
+    state: InstanceStates,
 }
 
 #[async_trait]
 impl Simulatable for SimInstance {
-    type CurrentState = ApiInstanceRuntimeState;
-    type RequestedState = ApiInstanceRuntimeStateRequested;
+    type CurrentState = InstanceRuntimeState;
+    type RequestedState = InstanceRuntimeStateRequested;
     type Action = InstanceAction;
 
-    fn new(current: ApiInstanceRuntimeState) -> Self {
-        SimInstance { state: InstanceState::new(current) }
+    fn new(current: InstanceRuntimeState) -> Self {
+        SimInstance { state: InstanceStates::new(current) }
     }
 
     fn request_transition(
         &mut self,
-        target: &ApiInstanceRuntimeStateRequested,
-    ) -> Result<Option<InstanceAction>, ApiError> {
+        target: &InstanceRuntimeStateRequested,
+    ) -> Result<Option<InstanceAction>, Error> {
         self.state.request_transition(target.run_state)
     }
 
     fn execute_desired_transition(&mut self) -> Option<InstanceAction> {
-        if matches!(self.state.current().run_state, ApiInstanceState::Rebooting)
-        {
+        if matches!(self.state.current().run_state, InstanceState::Rebooting) {
             self.state.observe_transition(&PropolisInstanceState::Starting)
         } else if let Some(desired) = self.state.desired() {
             // These operations would typically be triggered via responses from
@@ -54,13 +53,13 @@ impl Simulatable for SimInstance {
             // Instead, we make transitions to new states based entirely on the
             // value of "desired".
             let observed = match desired.run_state {
-                ApiInstanceStateRequested::Running => {
+                InstanceStateRequested::Running => {
                     PropolisInstanceState::Running
                 }
-                ApiInstanceStateRequested::Stopped => {
+                InstanceStateRequested::Stopped => {
                     PropolisInstanceState::Stopped
                 }
-                ApiInstanceStateRequested::Destroyed => {
+                InstanceStateRequested::Destroyed => {
                     PropolisInstanceState::Destroyed
                 }
                 _ => panic!("Unexpected desired state: {}", desired.run_state),
@@ -71,7 +70,7 @@ impl Simulatable for SimInstance {
         }
     }
 
-    fn generation(&self) -> ApiGeneration {
+    fn generation(&self) -> Generation {
         self.state.current().gen
     }
 
@@ -84,14 +83,14 @@ impl Simulatable for SimInstance {
     }
 
     fn ready_to_destroy(&self) -> bool {
-        self.current().run_state == ApiInstanceState::Destroyed
+        self.current().run_state == InstanceState::Destroyed
     }
 
     async fn notify(
         nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         nexus_client.notify_instance_updated(id, &current).await
     }
 }

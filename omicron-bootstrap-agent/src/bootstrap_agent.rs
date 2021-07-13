@@ -1,6 +1,6 @@
 use crate::bootstrap_agent_client::Client as BootstrapClient;
-use omicron_common::api::ApiError;
 use omicron_common::api::BootstrapAgentShareResponse;
+use omicron_common::api::Error;
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;
@@ -31,7 +31,7 @@ pub enum BootstrapError {
     SmfAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
-    Api(#[from] ApiError),
+    Api(#[from] Error),
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
@@ -49,7 +49,7 @@ impl BootstrapAgent {
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
-    ) -> Result<BootstrapAgentShareResponse, ApiError> {
+    ) -> Result<BootstrapAgentShareResponse, Error> {
         // TODO-correctness: Validate identity, return whatever
         // information is necessary to establish trust quorum.
         //

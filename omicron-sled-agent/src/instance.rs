@@ -1,13 +1,13 @@
 //! API for controlling a single instance.
 
-use crate::common::instance::{Action as InstanceAction, InstanceState};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use futures::lock::Mutex;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
@@ -35,7 +35,7 @@ use omicron_common::NexusClient;
 async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
-) -> Result<(), ApiError> {
+) -> Result<(), Error> {
     poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
         || async {
             // This request is nonsensical - we don't expect an instance to be
@@ -58,7 +58,7 @@ async fn wait_for_http_server(
         &Duration::from_secs(10),
     )
     .await
-    .map_err(|e| ApiError::InternalError {
+    .map_err(|e| Error::InternalError {
         message: format!("Failed to wait for HTTP server: {}", e),
     })
 }
@@ -130,7 +130,7 @@ struct InstanceInner {
     log: Logger,
     runtime_id: u64,
     properties: propolis_client::api::InstanceProperties,
-    state: InstanceState,
+    state: InstanceStates,
     nexus_client: Arc<NexusClient>,
     running_state: Option<RunningState>,
 }
@@ -143,7 +143,7 @@ impl InstanceInner {
     async fn observe_state(
         &mut self,
         state: propolis_client::api::InstanceState,
-    ) -> Result<Reaction, ApiError> {
+    ) -> Result<Reaction, Error> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
         // Update the Sled Agent's internal state machine.
@@ -171,19 +171,19 @@ impl InstanceInner {
     async fn propolis_state_put(
         &self,
         request: propolis_client::api::InstanceStateRequested,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         self.running_state
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
             .instance_state_put(self.properties.id, request)
             .await
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!("Failed to set state of instance: {}", e),
             })
     }
 
-    async fn ensure(&self) -> Result<(), ApiError> {
+    async fn ensure(&self) -> Result<(), Error> {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
         };
@@ -193,7 +193,7 @@ impl InstanceInner {
             .client
             .instance_ensure(&request)
             .await
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!("Failed to ensure instance: {}", e),
             })?;
         Ok(())
@@ -202,7 +202,7 @@ impl InstanceInner {
     async fn take_action(
         &self,
         action: InstanceAction,
-    ) -> Result<Reaction, ApiError> {
+    ) -> Result<Reaction, Error> {
         info!(self.log, "Taking action: {:#?}", action);
         let requested_state = match action {
             InstanceAction::Run => {
@@ -243,14 +243,14 @@ mockall::mock! {
             log: Logger,
             id: Uuid,
             runtime_id: u64,
-            initial_runtime: ApiInstanceRuntimeState,
+            initial_runtime: InstanceRuntimeState,
             nexus_client: Arc<NexusClient>,
-        ) -> Result<Self, ApiError>;
-        pub async fn start(&self, ticket: InstanceTicket) -> Result<(), ApiError>;
+        ) -> Result<Self, Error>;
+        pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
         pub async fn transition(
             &self,
-            target: ApiInstanceRuntimeStateRequested,
-        ) -> Result<ApiInstanceRuntimeState, ApiError>;
+            target: InstanceRuntimeStateRequested,
+        ) -> Result<InstanceRuntimeState, Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -272,9 +272,9 @@ impl Instance {
         log: Logger,
         id: Uuid,
         runtime_id: u64,
-        initial_runtime: ApiInstanceRuntimeState,
+        initial_runtime: InstanceRuntimeState,
         nexus_client: Arc<NexusClient>,
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, Error> {
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
             runtime_id,
@@ -288,7 +288,7 @@ impl Instance {
                 memory: 256,
                 vcpus: 2,
             },
-            state: InstanceState::new(initial_runtime),
+            state: InstanceStates::new(initial_runtime),
             nexus_client,
             running_state: None,
         };
@@ -299,7 +299,7 @@ impl Instance {
     }
 
     /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), ApiError> {
+    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         let log = &inner.log;
 
@@ -383,7 +383,7 @@ impl Instance {
     }
 
     // Terminate the Propolis service.
-    async fn stop(&self) -> Result<(), ApiError> {
+    async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
         let zname = zone_name(inner.id());
@@ -399,7 +399,7 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(&self) -> Result<(), ApiError> {
+    async fn monitor_state_task(&self) -> Result<(), Error> {
         // Grab the UUID and Propolis Client before we start looping, so we
         // don't need to contend the lock to access them in steady state.
         //
@@ -419,7 +419,7 @@ impl Instance {
             let response = client
                 .instance_state_monitor(id, gen)
                 .await
-                .map_err(|e| ApiError::InternalError {
+                .map_err(|e| Error::InternalError {
                     message: format!("Failed to monitor propolis: {}", e),
                 })?;
             let reaction =
@@ -448,8 +448,8 @@ impl Instance {
     /// This method may panic if it has been invoked before [`Instance::start`].
     pub async fn transition(
         &self,
-        target: ApiInstanceRuntimeStateRequested,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        target: InstanceRuntimeStateRequested,
+    ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
         if let Some(action) =
             inner.state.request_transition(target.run_state)?
@@ -478,8 +478,7 @@ mod test {
     };
     use futures::future::FutureExt;
     use omicron_common::api::{
-        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState,
-        ApiInstanceStateRequested,
+        Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
     };
     use propolis_client::api;
     use tokio::sync::watch;
@@ -779,7 +778,7 @@ mod test {
     fn expect_state_transition(
         nexus_client: &mut MockNexusClient,
         seq: &mut mockall::Sequence,
-        expected_state: ApiInstanceState,
+        expected_state: InstanceState,
     ) -> impl core::future::Future<Output = ()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -804,11 +803,11 @@ mod test {
         .unwrap()
     }
 
-    fn new_runtime_state() -> ApiInstanceRuntimeState {
-        ApiInstanceRuntimeState {
-            run_state: ApiInstanceState::Creating,
+    fn new_runtime_state() -> InstanceRuntimeState {
+        InstanceRuntimeState {
+            run_state: InstanceState::Creating,
             sled_uuid: Uuid::new_v4(),
-            gen: ApiGeneration::new(),
+            gen: Generation::new(),
             time_updated: Utc::now(),
         }
     }
@@ -839,17 +838,17 @@ mod test {
         let create_fut = expect_state_transition(
             &mut nexus_client,
             &mut seq,
-            ApiInstanceState::Creating,
+            InstanceState::Creating,
         );
         let run_fut = expect_state_transition(
             &mut nexus_client,
             &mut seq,
-            ApiInstanceState::Running,
+            InstanceState::Running,
         );
         let stop_fut = expect_state_transition(
             &mut nexus_client,
             &mut seq,
-            ApiInstanceState::Stopped,
+            InstanceState::Stopped,
         );
 
         let ticket = InstanceTicket::null(test_uuid());
@@ -867,8 +866,8 @@ mod test {
         create_fut.await;
 
         // Start running the instance.
-        inst.transition(ApiInstanceRuntimeStateRequested {
-            run_state: ApiInstanceStateRequested::Running,
+        inst.transition(InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
         })
         .await
         .unwrap();
@@ -891,8 +890,8 @@ mod test {
                 assert_eq!(vnic, vnic_name(0));
                 Ok(())
             });
-        inst.transition(ApiInstanceRuntimeStateRequested {
-            run_state: ApiInstanceStateRequested::Stopped,
+        inst.transition(InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Stopped,
         })
         .await
         .unwrap();
@@ -920,8 +919,8 @@ mod test {
 
         // Trying to transition before the instance has been initialized will
         // result in a panic.
-        inst.transition(ApiInstanceRuntimeStateRequested {
-            run_state: ApiInstanceStateRequested::Running,
+        inst.transition(InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
         })
         .await
         .unwrap();

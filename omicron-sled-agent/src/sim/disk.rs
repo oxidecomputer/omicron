@@ -4,17 +4,17 @@
 
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskState;
-use omicron_common::api::ApiDiskStateRequested;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::DiskState;
+use omicron_common::api::DiskStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
 use omicron_common::NexusClient;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::disk::{Action as DiskAction, DiskState};
+use crate::common::disk::{Action as DiskAction, DiskStates};
 
 /**
  * Simulated Disk (network block device), as created by the external Oxide API
@@ -23,23 +23,23 @@ use crate::common::disk::{Action as DiskAction, DiskState};
  */
 #[derive(Debug)]
 pub struct SimDisk {
-    state: DiskState,
+    state: DiskStates,
 }
 
 #[async_trait]
 impl Simulatable for SimDisk {
-    type CurrentState = ApiDiskRuntimeState;
-    type RequestedState = ApiDiskStateRequested;
+    type CurrentState = DiskRuntimeState;
+    type RequestedState = DiskStateRequested;
     type Action = DiskAction;
 
-    fn new(current: ApiDiskRuntimeState) -> Self {
-        SimDisk { state: DiskState::new(current) }
+    fn new(current: DiskRuntimeState) -> Self {
+        SimDisk { state: DiskStates::new(current) }
     }
 
     fn request_transition(
         &mut self,
-        target: &ApiDiskStateRequested,
-    ) -> Result<Option<DiskAction>, ApiError> {
+        target: &DiskStateRequested,
+    ) -> Result<Option<DiskAction>, Error> {
         self.state.request_transition(target)
     }
 
@@ -51,14 +51,12 @@ impl Simulatable for SimDisk {
             // Instead, we make transitions to new states based entirely on the
             // value of "desired".
             let observed = match desired {
-                ApiDiskStateRequested::Attached(uuid) => {
+                DiskStateRequested::Attached(uuid) => {
                     PropolisDiskState::Attached(*uuid)
                 }
-                ApiDiskStateRequested::Detached => PropolisDiskState::Detached,
-                ApiDiskStateRequested::Destroyed => {
-                    PropolisDiskState::Destroyed
-                }
-                ApiDiskStateRequested::Faulted => PropolisDiskState::Faulted,
+                DiskStateRequested::Detached => PropolisDiskState::Detached,
+                DiskStateRequested::Destroyed => PropolisDiskState::Destroyed,
+                DiskStateRequested::Faulted => PropolisDiskState::Faulted,
             };
             self.state.observe_transition(&observed)
         } else {
@@ -66,7 +64,7 @@ impl Simulatable for SimDisk {
         }
     }
 
-    fn generation(&self) -> ApiGeneration {
+    fn generation(&self) -> Generation {
         self.state.current().gen
     }
 
@@ -79,14 +77,14 @@ impl Simulatable for SimDisk {
     }
 
     fn ready_to_destroy(&self) -> bool {
-        ApiDiskState::Destroyed == self.current().disk_state
+        DiskState::Destroyed == self.current().disk_state
     }
 
     async fn notify(
         nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         nexus_client.notify_disk_updated(id, &current).await
     }
 }

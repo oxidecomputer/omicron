@@ -6,22 +6,22 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::ApiDiskCreateParams;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskState;
-use omicron_common::api::ApiIdentityMetadataCreateParams;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiProjectCreateParams;
+use omicron_common::api::DiskCreateParams;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::DiskState;
+use omicron_common::api::IdentityMetadataCreateParams;
+use omicron_common::api::InstanceCreateParams;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceState;
 use omicron_common::api::OximeterAssignment;
 use omicron_common::api::OximeterInfo;
 use omicron_common::api::ProducerEndpoint;
+use omicron_common::api::ProjectCreateParams;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;
 
-impl SqlSerialize for ApiIdentityMetadataCreateParams {
+impl SqlSerialize for IdentityMetadataCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         output.set("name", &self.name);
         output.set("description", &self.description);
@@ -29,13 +29,13 @@ impl SqlSerialize for ApiIdentityMetadataCreateParams {
     }
 }
 
-impl SqlSerialize for ApiProjectCreateParams {
+impl SqlSerialize for ProjectCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.identity.sql_serialize(output)
     }
 }
 
-impl SqlSerialize for ApiInstanceCreateParams {
+impl SqlSerialize for InstanceCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.identity.sql_serialize(output);
         output.set("ncpus", &self.ncpus);
@@ -44,13 +44,13 @@ impl SqlSerialize for ApiInstanceCreateParams {
     }
 }
 
-impl SqlSerialize for ApiInstanceState {
+impl SqlSerialize for InstanceState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         output.set("instance_state", &self.label());
     }
 }
 
-impl SqlSerialize for ApiInstanceRuntimeState {
+impl SqlSerialize for InstanceRuntimeState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.run_state.sql_serialize(output);
         output.set("active_server_id", &self.sled_uuid);
@@ -59,7 +59,7 @@ impl SqlSerialize for ApiInstanceRuntimeState {
     }
 }
 
-impl SqlSerialize for ApiDiskCreateParams {
+impl SqlSerialize for DiskCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.identity.sql_serialize(output);
         output.set("size_bytes", &self.size);
@@ -67,7 +67,7 @@ impl SqlSerialize for ApiDiskCreateParams {
     }
 }
 
-impl SqlSerialize for ApiDiskRuntimeState {
+impl SqlSerialize for DiskRuntimeState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.disk_state.sql_serialize(output);
         output.set("state_generation", &self.gen);
@@ -75,7 +75,7 @@ impl SqlSerialize for ApiDiskRuntimeState {
     }
 }
 
-impl SqlSerialize for ApiDiskState {
+impl SqlSerialize for DiskState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         let attach_id = &self.attached_instance_id().map(|id| *id);
         output.set("attach_instance_id", attach_id);

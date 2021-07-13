@@ -1,7 +1,7 @@
 //! API for interacting with Zones running Propolis.
 
 use ipnet::IpNet;
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -19,9 +19,9 @@ const ZLOGIN: &str = "/usr/sbin/zlogin";
 
 pub const ZONE_PREFIX: &str = "propolis_instance_";
 
-fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
+fn get_zone(name: &str) -> Result<Option<zone::Zone>, Error> {
     Ok(zone::Adm::list()
-        .map_err(|e| ApiError::InternalError {
+        .map_err(|e| Error::InternalError {
             message: format!("Cannot list zones: {}", e),
         })?
         .into_iter()
@@ -34,23 +34,23 @@ pub struct Zones {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
-    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), ApiError> {
+    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
         if let Some(zone) = get_zone(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
             if zone.state() == zone::State::Running {
                 zone::Adm::new(name).halt().map_err(|e| {
-                    ApiError::InternalError {
+                    Error::InternalError {
                         message: format!("Cannot halt zone {}: {}", name, e),
                     }
                 })?;
             }
             zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
-                ApiError::InternalError {
+                Error::InternalError {
                     message: format!("Cannot uninstall {}: {}", name, e),
                 }
             })?;
             zone::Config::new(name).delete(/* force= */ true).run().map_err(
-                |e| ApiError::InternalError {
+                |e| Error::InternalError {
                     message: format!("Cannot delete {}: {}", name, e),
                 },
             )?;
@@ -60,7 +60,7 @@ impl Zones {
 
     /// Creates a "base" zone for Propolis, from which other Propolis
     /// zones may quickly be cloned.
-    pub fn create_base(log: &Logger) -> Result<(), ApiError> {
+    pub fn create_base(log: &Logger) -> Result<(), Error> {
         let name = BASE_ZONE;
 
         info!(log, "Querying for prescence of zone: {}", name);
@@ -101,14 +101,14 @@ impl Zones {
             options: vec!["ro".to_string()],
             ..Default::default()
         });
-        cfg.run().map_err(|e| ApiError::InternalError {
+        cfg.run().map_err(|e| Error::InternalError {
             message: format!("Failed to create base zone: {}", e),
         })?;
 
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
         zone::Adm::new(name).install(&[]).map_err(|e| {
-            ApiError::InternalError {
+            Error::InternalError {
                 message: format!("Failed to install base zone: {}", e),
             }
         })?;
@@ -123,7 +123,7 @@ impl Zones {
         log: &Logger,
         name: &str,
         vnic: &str,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         info!(log, "Creating child zone: {}", name);
         let mut cfg = zone::Config::create(
             name,
@@ -148,7 +148,7 @@ impl Zones {
         cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });
-        cfg.run().map_err(|e| ApiError::InternalError {
+        cfg.run().map_err(|e| Error::InternalError {
             message: format!("Failed to create child zone: {}", e),
         })?;
 
@@ -156,9 +156,9 @@ impl Zones {
     }
 
     /// Clones a zone (named `name`) from the base Propolis zone.
-    pub fn clone_from_base(name: &str) -> Result<(), ApiError> {
+    pub fn clone_from_base(name: &str) -> Result<(), Error> {
         zone::Adm::new(name).clone(BASE_ZONE).map_err(|e| {
-            ApiError::InternalError {
+            Error::InternalError {
                 message: format!("Failed to clone zone: {}", e),
             }
         })?;
@@ -166,17 +166,17 @@ impl Zones {
     }
 
     /// Boots a zone (named `name`).
-    pub fn boot(name: &str) -> Result<(), ApiError> {
-        zone::Adm::new(name).boot().map_err(|e| ApiError::InternalError {
+    pub fn boot(name: &str) -> Result<(), Error> {
+        zone::Adm::new(name).boot().map_err(|e| Error::InternalError {
             message: format!("Failed to boot zone: {}", e),
         })?;
         Ok(())
     }
 
     /// Returns all zones that may be managed by the Sled Agent.
-    pub fn get() -> Result<Vec<zone::Zone>, ApiError> {
+    pub fn get() -> Result<Vec<zone::Zone>, Error> {
         Ok(zone::Adm::list()
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!("Failed to list zones: {}", e),
             })?
             .into_iter()
@@ -185,10 +185,7 @@ impl Zones {
     }
 
     /// Creates an IP address within a Zone.
-    pub fn create_address(
-        zone: &str,
-        interface: &str,
-    ) -> Result<IpNet, ApiError> {
+    pub fn create_address(zone: &str, interface: &str) -> Result<IpNet, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
@@ -215,12 +212,12 @@ impl Zones {
         ]);
         let output = execute(cmd)?;
         String::from_utf8(output.stdout)
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!("Cannot parse ipadm output as UTF-8: {}", e),
             })?
             .lines()
             .find_map(|s| s.parse().ok())
-            .ok_or(ApiError::InternalError {
+            .ok_or(Error::InternalError {
                 message: format!(
                     "Cannot find a valid IP address on {}",
                     interface
@@ -233,7 +230,7 @@ impl Zones {
         zone: &str,
         id: &Uuid,
         addr: &SocketAddr,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         // Import the service manifest for Propolis.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[

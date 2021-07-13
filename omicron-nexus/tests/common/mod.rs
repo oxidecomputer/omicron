@@ -7,7 +7,7 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use omicron_common::api::ApiIdentityMetadata;
+use omicron_common::api::IdentityMetadata;
 use omicron_common::api::ProducerEndpoint;
 use omicron_common::dev;
 use slog::o;
@@ -263,7 +263,7 @@ pub async fn start_producer_server(
 }
 
 /** Returns whether the two identity metadata objects are identical. */
-pub fn identity_eq(ident1: &ApiIdentityMetadata, ident2: &ApiIdentityMetadata) {
+pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.id, ident2.id);
     assert_eq!(ident1.name, ident2.name);
     assert_eq!(ident1.description, ident2.description);

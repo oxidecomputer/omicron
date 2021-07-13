@@ -3,7 +3,7 @@
  * and extract values
  */
 
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::DbError;
 use std::convert::TryFrom;
@@ -54,20 +54,20 @@ pub async fn sql_query_always_one(
  * Like [`sql_query()`], but produces an error based on the row count:
  *
  * * the result of `mkzerror()` if there are no rows returned.  This is
- *   expected to be a suitable [`ApiError::ObjectNotFound`] error.
+ *   expected to be a suitable [`Error::ObjectNotFound`] error.
  * * a generic InternalError if more than one row is returned.  This is
  *   expected to be impossible for this query.  Otherwise, the caller should use
  *   [`sql_query()`].
  */
 /*
- * TODO-debugging can we include the SQL in the ApiError
+ * TODO-debugging can we include the SQL in the Error
  */
 pub async fn sql_query_maybe_one(
     client: &tokio_postgres::Client,
     sql: &str,
     params: &[&(dyn ToSql + Sync)],
-    mkzerror: impl Fn() -> ApiError,
-) -> Result<tokio_postgres::Row, ApiError> {
+    mkzerror: impl Fn() -> Error,
+) -> Result<tokio_postgres::Row, Error> {
     sql_query(client, sql, params).await.map_err(sql_error_generic).and_then(
         |mut rows| match rows.len() {
             1 => Ok(rows.pop().unwrap()),
@@ -100,18 +100,18 @@ pub async fn sql_execute(
  * Like [`sql_execute()`], but produces an error based on the row count:
  *
  * * the result of `mkzerror()` if there are no rows returned.  This is
- *   expected to be a suitable [`ApiError::ObjectNotFound`] error.
+ *   expected to be a suitable [`Error::ObjectNotFound`] error.
  * * a generic InternalError if more than one row is returned.  This is
  *   expected to be impossible for this query.  Otherwise, the caller should use
  *   [`sql_query()`].
  */
-/* TODO-debugging can we include the SQL in the ApiError */
+/* TODO-debugging can we include the SQL in the Error */
 pub async fn sql_execute_maybe_one(
     client: &tokio_postgres::Client,
     sql: &str,
     params: &[&(dyn ToSql + Sync)],
-    mkzerror: impl Fn() -> ApiError,
-) -> Result<(), ApiError> {
+    mkzerror: impl Fn() -> Error,
+) -> Result<(), Error> {
     sql_execute(client, sql, params).await.map_err(sql_error_generic).and_then(
         |nrows| match nrows {
             1 => Ok(()),

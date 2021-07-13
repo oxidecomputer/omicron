@@ -2,8 +2,8 @@
  * Functions for iterating pages from a collection
  */
 
-use crate::api::ApiError;
 use crate::api::DataPageParams;
+use crate::api::Error;
 use crate::api::ListResult;
 use crate::api::PaginationOrder::Ascending;
 use crate::api::PaginationOrder::Descending;
@@ -32,7 +32,7 @@ where
      */
     let list = collection_page_as_iter(search_tree, pagparams)
         .map(|(_, v)| Ok(Arc::clone(v)))
-        .collect::<Vec<Result<Arc<ValueType>, ApiError>>>();
+        .collect::<Vec<Result<Arc<ValueType>, Error>>>();
     Ok(futures::stream::iter(list).boxed())
 }
 

@@ -2,7 +2,7 @@
 
 use cfg_if::cfg_if;
 
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::dev::poll;
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ mod inner {
     pub async fn wait_for_service<'a, 'b>(
         zone: Option<&'a str>,
         fmri: &'b str,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), Error> {
         let name = smf::PropertyName::new("restarter", "state").unwrap();
 
         poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
@@ -50,7 +50,7 @@ mod inner {
             &Duration::from_secs(20),
         )
         .await
-        .map_err(|e| ApiError::InternalError {
+        .map_err(|e| Error::InternalError {
             message: format!("Failed to wait for service: {}", e),
         })
     }

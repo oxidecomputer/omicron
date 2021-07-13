@@ -2,11 +2,11 @@
  * Simulated sled agent implementation
  */
 
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiDiskStateRequested;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::DiskStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
@@ -76,9 +76,9 @@ impl SledAgent {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         instance_id: Uuid,
-        initial_runtime: ApiInstanceRuntimeState,
-        target: ApiInstanceRuntimeStateRequested,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        initial_runtime: InstanceRuntimeState,
+        target: InstanceRuntimeStateRequested,
+    ) -> Result<InstanceRuntimeState, Error> {
         Ok(self
             .instances
             .sim_ensure(&instance_id, initial_runtime, target)
@@ -93,9 +93,9 @@ impl SledAgent {
     pub async fn disk_ensure(
         self: &Arc<Self>,
         disk_id: Uuid,
-        initial_state: ApiDiskRuntimeState,
-        target: ApiDiskStateRequested,
-    ) -> Result<ApiDiskRuntimeState, ApiError> {
+        initial_state: DiskRuntimeState,
+        target: DiskStateRequested,
+    ) -> Result<DiskRuntimeState, Error> {
         Ok(self.disks.sim_ensure(&disk_id, initial_state, target).await?)
     }
 

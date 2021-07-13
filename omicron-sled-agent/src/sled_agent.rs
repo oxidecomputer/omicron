@@ -1,9 +1,9 @@
 //! Sled agent implementation
 
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::api::{
-    ApiDiskRuntimeState, ApiDiskStateRequested, ApiInstanceRuntimeState,
-    ApiInstanceRuntimeStateRequested,
+    DiskRuntimeState, DiskStateRequested, InstanceRuntimeState,
+    InstanceRuntimeStateRequested,
 };
 use slog::Logger;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ impl SledAgent {
         id: &Uuid,
         log: Logger,
         nexus_client: Arc<NexusClient>,
-    ) -> Result<SledAgent, ApiError> {
+    ) -> Result<SledAgent, Error> {
         info!(&log, "created sled agent"; "id" => ?id);
 
         Ok(SledAgent {
@@ -41,9 +41,9 @@ impl SledAgent {
     pub async fn instance_ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: ApiInstanceRuntimeState,
-        target: ApiInstanceRuntimeStateRequested,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        initial_runtime: InstanceRuntimeState,
+        target: InstanceRuntimeStateRequested,
+    ) -> Result<InstanceRuntimeState, Error> {
         self.instances.ensure(instance_id, initial_runtime, target).await
     }
 
@@ -54,9 +54,9 @@ impl SledAgent {
     pub async fn disk_ensure(
         &self,
         _disk_id: Uuid,
-        _initial_state: ApiDiskRuntimeState,
-        _target: ApiDiskStateRequested,
-    ) -> Result<ApiDiskRuntimeState, ApiError> {
+        _initial_state: DiskRuntimeState,
+        _target: DiskStateRequested,
+    ) -> Result<DiskRuntimeState, Error> {
         todo!("Disk attachment not yet implemented");
     }
 }

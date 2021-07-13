@@ -5,9 +5,9 @@
  * agnostic to the control plane.  There is a bit of leakage in a few places.
  */
 
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiResourceType;
 use omicron_common::api::DataPageParams;
+use omicron_common::api::Error;
+use omicron_common::api::ResourceType;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;
@@ -241,7 +241,7 @@ pub trait SqlSerialize {
 pub trait Table {
     /** Struct that represents rows of this table when the full row is needed */
     /* TODO-cleanup what does the 'static actually mean here? */
-    type ModelType: for<'a> TryFrom<&'a tokio_postgres::Row, Error = ApiError>
+    type ModelType: for<'a> TryFrom<&'a tokio_postgres::Row, Error = Error>
         + Send
         + 'static;
     /** Name of the table */
@@ -264,7 +264,7 @@ pub trait Table {
 /**
  * Describes a [`Table`] whose rows represent HTTP resources in the public API
  *
- * Among other things, lookups from these tables produces suitable `ApiError`s
+ * Among other things, lookups from these tables produces suitable `Error`s
  * when an object is not found.
  */
 pub trait ResourceTable: Table {
@@ -272,8 +272,8 @@ pub trait ResourceTable: Table {
      * TODO-cleanup can we remove the RESOURCE_TYPE here?  And if so, can we
      * make this totally agnostic to the control plane?
      */
-    /** [`ApiResourceType`] that corresponds to rows of this table */
-    const RESOURCE_TYPE: ApiResourceType;
+    /** [`ResourceType`] that corresponds to rows of this table */
+    const RESOURCE_TYPE: ResourceType;
 }
 
 /**
@@ -355,7 +355,7 @@ pub trait LookupKey<'a, T: Table> {
     fn where_select_error(
         scope_key: Self::ScopeKey,
         item_key: &Self::ItemKey,
-    ) -> ApiError;
+    ) -> Error;
 
     /*
      * The rest of this trait provides common implementation for all impls

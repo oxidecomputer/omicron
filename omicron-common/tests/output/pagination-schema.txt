@@ -9,13 +9,13 @@ schema for pagination parameters: scan parameters, scan by name only
       "default": "name-ascending",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiNameSortMode"
+          "$ref": "#/definitions/NameSortMode"
         }
       ]
     }
   },
   "definitions": {
-    "ApiNameSortMode": {
+    "NameSortMode": {
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
       "type": "string",
       "enum": [
@@ -61,13 +61,13 @@ schema for pagination parameters: scan parameters, scan by name or id
       "default": "name-ascending",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiNameOrIdSortMode"
+          "$ref": "#/definitions/NameOrIdSortMode"
         }
       ]
     }
   },
   "definitions": {
-    "ApiNameOrIdSortMode": {
+    "NameOrIdSortMode": {
       "description": "Supported set of sort modes for scanning by name or id",
       "type": "string",
       "enum": [
@@ -81,7 +81,7 @@ schema for pagination parameters: scan parameters, scan by name or id
 schema for pagination parameters: page selector, scan by name only
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ApiPageSelector_for_ApiScanByName_and_ApiName",
+  "title": "ApiPageSelector_for_ApiScanByName_and_Name",
   "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
   "type": "object",
   "required": [
@@ -92,7 +92,7 @@ schema for pagination parameters: page selector, scan by name only
       "description": "value of the marker field last seen by the client",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiName"
+          "$ref": "#/definitions/Name"
         }
       ]
     },
@@ -100,20 +100,20 @@ schema for pagination parameters: page selector, scan by name only
       "default": "name-ascending",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiNameSortMode"
+          "$ref": "#/definitions/NameSortMode"
         }
       ]
     }
   },
   "definitions": {
-    "ApiName": {
+    "Name": {
       "title": "A name used in the API",
       "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
       "type": "string",
       "maxLength": 63,
       "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])"
     },
-    "ApiNameSortMode": {
+    "NameSortMode": {
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
       "type": "string",
       "enum": [
@@ -159,7 +159,7 @@ schema for pagination parameters: page selector, scan by id only
 schema for pagination parameters: page selector, scan by name or id
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ApiPageSelector_for_ApiScanByNameOrId_and_ApiNameOrIdMarker",
+  "title": "ApiPageSelector_for_ApiScanByNameOrId_and_NameOrIdMarker",
   "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
   "type": "object",
   "required": [
@@ -170,7 +170,7 @@ schema for pagination parameters: page selector, scan by name or id
       "description": "value of the marker field last seen by the client",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiNameOrIdMarker"
+          "$ref": "#/definitions/NameOrIdMarker"
         }
       ]
     },
@@ -178,20 +178,20 @@ schema for pagination parameters: page selector, scan by name or id
       "default": "name-ascending",
       "allOf": [
         {
-          "$ref": "#/definitions/ApiNameOrIdSortMode"
+          "$ref": "#/definitions/NameOrIdSortMode"
         }
       ]
     }
   },
   "definitions": {
-    "ApiName": {
+    "Name": {
       "title": "A name used in the API",
       "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
       "type": "string",
       "maxLength": 63,
       "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])"
     },
-    "ApiNameOrIdMarker": {
+    "NameOrIdMarker": {
       "anyOf": [
         {
           "type": "object",
@@ -213,14 +213,14 @@ schema for pagination parameters: page selector, scan by name or id
           ],
           "properties": {
             "name": {
-              "$ref": "#/definitions/ApiName"
+              "$ref": "#/definitions/Name"
             }
           },
           "additionalProperties": false
         }
       ]
     },
-    "ApiNameOrIdSortMode": {
+    "NameOrIdSortMode": {
       "description": "Supported set of sort modes for scanning by name or id",
       "type": "string",
       "enum": [

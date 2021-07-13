@@ -5,10 +5,10 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
-use crate::api::ApiError;
+use crate::api::Error;
 use anyhow::anyhow;
 use anyhow::Context;
-use api_identity::ApiObjectIdentity;
+use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 pub use dropshot::PaginationOrder;
@@ -32,35 +32,35 @@ use uuid::Uuid;
 /*
  * The type aliases below exist primarily to ensure consistency among return
  * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
- * type argument `T` generally implements `ApiObject`.
+ * type argument `T` generally implements `Object`.
  */
 
 /** Result of a create operation for the specified type */
-pub type CreateResult<T> = Result<T, ApiError>;
+pub type CreateResult<T> = Result<T, Error>;
 /** Result of a delete operation for the specified type */
-pub type DeleteResult = Result<(), ApiError>;
+pub type DeleteResult = Result<(), Error>;
 /** Result of a list operation that returns an ObjectStream */
-pub type ListResult<T> = Result<ObjectStream<T>, ApiError>;
+pub type ListResult<T> = Result<ObjectStream<T>, Error>;
 /** Result of a lookup operation for the specified type */
-pub type LookupResult<T> = Result<T, ApiError>;
+pub type LookupResult<T> = Result<T, Error>;
 /** Result of an update operation for the specified type */
-pub type UpdateResult<T> = Result<T, ApiError>;
+pub type UpdateResult<T> = Result<T, Error>;
 
 /**
  * A stream of Results, each potentially representing an object in the API
  */
-pub type ObjectStream<T> = BoxStream<'static, Result<T, ApiError>>;
+pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
 
 /*
  * General-purpose types used for client request parameters and return values.
  */
 
 /**
- * Describes an `ApiObject` that has its own identity metadata.  This is
+ * Describes an `Object` that has its own identity metadata.  This is
  * currently used only for pagination.
  */
-pub trait ApiObjectIdentity {
-    fn identity(&self) -> &ApiIdentityMetadata;
+pub trait ObjectIdentity {
+    fn identity(&self) -> &IdentityMetadata;
 }
 
 /**
@@ -75,7 +75,7 @@ pub trait ApiObjectIdentity {
  * APIs.
  *
  * `NameType` is the type of the field used to sort the returned values and it's
- * usually `ApiName`.
+ * usually `Name`.
  */
 #[derive(Debug)]
 pub struct DataPageParams<'a, NameType> {
@@ -102,22 +102,22 @@ pub struct DataPageParams<'a, NameType> {
  * A name used in the API
  *
  * Names are generally user-provided unique identifiers, highly constrained as
- * described in RFD 4.  An `ApiName` can only be constructed with a string
+ * described in RFD 4.  An `Name` can only be constructed with a string
  * that's valid as a name.
  */
 #[derive(
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
-pub struct ApiName(String);
+pub struct Name(String);
 
 /**
- * `ApiName::try_from(String)` is the primary method for constructing an ApiName
+ * `Name::try_from(String)` is the primary method for constructing an Name
  * from an input string.  This validates the string according to our
  * requirements for a name.
  * TODO-cleanup why shouldn't callers use TryFrom<&str>?
  */
-impl TryFrom<String> for ApiName {
+impl TryFrom<String> for Name {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.len() > 63 {
@@ -152,31 +152,31 @@ impl TryFrom<String> for ApiName {
             return Err(String::from("name cannot end with \"-\""));
         }
 
-        Ok(ApiName(value))
+        Ok(Name(value))
     }
 }
 
 /**
  * Convenience parse function for literal strings, primarily for the test suite.
  */
-impl TryFrom<&str> for ApiName {
+impl TryFrom<&str> for Name {
     type Error = String;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ApiName::try_from(String::from(value))
+        Name::try_from(String::from(value))
     }
 }
 
-impl<'a> From<&'a ApiName> for &'a str {
-    fn from(n: &'a ApiName) -> Self {
+impl<'a> From<&'a Name> for &'a str {
+    fn from(n: &'a Name) -> Self {
         n.as_str()
     }
 }
 
 /**
- * `ApiName` instances are comparable like Strings, primarily so that they can
+ * `Name` instances are comparable like Strings, primarily so that they can
  * be used as keys in trees.
  */
-impl<S> PartialEq<S> for ApiName
+impl<S> PartialEq<S> for Name
 where
     S: AsRef<str>,
 {
@@ -186,15 +186,15 @@ where
 }
 
 /**
- * Custom JsonSchema implementation to encode the constraints on ApiName
+ * Custom JsonSchema implementation to encode the constraints on Name
  */
 /*
  * TODO: 1. make this part of schemars w/ rename and maxlen annotations
  * TODO: 2. integrate the regex with `try_from`
  */
-impl JsonSchema for ApiName {
+impl JsonSchema for Name {
     fn schema_name() -> String {
-        "ApiName".to_string()
+        "Name".to_string()
     }
     fn json_schema(
         _gen: &mut schemars::gen::SchemaGenerator,
@@ -236,14 +236,14 @@ impl JsonSchema for ApiName {
     }
 }
 
-impl ApiName {
+impl Name {
     /**
-     * Parse an `ApiName`.  This is a convenience wrapper around
-     * `ApiName::try_from(String)` that marshals any error into an appropriate
-     * `ApiError`.
+     * Parse an `Name`.  This is a convenience wrapper around
+     * `Name::try_from(String)` that marshals any error into an appropriate
+     * `Error`.
      */
-    pub fn from_param(value: String, label: &str) -> Result<ApiName, ApiError> {
-        ApiName::try_from(value).map_err(|e| ApiError::InvalidValue {
+    pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
+        Name::try_from(value).map_err(|e| Error::InvalidValue {
             label: String::from(label),
             message: e,
         })
@@ -277,19 +277,18 @@ impl ApiName {
  * serialize the value.
  */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiByteCount(u64);
-impl ApiByteCount {
-    pub fn from_kibibytes_u32(kibibytes: u32) -> ApiByteCount {
-        ApiByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
+pub struct ByteCount(u64);
+impl ByteCount {
+    pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
+        ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
     }
 
-    pub fn from_mebibytes_u32(mebibytes: u32) -> ApiByteCount {
-        ApiByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
+    pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
+        ByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
     }
 
-    pub fn from_gibibytes_u32(gibibytes: u32) -> ApiByteCount {
-        ApiByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes))
-            .unwrap()
+    pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
+        ByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes)).unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
@@ -317,36 +316,36 @@ pub enum ByteCountRangeError {
     #[error("value is too large for a byte count")]
     TooLarge,
 }
-impl TryFrom<u64> for ApiByteCount {
+impl TryFrom<u64> for ByteCount {
     type Error = ByteCountRangeError;
 
     fn try_from(bytes: u64) -> Result<Self, Self::Error> {
         if i64::try_from(bytes).is_err() {
             Err(ByteCountRangeError::TooLarge)
         } else {
-            Ok(ApiByteCount(bytes))
+            Ok(ByteCount(bytes))
         }
     }
 }
 
-impl TryFrom<i64> for ApiByteCount {
+impl TryFrom<i64> for ByteCount {
     type Error = ByteCountRangeError;
 
     fn try_from(bytes: i64) -> Result<Self, Self::Error> {
-        Ok(ApiByteCount(
+        Ok(ByteCount(
             u64::try_from(bytes).map_err(|_| ByteCountRangeError::TooSmall)?,
         ))
     }
 }
 
-impl From<u32> for ApiByteCount {
+impl From<u32> for ByteCount {
     fn from(value: u32) -> Self {
-        ApiByteCount(u64::from(value))
+        ByteCount(u64::from(value))
     }
 }
 
-impl From<&ApiByteCount> for i64 {
-    fn from(b: &ApiByteCount) -> Self {
+impl From<&ByteCount> for i64 {
+    fn from(b: &ByteCount) -> Self {
         /* We have already validated that this value is in range. */
         i64::try_from(b.0).unwrap()
     }
@@ -372,13 +371,13 @@ impl From<&ApiByteCount> for i64 {
     PartialOrd,
     Serialize,
 )]
-pub struct ApiGeneration(u64);
-impl ApiGeneration {
-    pub fn new() -> ApiGeneration {
-        ApiGeneration(1)
+pub struct Generation(u64);
+impl Generation {
+    pub fn new() -> Generation {
+        Generation(1)
     }
 
-    pub fn next(&self) -> ApiGeneration {
+    pub fn next(&self) -> Generation {
         /*
          * It should technically be an operational error if this wraps or even
          * exceeds the value allowed by an i64.  But it seems unlikely enough to
@@ -386,18 +385,18 @@ impl ApiGeneration {
          */
         let next_gen = self.0 + 1;
         assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
-        ApiGeneration(next_gen)
+        Generation(next_gen)
     }
 }
 
-impl Display for ApiGeneration {
+impl Display for Generation {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         f.write_str(&self.0.to_string())
     }
 }
 
-impl From<&ApiGeneration> for i64 {
-    fn from(g: &ApiGeneration) -> Self {
+impl From<&Generation> for i64 {
+    fn from(g: &Generation) -> Self {
         /* We have already validated that the value is within range. */
         /*
          * TODO-robustness We need to ensure that we don't deserialize a value
@@ -407,11 +406,11 @@ impl From<&ApiGeneration> for i64 {
     }
 }
 
-impl TryFrom<i64> for ApiGeneration {
+impl TryFrom<i64> for Generation {
     type Error = anyhow::Error;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Ok(ApiGeneration(
+        Ok(Generation(
             u64::try_from(value)
                 .map_err(|_| anyhow!("generation number too large"))?,
         ))
@@ -426,7 +425,7 @@ impl TryFrom<i64> for ApiGeneration {
  * Identifies a type of API resource
  */
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub enum ApiResourceType {
+pub enum ResourceType {
     Project,
     Disk,
     DiskAttachment,
@@ -436,68 +435,68 @@ pub enum ApiResourceType {
     SagaDbg,
 }
 
-impl Display for ApiResourceType {
+impl Display for ResourceType {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(
             f,
             "{}",
             match self {
-                ApiResourceType::Project => "project",
-                ApiResourceType::Disk => "disk",
-                ApiResourceType::DiskAttachment => "disk attachment",
-                ApiResourceType::Instance => "instance",
-                ApiResourceType::Rack => "rack",
-                ApiResourceType::Sled => "sled",
-                ApiResourceType::SagaDbg => "saga_dbg",
+                ResourceType::Project => "project",
+                ResourceType::Disk => "disk",
+                ResourceType::DiskAttachment => "disk attachment",
+                ResourceType::Instance => "instance",
+                ResourceType::Rack => "rack",
+                ResourceType::Sled => "sled",
+                ResourceType::SagaDbg => "saga_dbg",
             }
         )
     }
 }
 
 /**
- * ApiObject represents a resource in the API and is implemented by concrete
+ * Object represents a resource in the API and is implemented by concrete
  * types representing specific API resources.
  *
  * Consider a Project, which is about as simple a resource as we have.  The
- * `ApiProject` struct represents a project as understood by the API.  It
+ * `Project` struct represents a project as understood by the API.  It
  * contains all the fields necessary to implement a Project.  It has several
  * related types:
  *
- * * `ApiProjectView` is what gets emitted by the API when a user asks for a
+ * * `ProjectView` is what gets emitted by the API when a user asks for a
  *   Project
- * * `ApiProjectCreateParams` is what must be provided to the API when a user
+ * * `ProjectCreateParams` is what must be provided to the API when a user
  *   wants to create a new project
- * * `ApiProjectUpdateParams` is what must be provided to the API when a user
+ * * `ProjectUpdateParams` is what must be provided to the API when a user
  *   wants to update a project.
  *
  * We also have Instances, Disks, Racks, Sleds, and many related types, and we
  * expect to add many more types like images, networking abstractions,
  * organizations, teams, users, system components, and the like.  See RFD 4 for
  * details.  Some resources may not have analogs for all these types because
- * they're immutable (e.g., the `ApiRack` resource doesn't define a
+ * they're immutable (e.g., the `Rack` resource doesn't define a
  * "CreateParams" type).
  *
- * The only thing guaranteed by the `ApiObject` trait is that the type can be
+ * The only thing guaranteed by the `Object` trait is that the type can be
  * converted to a View, which is something that can be serialized.
  */
 /*
  * TODO-coverage: each type could have unit tests for various invalid input
  * types?
  */
-pub trait ApiObject {
+pub trait Object {
     type View: Serialize + Clone + Debug;
     fn to_view(&self) -> Self::View;
 }
 
 /**
- * Given an `ObjectStream<ApiObject>` (for some specific `ApiObject` type),
+ * Given an `ObjectStream<Object>` (for some specific `Object` type),
  * return a vector of the objects' views.  Any failures are ignored.
  */
 /*
  * TODO-hardening: Consider how to better deal with these failures.  We should
  * probably at least log something.
  */
-pub async fn to_view_list<T: ApiObject>(
+pub async fn to_view_list<T: Object>(
     object_stream: ObjectStream<T>,
 ) -> Vec<T::View> {
     object_stream
@@ -516,11 +515,11 @@ pub async fn to_view_list<T: ApiObject>(
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiIdentityMetadata {
+pub struct IdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
     /** unique, mutable, user-controlled identifier for each resource */
-    pub name: ApiName,
+    pub name: Name,
     /** human-readable free-form text about a resource */
     pub description: String,
     /** timestamp when this resource was created */
@@ -534,8 +533,8 @@ pub struct ApiIdentityMetadata {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiIdentityMetadataCreateParams {
-    pub name: ApiName,
+pub struct IdentityMetadataCreateParams {
+    pub name: Name,
     pub description: String,
 }
 
@@ -544,8 +543,8 @@ pub struct ApiIdentityMetadataCreateParams {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiIdentityMetadataUpdateParams {
-    pub name: Option<ApiName>,
+pub struct IdentityMetadataUpdateParams {
+    pub name: Option<Name>,
     pub description: Option<String>,
 }
 
@@ -560,52 +559,50 @@ pub struct ApiIdentityMetadataUpdateParams {
 /**
  * A Project in the external API
  */
-pub struct ApiProject {
+pub struct Project {
     /** common identifying metadata */
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
 }
 
-impl ApiObject for ApiProject {
-    type View = ApiProjectView;
-    fn to_view(&self) -> ApiProjectView {
-        ApiProjectView { identity: self.identity.clone() }
+impl Object for Project {
+    type View = ProjectView;
+    fn to_view(&self) -> ProjectView {
+        ProjectView { identity: self.identity.clone() }
     }
 }
 
 /**
- * Client view of an [`ApiProject`]
+ * Client view of an [`Project`]
  */
-#[derive(
-    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiProjectView {
+pub struct ProjectView {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
      * intent in RFD 4?
      */
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
 }
 
 /**
- * Create-time parameters for an [`ApiProject`]
+ * Create-time parameters for an [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiProjectCreateParams {
+pub struct ProjectCreateParams {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadataCreateParams,
+    pub identity: IdentityMetadataCreateParams,
 }
 
 /**
- * Updateable properties of an [`ApiProject`]
+ * Updateable properties of an [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiProjectUpdateParams {
+pub struct ProjectUpdateParams {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /*
@@ -631,7 +628,7 @@ pub struct ApiProjectUpdateParams {
     JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum ApiInstanceState {
+pub enum InstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
     Running,
@@ -647,50 +644,50 @@ pub enum ApiInstanceState {
     Destroyed,
 }
 
-impl Display for ApiInstanceState {
+impl Display for InstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
     }
 }
 
 /*
- * TODO-cleanup why is this error type different from the one for ApiName?  The
- * reason is probably that ApiName can be provided by the user, so we want a
- * good validation error.  ApiInstanceState cannot.  Still, is there a way to
+ * TODO-cleanup why is this error type different from the one for Name?  The
+ * reason is probably that Name can be provided by the user, so we want a
+ * good validation error.  InstanceState cannot.  Still, is there a way to
  * unify these?
  */
-impl TryFrom<&str> for ApiInstanceState {
+impl TryFrom<&str> for InstanceState {
     type Error = String;
 
     fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
-            "creating" => ApiInstanceState::Creating,
-            "starting" => ApiInstanceState::Starting,
-            "running" => ApiInstanceState::Running,
-            "stopping" => ApiInstanceState::Stopping,
-            "stopped" => ApiInstanceState::Stopped,
-            "rebooting" => ApiInstanceState::Rebooting,
-            "repairing" => ApiInstanceState::Repairing,
-            "failed" => ApiInstanceState::Failed,
-            "destroyed" => ApiInstanceState::Destroyed,
+            "creating" => InstanceState::Creating,
+            "starting" => InstanceState::Starting,
+            "running" => InstanceState::Running,
+            "stopping" => InstanceState::Stopping,
+            "stopped" => InstanceState::Stopped,
+            "rebooting" => InstanceState::Rebooting,
+            "repairing" => InstanceState::Repairing,
+            "failed" => InstanceState::Failed,
+            "destroyed" => InstanceState::Destroyed,
             _ => return Err(format!("Unexpected variant {}", variant)),
         };
         Ok(r)
     }
 }
 
-impl ApiInstanceState {
+impl InstanceState {
     pub fn label(&self) -> &'static str {
         match self {
-            ApiInstanceState::Creating => "creating",
-            ApiInstanceState::Starting => "starting",
-            ApiInstanceState::Running => "running",
-            ApiInstanceState::Stopping => "stopping",
-            ApiInstanceState::Stopped => "stopped",
-            ApiInstanceState::Rebooting => "rebooting",
-            ApiInstanceState::Repairing => "repairing",
-            ApiInstanceState::Failed => "failed",
-            ApiInstanceState::Destroyed => "destroyed",
+            InstanceState::Creating => "creating",
+            InstanceState::Starting => "starting",
+            InstanceState::Running => "running",
+            InstanceState::Stopping => "stopping",
+            InstanceState::Stopped => "stopped",
+            InstanceState::Rebooting => "rebooting",
+            InstanceState::Repairing => "repairing",
+            InstanceState::Failed => "failed",
+            InstanceState::Destroyed => "destroyed",
         }
     }
 
@@ -701,16 +698,16 @@ impl ApiInstanceState {
      */
     pub fn is_stopped(&self) -> bool {
         match self {
-            ApiInstanceState::Starting => false,
-            ApiInstanceState::Running => false,
-            ApiInstanceState::Stopping => false,
-            ApiInstanceState::Rebooting => false,
+            InstanceState::Starting => false,
+            InstanceState::Running => false,
+            InstanceState::Stopping => false,
+            InstanceState::Rebooting => false,
 
-            ApiInstanceState::Creating => true,
-            ApiInstanceState::Stopped => true,
-            ApiInstanceState::Repairing => true,
-            ApiInstanceState::Failed => true,
-            ApiInstanceState::Destroyed => true,
+            InstanceState::Creating => true,
+            InstanceState::Stopped => true,
+            InstanceState::Repairing => true,
+            InstanceState::Failed => true,
+            InstanceState::Destroyed => true,
         }
     }
 }
@@ -718,7 +715,7 @@ impl ApiInstanceState {
 /**
  * Requestable running state of an Instance.
  *
- * A subset of [`ApiInstanceState`].
+ * A subset of [`InstanceState`].
  */
 #[derive(
     Copy,
@@ -733,7 +730,7 @@ impl ApiInstanceState {
     JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum ApiInstanceStateRequested {
+pub enum InstanceStateRequested {
     Running,
     Stopped,
     // Issues a reset command to the instance, such that it should
@@ -742,19 +739,19 @@ pub enum ApiInstanceStateRequested {
     Destroyed,
 }
 
-impl Display for ApiInstanceStateRequested {
+impl Display for InstanceStateRequested {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
     }
 }
 
-impl ApiInstanceStateRequested {
+impl InstanceStateRequested {
     fn label(&self) -> &str {
         match self {
-            ApiInstanceStateRequested::Running => "running",
-            ApiInstanceStateRequested::Stopped => "stopped",
-            ApiInstanceStateRequested::Reboot => "reboot",
-            ApiInstanceStateRequested::Destroyed => "destroyed",
+            InstanceStateRequested::Running => "running",
+            InstanceStateRequested::Stopped => "stopped",
+            InstanceStateRequested::Reboot => "reboot",
+            InstanceStateRequested::Destroyed => "destroyed",
         }
     }
 
@@ -763,30 +760,28 @@ impl ApiInstanceStateRequested {
      */
     pub fn is_stopped(&self) -> bool {
         match self {
-            ApiInstanceStateRequested::Running => false,
-            ApiInstanceStateRequested::Stopped => true,
-            ApiInstanceStateRequested::Reboot => false,
-            ApiInstanceStateRequested::Destroyed => true,
+            InstanceStateRequested::Running => false,
+            InstanceStateRequested::Stopped => true,
+            InstanceStateRequested::Reboot => false,
+            InstanceStateRequested::Destroyed => true,
         }
     }
 }
 
 /** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiInstanceCpuCount(pub u16);
+pub struct InstanceCpuCount(pub u16);
 
-impl TryFrom<i64> for ApiInstanceCpuCount {
+impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Ok(ApiInstanceCpuCount(
-            u16::try_from(value).context("parsing CPU count")?,
-        ))
+        Ok(InstanceCpuCount(u16::try_from(value).context("parsing CPU count")?))
     }
 }
 
-impl From<&ApiInstanceCpuCount> for i64 {
-    fn from(c: &ApiInstanceCpuCount) -> Self {
+impl From<&InstanceCpuCount> for i64 {
+    fn from(c: &InstanceCpuCount) -> Self {
         i64::from(c.0)
     }
 }
@@ -795,29 +790,29 @@ impl From<&ApiInstanceCpuCount> for i64 {
  * An Instance (VM) in the external API
  */
 #[derive(Clone, Debug)]
-pub struct ApiInstance {
+pub struct Instance {
     /** common identifying metadata */
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
 
     /** id for the project containing this Instance */
     pub project_id: Uuid,
 
     /** number of CPUs allocated for this Instance */
-    pub ncpus: ApiInstanceCpuCount,
+    pub ncpus: InstanceCpuCount,
     /** memory allocated for this Instance */
-    pub memory: ApiByteCount,
+    pub memory: ByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
     /** state owned by the data plane */
-    pub runtime: ApiInstanceRuntimeState,
+    pub runtime: InstanceRuntimeState,
     /* TODO-completeness: add disks, network, tags, metrics */
 }
 
-impl ApiObject for ApiInstance {
-    type View = ApiInstanceView;
-    fn to_view(&self) -> ApiInstanceView {
-        ApiInstanceView {
+impl Object for Instance {
+    type View = InstanceView;
+    fn to_view(&self) -> InstanceView {
+        InstanceView {
             identity: self.identity.clone(),
             project_id: self.project_id,
             ncpus: self.ncpus,
@@ -835,13 +830,13 @@ impl ApiObject for ApiInstance {
  * This state is owned by the sled agent running that Instance.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiInstanceRuntimeState {
+pub struct InstanceRuntimeState {
     /** runtime state of the Instance */
-    pub run_state: ApiInstanceState,
+    pub run_state: InstanceState,
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
     /** generation number for this state */
-    pub gen: ApiGeneration,
+    pub gen: Generation,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
@@ -853,24 +848,24 @@ pub struct ApiInstanceRuntimeState {
  * to support changing properties like "ncpus" here.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiInstanceRuntimeStateRequested {
-    pub run_state: ApiInstanceStateRequested,
+pub struct InstanceRuntimeStateRequested {
+    pub run_state: InstanceStateRequested,
 }
 
 /**
- * Client view of an [`ApiInstanceRuntimeState`]
+ * Client view of an [`InstanceRuntimeState`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiInstanceRuntimeStateView {
-    pub run_state: ApiInstanceState,
+pub struct InstanceRuntimeStateView {
+    pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl ApiObject for ApiInstanceRuntimeState {
-    type View = ApiInstanceRuntimeStateView;
-    fn to_view(&self) -> ApiInstanceRuntimeStateView {
-        ApiInstanceRuntimeStateView {
+impl Object for InstanceRuntimeState {
+    type View = InstanceRuntimeStateView;
+    fn to_view(&self) -> InstanceRuntimeStateView {
+        InstanceRuntimeStateView {
             run_state: self.run_state,
             time_run_state_updated: self.time_updated,
         }
@@ -878,33 +873,31 @@ impl ApiObject for ApiInstanceRuntimeState {
 }
 
 /**
- * Client view of an [`ApiInstance`]
+ * Client view of an [`Instance`]
  */
-#[derive(
-    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiInstanceView {
+pub struct InstanceView {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
 
     /** id for the project containing this Instance */
     pub project_id: Uuid,
 
     /** number of CPUs allocated for this Instance */
-    pub ncpus: ApiInstanceCpuCount,
+    pub ncpus: InstanceCpuCount,
     /** memory, in gigabytes, allocated for this Instance */
-    pub memory: ApiByteCount,
+    pub memory: ByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */
 
     #[serde(flatten)]
-    pub runtime: ApiInstanceRuntimeStateView,
+    pub runtime: InstanceRuntimeStateView,
 }
 
 /**
- * Create-time parameters for an [`ApiInstance`]
+ * Create-time parameters for an [`Instance`]
  */
 /*
  * TODO We're ignoring "type" for now because no types are specified by the API.
@@ -913,22 +906,22 @@ pub struct ApiInstanceView {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiInstanceCreateParams {
+pub struct InstanceCreateParams {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadataCreateParams,
-    pub ncpus: ApiInstanceCpuCount,
-    pub memory: ApiByteCount,
+    pub identity: IdentityMetadataCreateParams,
+    pub ncpus: InstanceCpuCount,
+    pub memory: ByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
 }
 
 /**
- * Updateable properties of an [`ApiInstance`]
+ * Updateable properties of an [`Instance`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiInstanceUpdateParams {
+pub struct InstanceUpdateParams {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /*
@@ -939,9 +932,9 @@ pub struct ApiInstanceUpdateParams {
  * A Disk (network block device) in the external API
  */
 #[derive(Clone, Debug)]
-pub struct ApiDisk {
+pub struct Disk {
     /** common identifying metadata */
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
     /** id for the project containing this Disk */
     pub project_id: Uuid,
     /**
@@ -950,37 +943,35 @@ pub struct ApiDisk {
      */
     pub create_snapshot_id: Option<Uuid>,
     /** size of the Disk */
-    pub size: ApiByteCount,
+    pub size: ByteCount,
     /** runtime state of the Disk */
-    pub runtime: ApiDiskRuntimeState,
+    pub runtime: DiskRuntimeState,
 }
 
 /**
- * Client view of an [`ApiDisk`]
+ * Client view of an [`Disk`]
  */
-#[derive(
-    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiDiskView {
+pub struct DiskView {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
     pub project_id: Uuid,
     pub snapshot_id: Option<Uuid>,
-    pub size: ApiByteCount,
-    pub state: ApiDiskState,
+    pub size: ByteCount,
+    pub state: DiskState,
     pub device_path: String,
 }
 
-impl ApiObject for ApiDisk {
-    type View = ApiDiskView;
-    fn to_view(&self) -> ApiDiskView {
+impl Object for Disk {
+    type View = DiskView;
+    fn to_view(&self) -> DiskView {
         /*
          * TODO-correctness: can the name always be used as a path like this
          * or might it need to be sanitized?
          */
         let device_path = format!("/mnt/{}", self.identity.name.as_str());
-        ApiDiskView {
+        DiskView {
             identity: self.identity.clone(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
@@ -1006,7 +997,7 @@ impl ApiObject for ApiDisk {
     JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum ApiDiskState {
+pub enum DiskState {
     /** Disk is being initialized */
     Creating,
     /** Disk is ready but detached from any Instance */
@@ -1023,26 +1014,26 @@ pub enum ApiDiskState {
     Faulted,
 }
 
-impl Display for ApiDiskState {
+impl Display for DiskState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
     }
 }
 
-impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
+impl TryFrom<(&str, Option<Uuid>)> for DiskState {
     type Error = String;
 
     fn try_from(
         (s, maybe_id): (&str, Option<Uuid>),
     ) -> Result<Self, Self::Error> {
         match (s, maybe_id) {
-            ("creating", None) => Ok(ApiDiskState::Creating),
-            ("detached", None) => Ok(ApiDiskState::Detached),
-            ("destroyed", None) => Ok(ApiDiskState::Destroyed),
-            ("faulted", None) => Ok(ApiDiskState::Faulted),
-            ("attaching", Some(id)) => Ok(ApiDiskState::Attaching(id)),
-            ("attached", Some(id)) => Ok(ApiDiskState::Attached(id)),
-            ("detaching", Some(id)) => Ok(ApiDiskState::Detaching(id)),
+            ("creating", None) => Ok(DiskState::Creating),
+            ("detached", None) => Ok(DiskState::Detached),
+            ("destroyed", None) => Ok(DiskState::Destroyed),
+            ("faulted", None) => Ok(DiskState::Faulted),
+            ("attaching", Some(id)) => Ok(DiskState::Attaching(id)),
+            ("attached", Some(id)) => Ok(DiskState::Attached(id)),
+            ("detaching", Some(id)) => Ok(DiskState::Detaching(id)),
             _ => Err(format!(
                 "unexpected value for disk state: {:?} with attached id {:?}",
                 s, maybe_id
@@ -1051,19 +1042,19 @@ impl TryFrom<(&str, Option<Uuid>)> for ApiDiskState {
     }
 }
 
-impl ApiDiskState {
+impl DiskState {
     /**
      * Returns the string label for this disk state
      */
     pub fn label(&self) -> &'static str {
         match self {
-            ApiDiskState::Creating => "creating",
-            ApiDiskState::Detached => "detached",
-            ApiDiskState::Attaching(_) => "attaching",
-            ApiDiskState::Attached(_) => "attached",
-            ApiDiskState::Detaching(_) => "detaching",
-            ApiDiskState::Destroyed => "destroyed",
-            ApiDiskState::Faulted => "faulted",
+            DiskState::Creating => "creating",
+            DiskState::Detached => "detached",
+            DiskState::Attaching(_) => "attaching",
+            DiskState::Attached(_) => "attached",
+            DiskState::Detaching(_) => "detaching",
+            DiskState::Destroyed => "destroyed",
+            DiskState::Faulted => "faulted",
         }
     }
 
@@ -1081,14 +1072,14 @@ impl ApiDiskState {
      */
     pub fn attached_instance_id(&self) -> Option<&Uuid> {
         match self {
-            ApiDiskState::Attaching(id) => Some(id),
-            ApiDiskState::Attached(id) => Some(id),
-            ApiDiskState::Detaching(id) => Some(id),
+            DiskState::Attaching(id) => Some(id),
+            DiskState::Attached(id) => Some(id),
+            DiskState::Detaching(id) => Some(id),
 
-            ApiDiskState::Creating => None,
-            ApiDiskState::Detached => None,
-            ApiDiskState::Destroyed => None,
-            ApiDiskState::Faulted => None,
+            DiskState::Creating => None,
+            DiskState::Detached => None,
+            DiskState::Destroyed => None,
+            DiskState::Faulted => None,
         }
     }
 }
@@ -1098,28 +1089,28 @@ impl ApiDiskState {
  * metadata
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ApiDiskRuntimeState {
+pub struct DiskRuntimeState {
     /** runtime state of the Disk */
-    pub disk_state: ApiDiskState,
+    pub disk_state: DiskState,
     /** generation number for this state */
-    pub gen: ApiGeneration,
+    pub gen: Generation,
     /** timestamp for this information */
     pub time_updated: DateTime<Utc>,
 }
 
 /**
- * Create-time parameters for an [`ApiDisk`]
+ * Create-time parameters for an [`Disk`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiDiskCreateParams {
+pub struct DiskCreateParams {
     /** common identifying metadata */
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadataCreateParams,
+    pub identity: IdentityMetadataCreateParams,
     /** id for snapshot from which the Disk should be created, if any */
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
     /** size of the Disk */
-    pub size: ApiByteCount,
+    pub size: ByteCount,
 }
 
 /**
@@ -1127,14 +1118,14 @@ pub struct ApiDiskCreateParams {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiDiskAttachment {
+pub struct DiskAttachment {
     pub instance_id: Uuid,
     pub disk_id: Uuid,
-    pub disk_name: ApiName,
-    pub disk_state: ApiDiskState,
+    pub disk_name: Name,
+    pub disk_state: DiskState,
 }
 
-impl ApiObject for ApiDiskAttachment {
+impl Object for DiskAttachment {
     type View = Self;
     fn to_view(&self) -> Self::View {
         self.clone()
@@ -1146,24 +1137,24 @@ impl ApiObject for ApiDiskAttachment {
  */
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum ApiDiskStateRequested {
+pub enum DiskStateRequested {
     Detached,
     Attached(Uuid),
     Destroyed,
     Faulted,
 }
 
-impl ApiDiskStateRequested {
+impl DiskStateRequested {
     /**
      * Returns whether the requested state is attached to an Instance or not.
      */
     pub fn is_attached(&self) -> bool {
         match self {
-            ApiDiskStateRequested::Detached => false,
-            ApiDiskStateRequested::Destroyed => false,
-            ApiDiskStateRequested::Faulted => false,
+            DiskStateRequested::Detached => false,
+            DiskStateRequested::Destroyed => false,
+            DiskStateRequested::Faulted => false,
 
-            ApiDiskStateRequested::Attached(_) => true,
+            DiskStateRequested::Attached(_) => true,
         }
     }
 }
@@ -1175,26 +1166,24 @@ impl ApiDiskStateRequested {
 /**
  * A Rack in the external API
  */
-pub struct ApiRack {
-    pub identity: ApiIdentityMetadata,
+pub struct Rack {
+    pub identity: IdentityMetadata,
 }
 
-impl ApiObject for ApiRack {
-    type View = ApiRackView;
-    fn to_view(&self) -> ApiRackView {
-        ApiRackView { identity: self.identity.clone() }
+impl Object for Rack {
+    type View = RackView;
+    fn to_view(&self) -> RackView {
+        RackView { identity: self.identity.clone() }
     }
 }
 
 /**
- * Client view of an [`ApiRack`]
+ * Client view of an [`Rack`]
  */
-#[derive(
-    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiRackView {
-    pub identity: ApiIdentityMetadata,
+pub struct RackView {
+    pub identity: IdentityMetadata,
 }
 
 /*
@@ -1204,15 +1193,15 @@ pub struct ApiRackView {
 /**
  * A Sled in the external API
  */
-pub struct ApiSled {
-    pub identity: ApiIdentityMetadata,
+pub struct Sled {
+    pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
 }
 
-impl ApiObject for ApiSled {
-    type View = ApiSledView;
-    fn to_view(&self) -> ApiSledView {
-        ApiSledView {
+impl Object for Sled {
+    type View = SledView;
+    fn to_view(&self) -> SledView {
+        SledView {
             identity: self.identity.clone(),
             service_address: self.service_address,
         }
@@ -1220,15 +1209,13 @@ impl ApiObject for ApiSled {
 }
 
 /**
- * Client view of an [`ApiSled`]
+ * Client view of an [`Sled`]
  */
-#[derive(
-    ApiObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiSledView {
+pub struct SledView {
     #[serde(flatten)]
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
 }
 
@@ -1239,48 +1226,48 @@ pub struct ApiSledView {
  * eventually want to flesh this out into something more observable for end
  * users.
  */
-#[derive(ApiObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
-pub struct ApiSagaView {
+#[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+pub struct SagaView {
     pub id: Uuid,
-    pub state: ApiSagaStateView,
+    pub state: SagaStateView,
     /*
-     * TODO-cleanup This object contains a fake `ApiIdentityMetadata`.  Why?  We
+     * TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
      * want to paginate these objects.  http_pagination.rs provides a bunch of
      * useful facilities -- notably `ApiPaginatedById`.  `ApiPaginatedById`
      * requires being able to take an arbitrary object in the result set and get
-     * its id.  To do that, it uses the `ApiObjectIdentity` trait, which expects
-     * to be able to return an `ApiIdentityMetadata` reference from an object.
+     * its id.  To do that, it uses the `ObjectIdentity` trait, which expects
+     * to be able to return an `IdentityMetadata` reference from an object.
      * Finally, the pagination facilities just pull the `id` out of that.
      *
      * In this case (as well as others, like sleds and racks), we have ids, and
      * we want to be able to paginate by id, but we don't have full identity
      * metadata.  (Or we do, but it's similarly faked up.)  What we should
-     * probably do is create a new trait, say `ApiObjectId`, that returns _just_
+     * probably do is create a new trait, say `ObjectId`, that returns _just_
      * an id.  We can provide a blanket impl for anything that impls
-     * ApiIdentityMetadata.  We can define one-off impls for structs like this
+     * IdentityMetadata.  We can define one-off impls for structs like this
      * one.  Then the id-only pagination interfaces can require just
-     * `ApiObjectId`.
+     * `ObjectId`.
      */
     #[serde(skip)]
-    pub identity: ApiIdentityMetadata,
+    pub identity: IdentityMetadata,
 }
 
-impl ApiObject for ApiSagaView {
+impl Object for SagaView {
     type View = Self;
     fn to_view(&self) -> Self::View {
         self.clone()
     }
 }
 
-impl From<steno::SagaView> for ApiSagaView {
+impl From<steno::SagaView> for SagaView {
     fn from(s: steno::SagaView) -> Self {
-        ApiSagaView {
+        SagaView {
             id: Uuid::from(s.id),
-            state: ApiSagaStateView::from(s.state),
-            identity: ApiIdentityMetadata {
-                /* TODO-cleanup See the note in ApiSagaView above. */
+            state: SagaStateView::from(s.state),
+            identity: IdentityMetadata {
+                /* TODO-cleanup See the note in SagaView above. */
                 id: Uuid::from(s.id),
-                name: ApiName::try_from(format!("saga-{}", s.id)).unwrap(),
+                name: Name::try_from(format!("saga-{}", s.id)).unwrap(),
                 description: format!("saga {}", s.id),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -1295,7 +1282,7 @@ impl From<steno::SagaView> for ApiSagaView {
  */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ApiSagaStateView {
+pub enum SagaStateView {
     Running,
     #[serde(rename_all = "camelCase")]
     Done {
@@ -1305,18 +1292,18 @@ pub enum ApiSagaStateView {
     },
 }
 
-impl From<steno::SagaStateView> for ApiSagaStateView {
+impl From<steno::SagaStateView> for SagaStateView {
     fn from(st: steno::SagaStateView) -> Self {
         match st {
-            steno::SagaStateView::Ready { .. } => ApiSagaStateView::Running,
-            steno::SagaStateView::Running { .. } => ApiSagaStateView::Running,
+            steno::SagaStateView::Ready { .. } => SagaStateView::Running,
+            steno::SagaStateView::Running { .. } => SagaStateView::Running,
             steno::SagaStateView::Done { result, .. } => match result.kind {
-                Ok(_) => ApiSagaStateView::Done {
+                Ok(_) => SagaStateView::Done {
                     failed: false,
                     error_node_name: None,
                     error_info: None,
                 },
-                Err(e) => ApiSagaStateView::Done {
+                Err(e) => SagaStateView::Done {
                     failed: true,
                     error_node_name: Some(e.error_node_name),
                     error_info: Some(e.error_source),
@@ -1334,7 +1321,7 @@ impl From<steno::SagaStateView> for ApiSagaStateView {
  * Sent by a sled agent on startup to Nexus to request further instruction
  */
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ApiSledAgentStartupInfo {
+pub struct SledAgentStartupInfo {
     /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
 }
@@ -1348,9 +1335,9 @@ pub struct InstanceEnsureBody {
      * Last runtime state of the Instance known to Nexus (used if the agent
      * has never seen this Instance before).
      */
-    pub initial_runtime: ApiInstanceRuntimeState,
+    pub initial_runtime: InstanceRuntimeState,
     /** requested runtime state of the Instance */
-    pub target: ApiInstanceRuntimeStateRequested,
+    pub target: InstanceRuntimeStateRequested,
 }
 
 /**
@@ -1362,9 +1349,9 @@ pub struct DiskEnsureBody {
      * Last runtime state of the Disk known to Nexus (used if the agent has
      * never seen this Disk before).
      */
-    pub initial_runtime: ApiDiskRuntimeState,
+    pub initial_runtime: DiskRuntimeState,
     /** requested runtime state of the Disk */
-    pub target: ApiDiskStateRequested,
+    pub target: DiskStateRequested,
 }
 
 /*
@@ -1433,9 +1420,9 @@ pub struct OximeterAssignment {
 
 #[cfg(test)]
 mod test {
-    use super::ApiByteCount;
-    use super::ApiName;
-    use crate::api::ApiError;
+    use super::ByteCount;
+    use super::Name;
+    use crate::api::Error;
     use std::convert::TryFrom;
 
     #[test]
@@ -1471,7 +1458,7 @@ mod test {
 
         for (input, expected_message) in error_cases {
             eprintln!("check name \"{}\" (expecting error)", input);
-            assert_eq!(ApiName::try_from(input).unwrap_err(), expected_message);
+            assert_eq!(Name::try_from(input).unwrap_err(), expected_message);
         }
 
         /*
@@ -1482,21 +1469,21 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, ApiName::try_from(name).unwrap().as_str());
+            assert_eq!(name, Name::try_from(name).unwrap().as_str());
         }
     }
 
     #[test]
     fn test_name_parse_from_param() {
-        let result = ApiName::from_param(String::from("my-name"), "the_name");
+        let result = Name::from_param(String::from("my-name"), "the_name");
         assert!(result.is_ok());
-        assert_eq!(result, Ok(ApiName::try_from("my-name").unwrap()));
+        assert_eq!(result, Ok(Name::try_from("my-name").unwrap()));
 
-        let result = ApiName::from_param(String::from(""), "the_name");
+        let result = Name::from_param(String::from(""), "the_name");
         assert!(result.is_err());
         assert_eq!(
             result,
-            Err(ApiError::InvalidValue {
+            Err(Error::InvalidValue {
                 label: "the_name".to_string(),
                 message: "name requires at least one character".to_string()
             })
@@ -1506,24 +1493,24 @@ mod test {
     #[test]
     fn test_bytecount() {
         /* Smallest supported value: all constructors */
-        let zero = ApiByteCount::from(0u32);
+        let zero = ByteCount::from(0u32);
         assert_eq!(0, zero.to_bytes());
         assert_eq!(0, zero.to_whole_kibibytes());
         assert_eq!(0, zero.to_whole_mebibytes());
         assert_eq!(0, zero.to_whole_gibibytes());
         assert_eq!(0, zero.to_whole_tebibytes());
-        let zero = ApiByteCount::try_from(0i64).unwrap();
+        let zero = ByteCount::try_from(0i64).unwrap();
         assert_eq!(0, zero.to_bytes());
-        let zero = ApiByteCount::try_from(0u64).unwrap();
+        let zero = ByteCount::try_from(0u64).unwrap();
         assert_eq!(0, zero.to_bytes());
 
         /* Largest supported value: both constructors that support it. */
-        let max = ApiByteCount::try_from(i64::MAX).unwrap();
+        let max = ByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
         assert_eq!(i64::MAX, i64::from(&max));
 
         let maxu64 = u64::try_from(i64::MAX).unwrap();
-        let max = ApiByteCount::try_from(maxu64).unwrap();
+        let max = ByteCount::try_from(maxu64).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
         assert_eq!(i64::MAX, i64::from(&max));
         assert_eq!(
@@ -1532,13 +1519,13 @@ mod test {
         );
 
         /* Value too large (only one constructor can hit this) */
-        let bogus = ApiByteCount::try_from(maxu64 + 1).unwrap_err();
+        let bogus = ByteCount::try_from(maxu64 + 1).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too large for a byte count");
         /* Value too small (only one constructor can hit this) */
-        let bogus = ApiByteCount::try_from(-1i64).unwrap_err();
+        let bogus = ByteCount::try_from(-1i64).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
         /* For good measure, let's check i64::MIN */
-        let bogus = ApiByteCount::try_from(i64::MIN).unwrap_err();
+        let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
 
         /*
@@ -1548,7 +1535,7 @@ mod test {
          * means picking values in the middle of the range.
          */
         let three_terabytes = 3_000_000_000_000u64;
-        let tb3 = ApiByteCount::try_from(three_terabytes).unwrap();
+        let tb3 = ByteCount::try_from(three_terabytes).unwrap();
         assert_eq!(three_terabytes, tb3.to_bytes());
         assert_eq!(2929687500, tb3.to_whole_kibibytes());
         assert_eq!(2861022, tb3.to_whole_mebibytes());
@@ -1556,7 +1543,7 @@ mod test {
         assert_eq!(2, tb3.to_whole_tebibytes());
 
         let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
-        let tib3 = ApiByteCount::try_from(three_tebibytes).unwrap();
+        let tib3 = ByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());

@@ -11,8 +11,8 @@
  */
 
 use crate::db;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiGeneration;
+use omicron_common::api::Error;
+use omicron_common::api::Generation;
 use omicron_common::db::sql_row_value;
 use omicron_common::impl_sql_wrapping;
 use std::convert::TryFrom;
@@ -52,12 +52,12 @@ pub struct Saga {
     pub saga_params: serde_json::Value,
     pub saga_state: steno::SagaCachedState,
     pub current_sec: Option<SecId>,
-    pub adopt_generation: ApiGeneration,
+    pub adopt_generation: Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl TryFrom<&tokio_postgres::Row> for Saga {
-    type Error = ApiError;
+    type Error = Error;
 
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let saga_state_str: String = sql_row_value(row, "saga_state")?;
@@ -65,7 +65,7 @@ impl TryFrom<&tokio_postgres::Row> for Saga {
             saga_state_str.as_str(),
         )
         .map_err(|e| {
-            ApiError::internal_error(&format!(
+            Error::internal_error(&format!(
                 "failed to parse saga state {:?}: {:#}",
                 saga_state_str, e
             ))
@@ -111,7 +111,7 @@ pub struct SagaNodeEvent {
 }
 
 impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
-    type Error = ApiError;
+    type Error = Error;
 
     fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let event_data: Option<serde_json::Value> = sql_row_value(row, "data")?;
@@ -125,7 +125,7 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
             ("failed", Some(d)) => {
                 let error: steno::ActionError = serde_json::from_value(d)
                     .map_err(|error| {
-                        ApiError::internal_error(&format!(
+                        Error::internal_error(&format!(
                             "failed to parse ActionError for \"failed\" \
                             SagaNodeEvent: {:#}",
                             error
@@ -136,7 +136,7 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
             ("undo_started", None) => steno::SagaNodeEventType::UndoStarted,
             ("undo_finished", None) => steno::SagaNodeEventType::UndoFinished,
             (name, data) => {
-                return Err(ApiError::internal_error(&format!(
+                return Err(Error::internal_error(&format!(
                     "bad SagaNodeEventRow: event_type = {:?}, data = {:?}",
                     name, data
                 )));
@@ -145,7 +145,7 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
 
         let node_id_i64: i64 = sql_row_value(row, "node_id")?;
         let node_id_u32 = u32::try_from(node_id_i64)
-            .map_err(|_| ApiError::internal_error("node id out of range"))?;
+            .map_err(|_| Error::internal_error("node id out of range"))?;
         let node_id = steno::SagaNodeId::from(node_id_u32);
 
         Ok(SagaNodeEvent {

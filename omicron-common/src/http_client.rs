@@ -2,7 +2,7 @@
  * HTTP client used for internal control plane interfaces
  */
 
-use crate::api::ApiError;
+use crate::api::Error;
 use dropshot::HttpErrorResponseBody;
 use http::Method;
 use hyper::client::HttpConnector;
@@ -60,10 +60,10 @@ impl HttpClient {
      * A 200-level response will be returned as a successful
      * `Ok(Response<Body>)`.  Any other result (including failure to make the
      * request, a 400-level response, or a 500-level response) will result in an
-     * `Err(ApiError)` describing the error.  When possible, if an error
-     * contained in the response corresponds to an `ApiError` that we can
+     * `Err(Error)` describing the error.  When possible, if an error
+     * contained in the response corresponds to an `Error` that we can
      * recognize (i.e., because the remote side is another control plane service
-     * that also uses `ApiError` and it serialized the error with enough
+     * that also uses `Error` and it serialized the error with enough
      * information for us to recognize it), the server-side error will be
      * reconstituted as the returned error.
      */
@@ -72,7 +72,7 @@ impl HttpClient {
         method: Method,
         path: &str,
         body: Body,
-    ) -> Result<Response<Body>, ApiError> {
+    ) -> Result<Response<Body>, Error> {
         let error_message_base = self.error_message_base(&method, path);
 
         debug!(self.log, "client request";
@@ -103,7 +103,7 @@ impl HttpClient {
 
         let error_body: HttpErrorResponseBody =
             self.read_json(&error_message_base, &mut response).await?;
-        Err(ApiError::from_response(error_message_base, error_body))
+        Err(Error::from_response(error_message_base, error_body))
     }
 
     /**
@@ -133,7 +133,7 @@ impl HttpClient {
         &self,
         error_message_base: &str,
         response: &mut Response<Body>,
-    ) -> Result<T, ApiError> {
+    ) -> Result<T, Error> {
         assert_eq!(
             dropshot::CONTENT_TYPE_JSON,
             response.headers().get(http::header::CONTENT_TYPE).unwrap()
@@ -158,8 +158,8 @@ fn convert_error<E: Display>(
     error_message_base: &str,
     action: &str,
     error: E,
-) -> ApiError {
-    ApiError::ServiceUnavailable {
+) -> Error {
+    Error::ServiceUnavailable {
         message: format!("{}: {}: {}", error_message_base, action, error),
     }
 }
