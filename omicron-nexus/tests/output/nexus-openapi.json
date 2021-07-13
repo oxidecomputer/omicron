@@ -13,7 +13,7 @@
     "/hardware/racks": {
       "get": {
         "description": "List racks in the system.",
-        "operationId": "api_hardware_racks_get",
+        "operationId": "hardware_racks_get",
         "parameters": [
           {
             "in": "query",
@@ -62,7 +62,7 @@
     "/hardware/racks/{rack_id}": {
       "get": {
         "description": "Fetch information about a particular rack.",
-        "operationId": "api_hardware_racks_get_rack",
+        "operationId": "hardware_racks_get_rack",
         "parameters": [
           {
             "in": "path",
@@ -93,7 +93,7 @@
     "/hardware/sleds": {
       "get": {
         "description": "List sleds in the system.",
-        "operationId": "api_hardware_sleds_get",
+        "operationId": "hardware_sleds_get",
         "parameters": [
           {
             "in": "query",
@@ -142,7 +142,7 @@
     "/hardware/sleds/{sled_id}": {
       "get": {
         "description": "Fetch information about a sled in the system.",
-        "operationId": "api_hardware_sleds_get_sled",
+        "operationId": "hardware_sleds_get_sled",
         "parameters": [
           {
             "in": "path",
@@ -173,7 +173,7 @@
     "/projects": {
       "get": {
         "description": "List all projects.",
-        "operationId": "api_projects_get",
+        "operationId": "projects_get",
         "parameters": [
           {
             "in": "query",
@@ -220,7 +220,7 @@
       },
       "post": {
         "description": "Create a new project.",
-        "operationId": "api_projects_post",
+        "operationId": "projects_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -248,7 +248,7 @@
     "/projects/{project_name}": {
       "get": {
         "description": "Fetch a specific project",
-        "operationId": "api_projects_get_project",
+        "operationId": "projects_get_project",
         "parameters": [
           {
             "in": "path",
@@ -275,7 +275,7 @@
       },
       "put": {
         "description": "Update a specific project.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
-        "operationId": "api_projects_put_project",
+        "operationId": "projects_put_project",
         "parameters": [
           {
             "in": "path",
@@ -312,7 +312,7 @@
       },
       "delete": {
         "description": "Delete a specific project.",
-        "operationId": "api_projects_delete_project",
+        "operationId": "projects_delete_project",
         "parameters": [
           {
             "in": "path",
@@ -334,7 +334,7 @@
     "/projects/{project_name}/disks": {
       "get": {
         "description": "List disks in a project.",
-        "operationId": "api_project_disks_get",
+        "operationId": "project_disks_get",
         "parameters": [
           {
             "in": "query",
@@ -390,7 +390,7 @@
       },
       "post": {
         "description": "Create a disk in a project.\n * TODO-correctness See note about instance create.  This should be async.",
-        "operationId": "api_project_disks_post",
+        "operationId": "project_disks_post",
         "parameters": [
           {
             "in": "path",
@@ -429,7 +429,7 @@
     "/projects/{project_name}/disks/{disk_name}": {
       "get": {
         "description": "Fetch a single disk in a project.",
-        "operationId": "api_project_disks_get_disk",
+        "operationId": "project_disks_get_disk",
         "parameters": [
           {
             "in": "path",
@@ -465,7 +465,7 @@
       },
       "delete": {
         "description": "Delete a disk from a project.",
-        "operationId": "api_project_disks_delete_disk",
+        "operationId": "project_disks_delete_disk",
         "parameters": [
           {
             "in": "path",
@@ -496,7 +496,7 @@
     "/projects/{project_name}/instances": {
       "get": {
         "description": "List instances in a project.",
-        "operationId": "api_project_instances_get",
+        "operationId": "project_instances_get",
         "parameters": [
           {
             "in": "query",
@@ -552,7 +552,7 @@
       },
       "post": {
         "description": "Create an instance in a project.\n * TODO-correctness This is supposed to be async.  Is that right?  We can create the instance immediately -- it's just not booted yet.  Maybe the boot operation is what's a separate operation_id.  What about the response code (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a useful response, including an operation id, with either response code.  Maybe a \"reboot\" operation would return a 202 Accepted because there's no actual resource created?",
-        "operationId": "api_project_instances_post",
+        "operationId": "project_instances_post",
         "parameters": [
           {
             "in": "path",
@@ -591,7 +591,7 @@
     "/projects/{project_name}/instances/{instance_name}": {
       "get": {
         "description": "Get an instance in a project.",
-        "operationId": "api_project_instances_get_instance",
+        "operationId": "project_instances_get_instance",
         "parameters": [
           {
             "in": "path",
@@ -627,7 +627,7 @@
       },
       "delete": {
         "description": "Delete an instance from a project.",
-        "operationId": "api_project_instances_delete_instance",
+        "operationId": "project_instances_delete_instance",
         "parameters": [
           {
             "in": "path",
@@ -658,7 +658,7 @@
     "/projects/{project_name}/instances/{instance_name}/disks": {
       "get": {
         "description": "List disks attached to this instance.",
-        "operationId": "api_instance_disks_get",
+        "operationId": "instance_disks_get",
         "parameters": [
           {
             "in": "path",
@@ -700,7 +700,7 @@
     "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}": {
       "get": {
         "description": "Fetch a description of the attachment of this disk to this instance.",
-        "operationId": "api_instance_disks_get_disk",
+        "operationId": "instance_disks_get_disk",
         "parameters": [
           {
             "in": "path",
@@ -745,7 +745,7 @@
       },
       "put": {
         "description": "Attach a disk to this instance.",
-        "operationId": "api_instance_disks_put_disk",
+        "operationId": "instance_disks_put_disk",
         "parameters": [
           {
             "in": "path",
@@ -790,7 +790,7 @@
       },
       "delete": {
         "description": "Detach a disk from this instance.",
-        "operationId": "api_instance_disks_delete_disk",
+        "operationId": "instance_disks_delete_disk",
         "parameters": [
           {
             "in": "path",
@@ -830,7 +830,7 @@
     "/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "description": "Reboot an instance.",
-        "operationId": "api_project_instances_instance_reboot",
+        "operationId": "project_instances_instance_reboot",
         "parameters": [
           {
             "in": "path",
@@ -868,7 +868,7 @@
     "/projects/{project_name}/instances/{instance_name}/start": {
       "post": {
         "description": "Boot an instance.",
-        "operationId": "api_project_instances_instance_start",
+        "operationId": "project_instances_instance_start",
         "parameters": [
           {
             "in": "path",
@@ -906,7 +906,7 @@
     "/projects/{project_name}/instances/{instance_name}/stop": {
       "post": {
         "description": "Halt an instance.",
-        "operationId": "api_project_instances_instance_stop",
+        "operationId": "project_instances_instance_stop",
         "parameters": [
           {
             "in": "path",
@@ -944,7 +944,7 @@
     "/sagas": {
       "get": {
         "description": "List all sagas (for debugging)",
-        "operationId": "api_sagas_get",
+        "operationId": "sagas_get",
         "parameters": [
           {
             "in": "query",
@@ -993,7 +993,7 @@
     "/sagas/{saga_id}": {
       "get": {
         "description": "Fetch information about a single saga (for debugging)",
-        "operationId": "api_sagas_get_saga",
+        "operationId": "sagas_get_saga",
         "parameters": [
           {
             "in": "path",

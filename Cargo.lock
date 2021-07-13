@@ -22,9 +22,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.41"
+version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15af2628f6890fe2609a3b91bef4c83450512802e59489f9c1cb1fa5df064a61"
+checksum = "595d3cfa7a60d4555cb5067b99f07142a08ea778de5cf993f7b75c7d8fabc486"
 
 [[package]]
 name = "api_identity"
@@ -111,7 +111,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 dependencies = [
  "libc",
  "num_enum",
@@ -394,7 +394,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 dependencies = [
  "libc",
  "num_enum",
@@ -893,6 +893,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "input_buffer"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f97967975f448f1a7ddb12b0bc41069d09ed6a1c161a92687e057325db35d413"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -939,9 +948,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.97"
+version = "0.2.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12b8adadd720df158f4d70dfe7ccc6adb0472d7c55ca83445f6a5ab3e36f8fb6"
+checksum = "320cfe77175da3a483efed4bc0adc1968ca050b098ce4f2f1c13a56626128790"
 
 [[package]]
 name = "linked-hash-map"
@@ -1466,7 +1475,7 @@ checksum = "54be6e404f5317079812fc8f9f5279de376d8856929e21c184ecf6bbd692a11d"
 dependencies = [
  "maplit",
  "pest",
- "sha-1",
+ "sha-1 0.8.2",
 ]
 
 [[package]]
@@ -1660,7 +1669,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 dependencies = [
  "bhyve_api",
  "bitflags",
@@ -1693,7 +1702,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 dependencies = [
  "reqwest",
  "ring",
@@ -1709,18 +1718,21 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 dependencies = [
  "anyhow",
  "dropshot",
  "futures",
+ "hyper",
  "propolis",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=fafae47a)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=b6da043d)",
  "serde",
  "serde_derive",
+ "slog",
  "structopt",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "toml",
  "uuid",
 ]
@@ -2158,6 +2170,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha-1"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c4cfa741c5832d0ef7fab46cabed29c2aae926db0b11bb2069edd8db5e64e16"
+dependencies = [
+ "block-buffer 0.9.0",
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.9.0",
+ "opaque-debug 0.3.0",
+]
+
+[[package]]
 name = "sha2"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2521,9 +2546,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "570c2eb13b3ab38208130eccd41be92520388791207fde783bda7c1e8ace28d4"
+checksum = "98c8b05dc14c75ea83d63dd391100353789f5f24b8b3866542a5e85c8be8e985"
 dependencies = [
  "autocfg",
  "bytes",
@@ -2592,6 +2617,19 @@ dependencies = [
  "rustls",
  "tokio",
  "webpki",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e96bb520beab540ab664bd5a9cfeaa1fcd846fa68c830b42e2c8963071251d2"
+dependencies = [
+ "futures-util",
+ "log",
+ "pin-project",
+ "tokio",
+ "tungstenite",
 ]
 
 [[package]]
@@ -2667,6 +2705,26 @@ dependencies = [
  "serde_json",
  "termcolor",
  "toml",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fe8dada8c1a3aeca77d6b51a4f1314e0f4b8e438b7b1b71e3ddaca8080e4093"
+dependencies = [
+ "base64",
+ "byteorder",
+ "bytes",
+ "http",
+ "httparse",
+ "input_buffer",
+ "log",
+ "rand",
+ "sha-1 0.9.6",
+ "thiserror",
+ "url",
+ "utf-8",
 ]
 
 [[package]]
@@ -2778,6 +2836,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "utf-8"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
+
+[[package]]
 name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2808,7 +2872,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fafae47a#fafae47acdde5946da458e01c6a865315877159c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b6da043d#b6da043dd8c2a3aef44f84aed1f43c6a7369e77f"
 
 [[package]]
 name = "walkdir"

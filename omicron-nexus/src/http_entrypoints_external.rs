@@ -57,37 +57,37 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
  */
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(api_projects_get)?;
-        api.register(api_projects_post)?;
-        api.register(api_projects_get_project)?;
-        api.register(api_projects_delete_project)?;
-        api.register(api_projects_put_project)?;
+        api.register(projects_get)?;
+        api.register(projects_post)?;
+        api.register(projects_get_project)?;
+        api.register(projects_delete_project)?;
+        api.register(projects_put_project)?;
 
-        api.register(api_project_disks_get)?;
-        api.register(api_project_disks_post)?;
-        api.register(api_project_disks_get_disk)?;
-        api.register(api_project_disks_delete_disk)?;
+        api.register(project_disks_get)?;
+        api.register(project_disks_post)?;
+        api.register(project_disks_get_disk)?;
+        api.register(project_disks_delete_disk)?;
 
-        api.register(api_project_instances_get)?;
-        api.register(api_project_instances_post)?;
-        api.register(api_project_instances_get_instance)?;
-        api.register(api_project_instances_delete_instance)?;
-        api.register(api_project_instances_instance_reboot)?;
-        api.register(api_project_instances_instance_start)?;
-        api.register(api_project_instances_instance_stop)?;
+        api.register(project_instances_get)?;
+        api.register(project_instances_post)?;
+        api.register(project_instances_get_instance)?;
+        api.register(project_instances_delete_instance)?;
+        api.register(project_instances_instance_reboot)?;
+        api.register(project_instances_instance_start)?;
+        api.register(project_instances_instance_stop)?;
 
-        api.register(api_instance_disks_get)?;
-        api.register(api_instance_disks_get_disk)?;
-        api.register(api_instance_disks_put_disk)?;
-        api.register(api_instance_disks_delete_disk)?;
+        api.register(instance_disks_get)?;
+        api.register(instance_disks_get_disk)?;
+        api.register(instance_disks_put_disk)?;
+        api.register(instance_disks_delete_disk)?;
 
-        api.register(api_hardware_racks_get)?;
-        api.register(api_hardware_racks_get_rack)?;
-        api.register(api_hardware_sleds_get)?;
-        api.register(api_hardware_sleds_get_sled)?;
+        api.register(hardware_racks_get)?;
+        api.register(hardware_racks_get_rack)?;
+        api.register(hardware_sleds_get)?;
+        api.register(hardware_sleds_get_sled)?;
 
-        api.register(api_sagas_get)?;
-        api.register(api_sagas_get_saga)?;
+        api.register(sagas_get)?;
+        api.register(sagas_get_saga)?;
 
         Ok(())
     }
@@ -114,22 +114,27 @@ pub fn external_api() -> NexusApiDescription {
  * There's a naming convention for the functions that implement these API entry
  * points.  When operating on the collection itself, we use:
  *
- *    api_{collection_path}_{verb}
+ *    {collection_path}_{verb}
  *
  * For examples:
  *
- *    GET  /projects                    -> api_projects_get()
- *    POST /projects                    -> api_projects_post()
+ *    GET  /projects                    -> projects_get()
+ *    POST /projects                    -> projects_post()
  *
  * For operations on items within the collection, we use:
  *
- *    api_{collection_path}_{verb}_{object}
+ *    {collection_path}_{verb}_{object}
  *
  * For examples:
  *
- *    DELETE /projects/{project_name}   -> api_projects_delete_project()
- *    GET    /projects/{project_name}   -> api_projects_get_project()
- *    PUT    /projects/{project_name}   -> api_projects_put_project()
+ *    DELETE /projects/{project_name}   -> projects_delete_project()
+ *    GET    /projects/{project_name}   -> projects_get_project()
+ *    PUT    /projects/{project_name}   -> projects_put_project()
+ *
+ * Note that these function names end up in generated OpenAPI spec as the
+ * operationId for each endpoint, and therefore represent a contract with
+ * clients. Client generators use operationId to name API methods, so changing
+ * a function name is a breaking change from a client perspective.
  */
 
 /**
@@ -139,7 +144,7 @@ pub fn external_api() -> NexusApiDescription {
      method = GET,
      path = "/projects",
  }]
-async fn api_projects_get(
+async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiProjectView>>, HttpError> {
@@ -172,7 +177,7 @@ async fn api_projects_get(
     method = POST,
     path = "/projects"
 }]
-async fn api_projects_post(
+async fn projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_project: TypedBody<ApiProjectCreateParams>,
 ) -> Result<HttpResponseCreated<ApiProjectView>, HttpError> {
@@ -198,7 +203,7 @@ struct ProjectPathParam {
     method = GET,
     path = "/projects/{project_name}",
 }]
-async fn api_projects_get_project(
+async fn projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ApiProjectView>, HttpError> {
@@ -217,7 +222,7 @@ async fn api_projects_get_project(
      method = DELETE,
      path = "/projects/{project_name}",
  }]
-async fn api_projects_delete_project(
+async fn projects_delete_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -242,7 +247,7 @@ async fn api_projects_delete_project(
      method = PUT,
      path = "/projects/{project_name}",
  }]
-async fn api_projects_put_project(
+async fn projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<ApiProjectUpdateParams>,
@@ -268,7 +273,7 @@ async fn api_projects_put_project(
      method = GET,
      path = "/projects/{project_name}/disks",
  }]
-async fn api_project_disks_get(
+async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -297,7 +302,7 @@ async fn api_project_disks_get(
      method = POST,
      path = "/projects/{project_name}/disks",
  }]
-async fn api_project_disks_post(
+async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<ApiDiskCreateParams>,
@@ -328,7 +333,7 @@ struct DiskPathParam {
      method = GET,
      path = "/projects/{project_name}/disks/{disk_name}",
  }]
-async fn api_project_disks_get_disk(
+async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<ApiDiskView>, HttpError> {
@@ -348,7 +353,7 @@ async fn api_project_disks_get_disk(
      method = DELETE,
      path = "/projects/{project_name}/disks/{disk_name}",
  }]
-async fn api_project_disks_delete_disk(
+async fn project_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -372,7 +377,7 @@ async fn api_project_disks_delete_disk(
      method = GET,
      path = "/projects/{project_name}/instances",
  }]
-async fn api_project_instances_get(
+async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -407,7 +412,7 @@ async fn api_project_instances_get(
      method = POST,
      path = "/projects/{project_name}/instances",
  }]
-async fn api_project_instances_post(
+async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<ApiInstanceCreateParams>,
@@ -439,7 +444,7 @@ struct InstancePathParam {
      method = GET,
      path = "/projects/{project_name}/instances/{instance_name}",
  }]
-async fn api_project_instances_get_instance(
+async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ApiInstanceView>, HttpError> {
@@ -460,7 +465,7 @@ async fn api_project_instances_get_instance(
      method = DELETE,
      path = "/projects/{project_name}/instances/{instance_name}",
  }]
-async fn api_project_instances_delete_instance(
+async fn project_instances_delete_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -480,7 +485,7 @@ async fn api_project_instances_delete_instance(
     method = POST,
     path = "/projects/{project_name}/instances/{instance_name}/reboot",
 }]
-async fn api_project_instances_instance_reboot(
+async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
@@ -500,7 +505,7 @@ async fn api_project_instances_instance_reboot(
     method = POST,
     path = "/projects/{project_name}/instances/{instance_name}/start",
 }]
-async fn api_project_instances_instance_start(
+async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
@@ -521,7 +526,7 @@ async fn api_project_instances_instance_start(
     path = "/projects/{project_name}/instances/{instance_name}/stop",
 }]
 /* Our naming convention kind of falls apart here. */
-async fn api_project_instances_instance_stop(
+async fn project_instances_instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<ApiInstanceView>, HttpError> {
@@ -542,7 +547,7 @@ async fn api_project_instances_instance_stop(
     method = GET,
     path = "/projects/{project_name}/instances/{instance_name}/disks"
 }]
-async fn api_instance_disks_get(
+async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<Vec<ApiDiskAttachment>>, HttpError> {
@@ -580,7 +585,7 @@ struct InstanceDiskPathParam {
     method = GET,
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
-async fn api_instance_disks_get_disk(
+async fn instance_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseOk<ApiDiskAttachment>, HttpError> {
@@ -603,7 +608,7 @@ async fn api_instance_disks_get_disk(
     method = PUT,
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
-async fn api_instance_disks_put_disk(
+async fn instance_disks_put_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseCreated<ApiDiskAttachment>, HttpError> {
@@ -626,7 +631,7 @@ async fn api_instance_disks_put_disk(
     method = DELETE,
     path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
-async fn api_instance_disks_delete_disk(
+async fn instance_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceDiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -653,7 +658,7 @@ async fn api_instance_disks_delete_disk(
      method = GET,
      path = "/hardware/racks",
  }]
-async fn api_hardware_racks_get(
+async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiRackView>>, HttpError> {
@@ -682,7 +687,7 @@ struct RackPathParam {
     method = GET,
     path = "/hardware/racks/{rack_id}",
 }]
-async fn api_hardware_racks_get_rack(
+async fn hardware_racks_get_rack(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<ApiRackView>, HttpError> {
@@ -704,7 +709,7 @@ async fn api_hardware_racks_get_rack(
      method = GET,
      path = "/hardware/sleds",
  }]
-async fn api_hardware_sleds_get(
+async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiSledView>>, HttpError> {
@@ -733,7 +738,7 @@ struct SledPathParam {
      method = GET,
      path = "/hardware/sleds/{sled_id}",
  }]
-async fn api_hardware_sleds_get_sled(
+async fn hardware_sleds_get_sled(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<ApiSledView>, HttpError> {
@@ -755,7 +760,7 @@ async fn api_hardware_sleds_get_sled(
      method = GET,
      path = "/sagas",
  }]
-async fn api_sagas_get(
+async fn sagas_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<ApiPaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ApiSagaView>>, HttpError> {
@@ -783,7 +788,7 @@ struct SagaPathParam {
      method = GET,
      path = "/sagas/{saga_id}",
  }]
-async fn api_sagas_get_saga(
+async fn sagas_get_saga(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<ApiSagaView>, HttpError> {
