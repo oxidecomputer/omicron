@@ -5,10 +5,11 @@ use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
 use slog::{debug, error, trace, Logger};
 
 use crate::db::{model, query};
-use crate::{types::Sample, Error, Field, FieldValue, MeasurementType};
+use crate::{types::Sample, Error, Field, FieldValue};
 
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
@@ -185,20 +186,76 @@ impl Client {
         Ok(())
     }
 
+    /// Search for timeseries matching the given criteria, building filters from the input.
+    ///
+    /// This method builds up the objects used to query the database from loosly-typed input,
+    /// especially string field=value pairs for the timeseries fields.
+    pub async fn filter_timeseries_with(
+        &self,
+        timeseries_name: &str,
+        filters: &[query::Filter],
+        after: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+    ) -> Result<Vec<model::Timeseries>, Error> {
+        let schema = self
+            .schema_for_timeseries(&timeseries_name)
+            .await?
+            .ok_or_else(|| {
+                Error::QueryError(format!(
+                    "No such timeseries: '{}'",
+                    timeseries_name
+                ))
+            })?;
+
+        // Convert the filters as strings to typed `FieldValue`s for each field in the schema.
+        let mut fields = BTreeMap::new();
+        for filter in filters.into_iter() {
+            let ty = schema
+                .fields
+                .iter()
+                .find(|f| f.name == filter.name)
+                .ok_or_else(|| {
+                    Error::QueryError(format!(
+                        "No field '{}' for timeseries '{}'",
+                        filter.name, timeseries_name
+                    ))
+                })?
+                .ty;
+            fields
+                .entry(&filter.name)
+                .or_insert_with(Vec::new)
+                .push(FieldValue::parse_as_type(&filter.value, ty)?);
+        }
+
+        // Aggregate all filters on all fields
+        let filters = fields
+            .iter()
+            .map(|(field_name, field_filters)| {
+                query::FieldFilter::new(&field_name, &field_filters)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let time_filter = query::TimeFilter::from_timestamps(after, before);
+        let filter = query::TimeseriesFilter {
+            timeseries_name: timeseries_name.to_string(),
+            filters,
+            time_filter,
+        };
+        self.filter_timeseries(&filter).await
+    }
+
     /// Search for samples from timeseries matching the given criteria.
     pub async fn filter_timeseries(
         &self,
         filter: &query::TimeseriesFilter,
-        measurement_type: MeasurementType, // TODO remove?
     ) -> Result<Vec<model::Timeseries>, Error> {
-        let query = filter.as_select_query(measurement_type);
-        let body = self.execute_with_body(query).await?;
         let schema =
             self.schema_for_timeseries(&filter.timeseries_name).await?.unwrap();
+        let query = filter.as_select_query(schema.measurement_type);
+        let body = self.execute_with_body(query).await?;
         let mut timeseries_by_key = BTreeMap::new();
         for line in body.lines() {
             let (key, sample) =
-                model::parse_timeseries_sample(line, measurement_type)?;
+                model::parse_timeseries_sample(line, schema.measurement_type)?;
             timeseries_by_key.entry(key).or_insert_with(Vec::new).push(sample);
         }
         timeseries_by_key
@@ -426,7 +483,7 @@ fn reconstitute_from_schema(
 mod tests {
     use super::*;
     use crate::db::{query, test_util};
-    use crate::types::FieldType;
+    use crate::types::{FieldType, MeasurementType};
     use chrono::{Duration, Utc};
     use omicron_common::dev::clickhouse::ClickHouseInstance;
     use slog::o;
@@ -736,10 +793,7 @@ mod tests {
             ],
             time_filter: None,
         };
-        let results = client
-            .filter_timeseries(&filter, sample.measurement.measurement_type())
-            .await
-            .unwrap();
+        let results = client.filter_timeseries(&filter).await.unwrap();
         assert_eq!(results.len(), 1, "Expected to find a single timeseries");
         let timeseries = &results[0];
         assert_eq!(

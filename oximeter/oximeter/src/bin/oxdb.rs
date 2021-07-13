@@ -1,14 +1,13 @@
 //! Tool for developing against the Oximeter timeseries database, populating data and querying.
 // Copyright 2021 Oxide Computer Company
 
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 use anyhow::{bail, Context};
 use chrono::{DateTime, Duration, Utc};
 use oximeter::{
     db::{query, Client},
-    types::{Cumulative, FieldValue, Sample},
+    types::{Cumulative, Sample},
     Metric, Target,
 };
 use slog::{debug, info, o, Drain, Level, Logger};
@@ -128,7 +127,7 @@ enum Subcommand {
 
         /// Filters applied to the timeseries's fields, specificed as `name=value` pairs.
         #[structopt(required = true, min_values(1))]
-        filters: Vec<Filter>,
+        filters: Vec<query::Filter>,
 
         /// The start time to which the search is constrained. None means the beginning of time.
         #[structopt(long)]
@@ -138,31 +137,6 @@ enum Subcommand {
         #[structopt(long)]
         before: Option<DateTime<Utc>>,
     },
-}
-
-#[derive(Debug, StructOpt)]
-struct Filter {
-    /// The name of the field
-    name: String,
-
-    /// The value of the field
-    value: String,
-}
-
-impl std::str::FromStr for Filter {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split('=').collect::<Vec<_>>();
-        if parts.len() == 2 {
-            Ok(Filter {
-                name: parts[0].to_string(),
-                value: parts[1].to_string(),
-            })
-        } else {
-            bail!("Field filters must be specified as 'name=value' pairs")
-        }
-    }
 }
 
 async fn make_client(port: u16, log: &Logger) -> Result<Client, anyhow::Error> {
@@ -291,62 +265,15 @@ async fn query(
     port: u16,
     log: Logger,
     timeseries_name: String,
-    filters: Vec<Filter>,
+    filters: Vec<query::Filter>,
     after: Option<DateTime<Utc>>,
     before: Option<DateTime<Utc>>,
 ) -> Result<(), anyhow::Error> {
     let client = make_client(port, &log).await?;
-    let schema = client
-        .schema_for_timeseries(&timeseries_name)
-        .await
-        .context("Failed to get timeseries")?
-        .context(format!("No such timeseries: '{}'", timeseries_name))?;
-
-    // Convert the filters as strings to typed `FieldValue`s for each field in the schema.
-    let mut fields = BTreeMap::new();
-    for filter in filters.into_iter() {
-        let ty = schema
-            .fields
-            .iter()
-            .find(|f| f.name == filter.name)
-            .context(format!("No such field: '{}'", filter.name))?
-            .ty;
-        fields
-            .entry(filter.name)
-            .or_insert_with(Vec::new)
-            .push(FieldValue::parse_as_type(&filter.value, ty)?);
-    }
-
-    // Aggregate all filters on all fields
-    let filters = fields
-        .iter()
-        .map(|(field_name, field_filters)| {
-            query::FieldFilter::new(&field_name, &field_filters)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to build query filters")?;
-    let time_filter = match (after, before) {
-        (None, None) => None,
-        (Some(after), None) => Some(query::TimeFilter::After(after)),
-        (None, Some(before)) => Some(query::TimeFilter::Before(before)),
-        (Some(after), Some(before)) => {
-            Some(query::TimeFilter::Between(after, before))
-        }
-    };
-    let filters = query::TimeseriesFilter {
-        timeseries_name: timeseries_name.clone(),
-        filters,
-        time_filter,
-    };
-    println!(
-        "{}",
-        serde_json::to_string(
-            &client
-                .filter_timeseries(&filters, schema.measurement_type)
-                .await?
-        )
-        .unwrap()
-    );
+    let timeseries = client
+        .filter_timeseries_with(&timeseries_name, &filters, after, before)
+        .await?;
+    println!("{}", serde_json::to_string(&timeseries).unwrap());
     Ok(())
 }
 

@@ -4,6 +4,7 @@
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::db::model::DATABASE_NAME;
 use crate::types::{FieldValue, MeasurementType};
@@ -47,7 +48,10 @@ impl MeasurementType {
     }
 }
 
-/// Object used to filter timestamps
+/// Object used to filter timestamps, specifying a start and/or end time.
+///
+/// Note that the endpoints are interpreted as inclusive, so a timestamp matching the endpoints is
+/// also returned.
 #[derive(Debug, Clone, Copy)]
 pub enum TimeFilter {
     /// Passes timestamps before the contained value
@@ -88,6 +92,51 @@ impl TimeFilter {
             ),
         }
     }
+
+    /// Construct a `TimeFilter` from the start and end timestamps.
+    ///
+    /// If both `before` and `after` are `None`, then `None` is returned. Otherwise, a variant of
+    /// `TimeFilter` is constructed and returned.
+    pub fn from_timestamps(
+        after: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+    ) -> Option<Self> {
+        match (after, before) {
+            (None, None) => None,
+            (Some(after), None) => Some(TimeFilter::After(after)),
+            (None, Some(before)) => Some(TimeFilter::Before(before)),
+            (Some(after), Some(before)) => {
+                Some(TimeFilter::Between(after, before))
+            }
+        }
+    }
+}
+
+/// A string-typed filter, used to build filters on timeseries fields from external input.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Filter {
+    /// The name of the field.
+    pub name: String,
+
+    /// The value of the field as a string.
+    pub value: String,
+}
+
+impl std::str::FromStr for Filter {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts = s.split('=').collect::<Vec<_>>();
+        if parts.len() == 2 {
+            Ok(Filter {
+                name: parts[0].to_string(),
+                value: parts[1].to_string(),
+            })
+        } else {
+            Err(Error::QueryError(String::from(
+                "String filters must be specified as `name=value` pairs",
+            )))
+        }
+    }
 }
 
 /// A `FieldFilter` specifies a field by name and one or more values to compare against by
@@ -99,6 +148,11 @@ pub struct FieldFilter {
 }
 
 impl FieldFilter {
+    /// Construct a filter applied to a field of the given name.
+    ///
+    /// `field_values` is a slice of data that can be converted into a `FieldValue`. The filter
+    /// matches any fields with the given name where the value is one of those specified in
+    /// `field_values` (i.e., it matches `field_values[0]` OR `field_values[1]`, etc.).
     pub fn new<T>(field_name: &str, field_values: &[T]) -> Result<Self, Error>
     where
         T: Into<FieldValue> + Clone,
@@ -139,7 +193,12 @@ impl FieldFilter {
     }
 }
 
-/// Object used to filter timeseries
+/// Object used to filter timeseries.
+///
+/// Timeseries must be selected by name. A list of filters applied to the fields of the timeseries
+/// can be used to further restrict the matching timeseries. The `time_filter` is used to restrict
+/// the data to the specified time window, and is applied to all matching timeseries.
+#[derive(Debug, Clone)]
 pub struct TimeseriesFilter {
     /// The name of the timeseries to select
     pub timeseries_name: String,
@@ -192,9 +251,9 @@ impl TimeseriesFilter {
     }
 
     /// Generate a select query for this filter
-    pub fn as_select_query(
+    pub(crate) fn as_select_query(
         &self,
-        measurement_type: MeasurementType, // TODO remove
+        measurement_type: MeasurementType,
     ) -> String {
         let select_queries = self.field_select_queries();
         let query = if select_queries.len() == 1 {
