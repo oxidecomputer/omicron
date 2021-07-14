@@ -12,12 +12,9 @@
 
 mod bootstrap_agent;
 mod bootstrap_agent_client;
-mod config;
+pub mod config;
 mod http_entrypoints;
-mod server;
-
-pub use config::Config;
-pub use server::Server;
+pub mod server;
 
 #[macro_use]
 extern crate slog;
