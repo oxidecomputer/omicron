@@ -404,7 +404,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#feea2584eb3ce562a45e6696d51f8d6fa4b40a1e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3a9cb2ba9cb1c7da4c51937a82789d4d24de26f9"
 dependencies = [
  "async-trait",
  "base64",
@@ -428,6 +428,7 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
+ "syn",
  "tokio",
  "toml",
  "uuid",
@@ -436,7 +437,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#feea2584eb3ce562a45e6696d51f8d6fa4b40a1e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3a9cb2ba9cb1c7da4c51937a82789d4d24de26f9"
 dependencies = [
  "proc-macro2",
  "quote",
