@@ -245,6 +245,73 @@ CREATE TABLE omicron.public.OximeterAssignment (
     CONSTRAINT "primary" PRIMARY KEY (oximeter_id, producer_id)
 );
 
+/*
+ * VPCs and networking primitives
+ */
+
+CREATE TABLE omicron.public.VPC (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ
+    /* TODO: Add project-scoping.
+     * project_id UUID NOT NULL REFERENCES omicron.public.Project (id),
+     */
+);
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.VPC (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.VPCSubnet (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    ipv4_block INET,
+    ipv6_block INET
+);
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.VPCSubnet (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.VNIC (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    /* FK into VPC table */
+    vpc_id UUID NOT NULL,
+    /* FK into VPCSubnet table. */
+    subnet_id UUID NOT NULL,
+    mac CHAR(17) NOT NULL, -- 6 octets in hex -> 12 characters, plus 5 ":" separators
+    ip INET NOT NULL
+);
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.VNIC (
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 /*

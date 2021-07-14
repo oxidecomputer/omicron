@@ -24,7 +24,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
@@ -1311,6 +1311,279 @@ impl From<steno::SagaStateView> for SagaStateView {
             },
         }
     }
+}
+
+/// A Virtual Private Cloud (VPC) object.
+#[derive(Clone, Debug)]
+pub struct VPC {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+    // TODO: Implement project-scoping
+    // /** id for the project containing this Instance */
+    // pub project_id: Uuid,
+}
+
+/// Client view onto a `VPC` object.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VPCView {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    // TODO: Implement project-scoping
+    // /** id for the project containing this Instance */
+    // pub project_id: Uuid,
+}
+
+impl Object for VPC {
+    type View = VPCView;
+    fn to_view(&self) -> Self::View {
+        VPCView { identity: self.identity.clone() }
+    }
+}
+
+/// An `IpNet` represents a IP subnetwork (v4 or v6), including the address and network mask.
+// NOTE: We're using the `ipnet` crate's implementation, but we wrap it in a newtype because that
+// crate does not implement `JsonSchema` and Rust's orphan rules prevent us from implementing the
+// trait directly on the type.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct IpNet(pub ipnet::IpNet);
+
+impl std::ops::Deref for IpNet {
+    type Target = ipnet::IpNet;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for IpNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for IpNet {
+    fn schema_name() -> String {
+        "IpNet".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject {
+                metadata: Some(Box::new(schemars::schema::Metadata {
+                    id: None,
+                    title: Some("An IP subnet".to_string()),
+                    description: Some("An IPv4 or IPv6 subnet, including prefix and subnet mask".to_string()),
+                    default: None,
+                    deprecated: false,
+                    read_only: false,
+                    write_only: false,
+                    examples: vec!["192.168.1.0/24".into(), "fd12:3456::/64".into()],
+                })),
+                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
+                format: None,
+                enum_values: None,
+                const_value: None,
+                subschemas: None,
+                number: None,
+                string: Some(Box::new(schemars::schema::StringValidation {
+                    max_length: Some(23), // fully-specified IPv6, slash and 3-digit mask
+                    min_length: None,
+                    // This regex validator is inspired by https://ihateregex.io/expr/ipv{4,6}
+                    // Note that the regex is more permissive than we intend to be in the final
+                    // API. This passes _any_ IPs, while we're likely going to restrict them to the
+                    // private address space for v4 for example (RFD 21 sec 2.2).
+                    pattern: Some(
+                        r#"(^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$)|(^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$)"#.to_string()
+                    ),
+                })),
+                array: None,
+                object: None,
+                reference: None,
+                extensions: BTreeMap::new(),
+            }
+        )
+    }
+}
+
+/// An IP subnet within a VPC.
+#[derive(Clone, Debug)]
+pub struct VPCSubnet {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    // TODO: Implement project-scoping
+    // /** id for the project containing this Instance */
+    // pub project_id: Uuid,
+    /** The VPC to which the subnet belongs. */
+    pub vpc_id: Uuid,
+
+    // TODO-correctness: RFD 21 sec 3.5 indicates that users may specify both v4 and v6 subnets in
+    // a single API call, but does not explicitly say if either is required. Clearly, one of them
+    // has to be specified, and most cloud providers require v4 and make v6 optional. However, RFD
+    // hints that users _might_ be able to specify v6 and not v4 (and maybe that the omitted block
+    // will be added by default).
+    /** The IPv4 subnet CIDR block. */
+    pub ipv4_block: Option<IpNet>,
+
+    /** The IPv4 subnet CIDR block. */
+    pub ipv6_block: Option<IpNet>,
+}
+
+impl Object for VPCSubnet {
+    type View = VPCSubnetView;
+    fn to_view(&self) -> Self::View {
+        VPCSubnetView {
+            identity: self.identity.clone(),
+            vpc_id: self.vpc_id,
+            ipv4_block: self.ipv4_block,
+            ipv6_block: self.ipv6_block,
+        }
+    }
+}
+
+/// Client view onto a `VPCSubnet` object.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VPCSubnetView {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    // TODO: Implement project-scoping
+    // /** id for the project containing this Instance */
+    // pub project_id: Uuid,
+    /** The VPC to which the subnet belongs. */
+    pub vpc_id: Uuid,
+
+    /** The IPv4 subnetwork. */
+    pub ipv4_block: Option<IpNet>,
+
+    /** The IPv6 subnetwork. */
+    pub ipv6_block: Option<IpNet>,
+}
+
+/// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
+/// hardware devices on a network.
+// NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
+// this crate does not implement `JsonSchema`, nor the the SQL conversion traits `FromSql` and
+// `ToSql`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl std::ops::Deref for MacAddr {
+    type Target = macaddr::MacAddr6;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for MacAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for MacAddr {
+    fn schema_name() -> String {
+        "MacAddr".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A MAC address".to_string()),
+                description: Some(
+                    "A Media Access Control address, in EUI-48 format"
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec!["ff:ff:ff:ff:ff:ff".into()],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(17), // 12 hex characters and 5 ":"-separators
+                min_length: Some(17),
+                pattern: Some(
+                    r#"^([0-8a-fA-F]{2}:){5}[0-8a-fA-F]{2}$"#.to_string(),
+                ),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
+/// A `VNIC` represents a virtual network interface device.
+#[derive(Clone, Debug)]
+pub struct VNIC {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    // TODO: Implement project-scoping
+    // /** id for the project containing this Instance */
+    // pub project_id: Uuid,
+    /** The VPC to which the NIC belongs. */
+    pub vpc_id: Uuid,
+
+    /** The subnet to which the NIC belongs. */
+    pub subnet_id: Uuid,
+
+    /** The MAC address assigned to this NIC. */
+    pub mac: MacAddr,
+
+    /** The IP address assigned to this NIC. */
+    pub ip: IpAddr,
+}
+
+impl Object for VNIC {
+    type View = VNICView;
+    fn to_view(&self) -> Self::View {
+        VNICView {
+            identity: self.identity.clone(),
+            vpc_id: self.vpc_id,
+            subnet_id: self.subnet_id,
+            mac: self.mac,
+            ip: self.ip,
+        }
+    }
+}
+
+/// Client view onto a `VNIC` object.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VNICView {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    // TODO: Implement project-scoping
+    // pub project_id: Uuid,
+    /** The VPC to which the NIC belongs. */
+    pub vpc_id: Uuid,
+
+    /** The subnet to which the NIC belongs. */
+    pub subnet_id: Uuid,
+
+    /** The MAC address assigned to this NIC. */
+    pub mac: MacAddr,
+
+    /** The IP address assigned to this NIC. */
+    pub ip: IpAddr,
 }
 
 /*

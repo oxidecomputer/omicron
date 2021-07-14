@@ -11,6 +11,7 @@ http = "0.2.0"
 hyper = "0.14"
 libc = "0.2.98"
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b6da043d" }
+postgres-protocol = "0.6.1"
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"
@@ -40,6 +41,14 @@ features = [ "serde" ]
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
 branch = "main"
+
+[dependencies.ipnet]
+version = "2.3.1"
+features = [ "serde" ]
+
+[dependencies.macaddr]
+version = "1.0.1"
+features = [ "serde_std" ]
 
 [dependencies.schemars]
 version = "0.8"
