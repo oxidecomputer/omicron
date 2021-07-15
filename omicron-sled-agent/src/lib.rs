@@ -6,11 +6,13 @@
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
 
-// Shared sled agent modules.
-pub mod common;
+// Module for executing the simulated sled agent.
 pub mod sim;
 
-// "Real" sled agent modules.
+// Modules shared by both simulated and non-simulated sled agents.
+pub mod common;
+
+// Modules for the non-simulated sled agent.
 pub mod config;
 mod http_entrypoints;
 pub mod server;
