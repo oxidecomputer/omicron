@@ -404,7 +404,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3a9cb2ba9cb1c7da4c51937a82789d4d24de26f9"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
 dependencies = [
  "async-trait",
  "base64",
@@ -419,6 +419,7 @@ dependencies = [
  "openapiv3",
  "paste",
  "percent-encoding",
+ "proc-macro2",
  "schemars",
  "serde",
  "serde_json",
@@ -437,7 +438,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3a9cb2ba9cb1c7da4c51937a82789d4d24de26f9"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
 dependencies = [
  "proc-macro2",
  "quote",
