@@ -9,7 +9,7 @@ bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
 num-traits = "0.2.14"
-hyper = "0.14.7"
+hyper = "0.14.10"
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
 omicron-common = { path = "../../omicron-common" }
 reqwest = { version = "0.11.4", features = [ "json" ] }
