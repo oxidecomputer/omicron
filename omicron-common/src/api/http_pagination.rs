@@ -127,10 +127,7 @@ pub trait ScanParams:
      * expected that consumers would override this implementation.
      */
     fn results_page<T>(
-        query: &PaginationParams<
-            Self,
-            PageSelector<Self, Self::MarkerValue>,
-        >,
+        query: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
         list: Vec<T>,
     ) -> Result<ResultsPage<T>, dropshot::HttpError>
     where
@@ -144,10 +141,7 @@ pub trait ScanParams:
 /**
  * See `dropshot::ResultsPage::new`
  */
-fn page_selector_for<T, S, M>(
-    item: &T,
-    scan_params: &S,
-) -> PageSelector<S, M>
+fn page_selector_for<T, S, M>(item: &T, scan_params: &S) -> PageSelector<S, M>
 where
     T: ObjectIdentity,
     S: ScanParams<MarkerValue = M>,
@@ -206,8 +200,7 @@ where
  */
 
 /** Query parameters for pagination by name only */
-pub type PaginatedByName =
-    PaginationParams<ScanByName, PageSelectorByName>;
+pub type PaginatedByName = PaginationParams<ScanByName, PageSelectorByName>;
 /** Page selector for pagination by name only */
 pub type PageSelectorByName = PageSelector<ScanByName, Name>;
 /** Scan parameters for resources that support scanning by name only */
@@ -306,8 +299,7 @@ impl ScanParams for ScanById {
 pub type PaginatedByNameOrId =
     PaginationParams<ScanByNameOrId, PageSelectorByNameOrId>;
 /** Page selector for pagination by name or id */
-pub type PageSelectorByNameOrId =
-    PageSelector<ScanByNameOrId, NameOrIdMarker>;
+pub type PageSelectorByNameOrId = PageSelector<ScanByNameOrId, NameOrIdMarker>;
 /** Scan parameters for resources that support scanning by name or id */
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanByNameOrId {
@@ -497,6 +489,10 @@ mod test {
     use super::page_selector_for;
     use super::pagination_field_for_scan_params;
     use super::IdSortMode;
+    use super::Name;
+    use super::NameOrIdMarker;
+    use super::NameOrIdSortMode;
+    use super::NameSortMode;
     use super::PagField;
     use super::PageSelector;
     use super::PageSelectorById;
@@ -508,10 +504,6 @@ mod test {
     use super::ScanById;
     use super::ScanByName;
     use super::ScanByNameOrId;
-    use super::Name;
-    use super::NameOrIdMarker;
-    use super::NameOrIdSortMode;
-    use super::NameSortMode;
     use super::ScanParams;
     use crate::api::IdentityMetadata;
     use crate::api::ObjectIdentity;
@@ -553,10 +545,7 @@ mod test {
                 "page selector, scan by name only",
                 schema_for!(PageSelectorByName),
             ),
-            (
-                "page selector, scan by id only",
-                schema_for!(PageSelectorById),
-            ),
+            ("page selector, scan by id only", schema_for!(PageSelectorById)),
             (
                 "page selector, scan by name or id",
                 schema_for!(PageSelectorByNameOrId),
@@ -582,8 +571,7 @@ mod test {
     #[test]
     fn test_pagination_examples() {
         let scan_by_id = ScanById { sort_by: IdSortMode::IdAscending };
-        let scan_by_name =
-            ScanByName { sort_by: NameSortMode::NameAscending };
+        let scan_by_name = ScanByName { sort_by: NameSortMode::NameAscending };
         let scan_by_nameid_name =
             ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending };
         let scan_by_nameid_id =
@@ -736,8 +724,7 @@ mod test {
          * the results page was properly generated.
          */
         assert_eq!(S::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(PageSelector { ref last_seen, .. }) = p1.page
-        {
+        if let WhichPage::Next(PageSelector { ref last_seen, .. }) = p1.page {
             assert_eq!(last_seen, itemlast_marker);
         } else {
             panic!("expected WhichPage::Next");
@@ -854,8 +841,7 @@ mod test {
     #[test]
     fn test_scan_by_nameid_name() {
         /* Start with the common battery of tests. */
-        let scan =
-            ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
+        let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
         assert_eq!(pagination_field_for_scan_params(&scan), PagField::Name);
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
