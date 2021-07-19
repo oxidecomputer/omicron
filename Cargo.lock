@@ -419,7 +419,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#feea2584eb3ce562a45e6696d51f8d6fa4b40a1e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
 dependencies = [
  "async-trait",
  "base64",
@@ -434,6 +434,7 @@ dependencies = [
  "openapiv3",
  "paste",
  "percent-encoding",
+ "proc-macro2",
  "schemars",
  "serde",
  "serde_json",
@@ -443,6 +444,7 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
+ "syn",
  "tokio",
  "toml",
  "uuid",
@@ -451,7 +453,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#feea2584eb3ce562a45e6696d51f8d6fa4b40a1e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
 dependencies = [
  "proc-macro2",
  "quote",
