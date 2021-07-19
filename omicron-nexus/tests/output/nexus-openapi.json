@@ -39,7 +39,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/ApiIdSortMode"
+              "$ref": "#/components/schemas/IdSortMode"
             },
             "style": "form"
           }
@@ -119,7 +119,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/ApiIdSortMode"
+              "$ref": "#/components/schemas/IdSortMode"
             },
             "style": "form"
           }
@@ -970,7 +970,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/ApiIdSortMode"
+              "$ref": "#/components/schemas/IdSortMode"
             },
             "style": "form"
           }
@@ -1725,7 +1725,7 @@
           "items"
         ]
       },
-      "ApiIdSortMode": {
+      "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
         "enum": [
