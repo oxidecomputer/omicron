@@ -1,9 +1,9 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::api::{
-    ApiInstanceRuntimeState, ApiInstanceRuntimeStateRequested,
+    InstanceRuntimeState, InstanceRuntimeStateRequested,
 };
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -54,7 +54,7 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: Arc<NexusClient>,
-    ) -> Result<InstanceManager, ApiError> {
+    ) -> Result<InstanceManager, Error> {
         // Before we start creating instances, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
         Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
@@ -103,9 +103,9 @@ impl InstanceManager {
     pub async fn ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: ApiInstanceRuntimeState,
-        target: ApiInstanceRuntimeStateRequested,
-    ) -> Result<ApiInstanceRuntimeState, ApiError> {
+        initial_runtime: InstanceRuntimeState,
+        target: InstanceRuntimeStateRequested,
+    ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
             "instance_ensure {} -> {:?}", instance_id, target
@@ -200,8 +200,7 @@ mod test {
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
     use omicron_common::api::{
-        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState,
-        ApiInstanceStateRequested,
+        Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
     };
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
@@ -218,11 +217,11 @@ mod test {
         .unwrap()
     }
 
-    fn new_runtime_state() -> ApiInstanceRuntimeState {
-        ApiInstanceRuntimeState {
-            run_state: ApiInstanceState::Creating,
+    fn new_runtime_state() -> InstanceRuntimeState {
+        InstanceRuntimeState {
+            run_state: InstanceState::Creating,
             sled_uuid: Uuid::new_v4(),
-            gen: ApiGeneration::new(),
+            gen: Generation::new(),
             time_updated: Utc::now(),
         }
     }
@@ -282,7 +281,7 @@ mod test {
                 });
                 inst.expect_transition().return_once(|_| {
                     let mut rt_state = new_runtime_state();
-                    rt_state.run_state = ApiInstanceState::Running;
+                    rt_state.run_state = InstanceState::Running;
                     Ok(rt_state)
                 });
                 inst
@@ -293,8 +292,8 @@ mod test {
             .ensure(
                 test_uuid(),
                 new_runtime_state(),
-                ApiInstanceRuntimeStateRequested {
-                    run_state: ApiInstanceStateRequested::Running,
+                InstanceRuntimeStateRequested {
+                    run_state: InstanceStateRequested::Running,
                 },
             )
             .await
@@ -302,7 +301,7 @@ mod test {
 
         // At this point, we can observe the expected state of the instance
         // manager: contianing the created instance...
-        assert_eq!(rt_state.run_state, ApiInstanceState::Running);
+        assert_eq!(rt_state.run_state, InstanceState::Running);
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
 
         // ... however, when we drop the ticket of the corresponding instance,
@@ -353,7 +352,7 @@ mod test {
                     });
                     inst.expect_transition().return_once(|_| {
                         let mut rt_state = new_runtime_state();
-                        rt_state.run_state = ApiInstanceState::Running;
+                        rt_state.run_state = InstanceState::Running;
                         Ok(rt_state)
                     });
                     inst
@@ -365,7 +364,7 @@ mod test {
                     let mut inst = MockInstance::default();
                     inst.expect_transition().returning(|_| {
                         let mut rt_state = new_runtime_state();
-                        rt_state.run_state = ApiInstanceState::Running;
+                        rt_state.run_state = InstanceState::Running;
                         Ok(rt_state)
                     });
                     inst
@@ -376,8 +375,8 @@ mod test {
 
         let id = test_uuid();
         let rt = new_runtime_state();
-        let target = ApiInstanceRuntimeStateRequested {
-            run_state: ApiInstanceStateRequested::Running,
+        let target = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
         };
 
         // Creates instance, start + transition.

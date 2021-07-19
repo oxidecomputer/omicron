@@ -8,7 +8,7 @@ use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -105,7 +105,7 @@ impl<S: Simulatable> SimObject<S> {
     fn transition(
         &mut self,
         target: S::RequestedState,
-    ) -> Result<Option<S::RequestedState>, ApiError> {
+    ) -> Result<Option<S::RequestedState>, Error> {
         let dropped = self.object.desired().clone();
         let old_gen = self.object.generation();
         let action = self.object.request_transition(&target)?;
@@ -293,7 +293,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         id: &Uuid,
         current: S::CurrentState,
         target: S::RequestedState,
-    ) -> Result<S::CurrentState, ApiError> {
+    ) -> Result<S::CurrentState, Error> {
         let mut objects = self.objects.lock().await;
         let maybe_current_object = objects.remove(id);
         let (mut object, is_new) = {
@@ -336,25 +336,25 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
-    use omicron_common::api::ApiDiskRuntimeState;
-    use omicron_common::api::ApiDiskState;
-    use omicron_common::api::ApiDiskStateRequested;
-    use omicron_common::api::ApiError;
-    use omicron_common::api::ApiGeneration;
-    use omicron_common::api::ApiInstanceRuntimeState;
-    use omicron_common::api::ApiInstanceRuntimeStateRequested;
-    use omicron_common::api::ApiInstanceState;
-    use omicron_common::api::ApiInstanceStateRequested;
+    use omicron_common::api::DiskRuntimeState;
+    use omicron_common::api::DiskState;
+    use omicron_common::api::DiskStateRequested;
+    use omicron_common::api::Error;
+    use omicron_common::api::Generation;
+    use omicron_common::api::InstanceRuntimeState;
+    use omicron_common::api::InstanceRuntimeStateRequested;
+    use omicron_common::api::InstanceState;
+    use omicron_common::api::InstanceStateRequested;
     use omicron_common::dev::test_setup_log;
 
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
         let initial_runtime = {
-            ApiInstanceRuntimeState {
-                run_state: ApiInstanceState::Creating,
+            InstanceRuntimeState {
+                run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
-                gen: ApiGeneration::new(),
+                gen: Generation::new(),
                 time_updated: Utc::now(),
             }
         };
@@ -364,12 +364,12 @@ mod test {
 
     fn make_disk(
         logctx: &LogContext,
-        initial_state: ApiDiskState,
+        initial_state: DiskState,
     ) -> (SimObject<SimDisk>, Receiver<()>) {
         let initial_runtime = {
-            ApiDiskRuntimeState {
+            DiskRuntimeState {
                 disk_state: initial_state,
-                gen: ApiGeneration::new(),
+                gen: Generation::new(),
                 time_updated: Utc::now(),
             }
         };
@@ -384,8 +384,8 @@ mod test {
         let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-        assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.run_state, InstanceState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         /*
          * There's no asynchronous transition going on yet so a
@@ -405,14 +405,14 @@ mod test {
          * that as a transition to "Running".
          */
         let stopped_states = vec![
-            ApiInstanceStateRequested::Stopped,
-            ApiInstanceStateRequested::Destroyed,
+            InstanceStateRequested::Stopped,
+            InstanceStateRequested::Destroyed,
         ];
         let mut rprev = r1;
         for state in stopped_states {
             assert!(rprev.run_state.is_stopped());
             let dropped = instance
-                .transition(ApiInstanceRuntimeStateRequested {
+                .transition(InstanceRuntimeStateRequested {
                     run_state: state.clone(),
                 })
                 .unwrap();
@@ -422,11 +422,11 @@ mod test {
             assert!(rnext.gen > rprev.gen);
             assert!(rnext.time_updated >= rprev.time_updated);
             match state {
-                ApiInstanceStateRequested::Stopped => {
-                    assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
+                InstanceStateRequested::Stopped => {
+                    assert_eq!(rnext.run_state, InstanceState::Stopped);
                 }
-                ApiInstanceStateRequested::Destroyed => {
-                    assert_eq!(rnext.run_state, ApiInstanceState::Destroyed);
+                InstanceStateRequested::Destroyed => {
+                    assert_eq!(rnext.run_state, InstanceState::Destroyed);
                 }
                 _ => panic!("Unexpected requested state: {}", state),
             }
@@ -448,8 +448,8 @@ mod test {
         let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-        assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.run_state, InstanceState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         /*
          * There's no asynchronous transition going on yet so a
@@ -470,8 +470,8 @@ mod test {
         let mut rprev = r1;
         assert!(rx.try_next().is_err());
         let dropped = instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -480,7 +480,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         assert!(!rnext.run_state.is_stopped());
         rprev = rnext;
 
@@ -490,8 +490,8 @@ mod test {
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
-        assert_eq!(rprev.run_state, ApiInstanceState::Starting);
-        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert_eq!(rprev.run_state, InstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Running);
         rprev = rnext;
         instance.transition_finish();
         let rnext = instance.object.current().clone();
@@ -503,8 +503,8 @@ mod test {
          */
         assert!(!rprev.run_state.is_stopped());
         let dropped = instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -523,8 +523,8 @@ mod test {
         assert!(!rprev.run_state.is_stopped());
         assert!(rx.try_next().is_err());
         let dropped = instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Destroyed,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Destroyed,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -532,7 +532,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, InstanceState::Stopping);
         assert!(!rnext.run_state.is_stopped());
         rprev = rnext;
 
@@ -541,8 +541,8 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.desired().is_none());
-        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
+        assert_eq!(rprev.run_state, InstanceState::Stopping);
+        assert_eq!(rnext.run_state, InstanceState::Stopped);
         rprev = rnext;
         instance.transition_finish();
         let rnext = instance.object.current().clone();
@@ -557,8 +557,8 @@ mod test {
         let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-        assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.run_state, InstanceState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         /*
          * There's no asynchronous transition going on yet so a
@@ -586,8 +586,8 @@ mod test {
          */
         assert!(rprev.run_state.is_stopped());
         let dropped = instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -595,7 +595,7 @@ mod test {
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         assert!(!rnext.run_state.is_stopped());
         rprev = rnext;
 
@@ -603,18 +603,15 @@ mod test {
          * Interrupt the async transition with a new one.
          */
         let dropped = instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Destroyed,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Destroyed,
             })
             .unwrap();
-        assert_eq!(
-            dropped.unwrap().run_state,
-            ApiInstanceStateRequested::Running
-        );
+        assert_eq!(dropped.unwrap().run_state, InstanceStateRequested::Running);
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Stopping);
+        assert_eq!(rnext.run_state, InstanceState::Stopping);
         rprev = rnext;
 
         /*
@@ -625,8 +622,8 @@ mod test {
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert!(instance.object.desired().is_none());
-        assert_eq!(rprev.run_state, ApiInstanceState::Stopping);
-        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
+        assert_eq!(rprev.run_state, InstanceState::Stopping);
+        assert_eq!(rnext.run_state, InstanceState::Stopped);
         rprev = rnext;
         instance.transition_finish();
         let rnext = instance.object.current().clone();
@@ -649,11 +646,11 @@ mod test {
         let r1 = instance.object.current().clone();
 
         info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-        assert_eq!(r1.run_state, ApiInstanceState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.run_state, InstanceState::Creating);
+        assert_eq!(r1.gen, Generation::new());
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             })
             .unwrap()
             .is_none());
@@ -670,8 +667,8 @@ mod test {
          * Now, take it through a reboot sequence.
          */
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_none());
@@ -684,7 +681,7 @@ mod test {
 
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         assert!(instance.object.desired().is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
@@ -696,13 +693,13 @@ mod test {
 
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         assert!(instance.object.desired().is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
-        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert_eq!(rnext.run_state, InstanceState::Running);
         assert!(instance.object.desired().is_none());
 
         /*
@@ -711,27 +708,27 @@ mod test {
          * second reboot is totally superfluous.
          */
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert_eq!(rnext.run_state, InstanceState::Running);
         assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
@@ -743,30 +740,30 @@ mod test {
          * sequence.
          */
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_some());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert_eq!(rnext.run_state, InstanceState::Running);
         assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
@@ -780,36 +777,36 @@ mod test {
          * it.  Then, while it's starting, begin a reboot sequence.
          */
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Stopped,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Stopped,
             })
             .unwrap()
             .is_none());
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Stopped);
+        assert_eq!(rnext.run_state, InstanceState::Stopped);
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Running,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Running,
             })
             .unwrap()
             .is_none());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         assert!(instance
-            .transition(ApiInstanceRuntimeStateRequested {
-                run_state: ApiInstanceStateRequested::Reboot,
+            .transition(InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Reboot,
             })
             .unwrap()
             .is_some());
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Rebooting);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Starting);
+        assert_eq!(rnext.run_state, InstanceState::Starting);
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, ApiInstanceState::Running);
+        assert_eq!(rnext.run_state, InstanceState::Running);
         assert!(instance.object.desired().is_none());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
@@ -838,20 +835,20 @@ mod test {
     async fn test_sim_disk_transition_to_detached_states() {
         let logctx =
             test_setup_log("test_sim_disk_transition_to_detached_states").await;
-        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, ApiDiskState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.disk_state, DiskState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         /*
          * Try transitioning to every other detached state.
          */
         let detached_states = vec![
-            (ApiDiskStateRequested::Detached, ApiDiskState::Detached),
-            (ApiDiskStateRequested::Destroyed, ApiDiskState::Destroyed),
-            (ApiDiskStateRequested::Faulted, ApiDiskState::Faulted),
+            (DiskStateRequested::Detached, DiskState::Detached),
+            (DiskStateRequested::Destroyed, DiskState::Destroyed),
+            (DiskStateRequested::Faulted, DiskState::Faulted),
         ];
         let mut rprev = r1;
         for (requested, next) in detached_states {
@@ -868,31 +865,31 @@ mod test {
     #[tokio::test]
     async fn test_sim_disk_attach_then_destroy() {
         let logctx = test_setup_log("test_sim_disk_attach_then_destroy").await;
-        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, ApiDiskState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.disk_state, DiskState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         let id = uuid::Uuid::new_v4();
         let rprev = r1;
         assert!(!rprev.disk_state.is_attached());
         assert!(disk
-            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id.clone()))
             .unwrap()
             .is_none());
         let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.disk_state, ApiDiskState::Attaching(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attaching(id.clone()));
         assert!(rnext.disk_state.is_attached());
         assert_eq!(id, *rnext.disk_state.attached_instance_id().unwrap());
         let rprev = rnext;
 
         disk.transition_finish();
         let rnext = disk.object.current().clone();
-        assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attached(id.clone()));
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         let rprev = rnext;
@@ -900,13 +897,13 @@ mod test {
         disk.transition_finish();
         let rnext = disk.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
-        assert_eq!(rnext.disk_state, ApiDiskState::Attached(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attached(id.clone()));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
 
         /* If we go straight to "Attached" again, there's nothing to do. */
         assert!(disk
-            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id.clone()))
             .unwrap()
             .is_none());
         let rnext = disk.object.current().clone();
@@ -919,9 +916,9 @@ mod test {
         let id2 = uuid::Uuid::new_v4();
         assert_ne!(id, id2);
         let error = disk
-            .transition(ApiDiskStateRequested::Attached(id2.clone()))
+            .transition(DiskStateRequested::Attached(id2.clone()))
             .unwrap_err();
-        if let ApiError::InvalidRequest { message } = error {
+        if let Error::InvalidRequest { message } = error {
             assert_eq!("disk is already attached", message);
         } else {
             panic!("unexpected error type");
@@ -934,68 +931,68 @@ mod test {
          * If we go to a different detached state, we go through the async
          * transition again.
          */
-        disk.transition(ApiDiskStateRequested::Detached).unwrap();
+        disk.transition(DiskStateRequested::Detached).unwrap();
         let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
-        assert_eq!(rnext.disk_state, ApiDiskState::Detaching(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Detaching(id.clone()));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
 
         disk.transition_finish();
         let rnext = disk.object.current().clone();
-        assert_eq!(rnext.disk_state, ApiDiskState::Detached);
+        assert_eq!(rnext.disk_state, DiskState::Detached);
         assert!(rnext.gen > rprev.gen);
 
         /*
          * Verify that it works fine to change directions in the middle of an
          * async transition.
          */
-        disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
+        disk.transition(DiskStateRequested::Attached(id.clone())).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            ApiDiskState::Attaching(id.clone())
+            DiskState::Attaching(id.clone())
         );
-        disk.transition(ApiDiskStateRequested::Destroyed).unwrap();
+        disk.transition(DiskStateRequested::Destroyed).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            ApiDiskState::Detaching(id.clone())
+            DiskState::Detaching(id.clone())
         );
         disk.transition_finish();
-        assert_eq!(disk.object.current().disk_state, ApiDiskState::Destroyed);
+        assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
     }
 
     #[tokio::test]
     async fn test_sim_disk_attach_then_fault() {
         let logctx = test_setup_log("test_sim_disk_attach_then_fault").await;
-        let (mut disk, _rx) = make_disk(&logctx, ApiDiskState::Creating);
+        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, ApiDiskState::Creating);
-        assert_eq!(r1.gen, ApiGeneration::new());
+        assert_eq!(r1.disk_state, DiskState::Creating);
+        assert_eq!(r1.gen, Generation::new());
 
         let id = uuid::Uuid::new_v4();
-        disk.transition(ApiDiskStateRequested::Attached(id.clone())).unwrap();
+        disk.transition(DiskStateRequested::Attached(id.clone())).unwrap();
         disk.transition_finish();
         assert_eq!(
             disk.object.current().disk_state,
-            ApiDiskState::Attached(id.clone())
+            DiskState::Attached(id.clone())
         );
-        disk.transition(ApiDiskStateRequested::Faulted).unwrap();
+        disk.transition(DiskStateRequested::Faulted).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            ApiDiskState::Detaching(id.clone())
+            DiskState::Detaching(id.clone())
         );
         let error = disk
-            .transition(ApiDiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id.clone()))
             .unwrap_err();
-        if let ApiError::InvalidRequest { message } = error {
+        if let Error::InvalidRequest { message } = error {
             assert_eq!("cannot attach from detaching", message);
         } else {
             panic!("unexpected error type");
         }
         disk.transition_finish();
-        assert_eq!(disk.object.current().disk_state, ApiDiskState::Faulted);
+        assert_eq!(disk.object.current().disk_state, DiskState::Faulted);
 
         logctx.cleanup_successful();
     }

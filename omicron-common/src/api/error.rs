@@ -4,8 +4,8 @@
  * For HTTP-level error handling, see Dropshot.
  */
 
-use crate::api::ApiName;
-use crate::api::ApiResourceType;
+use crate::api::Name;
+use crate::api::ResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
@@ -26,13 +26,13 @@ use uuid::Uuid;
  * cases that no programmatic consumer needs to distinguish.
  */
 #[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
-pub enum ApiError {
+pub enum Error {
     /** An object needed as part of this operation was not found. */
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
-    ObjectNotFound { type_name: ApiResourceType, lookup_type: LookupType },
+    ObjectNotFound { type_name: ResourceType, lookup_type: LookupType },
     /** An object already exists with the specified name or identifier. */
     #[error("Object (of type {type_name:?}) already exists: {object_name}")]
-    ObjectAlreadyExists { type_name: ApiResourceType, object_name: String },
+    ObjectAlreadyExists { type_name: ResourceType, object_name: String },
     /**
      * The request was well-formed, but the operation cannot be completed given
      * the current state of the system.
@@ -61,20 +61,20 @@ pub enum LookupType {
     Other(String),
 }
 
-impl ApiError {
+impl Error {
     /**
      * Returns whether the error is likely transient and could reasonably be
      * retried
      */
     pub fn retryable(&self) -> bool {
         match self {
-            ApiError::ServiceUnavailable { .. } => true,
+            Error::ServiceUnavailable { .. } => true,
 
-            ApiError::ObjectNotFound { .. }
-            | ApiError::ObjectAlreadyExists { .. }
-            | ApiError::InvalidRequest { .. }
-            | ApiError::InvalidValue { .. }
-            | ApiError::InternalError { .. } => false,
+            Error::ObjectNotFound { .. }
+            | Error::ObjectAlreadyExists { .. }
+            | Error::InvalidRequest { .. }
+            | Error::InvalidValue { .. }
+            | Error::InternalError { .. } => false,
         }
     }
 
@@ -82,11 +82,8 @@ impl ApiError {
      * Generates an [`Error::ObjectNotFound`] error for a lookup by object
      * name.
      */
-    pub fn not_found_by_name(
-        type_name: ApiResourceType,
-        name: &ApiName,
-    ) -> ApiError {
-        ApiError::ObjectNotFound {
+    pub fn not_found_by_name(type_name: ResourceType, name: &Name) -> Error {
+        Error::ObjectNotFound {
             type_name,
             lookup_type: LookupType::ByName(name.as_str().to_owned()),
         }
@@ -95,22 +92,16 @@ impl ApiError {
     /**
      * Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
      */
-    pub fn not_found_by_id(type_name: ApiResourceType, id: &Uuid) -> ApiError {
-        ApiError::ObjectNotFound {
-            type_name,
-            lookup_type: LookupType::ById(*id),
-        }
+    pub fn not_found_by_id(type_name: ResourceType, id: &Uuid) -> Error {
+        Error::ObjectNotFound { type_name, lookup_type: LookupType::ById(*id) }
     }
 
     /**
      * Generates an [`Error::ObjectNotFound`] error for some other kind of
      * lookup.
      */
-    pub fn not_found_other(
-        type_name: ApiResourceType,
-        message: String,
-    ) -> ApiError {
-        ApiError::ObjectNotFound {
+    pub fn not_found_other(type_name: ResourceType, message: String) -> Error {
+        Error::ObjectNotFound {
             type_name,
             lookup_type: LookupType::Other(message),
         }
@@ -124,8 +115,8 @@ impl ApiError {
      * deserializing a value from the database, or finding two records for
      * something that is supposed to be unique).
      */
-    pub fn internal_error(message: &str) -> ApiError {
-        ApiError::InternalError { message: message.to_owned() }
+    pub fn internal_error(message: &str) -> Error {
+        Error::InternalError { message: message.to_owned() }
     }
 
     /**
@@ -137,8 +128,8 @@ impl ApiError {
      * retry would not work should probably be an InternalError (if it's a
      * server problem) or InvalidRequest (if it's a client problem) instead.
      */
-    pub fn unavail(message: &str) -> ApiError {
-        ApiError::ServiceUnavailable { message: message.to_owned() }
+    pub fn unavail(message: &str) -> Error {
+        Error::ServiceUnavailable { message: message.to_owned() }
     }
 
     /**
@@ -151,7 +142,7 @@ impl ApiError {
     pub fn from_response(
         error_message_base: String,
         error_response: HttpErrorResponseBody,
-    ) -> ApiError {
+    ) -> Error {
         /*
          * We currently only handle the simple case of an InvalidRequest because
          * that's the only case that we currently use.  If we want to preserve
@@ -160,9 +151,9 @@ impl ApiError {
          */
         match error_response.error_code.as_deref() {
             Some("InvalidRequest") => {
-                ApiError::InvalidRequest { message: error_response.message }
+                Error::InvalidRequest { message: error_response.message }
             }
-            _ => ApiError::InternalError {
+            _ => Error::InternalError {
                 message: format!(
                     "{}: unknown error from dependency: {:?}",
                     error_message_base, error_response
@@ -172,15 +163,15 @@ impl ApiError {
     }
 }
 
-impl From<ApiError> for HttpError {
+impl From<Error> for HttpError {
     /**
      * Converts an `Error` error into an `HttpError`.  This defines how
      * errors that are represented internally using `Error` are ultimately
      * exposed to clients over HTTP.
      */
-    fn from(error: ApiError) -> HttpError {
+    fn from(error: Error) -> HttpError {
         match error {
-            ApiError::ObjectNotFound { type_name: t, lookup_type: lt } => {
+            Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
                 if let LookupType::Other(message) = lt {
                     HttpError::for_client_error(
                         Some(String::from("ObjectNotFound")),
@@ -206,7 +197,7 @@ impl From<ApiError> for HttpError {
                 }
             }
 
-            ApiError::ObjectAlreadyExists { type_name: t, object_name: n } => {
+            Error::ObjectAlreadyExists { type_name: t, object_name: n } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
                 HttpError::for_bad_request(
                     Some(String::from("ObjectAlreadyExists")),
@@ -214,12 +205,12 @@ impl From<ApiError> for HttpError {
                 )
             }
 
-            ApiError::InvalidRequest { message } => HttpError::for_bad_request(
+            Error::InvalidRequest { message } => HttpError::for_bad_request(
                 Some(String::from("InvalidRequest")),
                 message,
             ),
 
-            ApiError::InvalidValue { label, message } => {
+            Error::InvalidValue { label, message } => {
                 let message =
                     format!("unsupported value for \"{}\": {}", label, message);
                 HttpError::for_bad_request(
@@ -228,11 +219,11 @@ impl From<ApiError> for HttpError {
                 )
             }
 
-            ApiError::InternalError { message } => {
+            Error::InternalError { message } => {
                 HttpError::for_internal_error(message)
             }
 
-            ApiError::ServiceUnavailable { message } => HttpError::for_unavail(
+            Error::ServiceUnavailable { message } => HttpError::for_unavail(
                 Some(String::from("ServiceNotAvailable")),
                 message,
             ),
@@ -252,7 +243,7 @@ macro_rules! bail_unless {
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
-            return Err($crate::api::ApiError::internal_error(&format!(
+            return Err($crate::api::Error::internal_error(&format!(
                 $($arg)*)))
         }
     };
@@ -260,7 +251,7 @@ macro_rules! bail_unless {
 
 #[cfg(test)]
 mod test {
-    use super::ApiError;
+    use super::Error;
 
     #[test]
     fn test_bail_unless() {
@@ -298,7 +289,7 @@ mod test {
 
         for (result, expected_message) in &checks {
             let error = result.as_ref().unwrap_err();
-            if let ApiError::InternalError { message } = error {
+            if let Error::InternalError { message } = error {
                 assert_eq!(*expected_message, message);
             } else {
                 panic!("got something other than an InternalError");

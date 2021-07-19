@@ -11,28 +11,28 @@
  *     [`tokio_postgres::types::FromSql`] traits.  For the most part, these are
  *     newtypes in Rust that wrap a type for which there is already an impl for
  *     these traits and we delegate to those impls where possible.  For example,
- *     [`ApiByteCount`] is a numeric newtype containing a u64, which maps
+ *     [`ByteCount`] is a numeric newtype containing a u64, which maps
  *     directly to a CockroachDB (PostgreSQL) `int`, which is essentially an
- *     `i64`.  The `ToSql` and `FromSql` impls for `ApiByteCount` delegate to
+ *     `i64`.  The `ToSql` and `FromSql` impls for `ByteCount` delegate to
  *     the existing impls for `i64`.
  *
  * (2) For Rust types that require multiple database values (e.g., an
- *     [`ApiDisk`], which represents an entire row from the Disk table, we impl
+ *     [`Disk`], which represents an entire row from the Disk table, we impl
  *     `TryFrom<&tokio_postgres::Row>`.  The impl pulls multiple values out of
  *     the row, generally using the names of columns from the table.  We also
  *     impl `SqlSerialize`, which records key-value pairs that can be safely
  *     inserted into SQL "UPDATE" and "INSERT" statements.
  *
  * These often combine to form a hierarchy.  For example, to load an
- * [`ApiProject`] from a row from the Project table:
+ * [`Project`] from a row from the Project table:
  *
- * * We start with `ApiProject::try_from(row: &tokio_postgres::Row)`.
- * * The main field of an `ApiProject` is its `ApiIdentityMetadata`, so
- *   `ApiProject::try_from` invokes `ApiIdentityMetadata::try_from(row)` with
+ * * We start with `Project::try_from(row: &tokio_postgres::Row)`.
+ * * The main field of an `Project` is its `IdentityMetadata`, so
+ *   `Project::try_from` invokes `IdentityMetadata::try_from(row)` with
  *   the same `row` argument.
- * * `ApiIdentityMetadata` pulls out the fields that it knows about, including
+ * * `IdentityMetadata` pulls out the fields that it knows about, including
  *   `id` and `name`.
- * * `name` is an [`ApiName`], which is a newtype that wraps a Rust `String`.
+ * * `name` is an [`Name`], which is a newtype that wraps a Rust `String`.
  *   This has a `FromSql` impl.
  *
  * The ToSql/FromSql, and TryFrom impls are in this file because the Rust orphan
@@ -53,23 +53,23 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use super::db::sql_row_value;
-use crate::api::ApiByteCount;
-use crate::api::ApiDisk;
-use crate::api::ApiDiskAttachment;
-use crate::api::ApiDiskRuntimeState;
-use crate::api::ApiDiskState;
-use crate::api::ApiError;
-use crate::api::ApiGeneration;
-use crate::api::ApiIdentityMetadata;
-use crate::api::ApiInstance;
-use crate::api::ApiInstanceCpuCount;
-use crate::api::ApiInstanceRuntimeState;
-use crate::api::ApiInstanceState;
-use crate::api::ApiName;
-use crate::api::ApiProject;
+use crate::api::ByteCount;
+use crate::api::Disk;
+use crate::api::DiskAttachment;
+use crate::api::DiskRuntimeState;
+use crate::api::DiskState;
+use crate::api::Error;
+use crate::api::Generation;
+use crate::api::IdentityMetadata;
+use crate::api::Instance;
+use crate::api::InstanceCpuCount;
+use crate::api::InstanceRuntimeState;
+use crate::api::InstanceState;
+use crate::api::Name;
 use crate::api::OximeterAssignment;
 use crate::api::OximeterInfo;
 use crate::api::ProducerEndpoint;
+use crate::api::Project;
 use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
@@ -125,20 +125,20 @@ macro_rules! impl_sql_wrapping {
     };
 }
 
-impl_sql_wrapping!(ApiByteCount, i64);
-impl_sql_wrapping!(ApiGeneration, i64);
-impl_sql_wrapping!(ApiInstanceCpuCount, i64);
-impl_sql_wrapping!(ApiName, &str);
+impl_sql_wrapping!(ByteCount, i64);
+impl_sql_wrapping!(Generation, i64);
+impl_sql_wrapping!(InstanceCpuCount, i64);
+impl_sql_wrapping!(Name, &str);
 
 /*
  * TryFrom impls used for more complex Rust types
  */
 
-/// Load an [`ApiIdentityMetadata`] from a row of any table that contains the
+/// Load an [`IdentityMetadata`] from a row of any table that contains the
 /// usual identity fields: "id", "name", "description, "time_created", and
 /// "time_modified".
-impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let time_deleted: Option<DateTime<Utc>> =
@@ -154,7 +154,7 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
             time_deleted.is_none(),
             "model does not support objects that have been deleted"
         );
-        Ok(ApiIdentityMetadata {
+        Ok(IdentityMetadata {
             id: sql_row_value(value, "id")?,
             name: sql_row_value(value, "name")?,
             description: sql_row_value(value, "description")?,
@@ -164,50 +164,50 @@ impl TryFrom<&tokio_postgres::Row> for ApiIdentityMetadata {
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for ApiInstanceState {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for InstanceState {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let variant: &str = sql_row_value(value, "instance_state")?;
-        ApiInstanceState::try_from(variant)
-            .map_err(|err| ApiError::InternalError { message: err })
+        InstanceState::try_from(variant)
+            .map_err(|err| Error::InternalError { message: err })
     }
 }
 
-/// Load an [`ApiProject`] from a whole row of the "Project" table.
-impl TryFrom<&tokio_postgres::Row> for ApiProject {
-    type Error = ApiError;
+/// Load an [`Project`] from a whole row of the "Project" table.
+impl TryFrom<&tokio_postgres::Row> for Project {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiProject { identity: ApiIdentityMetadata::try_from(value)? })
+        Ok(Project { identity: IdentityMetadata::try_from(value)? })
     }
 }
 
-/// Load an [`ApiInstance`] from a whole row of the "Instance" table.
-impl TryFrom<&tokio_postgres::Row> for ApiInstance {
-    type Error = ApiError;
+/// Load an [`Instance`] from a whole row of the "Instance" table.
+impl TryFrom<&tokio_postgres::Row> for Instance {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiInstance {
-            identity: ApiIdentityMetadata::try_from(value)?,
+        Ok(Instance {
+            identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
             ncpus: sql_row_value(value, "ncpus")?,
             memory: sql_row_value(value, "memory")?,
             hostname: sql_row_value(value, "hostname")?,
-            runtime: ApiInstanceRuntimeState::try_from(value)?,
+            runtime: InstanceRuntimeState::try_from(value)?,
         })
     }
 }
 
-/// Load an [`ApiInstanceRuntimeState`] from a row of the "Instance" table,
+/// Load an [`InstanceRuntimeState`] from a row of the "Instance" table,
 /// using the "instance_state", "active_server_id", "state_generation", and
 /// "time_state_updated" columns.
-impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiInstanceRuntimeState {
-            run_state: ApiInstanceState::try_from(value)?,
+        Ok(InstanceRuntimeState {
+            run_state: InstanceState::try_from(value)?,
             sled_uuid: sql_row_value(value, "active_server_id")?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,
@@ -215,70 +215,70 @@ impl TryFrom<&tokio_postgres::Row> for ApiInstanceRuntimeState {
     }
 }
 
-/// Load an [`ApiDisk`] from a row of the "Disk" table.
-impl TryFrom<&tokio_postgres::Row> for ApiDisk {
-    type Error = ApiError;
+/// Load an [`Disk`] from a row of the "Disk" table.
+impl TryFrom<&tokio_postgres::Row> for Disk {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDisk {
-            identity: ApiIdentityMetadata::try_from(value)?,
+        Ok(Disk {
+            identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
             create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
             size: sql_row_value(value, "size_bytes")?,
-            runtime: ApiDiskRuntimeState::try_from(value)?,
+            runtime: DiskRuntimeState::try_from(value)?,
         })
     }
 }
 
-/// Load an [`ApiDiskAttachment`] from a database row containing those columns
+/// Load an [`DiskAttachment`] from a database row containing those columns
 /// of the Disk table that describe the attachment: "id", "name", "disk_state",
 /// "attach_instance_id"
-impl TryFrom<&tokio_postgres::Row> for ApiDiskAttachment {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for DiskAttachment {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDiskAttachment {
+        Ok(DiskAttachment {
             instance_id: sql_row_value(value, "attach_instance_id")?,
             disk_id: sql_row_value(value, "id")?,
             disk_name: sql_row_value(value, "name")?,
-            disk_state: ApiDiskState::try_from(value)?,
+            disk_state: DiskState::try_from(value)?,
         })
     }
 }
 
-/// Load an [`ApiDiskRuntimeState`'] from a row from the Disk table, using the
-/// columns needed for [`ApiDiskState`], plus "state_generation" and
+/// Load an [`DiskRuntimeState`'] from a row from the Disk table, using the
+/// columns needed for [`DiskState`], plus "state_generation" and
 /// "time_state_updated".
-impl TryFrom<&tokio_postgres::Row> for ApiDiskRuntimeState {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for DiskRuntimeState {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(ApiDiskRuntimeState {
-            disk_state: ApiDiskState::try_from(value)?,
+        Ok(DiskRuntimeState {
+            disk_state: DiskState::try_from(value)?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,
         })
     }
 }
 
-/// Load an [`ApiDiskState`] from a row from the Disk table, using the columns
+/// Load an [`DiskState`] from a row from the Disk table, using the columns
 /// "disk_state" and "attach_instance_id".
-impl TryFrom<&tokio_postgres::Row> for ApiDiskState {
-    type Error = ApiError;
+impl TryFrom<&tokio_postgres::Row> for DiskState {
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let disk_state_str: &str = sql_row_value(value, "disk_state")?;
         let instance_uuid: Option<Uuid> =
             sql_row_value(value, "attach_instance_id")?;
-        ApiDiskState::try_from((disk_state_str, instance_uuid))
-            .map_err(|e| ApiError::internal_error(&e))
+        DiskState::try_from((disk_state_str, instance_uuid))
+            .map_err(|e| Error::internal_error(&e))
     }
 }
 
 /// Load a [`ProducerEndpoint`] from a row in the `MetricProducer` table, using
 /// the columns "id", "ip", "port", "interval", and "route"
 impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
-    type Error = ApiError;
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let id: Uuid = sql_row_value(value, "id")?;
@@ -295,7 +295,7 @@ impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
 /// Load an [`OximeterInfo`] from a row in the `Oximeter` table, using the
 /// columns "id", "ip", and "port".
 impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
-    type Error = ApiError;
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let collector_id: Uuid = sql_row_value(value, "id")?;
@@ -309,7 +309,7 @@ impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
 /// Load an [`OximeterAssignment`] from a row in the `OximeterAssignment`
 /// table, using the columns "oximeter_id" and "producer_id"
 impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
-    type Error = ApiError;
+    type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let oximeter_id: Uuid = sql_row_value(value, "oximeter_id")?;

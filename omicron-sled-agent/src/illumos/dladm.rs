@@ -1,7 +1,7 @@
 //! Utilities for poking at data links.
 
 use crate::illumos::{execute, PFEXEC};
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
 
@@ -13,12 +13,12 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Returns the name of the first observed physical data link.
-    pub fn find_physical() -> Result<String, ApiError> {
+    pub fn find_physical() -> Result<String, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
         Ok(String::from_utf8(output.stdout)
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!("Cannot parse dladm output as UTF-8: {}", e),
             })?
             .lines()
@@ -27,17 +27,14 @@ impl Dladm {
             // selection?
             .next()
             .map(|s| s.trim())
-            .ok_or_else(|| ApiError::InternalError {
+            .ok_or_else(|| Error::InternalError {
                 message: "No physical devices found".to_string(),
             })?
             .to_string())
     }
 
     /// Creates a new VNIC atop a physical device.
-    pub fn create_vnic(
-        physical: &str,
-        vnic_name: &str,
-    ) -> Result<(), ApiError> {
+    pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd =
             command.args(&[DLADM, "create-vnic", "-l", physical, vnic_name]);
@@ -46,13 +43,13 @@ impl Dladm {
     }
 
     /// Returns all VNICs that may be managed by the Sled Agent.
-    pub fn get_vnics() -> Result<Vec<String>, ApiError> {
+    pub fn get_vnics() -> Result<Vec<String>, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
 
         let vnics = String::from_utf8(output.stdout)
-            .map_err(|e| ApiError::InternalError {
+            .map_err(|e| Error::InternalError {
                 message: format!(
                     "Failed to parse UTF-8 from dladm output: {}",
                     e
@@ -66,7 +63,7 @@ impl Dladm {
     }
 
     /// Remove a vnic from the sled.
-    pub fn delete_vnic(name: &str) -> Result<(), ApiError> {
+    pub fn delete_vnic(name: &str) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
         execute(cmd)?;

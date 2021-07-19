@@ -5,7 +5,7 @@
 use crate::db;
 use anyhow::Context;
 use async_trait::async_trait;
-use omicron_common::api::ApiGeneration;
+use omicron_common::api::Generation;
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
@@ -57,7 +57,7 @@ impl steno::SecStore for CockroachDbSecStore {
             saga_params: create_params.saga_params,
             saga_state: create_params.state,
             current_sec: Some(self.sec_id),
-            adopt_generation: ApiGeneration::new(),
+            adopt_generation: Generation::new(),
             adopt_time: now,
         };
 
@@ -104,7 +104,7 @@ impl steno::SecStore for CockroachDbSecStore {
          * unwrapping the result.
          */
         self.datastore
-            .saga_update_state(id, update, self.sec_id, ApiGeneration::new())
+            .saga_update_state(id, update, self.sec_id, Generation::new())
             .await
             .unwrap();
     }

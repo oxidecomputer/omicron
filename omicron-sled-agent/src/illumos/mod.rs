@@ -5,7 +5,7 @@ pub mod svc;
 pub mod zfs;
 pub mod zone;
 
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 
 const PFEXEC: &str = "/usr/bin/pfexec";
 
@@ -13,14 +13,14 @@ const PFEXEC: &str = "/usr/bin/pfexec";
 // exit code result.
 fn execute(
     command: &mut std::process::Command,
-) -> Result<std::process::Output, ApiError> {
+) -> Result<std::process::Output, Error> {
     let output =
-        command.env_clear().output().map_err(|e| ApiError::InternalError {
+        command.env_clear().output().map_err(|e| Error::InternalError {
             message: format!("Failed to execute {:?}: {}", command, e),
         })?;
 
     if !output.status.success() {
-        return Err(ApiError::InternalError {
+        return Err(Error::InternalError {
             message: format!(
                 "Command {:?} executed and failed: {}",
                 command,

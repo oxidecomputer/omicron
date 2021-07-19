@@ -1,9 +1,9 @@
 //! Mock structures for testing.
 
 use mockall::mock;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiSledAgentStartupInfo;
+use omicron_common::api::Error;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::SledAgentStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -14,12 +14,12 @@ mock! {
         pub async fn notify_sled_agent_online(
             &self,
             id: Uuid,
-            info: ApiSledAgentStartupInfo,
-        ) -> Result<(), ApiError>;
+            info: SledAgentStartupInfo,
+        ) -> Result<(), Error>;
         pub async fn notify_instance_updated(
             &self,
             id: &Uuid,
-            new_runtime_state: &ApiInstanceRuntimeState,
-        ) -> Result<(), ApiError>;
+            new_runtime_state: &InstanceRuntimeState,
+        ) -> Result<(), Error>;
     }
 }

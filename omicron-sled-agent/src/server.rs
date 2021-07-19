@@ -4,7 +4,7 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 
-use omicron_common::api::ApiSledAgentStartupInfo;
+use omicron_common::api::SledAgentStartupInfo;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -65,7 +65,7 @@ impl Server {
             nexus_client
                 .notify_sled_agent_online(
                     config.id,
-                    ApiSledAgentStartupInfo { sa_address },
+                    SledAgentStartupInfo { sa_address },
                 )
                 .await
                 .map_err(BackoffError::Transient)

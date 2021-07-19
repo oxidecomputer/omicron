@@ -7,10 +7,10 @@ use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeState;
 use omicron_common::api::DiskEnsureBody;
+use omicron_common::api::DiskRuntimeState;
 use omicron_common::api::InstanceEnsureBody;
+use omicron_common::api::InstanceRuntimeState;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ async fn instance_put(
     rqctx: Arc<RequestContext<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
-) -> Result<HttpResponseOk<ApiInstanceRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
@@ -77,7 +77,7 @@ async fn disk_put(
     rqctx: Arc<RequestContext<SledAgent>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
-) -> Result<HttpResponseOk<ApiDiskRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
     let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     let body_args = body.into_inner();

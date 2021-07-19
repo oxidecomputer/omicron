@@ -10,11 +10,11 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::ApiDiskRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiSledAgentStartupInfo;
+use omicron_common::api::DiskRuntimeState;
+use omicron_common::api::InstanceRuntimeState;
 use omicron_common::api::OximeterInfo;
 use omicron_common::api::ProducerEndpoint;
+use omicron_common::api::SledAgentStartupInfo;
 use omicron_common::SledAgentClient;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -61,7 +61,7 @@ struct SledAgentPathParam {
 async fn cpapi_sled_agents_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledAgentPathParam>,
-    sled_info: TypedBody<ApiSledAgentStartupInfo>,
+    sled_info: TypedBody<SledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -94,7 +94,7 @@ struct InstancePathParam {
 async fn cpapi_instances_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-    new_runtime_state: TypedBody<ApiInstanceRuntimeState>,
+    new_runtime_state: TypedBody<InstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -122,7 +122,7 @@ struct DiskPathParam {
 async fn cpapi_disks_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
-    new_runtime_state: TypedBody<ApiDiskRuntimeState>,
+    new_runtime_state: TypedBody<DiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

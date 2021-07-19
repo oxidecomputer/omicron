@@ -26,7 +26,7 @@
 
 use super::Config as DbConfig;
 use bb8_postgres::PostgresConnectionManager;
-use omicron_common::api::ApiError;
+use omicron_common::api::Error;
 use std::ops::Deref;
 
 #[derive(Debug)]
@@ -59,7 +59,7 @@ impl Pool {
         Pool { pool }
     }
 
-    pub async fn acquire(&self) -> Result<Conn<'_>, ApiError> {
+    pub async fn acquire(&self) -> Result<Conn<'_>, Error> {
         /*
          * TODO-design It would be better to provide more detailed error
          * information here so that we could monitor various kinds of failures.
@@ -69,7 +69,7 @@ impl Pool {
          * parameters like this.  It could also have its own logger.
          */
         self.pool.get().await.map(|conn| Conn { conn }).map_err(|e| {
-            ApiError::ServiceUnavailable {
+            Error::ServiceUnavailable {
                 message: format!(
                     "failed to acquire database connection: {}",
                     e.to_string()

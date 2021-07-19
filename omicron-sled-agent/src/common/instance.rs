@@ -1,11 +1,11 @@
 //! Describes the states of VM instances.
 
 use chrono::Utc;
-use omicron_common::api::ApiError;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiInstanceStateRequested;
+use omicron_common::api::Error;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
+use omicron_common::api::InstanceState;
+use omicron_common::api::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
@@ -23,9 +23,9 @@ pub enum Action {
 
 fn get_next_desired_state(
     observed: &PropolisInstanceState,
-    requested: ApiInstanceStateRequested,
-) -> Option<ApiInstanceStateRequested> {
-    use ApiInstanceStateRequested as Requested;
+    requested: InstanceStateRequested,
+) -> Option<InstanceStateRequested> {
+    use InstanceStateRequested as Requested;
     use PropolisInstanceState as Observed;
 
     match (requested, observed) {
@@ -48,26 +48,26 @@ fn get_next_desired_state(
 /// The instance state is a combination of the last-known state, as well as an
 /// "objective" state which the sled agent will work towards achieving.
 #[derive(Clone, Debug)]
-pub struct InstanceState {
+pub struct InstanceStates {
     // Last known state reported from Propolis.
-    current: ApiInstanceRuntimeState,
+    current: InstanceRuntimeState,
 
     // Desired state, which we will attempt to poke the VM towards.
-    desired: Option<ApiInstanceRuntimeStateRequested>,
+    desired: Option<InstanceRuntimeStateRequested>,
 }
 
-impl InstanceState {
-    pub fn new(current: ApiInstanceRuntimeState) -> Self {
-        InstanceState { current, desired: None }
+impl InstanceStates {
+    pub fn new(current: InstanceRuntimeState) -> Self {
+        InstanceStates { current, desired: None }
     }
 
     /// Returns the current instance state.
-    pub fn current(&self) -> &ApiInstanceRuntimeState {
+    pub fn current(&self) -> &InstanceRuntimeState {
         &self.current
     }
 
     /// Returns the desired instance state, if any exists.
-    pub fn desired(&self) -> &Option<ApiInstanceRuntimeStateRequested> {
+    pub fn desired(&self) -> &Option<InstanceRuntimeStateRequested> {
         &self.desired
     }
 
@@ -77,7 +77,7 @@ impl InstanceState {
         &mut self,
         observed: &PropolisInstanceState,
     ) -> Option<Action> {
-        use ApiInstanceState as State;
+        use InstanceState as State;
         use PropolisInstanceState as Observed;
 
         let current = match observed {
@@ -124,13 +124,13 @@ impl InstanceState {
     /// out this state transition.
     pub fn request_transition(
         &mut self,
-        target: ApiInstanceStateRequested,
-    ) -> Result<Option<Action>, ApiError> {
+        target: InstanceStateRequested,
+    ) -> Result<Option<Action>, Error> {
         match target {
-            ApiInstanceStateRequested::Running => self.request_running(),
-            ApiInstanceStateRequested::Stopped => self.request_stopped(),
-            ApiInstanceStateRequested::Reboot => self.request_reboot(),
-            ApiInstanceStateRequested::Destroyed => self.request_destroyed(),
+            InstanceStateRequested::Running => self.request_running(),
+            InstanceStateRequested::Stopped => self.request_stopped(),
+            InstanceStateRequested::Reboot => self.request_reboot(),
+            InstanceStateRequested::Destroyed => self.request_destroyed(),
         }
     }
 
@@ -140,40 +140,40 @@ impl InstanceState {
     // This transition always succeeds.
     fn transition(
         &mut self,
-        next: ApiInstanceState,
-        desired: Option<ApiInstanceStateRequested>,
+        next: InstanceState,
+        desired: Option<InstanceStateRequested>,
     ) {
-        self.current = ApiInstanceRuntimeState {
+        self.current = InstanceRuntimeState {
             run_state: next,
             sled_uuid: self.current.sled_uuid,
             gen: self.current.gen.next(),
             time_updated: Utc::now(),
         };
         self.desired = desired
-            .map(|run_state| ApiInstanceRuntimeStateRequested { run_state });
+            .map(|run_state| InstanceRuntimeStateRequested { run_state });
     }
 
-    fn request_running(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_running(&mut self) -> Result<Option<Action>, Error> {
         match self.current.run_state {
             // Early exit: Running request is no-op
-            ApiInstanceState::Running
-            | ApiInstanceState::Starting
-            | ApiInstanceState::Rebooting => return Ok(None),
+            InstanceState::Running
+            | InstanceState::Starting
+            | InstanceState::Rebooting => return Ok(None),
             // Valid states for a running request
-            ApiInstanceState::Creating
-            | ApiInstanceState::Stopping
-            | ApiInstanceState::Stopped => {
+            InstanceState::Creating
+            | InstanceState::Stopping
+            | InstanceState::Stopped => {
                 self.transition(
-                    ApiInstanceState::Starting,
-                    Some(ApiInstanceStateRequested::Running),
+                    InstanceState::Starting,
+                    Some(InstanceStateRequested::Running),
                 );
                 return Ok(Some(Action::Run));
             }
             // Invalid states for a running request
-            ApiInstanceState::Repairing
-            | ApiInstanceState::Failed
-            | ApiInstanceState::Destroyed => {
-                return Err(ApiError::InvalidRequest {
+            InstanceState::Repairing
+            | InstanceState::Failed
+            | InstanceState::Destroyed => {
+                return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot run instance in state \"{}\"",
                         self.current.run_state,
@@ -183,33 +183,33 @@ impl InstanceState {
         }
     }
 
-    fn request_stopped(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_stopped(&mut self) -> Result<Option<Action>, Error> {
         match self.current.run_state {
             // Early exit: Stop request is a no-op
-            ApiInstanceState::Stopped | ApiInstanceState::Stopping => {
+            InstanceState::Stopped | InstanceState::Stopping => {
                 return Ok(None)
             }
             // Valid states for a stop request
-            ApiInstanceState::Creating => {
+            InstanceState::Creating => {
                 // Already stopped, no action necessary.
-                self.transition(ApiInstanceState::Stopped, None);
+                self.transition(InstanceState::Stopped, None);
                 return Ok(None);
             }
-            ApiInstanceState::Starting
-            | ApiInstanceState::Running
-            | ApiInstanceState::Rebooting => {
+            InstanceState::Starting
+            | InstanceState::Running
+            | InstanceState::Rebooting => {
                 // The VM is running, explicitly tell it to stop.
                 self.transition(
-                    ApiInstanceState::Stopping,
-                    Some(ApiInstanceStateRequested::Stopped),
+                    InstanceState::Stopping,
+                    Some(InstanceStateRequested::Stopped),
                 );
                 return Ok(Some(Action::Stop));
             }
             // Invalid states for a stop request
-            ApiInstanceState::Repairing
-            | ApiInstanceState::Failed
-            | ApiInstanceState::Destroyed => {
-                return Err(ApiError::InvalidRequest {
+            InstanceState::Repairing
+            | InstanceState::Failed
+            | InstanceState::Destroyed => {
+                return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot stop instance in state \"{}\"",
                         self.current.run_state,
@@ -219,21 +219,21 @@ impl InstanceState {
         }
     }
 
-    fn request_reboot(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_reboot(&mut self) -> Result<Option<Action>, Error> {
         match self.current.run_state {
             // Early exit: Reboot request is a no-op
-            ApiInstanceState::Rebooting => return Ok(None),
+            InstanceState::Rebooting => return Ok(None),
             // Valid states for a reboot request
-            ApiInstanceState::Starting | ApiInstanceState::Running => {
+            InstanceState::Starting | InstanceState::Running => {
                 self.transition(
-                    ApiInstanceState::Rebooting,
-                    Some(ApiInstanceStateRequested::Reboot),
+                    InstanceState::Rebooting,
+                    Some(InstanceStateRequested::Reboot),
                 );
                 return Ok(Some(Action::Reboot));
             }
             // Invalid states for a reboot request
             _ => {
-                return Err(ApiError::InvalidRequest {
+                return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot reboot instance in state \"{}\"",
                         self.current.run_state,
@@ -243,14 +243,14 @@ impl InstanceState {
         }
     }
 
-    fn request_destroyed(&mut self) -> Result<Option<Action>, ApiError> {
+    fn request_destroyed(&mut self) -> Result<Option<Action>, Error> {
         if self.current.run_state.is_stopped() {
-            self.transition(ApiInstanceState::Destroyed, None);
+            self.transition(InstanceState::Destroyed, None);
             return Ok(Some(Action::Destroy));
         } else {
             self.transition(
-                ApiInstanceState::Stopping,
-                Some(ApiInstanceStateRequested::Destroyed),
+                InstanceState::Stopping,
+                Some(InstanceStateRequested::Destroyed),
             );
             return Ok(Some(Action::Stop));
         }
@@ -259,25 +259,25 @@ impl InstanceState {
 
 #[cfg(test)]
 mod test {
-    use super::{Action, InstanceState};
+    use super::{Action, InstanceStates};
     use chrono::Utc;
     use omicron_common::api::{
-        ApiGeneration, ApiInstanceRuntimeState, ApiInstanceState as State,
-        ApiInstanceStateRequested as Requested,
+        Generation, InstanceRuntimeState, InstanceState as State,
+        InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
 
-    fn make_instance() -> InstanceState {
-        InstanceState::new(ApiInstanceRuntimeState {
+    fn make_instance() -> InstanceStates {
+        InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
-            gen: ApiGeneration::new(),
+            gen: Generation::new(),
             time_updated: Utc::now(),
         })
     }
 
     fn verify_state(
-        instance: &InstanceState,
+        instance: &InstanceStates,
         expected_current: State,
         expected_desired: Option<Requested>,
     ) {

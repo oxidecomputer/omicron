@@ -4,15 +4,15 @@
 
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::ApiByteCount;
-use omicron_common::api::ApiIdentityMetadataCreateParams;
-use omicron_common::api::ApiInstanceCpuCount;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiInstanceView;
-use omicron_common::api::ApiName;
-use omicron_common::api::ApiProjectCreateParams;
-use omicron_common::api::ApiProjectView;
+use omicron_common::api::ByteCount;
+use omicron_common::api::IdentityMetadataCreateParams;
+use omicron_common::api::InstanceCpuCount;
+use omicron_common::api::InstanceCreateParams;
+use omicron_common::api::InstanceState;
+use omicron_common::api::InstanceView;
+use omicron_common::api::Name;
+use omicron_common::api::ProjectCreateParams;
+use omicron_common::api::ProjectView;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -43,12 +43,12 @@ async fn test_instances() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
-    let _: ApiProjectView = objects_post(
+    let _: ProjectView = objects_post(
         &client,
         "/projects",
-        ApiProjectCreateParams {
-            identity: ApiIdentityMetadataCreateParams {
-                name: ApiName::try_from(project_name).unwrap(),
+        ProjectCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
             },
         },
@@ -83,24 +83,24 @@ async fn test_instances() {
     );
 
     /* Create an instance. */
-    let new_instance = ApiInstanceCreateParams {
-        identity: ApiIdentityMetadataCreateParams {
-            name: ApiName::try_from("just-rainsticks").unwrap(),
+    let new_instance = InstanceCreateParams {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from("just-rainsticks").unwrap(),
             description: String::from("sells rainsticks"),
         },
-        ncpus: ApiInstanceCpuCount(4),
-        memory: ApiByteCount::from_mebibytes_u32(256),
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_mebibytes_u32(256),
         hostname: String::from("rainsticks"),
     };
-    let instance: ApiInstanceView =
+    let instance: InstanceView =
         objects_post(&client, &url_instances, new_instance.clone()).await;
     assert_eq!(instance.identity.name, "just-rainsticks");
     assert_eq!(instance.identity.description, "sells rainsticks");
-    let ApiInstanceCpuCount(nfoundcpus) = instance.ncpus;
+    let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
     assert_eq!(instance.hostname, "rainsticks");
-    assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
+    assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     /* Attempt to create a second instance with a conflicting name. */
     let error = client
@@ -121,7 +121,7 @@ async fn test_instances() {
     /* Fetch the instance and expect it to match. */
     let instance = instance_get(&client, &instance_url).await;
     instances_eq(&instances[0], &instance);
-    assert_eq!(instance.runtime.run_state, ApiInstanceState::Starting);
+    assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     /*
      * Now, simulate completion of instance boot and check the state reported.
@@ -129,7 +129,7 @@ async fn test_instances() {
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -152,7 +152,7 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Rebooting);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -161,7 +161,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -170,7 +170,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -182,7 +182,7 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -191,7 +191,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -227,7 +227,7 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Start).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -236,7 +236,7 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Rebooting);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -245,7 +245,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Starting);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -254,7 +254,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Running);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -268,7 +268,7 @@ async fn test_instances() {
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopping);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -285,7 +285,7 @@ async fn test_instances() {
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, ApiInstanceState::Stopped);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -388,15 +388,15 @@ async fn test_instances() {
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
-) -> ApiInstanceView {
-    object_get::<ApiInstanceView>(client, instance_url).await
+) -> InstanceView {
+    object_get::<InstanceView>(client, instance_url).await
 }
 
 async fn instances_list(
     client: &ClientTestContext,
     instances_url: &str,
-) -> Vec<ApiInstanceView> {
-    objects_list_page::<ApiInstanceView>(client, instances_url).await.items
+) -> Vec<InstanceView> {
+    objects_list_page::<InstanceView>(client, instances_url).await.items
 }
 
 /**
@@ -411,7 +411,7 @@ async fn instance_post(
     client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
-) -> ApiInstanceView {
+) -> InstanceView {
     let url = format!(
         "{}/{}",
         instance_url,
@@ -430,15 +430,15 @@ async fn instance_post(
         )
         .await
         .unwrap();
-    read_json::<ApiInstanceView>(&mut response).await
+    read_json::<InstanceView>(&mut response).await
 }
 
-fn instances_eq(instance1: &ApiInstanceView, instance2: &ApiInstanceView) {
+fn instances_eq(instance1: &InstanceView, instance2: &InstanceView) {
     identity_eq(&instance1.identity, &instance2.identity);
     assert_eq!(instance1.project_id, instance2.project_id);
 
-    let ApiInstanceCpuCount(nfoundcpus1) = instance1.ncpus;
-    let ApiInstanceCpuCount(nfoundcpus2) = instance2.ncpus;
+    let InstanceCpuCount(nfoundcpus1) = instance1.ncpus;
+    let InstanceCpuCount(nfoundcpus2) = instance2.ncpus;
     assert_eq!(nfoundcpus1, nfoundcpus2);
 
     assert_eq!(instance1.memory.to_bytes(), instance2.memory.to_bytes());

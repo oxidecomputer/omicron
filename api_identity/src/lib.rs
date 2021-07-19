@@ -1,7 +1,7 @@
 // Copyright 2020 Oxide Computer Company
 /*!
  * This macro is a helper to generate an accessor for the identity of any
- * `ApiObject`.
+ * `api::Object`.
  */
 
 extern crate proc_macro;
@@ -12,18 +12,20 @@ use syn::Fields;
 use syn::ItemStruct;
 
 /**
- * Generates an "identity()" accessor for any `ApiObject` having an `identity`
+ * Generates an "identity()" accessor for any `api::Object` having an `identity`
  * field.
  */
-#[proc_macro_derive(ApiObjectIdentity)]
-pub fn api_identity(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    match do_api_identity(item.into()) {
+#[proc_macro_derive(ObjectIdentity)]
+pub fn object_identity(
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match do_object_identity(item.into()) {
         Ok(result) => result.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
-fn do_api_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
+fn do_object_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     let ast: ItemStruct = syn::parse2(item)?;
     let name = &ast.ident;
 
@@ -35,14 +37,14 @@ fn do_api_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     } {
         return Err(syn::Error::new_spanned(
             ast,
-            "deriving ApiObjectIdentity on a struct requires that it have an \
+            "deriving ObjectIdentity on a struct requires that it have an \
              `identity` field",
         ));
     };
 
     let stream = quote! {
-        impl ApiObjectIdentity for #name {
-            fn identity(&self) -> &ApiIdentityMetadata {
+        impl ObjectIdentity for #name {
+            fn identity(&self) -> &IdentityMetadata {
                 &self.identity
             }
         }
@@ -53,21 +55,21 @@ fn do_api_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
 
 #[cfg(test)]
 mod test {
-    use super::do_api_identity;
+    use super::do_object_identity;
     use quote::quote;
 
     #[test]
     fn test_identity() {
-        let ret = do_api_identity(
+        let ret = do_object_identity(
             quote! {
-                struct Foo { identity: ApiIdentityMetadata }
+                struct Foo { identity: IdentityMetadata }
             }
             .into(),
         );
 
         let expected = quote! {
             impl ApiObjectIdentity for Foo {
-                fn identity(&self) -> &ApiIdentityMetadata {
+                fn identity(&self) -> &IdentityMetadata {
                     &self.identity
                 }
             }
@@ -78,7 +80,7 @@ mod test {
 
     #[test]
     fn test_identity_no_field() {
-        let ret = do_api_identity(
+        let ret = do_object_identity(
             quote! {
                 struct Foo {}
             }

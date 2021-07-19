@@ -12,12 +12,12 @@
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
-use omicron_common::api::ApiGeneration;
-use omicron_common::api::ApiInstanceCreateParams;
-use omicron_common::api::ApiInstanceRuntimeState;
-use omicron_common::api::ApiInstanceRuntimeStateRequested;
-use omicron_common::api::ApiInstanceState;
-use omicron_common::api::ApiInstanceStateRequested;
+use omicron_common::api::Generation;
+use omicron_common::api::InstanceCreateParams;
+use omicron_common::api::InstanceRuntimeState;
+use omicron_common::api::InstanceRuntimeStateRequested;
+use omicron_common::api::InstanceState;
+use omicron_common::api::InstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -63,7 +63,7 @@ fn all_templates(
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
     pub project_id: Uuid,
-    pub create_params: ApiInstanceCreateParams,
+    pub create_params: InstanceCreateParams,
 }
 
 #[derive(Debug)]
@@ -125,16 +125,16 @@ async fn sic_alloc_server(
 
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<ApiInstanceRuntimeState, ActionError> {
+) -> Result<InstanceRuntimeState, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
     let instance_id = sagactx.lookup::<Uuid>("instance_id");
 
-    let runtime = ApiInstanceRuntimeState {
-        run_state: ApiInstanceState::Creating,
+    let runtime = InstanceRuntimeState {
+        run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
-        gen: ApiGeneration::new(),
+        gen: Generation::new(),
         time_updated: Utc::now(),
     };
 
@@ -158,13 +158,13 @@ async fn sic_instance_ensure(
      * TODO-correctness is this idempotent?
      */
     let osagactx = sagactx.user_data();
-    let runtime_params = ApiInstanceRuntimeStateRequested {
-        run_state: ApiInstanceStateRequested::Running,
+    let runtime_params = InstanceRuntimeStateRequested {
+        run_state: InstanceStateRequested::Running,
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let initial_runtime =
-        sagactx.lookup::<ApiInstanceRuntimeState>("initial_runtime")?;
+        sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
     let sa = osagactx
         .sled_client(&sled_uuid)
         .await
