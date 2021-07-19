@@ -4,13 +4,12 @@
  * For HTTP-level error handling, see Dropshot.
  */
 
-use crate::model::ApiName;
-use crate::model::ApiResourceType;
+use crate::api::ApiName;
+use crate::api::ApiResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
 use serde::Serialize;
-use thiserror::Error;
 use uuid::Uuid;
 
 /**
@@ -18,7 +17,7 @@ use uuid::Uuid;
  *
  * These may be generated while handling a client request or as part of
  * background operation.  When generated as part of an HTTP request, an
- * `ApiError` will be converted into an HTTP error as one of the last steps in
+ * `Error` will be converted into an HTTP error as one of the last steps in
  * processing the request.  This allows most of the system to remain agnostic to
  * the transport with which the system communicates with clients.
  *
@@ -26,7 +25,7 @@ use uuid::Uuid;
  * to reuse existing variants rather than inventing new ones to distinguish
  * cases that no programmatic consumer needs to distinguish.
  */
-#[derive(Debug, Deserialize, Error, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
 pub enum ApiError {
     /** An object needed as part of this operation was not found. */
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -80,7 +79,7 @@ impl ApiError {
     }
 
     /**
-     * Generates an [`ApiError::ObjectNotFound`] error for a lookup by object
+     * Generates an [`Error::ObjectNotFound`] error for a lookup by object
      * name.
      */
     pub fn not_found_by_name(
@@ -94,7 +93,7 @@ impl ApiError {
     }
 
     /**
-     * Generates an [`ApiError::ObjectNotFound`] error for a lookup by object id.
+     * Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
      */
     pub fn not_found_by_id(type_name: ApiResourceType, id: &Uuid) -> ApiError {
         ApiError::ObjectNotFound {
@@ -104,7 +103,7 @@ impl ApiError {
     }
 
     /**
-     * Generates an [`ApiError::ObjectNotFound`] error for some other kind of
+     * Generates an [`Error::ObjectNotFound`] error for some other kind of
      * lookup.
      */
     pub fn not_found_other(
@@ -118,7 +117,7 @@ impl ApiError {
     }
 
     /**
-     * Generates an [`ApiError::InternalError`] error with the specific message
+     * Generates an [`Error::InternalError`] error with the specific message
      *
      * InternalError should be used for operational conditions that should not
      * happen but that we cannot reasonably handle at runtime (e.g.,
@@ -130,7 +129,7 @@ impl ApiError {
     }
 
     /**
-     * Generates an [`ApiError::ServiceUnavailable`] error with the specific
+     * Generates an [`Error::ServiceUnavailable`] error with the specific
      * message
      *
      * This should be used for transient failures where the caller might be
@@ -143,7 +142,7 @@ impl ApiError {
     }
 
     /**
-     * Given an error returned in an HTTP response, reconstitute an `ApiError`
+     * Given an error returned in an HTTP response, reconstitute an `Error`
      * that describes that error.  This is intended for use when returning an
      * error from one control plane service to another while preserving
      * information about the error.  If the error is of an unknown kind or
@@ -175,8 +174,8 @@ impl ApiError {
 
 impl From<ApiError> for HttpError {
     /**
-     * Converts an `ApiError` error into an `HttpError`.  This defines how
-     * errors that are represented internally using `ApiError` are ultimately
+     * Converts an `Error` error into an `HttpError`.  This defines how
+     * errors that are represented internally using `Error` are ultimately
      * exposed to clients over HTTP.
      */
     fn from(error: ApiError) -> HttpError {
@@ -243,7 +242,7 @@ impl From<ApiError> for HttpError {
 
 /**
  * Like [`assert!`], except that instead of panicking, this function returns an
- * `Err(ApiError::InternalError)` with an appropriate message if the given
+ * `Err(Error::InternalError)` with an appropriate message if the given
  * condition is not true.
  */
 #[macro_export]
@@ -253,7 +252,7 @@ macro_rules! bail_unless {
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
-            return Err($crate::error::ApiError::internal_error(&format!(
+            return Err($crate::api::ApiError::internal_error(&format!(
                 $($arg)*)))
         }
     };

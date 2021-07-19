@@ -5,7 +5,7 @@
 use crate::db;
 use anyhow::Context;
 use async_trait::async_trait;
-use omicron_common::model::ApiGeneration;
+use omicron_common::api::ApiGeneration;
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;

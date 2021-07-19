@@ -8,7 +8,7 @@ use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -336,16 +336,16 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
+    use omicron_common::api::ApiDiskRuntimeState;
+    use omicron_common::api::ApiDiskState;
+    use omicron_common::api::ApiDiskStateRequested;
+    use omicron_common::api::ApiError;
+    use omicron_common::api::ApiGeneration;
+    use omicron_common::api::ApiInstanceRuntimeState;
+    use omicron_common::api::ApiInstanceRuntimeStateRequested;
+    use omicron_common::api::ApiInstanceState;
+    use omicron_common::api::ApiInstanceStateRequested;
     use omicron_common::dev::test_setup_log;
-    use omicron_common::error::ApiError;
-    use omicron_common::model::ApiDiskRuntimeState;
-    use omicron_common::model::ApiDiskState;
-    use omicron_common::model::ApiDiskStateRequested;
-    use omicron_common::model::ApiGeneration;
-    use omicron_common::model::ApiInstanceRuntimeState;
-    use omicron_common::model::ApiInstanceRuntimeStateRequested;
-    use omicron_common::model::ApiInstanceState;
-    use omicron_common::model::ApiInstanceStateRequested;
 
     fn make_instance(
         logctx: &LogContext,

@@ -1,7 +1,7 @@
 //! API for interacting with Zones running Propolis.
 
 use ipnet::IpNet;
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;

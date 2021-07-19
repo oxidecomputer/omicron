@@ -5,14 +5,13 @@
  * ./sql.rs.
  */
 
-use omicron_common::error::ApiError;
-use omicron_common::model;
-use omicron_common::model::ApiDisk;
-use omicron_common::model::ApiInstance;
-use omicron_common::model::ApiName;
-use omicron_common::model::ApiProject;
-use omicron_common::model::ApiResourceType;
-use omicron_common::model::{OximeterInfo, ProducerEndpoint};
+use omicron_common::api::ApiDisk;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiInstance;
+use omicron_common::api::ApiName;
+use omicron_common::api::ApiProject;
+use omicron_common::api::ApiResourceType;
+use omicron_common::api::{OximeterInfo, ProducerEndpoint};
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -149,7 +148,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = model::OximeterAssignment;
+    type ModelType = omicron_common::api::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];

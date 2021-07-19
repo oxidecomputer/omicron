@@ -5,7 +5,7 @@ pub mod svc;
 pub mod zfs;
 pub mod zone;
 
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 
 const PFEXEC: &str = "/usr/bin/pfexec";
 

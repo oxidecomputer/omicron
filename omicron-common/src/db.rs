@@ -5,7 +5,7 @@
  * here is used by the model conversions, which have to live in this crate.
  */
 
-use crate::error::ApiError;
+use crate::api::ApiError;
 use std::fmt;
 use thiserror::Error;
 use tokio_postgres::types::FromSql;

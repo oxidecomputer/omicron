@@ -20,16 +20,15 @@
 /* TODO(#32): Remove this exception once resolved. */
 #![allow(clippy::field_reassign_with_default)]
 
+pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod collection;
 pub mod config;
 pub mod db;
 pub mod dev;
-pub mod error;
 pub mod http_client;
 pub mod http_pagination;
-pub mod model;
 pub mod model_db;
 pub mod packaging;
 

@@ -2,7 +2,7 @@
  * HTTP client used for internal control plane interfaces
  */
 
-use crate::error::ApiError;
+use crate::api::ApiError;
 use dropshot::HttpErrorResponseBody;
 use http::Method;
 use hyper::client::HttpConnector;

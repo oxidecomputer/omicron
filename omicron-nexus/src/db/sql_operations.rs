@@ -3,14 +3,14 @@
  */
 
 use futures::StreamExt;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiResourceType;
+use omicron_common::api::DataPageParams;
+use omicron_common::api::ListResult;
+use omicron_common::api::LookupResult;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::sql_row_value;
 use omicron_common::db::DbError;
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiResourceType;
-use omicron_common::model::DataPageParams;
-use omicron_common::model::ListResult;
-use omicron_common::model::LookupResult;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 

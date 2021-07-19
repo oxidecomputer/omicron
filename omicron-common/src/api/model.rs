@@ -5,7 +5,7 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
-use crate::error::ApiError;
+use crate::api::ApiError;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ApiObjectIdentity;
@@ -27,7 +27,6 @@ use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use thiserror::Error;
 use uuid::Uuid;
 
 /*
@@ -311,7 +310,7 @@ impl ApiByteCount {
 }
 
 /* TODO-cleanup This could use the experimental std::num::IntErrorKind. */
-#[derive(Debug, Eq, Error, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
     TooSmall,
@@ -1436,7 +1435,7 @@ pub struct OximeterAssignment {
 mod test {
     use super::ApiByteCount;
     use super::ApiName;
-    use crate::error::ApiError;
+    use crate::api::ApiError;
     use std::convert::TryFrom;
 
     #[test]

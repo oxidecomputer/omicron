@@ -5,9 +5,9 @@
  * agnostic to the control plane.  There is a bit of leakage in a few places.
  */
 
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiResourceType;
-use omicron_common::model::DataPageParams;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiResourceType;
+use omicron_common::api::DataPageParams;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use tokio_postgres::types::FromSql;

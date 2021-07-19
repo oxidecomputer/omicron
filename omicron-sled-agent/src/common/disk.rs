@@ -1,10 +1,10 @@
 //! Describes the states of network-attached storage.
 
 use chrono::Utc;
-use omicron_common::error::ApiError;
-use omicron_common::model::ApiDiskRuntimeState;
-use omicron_common::model::ApiDiskState;
-use omicron_common::model::ApiDiskStateRequested;
+use omicron_common::api::ApiDiskRuntimeState;
+use omicron_common::api::ApiDiskState;
+use omicron_common::api::ApiDiskStateRequested;
+use omicron_common::api::ApiError;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;
 

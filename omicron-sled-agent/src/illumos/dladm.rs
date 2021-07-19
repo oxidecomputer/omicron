@@ -1,7 +1,7 @@
 //! Utilities for poking at data links.
 
 use crate::illumos::{execute, PFEXEC};
-use omicron_common::error::ApiError;
+use omicron_common::api::ApiError;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
 

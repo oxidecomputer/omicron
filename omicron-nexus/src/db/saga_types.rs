@@ -11,10 +11,10 @@
  */
 
 use crate::db;
+use omicron_common::api::ApiError;
+use omicron_common::api::ApiGeneration;
 use omicron_common::db::sql_row_value;
-use omicron_common::error::ApiError;
 use omicron_common::impl_sql_wrapping;
-use omicron_common::model::ApiGeneration;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::SagaId;

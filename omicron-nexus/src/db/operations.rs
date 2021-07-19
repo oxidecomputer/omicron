@@ -3,9 +3,9 @@
  * and extract values
  */
 
+use omicron_common::api::ApiError;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::DbError;
-use omicron_common::error::ApiError;
 use std::convert::TryFrom;
 use tokio_postgres::types::ToSql;
 
