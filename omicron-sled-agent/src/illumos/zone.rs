@@ -6,11 +6,16 @@ use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-use crate::illumos::zfs::ZONE_ZFS_POOL_MOUNTPOINT;
+use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
 const BASE_ZONE: &str = "propolis_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
+
+const IPADM: &str = "/usr/sbin/ipadm";
+const SVCADM: &str = "/usr/sbin/svcadm";
+const SVCCFG: &str = "/usr/sbin/svccfg";
+const ZLOGIN: &str = "/usr/sbin/zlogin";
 
 pub const ZONE_PREFIX: &str = "propolis_instance_";
 
@@ -26,22 +31,30 @@ fn get_zone(name: &str) -> Result<Option<zone::Zone>, ApiError> {
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
 
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
-    pub fn halt_and_remove(name: &str) -> Result<(), ApiError> {
-        zone::Adm::new(name).halt().map_err(|e| ApiError::InternalError {
-            message: format!("Cannot halt zone {}: {}", name, e),
-        })?;
-        zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
-            ApiError::InternalError {
-                message: format!("Cannot uninstall {}: {}", name, e),
+    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), ApiError> {
+        if let Some(zone) = get_zone(name)? {
+            info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
+            if zone.state() == zone::State::Running {
+                zone::Adm::new(name).halt().map_err(|e| {
+                    ApiError::InternalError {
+                        message: format!("Cannot halt zone {}: {}", name, e),
+                    }
+                })?;
             }
-        })?;
-        zone::Config::new(name).delete(/* force= */ true).run().map_err(
-            |e| ApiError::InternalError {
-                message: format!("Cannot delete {}: {}", name, e),
-            },
-        )?;
+            zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
+                ApiError::InternalError {
+                    message: format!("Cannot uninstall {}: {}", name, e),
+                }
+            })?;
+            zone::Config::new(name).delete(/* force= */ true).run().map_err(
+                |e| ApiError::InternalError {
+                    message: format!("Cannot delete {}: {}", name, e),
+                },
+            )?;
+        }
         Ok(())
     }
 
@@ -67,7 +80,7 @@ impl Zones {
                     log,
                     "Invalid state; uninstalling and deleting zone {}", name
                 );
-                Zones::halt_and_remove(zone.name())?;
+                Zones::halt_and_remove(log, zone.name())?;
             }
         }
 
@@ -78,7 +91,7 @@ impl Zones {
             zone::CreationOptions::Template("sparse".to_string()),
         );
         cfg.get_global()
-            .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
+            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         cfg.add_fs(&zone::Fs {
@@ -118,7 +131,7 @@ impl Zones {
             zone::CreationOptions::Template("sparse".to_string()),
         );
         cfg.get_global()
-            .set_path(format!("{}/{}", ZONE_ZFS_POOL_MOUNTPOINT, name))
+            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         cfg.add_fs(&zone::Fs {
@@ -178,9 +191,9 @@ impl Zones {
     ) -> Result<IpNet, ApiError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "ipadm",
+            IPADM,
             "create-addr",
             "-t",
             "-T",
@@ -191,9 +204,9 @@ impl Zones {
 
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "ipadm",
+            IPADM,
             "show-addr",
             "-p",
             "-o",
@@ -224,9 +237,9 @@ impl Zones {
         // Import the service manifest for Propolis.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "import",
             "/opt/oxide/propolis-server/pkg/manifest.xml",
         ]);
@@ -235,9 +248,9 @@ impl Zones {
         // Set the desired address of the Propolis server.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "-s",
             "system/illumos/propolis-server",
             "setprop",
@@ -248,9 +261,9 @@ impl Zones {
         // Create a new Propolis service instance.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svccfg",
+            SVCCFG,
             "-s",
             "svc:/system/illumos/propolis-server",
             "add",
@@ -264,9 +277,9 @@ impl Zones {
         // ".synchronous()", but it doesn't, because of an SMF bug.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
-            "zlogin",
+            ZLOGIN,
             zone,
-            "svcadm",
+            SVCADM,
             "enable",
             "-t",
             &format!("svc:/system/illumos/propolis-server:vm-{}", id),

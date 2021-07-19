@@ -5,6 +5,7 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1.50"
+cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
 futures = "0.3.15"
@@ -25,6 +26,8 @@ zone = "0.1"
 
 [dev-dependencies]
 expectorate = "1.0.1"
+mockall = "0.10"
+serial_test = "0.5"
 subprocess = "0.2.7"
 
 #

@@ -5,10 +5,14 @@ use omicron_common::model::{
     ApiDiskRuntimeState, ApiDiskStateRequested, ApiInstanceRuntimeState,
     ApiInstanceRuntimeStateRequested,
 };
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[cfg(test)]
+use crate::mocks::MockNexusClient as NexusClient;
+#[cfg(not(test))]
+use omicron_common::NexusClient;
 
 use crate::instance_manager::InstanceManager;
 
