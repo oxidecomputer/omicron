@@ -6,7 +6,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::config::Config;
-use omicron_sled_agent::server::run_server;
+use omicron_sled_agent::server::{run_openapi, run_server};
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
@@ -16,15 +16,20 @@ use uuid::Uuid;
     name = "sled_agent",
     about = "See README.adoc for more information"
 )]
-struct Args {
-    #[structopt(name = "SA_UUID", parse(try_from_str))]
-    uuid: Uuid,
+enum Args {
+    /// Generates the OpenAPI specification.
+    OpenApi,
+    /// Runs the Sled Agent server.
+    Run {
+        #[structopt(name = "SA_UUID", parse(try_from_str))]
+        uuid: Uuid,
 
-    #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
-    sled_agent_addr: SocketAddr,
+        #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
+        sled_agent_addr: SocketAddr,
 
-    #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
-    nexus_addr: SocketAddr,
+        #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
+        nexus_addr: SocketAddr,
+    },
 }
 
 #[tokio::main]
@@ -39,15 +44,21 @@ async fn do_run() -> Result<(), CmdError> {
         CmdError::Usage(format!("parsing arguments: {}", err.message))
     })?;
 
-    let config = Config {
-        id: args.uuid,
-        nexus_address: args.nexus_addr,
-        dropshot: ConfigDropshot {
-            bind_address: args.sled_agent_addr,
-            ..Default::default()
-        },
-        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    };
-
-    run_server(&config).await.map_err(CmdError::Failure)
+    match args {
+        Args::OpenApi => run_openapi().map_err(CmdError::Failure),
+        Args::Run { uuid, sled_agent_addr, nexus_addr } => {
+            let config = Config {
+                id: uuid,
+                nexus_address: nexus_addr,
+                dropshot: ConfigDropshot {
+                    bind_address: sled_agent_addr,
+                    ..Default::default()
+                },
+                log: ConfigLogging::StderrTerminal {
+                    level: ConfigLoggingLevel::Info,
+                },
+            };
+            run_server(&config).await.map_err(CmdError::Failure)
+        }
+    }
 }
