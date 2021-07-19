@@ -28,7 +28,6 @@ pub mod config;
 pub mod db;
 pub mod dev;
 pub mod http_client;
-pub mod http_pagination;
 pub mod model_db;
 pub mod packaging;
 

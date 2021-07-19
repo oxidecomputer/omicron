@@ -1091,7 +1091,7 @@ impl Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<SagaView> {
         /*
-         * The endpoint we're serving only supports `ApiScanById`, which only
+         * The endpoint we're serving only supports `ScanById`, which only
          * supports an ascending scan.
          */
         bail_unless!(

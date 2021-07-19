@@ -66,7 +66,7 @@ use uuid::Uuid;
  * This type is generic over the different scan modes that we support.
  */
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ApiPageSelector<ScanParams, MarkerType> {
+pub struct PageSelector<ScanParams, MarkerType> {
     /** parameters describing the scan */
     #[serde(flatten)]
     scan: ScanParams,
@@ -116,7 +116,7 @@ pub trait ScanParams:
      * but the marker is an id rather than a name).
      */
     fn from_query(
-        q: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
+        q: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError>;
 
     /**
@@ -129,7 +129,7 @@ pub trait ScanParams:
     fn results_page<T>(
         query: &PaginationParams<
             Self,
-            ApiPageSelector<Self, Self::MarkerValue>,
+            PageSelector<Self, Self::MarkerValue>,
         >,
         list: Vec<T>,
     ) -> Result<ResultsPage<T>, dropshot::HttpError>
@@ -147,13 +147,13 @@ pub trait ScanParams:
 fn page_selector_for<T, S, M>(
     item: &T,
     scan_params: &S,
-) -> ApiPageSelector<S, M>
+) -> PageSelector<S, M>
 where
     T: ObjectIdentity,
     S: ScanParams<MarkerValue = M>,
     M: Clone + Debug + DeserializeOwned + PartialEq + Serialize,
 {
-    ApiPageSelector {
+    PageSelector {
         scan: scan_params.clone(),
         last_seen: scan_params.marker_for_item(item),
     }
@@ -163,13 +163,13 @@ where
  * Given a request and pagination parameters, return a [`DataPageParams`]
  * describing the current page of results to return
  *
- * This implementation is used for `ApiScanByName` and `ApiScanById`.  See
+ * This implementation is used for `ScanByName` and `ScanById`.  See
  * [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
- * variants that can be used for `ApiScanByNameOrId`.
+ * variants that can be used for `ScanByNameOrId`.
  */
 pub fn data_page_params_for<'a, S, C>(
     rqctx: &'a Arc<RequestContext<C>>,
-    pag_params: &'a PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+    pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
 where
     S: ScanParams,
@@ -186,14 +186,14 @@ where
  */
 fn data_page_params_with_limit<S>(
     limit: NonZeroU32,
-    pag_params: &PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+    pag_params: &PaginationParams<S, PageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<S::MarkerValue>, HttpError>
 where
     S: ScanParams,
 {
     let marker = match &pag_params.page {
         WhichPage::First(..) => None,
-        WhichPage::Next(ApiPageSelector { last_seen, .. }) => Some(last_seen),
+        WhichPage::Next(PageSelector { last_seen, .. }) => Some(last_seen),
     };
     let scan_params = S::from_query(pag_params)?;
     let direction = scan_params.direction();
@@ -206,13 +206,13 @@ where
  */
 
 /** Query parameters for pagination by name only */
-pub type ApiPaginatedByName =
-    PaginationParams<ApiScanByName, ApiPageSelectorByName>;
+pub type PaginatedByName =
+    PaginationParams<ScanByName, PageSelectorByName>;
 /** Page selector for pagination by name only */
-pub type ApiPageSelectorByName = ApiPageSelector<ApiScanByName, Name>;
+pub type PageSelectorByName = PageSelector<ScanByName, Name>;
 /** Scan parameters for resources that support scanning by name only */
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct ApiScanByName {
+pub struct ScanByName {
     #[serde(default = "default_name_sort_mode")]
     sort_by: NameSortMode,
 }
@@ -232,7 +232,7 @@ fn default_name_sort_mode() -> NameSortMode {
     NameSortMode::NameAscending
 }
 
-impl ScanParams for ApiScanByName {
+impl ScanParams for ScanByName {
     type MarkerValue = Name;
     fn direction(&self) -> PaginationOrder {
         PaginationOrder::Ascending
@@ -241,11 +241,11 @@ impl ScanParams for ApiScanByName {
         item.identity().name.clone()
     }
     fn from_query(
-        p: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
+        p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
-            WhichPage::Next(ApiPageSelector { ref scan, .. }) => scan,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
         })
     }
 }
@@ -255,14 +255,14 @@ impl ScanParams for ApiScanByName {
  */
 
 /** Query parameters for pagination by id only */
-pub type ApiPaginatedById = PaginationParams<ApiScanById, ApiPageSelectorById>;
+pub type PaginatedById = PaginationParams<ScanById, PageSelectorById>;
 /** Page selector for pagination by name only */
-pub type ApiPageSelectorById = ApiPageSelector<ApiScanById, Uuid>;
+pub type PageSelectorById = PageSelector<ScanById, Uuid>;
 /** Scan parameters for resources that support scanning by id only */
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct ApiScanById {
+pub struct ScanById {
     #[serde(default = "default_id_sort_mode")]
-    sort_by: ApiIdSortMode,
+    sort_by: IdSortMode,
 }
 
 /**
@@ -272,16 +272,16 @@ pub struct ApiScanById {
  */
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ApiIdSortMode {
+pub enum IdSortMode {
     /** sort in increasing order of "id" */
     IdAscending,
 }
 
-fn default_id_sort_mode() -> ApiIdSortMode {
-    ApiIdSortMode::IdAscending
+fn default_id_sort_mode() -> IdSortMode {
+    IdSortMode::IdAscending
 }
 
-impl ScanParams for ApiScanById {
+impl ScanParams for ScanById {
     type MarkerValue = Uuid;
     fn direction(&self) -> PaginationOrder {
         PaginationOrder::Ascending
@@ -289,10 +289,10 @@ impl ScanParams for ApiScanById {
     fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> Uuid {
         item.identity().id
     }
-    fn from_query(p: &ApiPaginatedById) -> Result<&Self, HttpError> {
+    fn from_query(p: &PaginatedById) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
-            WhichPage::Next(ApiPageSelector { ref scan, .. }) => scan,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
         })
     }
 }
@@ -303,14 +303,14 @@ impl ScanParams for ApiScanById {
  */
 
 /** Query parameters for pagination by name or id */
-pub type ApiPaginatedByNameOrId =
-    PaginationParams<ApiScanByNameOrId, ApiPageSelectorByNameOrId>;
+pub type PaginatedByNameOrId =
+    PaginationParams<ScanByNameOrId, PageSelectorByNameOrId>;
 /** Page selector for pagination by name or id */
-pub type ApiPageSelectorByNameOrId =
-    ApiPageSelector<ApiScanByNameOrId, NameOrIdMarker>;
+pub type PageSelectorByNameOrId =
+    PageSelector<ScanByNameOrId, NameOrIdMarker>;
 /** Scan parameters for resources that support scanning by name or id */
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct ApiScanByNameOrId {
+pub struct ScanByNameOrId {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: NameOrIdSortMode,
 }
@@ -353,20 +353,20 @@ fn bad_token_error() -> HttpError {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ApiPagField {
+pub enum PagField {
     Id,
     Name,
 }
 
-pub fn pagination_field_for_scan_params(p: &ApiScanByNameOrId) -> ApiPagField {
+pub fn pagination_field_for_scan_params(p: &ScanByNameOrId) -> PagField {
     match p.sort_by {
-        NameOrIdSortMode::NameAscending => ApiPagField::Name,
-        NameOrIdSortMode::NameDescending => ApiPagField::Name,
-        NameOrIdSortMode::IdAscending => ApiPagField::Id,
+        NameOrIdSortMode::NameAscending => PagField::Name,
+        NameOrIdSortMode::NameDescending => PagField::Name,
+        NameOrIdSortMode::IdAscending => PagField::Id,
     }
 }
 
-impl ScanParams for ApiScanByNameOrId {
+impl ScanParams for ScanByNameOrId {
     type MarkerValue = NameOrIdMarker;
 
     fn direction(&self) -> PaginationOrder {
@@ -380,18 +380,18 @@ impl ScanParams for ApiScanByNameOrId {
     fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> NameOrIdMarker {
         let identity = item.identity();
         match pagination_field_for_scan_params(self) {
-            ApiPagField::Name => NameOrIdMarker::Name(identity.name.clone()),
-            ApiPagField::Id => NameOrIdMarker::Id(identity.id),
+            PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
+            PagField::Id => NameOrIdMarker::Id(identity.id),
         }
     }
 
     fn from_query(
-        p: &PaginationParams<Self, ApiPageSelector<Self, Self::MarkerValue>>,
+        p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError> {
         match &p.page {
             WhichPage::First(scan_mode) => Ok(scan_mode),
 
-            WhichPage::Next(ApiPageSelectorByNameOrId {
+            WhichPage::Next(PageSelectorByNameOrId {
                 scan,
                 last_seen: NameOrIdMarker::Name(_),
             }) => match scan.sort_by {
@@ -400,7 +400,7 @@ impl ScanParams for ApiScanByNameOrId {
                 NameOrIdSortMode::IdAscending => Err(()),
             },
 
-            WhichPage::Next(ApiPageSelectorByNameOrId {
+            WhichPage::Next(PageSelectorByNameOrId {
                 scan,
                 last_seen: NameOrIdMarker::Id(_),
             }) => match scan.sort_by {
@@ -415,11 +415,11 @@ impl ScanParams for ApiScanByNameOrId {
 
 /**
  * Serves the same purpose as [`data_page_params_for`] for the specific case of
- * `ApiScanByNameOrId` when scanning by `name`
+ * `ScanByNameOrId` when scanning by `name`
  *
  * Why do we need a separate function here?  Because `data_page_params_for` only
  * knows how to return the (statically-defined) marker value from the page
- * selector.  For `ApiScanByNameOrId`, this would return the enum
+ * selector.  For `ScanByNameOrId`, this would return the enum
  * `NameOrIdMarker`.  But at some point our caller needs the specific type
  * (e.g., `Name` for a scan by name or `Uuid` for a scan by Uuid).  They get
  * that from this function and its partner, [`data_page_params_nameid_id`].
@@ -428,7 +428,7 @@ impl ScanParams for ApiScanByNameOrId {
  */
 pub fn data_page_params_nameid_name<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
-    pag_params: &'a ApiPaginatedByNameOrId,
+    pag_params: &'a PaginatedByNameOrId,
 ) -> Result<DataPageParams<'a, Name>, HttpError>
 where
     C: dropshot::ServerContext,
@@ -439,7 +439,7 @@ where
 
 fn data_page_params_nameid_name_limit(
     limit: NonZeroU32,
-    pag_params: &ApiPaginatedByNameOrId,
+    pag_params: &PaginatedByNameOrId,
 ) -> Result<DataPageParams<Name>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
     let direction = data_page.direction;
@@ -461,7 +461,7 @@ fn data_page_params_nameid_name_limit(
  */
 pub fn data_page_params_nameid_id<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
-    pag_params: &'a ApiPaginatedByNameOrId,
+    pag_params: &'a PaginatedByNameOrId,
 ) -> Result<DataPageParams<'a, Uuid>, HttpError>
 where
     C: dropshot::ServerContext,
@@ -472,7 +472,7 @@ where
 
 fn data_page_params_nameid_id_limit(
     limit: NonZeroU32,
-    pag_params: &ApiPaginatedByNameOrId,
+    pag_params: &PaginatedByNameOrId,
 ) -> Result<DataPageParams<Uuid>, HttpError> {
     let data_page = data_page_params_with_limit(limit, pag_params)?;
     let direction = data_page.direction;
@@ -496,18 +496,18 @@ mod test {
     use super::data_page_params_with_limit;
     use super::page_selector_for;
     use super::pagination_field_for_scan_params;
-    use super::ApiIdSortMode;
-    use super::ApiPagField;
-    use super::ApiPageSelector;
-    use super::ApiPageSelectorById;
-    use super::ApiPageSelectorByName;
-    use super::ApiPageSelectorByNameOrId;
-    use super::ApiPaginatedById;
-    use super::ApiPaginatedByName;
-    use super::ApiPaginatedByNameOrId;
-    use super::ApiScanById;
-    use super::ApiScanByName;
-    use super::ApiScanByNameOrId;
+    use super::IdSortMode;
+    use super::PagField;
+    use super::PageSelector;
+    use super::PageSelectorById;
+    use super::PageSelectorByName;
+    use super::PageSelectorByNameOrId;
+    use super::PaginatedById;
+    use super::PaginatedByName;
+    use super::PaginatedByNameOrId;
+    use super::ScanById;
+    use super::ScanByName;
+    use super::ScanByNameOrId;
     use super::Name;
     use super::NameOrIdMarker;
     use super::NameOrIdSortMode;
@@ -543,23 +543,23 @@ mod test {
     #[test]
     fn test_pagination_schemas() {
         let schemas = vec![
-            ("scan parameters, scan by name only", schema_for!(ApiScanByName)),
-            ("scan parameters, scan by id only", schema_for!(ApiScanById)),
+            ("scan parameters, scan by name only", schema_for!(ScanByName)),
+            ("scan parameters, scan by id only", schema_for!(ScanById)),
             (
                 "scan parameters, scan by name or id",
-                schema_for!(ApiScanByNameOrId),
+                schema_for!(ScanByNameOrId),
             ),
             (
                 "page selector, scan by name only",
-                schema_for!(ApiPageSelectorByName),
+                schema_for!(PageSelectorByName),
             ),
             (
                 "page selector, scan by id only",
-                schema_for!(ApiPageSelectorById),
+                schema_for!(PageSelectorById),
             ),
             (
                 "page selector, scan by name or id",
-                schema_for!(ApiPageSelectorByNameOrId),
+                schema_for!(PageSelectorByNameOrId),
             ),
         ];
 
@@ -581,13 +581,13 @@ mod test {
      */
     #[test]
     fn test_pagination_examples() {
-        let scan_by_id = ApiScanById { sort_by: ApiIdSortMode::IdAscending };
+        let scan_by_id = ScanById { sort_by: IdSortMode::IdAscending };
         let scan_by_name =
-            ApiScanByName { sort_by: NameSortMode::NameAscending };
+            ScanByName { sort_by: NameSortMode::NameAscending };
         let scan_by_nameid_name =
-            ApiScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending };
+            ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending };
         let scan_by_nameid_id =
-            ApiScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
+            ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
         let name = Name::try_from(String::from("bort")).unwrap();
         let examples = vec![
@@ -608,7 +608,7 @@ mod test {
             /* page selectors */
             (
                 "page selector: by id ascending",
-                to_string_pretty(&ApiPageSelectorById {
+                to_string_pretty(&PageSelectorById {
                     scan: scan_by_id,
                     last_seen: id,
                 })
@@ -616,7 +616,7 @@ mod test {
             ),
             (
                 "page selector: by name ascending",
-                to_string_pretty(&ApiPageSelectorByName {
+                to_string_pretty(&PageSelectorByName {
                     scan: scan_by_name,
                     last_seen: name.clone(),
                 })
@@ -624,7 +624,7 @@ mod test {
             ),
             (
                 "page selector: by name or id, using id ascending",
-                to_string_pretty(&ApiPageSelectorByNameOrId {
+                to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_id,
                     last_seen: NameOrIdMarker::Id(id),
                 })
@@ -632,7 +632,7 @@ mod test {
             ),
             (
                 "page selector: by name or id, using id ascending",
-                to_string_pretty(&ApiPageSelectorByNameOrId {
+                to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_name,
                     last_seen: NameOrIdMarker::Name(name.clone()),
                 })
@@ -685,8 +685,8 @@ mod test {
         itemlast_marker: &S::MarkerValue,
         scan_default: &S,
     ) -> (
-        PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
-        PaginationParams<S, ApiPageSelector<S, S::MarkerValue>>,
+        PaginationParams<S, PageSelector<S, S::MarkerValue>>,
+        PaginationParams<S, PageSelector<S, S::MarkerValue>>,
     )
     where
         S: ScanParams,
@@ -707,7 +707,7 @@ mod test {
         assert_eq!(&page_selector.last_seen, itemlast_marker);
 
         /* Test from_query() with the default scan parameters. */
-        let p: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+        let p: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str("").unwrap();
         assert_eq!(S::from_query(&p).unwrap(), scan_default);
 
@@ -715,7 +715,7 @@ mod test {
          * Test from_query() based on an explicit querystring corresponding to
          * the first page in a scan with "scan" as the scan parameters.
          */
-        let p0: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+        let p0: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str(querystring).unwrap();
         assert_eq!(S::from_query(&p0).unwrap(), scan);
 
@@ -727,7 +727,7 @@ mod test {
         assert_eq!(&page.items, list);
         assert!(page.next_page.is_some());
         let q = format!("page_token={}", page.next_page.unwrap());
-        let p1: PaginationParams<S, ApiPageSelector<S, S::MarkerValue>> =
+        let p1: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str(&q).unwrap();
 
         /*
@@ -736,7 +736,7 @@ mod test {
          * the results page was properly generated.
          */
         assert_eq!(S::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(ApiPageSelector { ref last_seen, .. }) = p1.page
+        if let WhichPage::Next(PageSelector { ref last_seen, .. }) = p1.page
         {
             assert_eq!(last_seen, itemlast_marker);
         } else {
@@ -753,7 +753,7 @@ mod test {
     #[test]
     fn test_scan_by_name() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanByName { sort_by: NameSortMode::NameAscending };
+        let scan = ScanByName { sort_by: NameSortMode::NameAscending };
 
         let list = list_of_things();
         let (p0, p1) = test_scan_param_common(
@@ -779,7 +779,7 @@ mod test {
         assert_eq!(data_page.limit, limit);
 
         /* Test from_query(): error case. */
-        let error = serde_urlencoded::from_str::<ApiPaginatedByName>(
+        let error = serde_urlencoded::from_str::<PaginatedByName>(
             "sort_by=name-descending",
         )
         .unwrap_err();
@@ -792,7 +792,7 @@ mod test {
     #[test]
     fn test_scan_by_id() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanById { sort_by: ApiIdSortMode::IdAscending };
+        let scan = ScanById { sort_by: IdSortMode::IdAscending };
 
         let list = list_of_things();
         let (p0, p1) = test_scan_param_common(
@@ -818,7 +818,7 @@ mod test {
         assert_eq!(data_page.limit, limit);
 
         /* Test from_query(): error case. */
-        let error = serde_urlencoded::from_str::<ApiPaginatedById>(
+        let error = serde_urlencoded::from_str::<PaginatedById>(
             "sort_by=id-descending",
         )
         .unwrap_err();
@@ -831,7 +831,7 @@ mod test {
     #[test]
     fn test_scan_by_nameid_generic() {
         /* Test from_query(): error case. */
-        let error = serde_urlencoded::from_str::<ApiPaginatedByNameOrId>(
+        let error = serde_urlencoded::from_str::<PaginatedByNameOrId>(
             "sort_by=id-descending",
         )
         .unwrap_err();
@@ -855,8 +855,8 @@ mod test {
     fn test_scan_by_nameid_name() {
         /* Start with the common battery of tests. */
         let scan =
-            ApiScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
-        assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Name);
+            ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
+        assert_eq!(pagination_field_for_scan_params(&scan), PagField::Name);
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
         let list = list_of_things();
@@ -871,7 +871,7 @@ mod test {
             "sort_by=name-descending",
             &thing0_marker,
             &thinglast_marker,
-            &ApiScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
         );
 
         /* Verify data pages based on the query params. */
@@ -894,8 +894,8 @@ mod test {
     #[test]
     fn test_scan_by_nameid_id() {
         /* Start with the common battery of tests. */
-        let scan = ApiScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
-        assert_eq!(pagination_field_for_scan_params(&scan), ApiPagField::Id);
+        let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
+        assert_eq!(pagination_field_for_scan_params(&scan), PagField::Id);
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         let list = list_of_things();
@@ -909,7 +909,7 @@ mod test {
             "sort_by=id-ascending",
             &thing0_marker,
             &thinglast_marker,
-            &ApiScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
         );
 
         /* Verify data pages based on the query params. */

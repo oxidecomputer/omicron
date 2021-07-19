@@ -1233,7 +1233,7 @@ pub struct SagaView {
     /*
      * TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
      * want to paginate these objects.  http_pagination.rs provides a bunch of
-     * useful facilities -- notably `ApiPaginatedById`.  `ApiPaginatedById`
+     * useful facilities -- notably `PaginatedById`.  `PaginatedById`
      * requires being able to take an arbitrary object in the result set and get
      * its id.  To do that, it uses the `ObjectIdentity` trait, which expects
      * to be able to return an `IdentityMetadata` reference from an object.

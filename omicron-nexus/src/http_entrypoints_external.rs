@@ -32,18 +32,18 @@ use omicron_common::api::ProjectView;
 use omicron_common::api::RackView;
 use omicron_common::api::SagaView;
 use omicron_common::api::SledView;
-use omicron_common::http_pagination::data_page_params_for;
-use omicron_common::http_pagination::data_page_params_nameid_id;
-use omicron_common::http_pagination::data_page_params_nameid_name;
-use omicron_common::http_pagination::pagination_field_for_scan_params;
-use omicron_common::http_pagination::ApiPagField;
-use omicron_common::http_pagination::ApiPaginatedById;
-use omicron_common::http_pagination::ApiPaginatedByName;
-use omicron_common::http_pagination::ApiPaginatedByNameOrId;
-use omicron_common::http_pagination::ApiScanById;
-use omicron_common::http_pagination::ApiScanByName;
-use omicron_common::http_pagination::ApiScanByNameOrId;
-use omicron_common::http_pagination::ScanParams;
+use omicron_common::api::http_pagination::data_page_params_for;
+use omicron_common::api::http_pagination::data_page_params_nameid_id;
+use omicron_common::api::http_pagination::data_page_params_nameid_name;
+use omicron_common::api::http_pagination::pagination_field_for_scan_params;
+use omicron_common::api::http_pagination::PagField;
+use omicron_common::api::http_pagination::PaginatedById;
+use omicron_common::api::http_pagination::PaginatedByName;
+use omicron_common::api::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::http_pagination::ScanById;
+use omicron_common::api::http_pagination::ScanByName;
+use omicron_common::api::http_pagination::ScanByNameOrId;
+use omicron_common::api::http_pagination::ScanParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -146,28 +146,28 @@ pub fn external_api() -> NexusApiDescription {
  }]
 async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedByNameOrId>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<ProjectView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
-    let params = ApiScanByNameOrId::from_query(&query)?;
+    let params = ScanByNameOrId::from_query(&query)?;
     let field = pagination_field_for_scan_params(params);
 
     let project_stream = match field {
-        ApiPagField::Id => {
+        PagField::Id => {
             let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
             nexus.projects_list_by_id(&page_selector).await?
         }
 
-        ApiPagField::Name => {
+        PagField::Name => {
             let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
             nexus.projects_list_by_name(&page_selector).await?
         }
     };
 
     let view_list = to_view_list(project_stream).await;
-    Ok(HttpResponseOk(ApiScanByNameOrId::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
 /**
@@ -275,7 +275,7 @@ async fn projects_put_project(
  }]
 async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedByName>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<DiskView>>, HttpError> {
     let apictx = rqctx.context();
@@ -290,7 +290,7 @@ async fn project_disks_get(
         )
         .await?;
     let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
 /**
@@ -379,7 +379,7 @@ async fn project_disks_delete_disk(
  }]
 async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedByName>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<InstanceView>>, HttpError> {
     let apictx = rqctx.context();
@@ -394,7 +394,7 @@ async fn project_instances_get(
         )
         .await?;
     let view_list = to_view_list(instance_stream).await;
-    Ok(HttpResponseOk(ApiScanByName::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
 /**
@@ -660,7 +660,7 @@ async fn instance_disks_delete_disk(
  }]
 async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedById>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<RackView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -668,7 +668,7 @@ async fn hardware_racks_get(
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list = to_view_list(rack_stream).await;
-    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
 /**
@@ -711,7 +711,7 @@ async fn hardware_racks_get_rack(
  }]
 async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedById>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<SledView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -719,7 +719,7 @@ async fn hardware_sleds_get(
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list = to_view_list(sled_stream).await;
-    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
 /**
@@ -762,7 +762,7 @@ async fn hardware_sleds_get_sled(
  }]
 async fn sagas_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ApiPaginatedById>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -770,7 +770,7 @@ async fn sagas_get(
     let pagparams = data_page_params_for(&rqctx, &query)?;
     let saga_stream = nexus.sagas_list(&pagparams).await?;
     let view_list = to_view_list(saga_stream).await;
-    Ok(HttpResponseOk(ApiScanById::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
 /**
