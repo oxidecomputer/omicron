@@ -31,3 +31,7 @@ subprocess = "0.2.7"
 [[bin]]
 name = "sled-agent-sim"
 doc = false
+
+[[bin]]
+name = "sled-agent"
+doc = false
