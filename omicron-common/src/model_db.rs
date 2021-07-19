@@ -65,7 +65,6 @@ use crate::api::Instance;
 use crate::api::InstanceCpuCount;
 use crate::api::InstanceRuntimeState;
 use crate::api::InstanceState;
-use crate::api::IpNet;
 use crate::api::MacAddr;
 use crate::api::Name;
 use crate::api::OximeterAssignment;
@@ -75,6 +74,7 @@ use crate::api::Project;
 use crate::api::VPCSubnet;
 use crate::api::VNIC;
 use crate::api::VPC;
+use crate::api::{Ipv4Net, Ipv6Net};
 use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
@@ -135,13 +135,8 @@ impl_sql_wrapping!(Generation, i64);
 impl_sql_wrapping!(InstanceCpuCount, i64);
 impl_sql_wrapping!(Name, &str);
 
-// Conversion to/from SQL types for IpNet.
-//
-// Although there are implementations that convert an IP _address_ to and from PostgreSQL types,
-// there does not appear to be any existing implementation that converts a _subnet_, including the
-// address and mask, to and from SQL types. At least, not for the 3rd-party crate `ipnet` we're
-// using to actually represent a subnet.
-impl tokio_postgres::types::ToSql for IpNet {
+// Conversion to/from SQL types for Ipv4Net.
+impl tokio_postgres::types::ToSql for Ipv4Net {
     fn to_sql(
         &self,
         _ty: &tokio_postgres::types::Type,
@@ -151,7 +146,7 @@ impl tokio_postgres::types::ToSql for IpNet {
         Box<dyn std::error::Error + Send + Sync>,
     > {
         postgres_protocol::types::inet_to_sql(
-            self.addr(),
+            self.addr().into(),
             self.prefix_len(),
             out,
         );
@@ -165,22 +160,62 @@ impl tokio_postgres::types::ToSql for IpNet {
     tokio_postgres::types::to_sql_checked!();
 }
 
-impl<'a> tokio_postgres::types::FromSql<'a> for IpNet {
+impl<'a> tokio_postgres::types::FromSql<'a> for Ipv4Net {
     fn from_sql(
         _ty: &tokio_postgres::types::Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let value = postgres_protocol::types::inet_from_sql(raw)?;
         let (addr, mask) = (value.addr(), value.netmask());
-        let subnet = match addr {
-            std::net::IpAddr::V4(addr) => {
-                ipnet::Ipv4Net::new(addr, mask)?.into()
-            }
-            std::net::IpAddr::V6(addr) => {
-                ipnet::Ipv6Net::new(addr, mask)?.into()
-            }
-        };
-        Ok(IpNet(subnet))
+        if let std::net::IpAddr::V4(addr) = addr {
+            Ok(Ipv4Net(ipnet::Ipv4Net::new(addr, mask)?))
+        } else {
+            panic!("Attempted to deserialize IPv6 subnet from database, expected IPv4 subnet");
+        }
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        matches!(ty, &tokio_postgres::types::Type::INET)
+    }
+}
+
+// Conversion to/from SQL types for Ipv6Net.
+impl tokio_postgres::types::ToSql for Ipv6Net {
+    fn to_sql(
+        &self,
+        _ty: &tokio_postgres::types::Type,
+        out: &mut tokio_postgres::types::private::BytesMut,
+    ) -> Result<
+        tokio_postgres::types::IsNull,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        postgres_protocol::types::inet_to_sql(
+            self.addr().into(),
+            self.prefix_len(),
+            out,
+        );
+        Ok(tokio_postgres::types::IsNull::No)
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        matches!(ty, &tokio_postgres::types::Type::INET)
+    }
+
+    tokio_postgres::types::to_sql_checked!();
+}
+
+impl<'a> tokio_postgres::types::FromSql<'a> for Ipv6Net {
+    fn from_sql(
+        _ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let value = postgres_protocol::types::inet_from_sql(raw)?;
+        let (addr, mask) = (value.addr(), value.netmask());
+        if let std::net::IpAddr::V6(addr) = addr {
+            Ok(Ipv6Net(ipnet::Ipv6Net::new(addr, mask)?))
+        } else {
+            panic!("Attempted to deserialize IPv4 subnet from database, expected IPv6 subnet");
+        }
     }
 
     fn accepts(ty: &tokio_postgres::types::Type) -> bool {
@@ -444,13 +479,13 @@ mod tests {
     use tokio_postgres::types::{FromSql, ToSql};
 
     #[test]
-    fn test_ipnet_conversion() {
-        let subnet = IpNet("192.168.1.0/24".parse().unwrap());
+    fn test_ipv4net_conversion() {
+        let subnet = Ipv4Net("192.168.1.0/24".parse().unwrap());
         let ty = tokio_postgres::types::Type::INET;
         let mut buf = BytesMut::with_capacity(128);
         let is_null = subnet.to_sql(&ty, &mut buf).unwrap();
         assert!(matches!(is_null, tokio_postgres::types::IsNull::No));
-        let from_sql = IpNet::from_sql(&ty, &buf).unwrap();
+        let from_sql = Ipv4Net::from_sql(&ty, &buf).unwrap();
         assert_eq!(subnet, from_sql);
         assert_eq!(
             from_sql.addr(),
@@ -459,7 +494,26 @@ mod tests {
         assert_eq!(from_sql.prefix_len(), 24);
 
         let bad = b"some-bad-net";
-        assert!(IpNet::from_sql(&ty, &bad[..]).is_err());
+        assert!(Ipv4Net::from_sql(&ty, &bad[..]).is_err());
+    }
+
+    #[test]
+    fn test_ipv6net_conversion() {
+        let subnet = Ipv6Net("fd00:1234::/24".parse().unwrap());
+        let ty = tokio_postgres::types::Type::INET;
+        let mut buf = BytesMut::with_capacity(256);
+        let is_null = subnet.to_sql(&ty, &mut buf).unwrap();
+        assert!(matches!(is_null, tokio_postgres::types::IsNull::No));
+        let from_sql = Ipv6Net::from_sql(&ty, &buf).unwrap();
+        assert_eq!(subnet, from_sql);
+        assert_eq!(
+            from_sql.addr(),
+            "fd00:1234::".parse::<std::net::IpAddr>().unwrap()
+        );
+        assert_eq!(from_sql.prefix_len(), 24);
+
+        let bad = b"some-bad-net";
+        assert!(Ipv6Net::from_sql(&ty, &bad[..]).is_err());
     }
 
     #[test]
