@@ -302,9 +302,17 @@ CREATE TABLE omicron.public.VNIC (
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
     subnet_id UUID NOT NULL,
-    mac CHAR(17) NOT NULL, -- 6 octets in hex -> 12 characters, plus 5 ":" separators
+    mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
     ip INET NOT NULL
 );
+
+/* TODO-completeness
+
+ * We currently have a VNIC table with the IP and MAC addresses inline.
+ * Eventually, we'll probably want to move these to their own tables, and
+ * refer to them here, most notably to support multiple IPs per NIC, as well
+ * as moving IPs between NICs on different instances, etc.
+ */
 
 -- TODO: add project_id to index
 CREATE UNIQUE INDEX ON omicron.public.VNIC (
