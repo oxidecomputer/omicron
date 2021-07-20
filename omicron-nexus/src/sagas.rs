@@ -134,6 +134,9 @@ async fn sic_create_instance_record(
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
+        hostname: params.create_params.hostname.clone(),
+        memory: params.create_params.memory,
+        ncpus: params.create_params.ncpus,
         gen: Generation::new(),
         time_updated: Utc::now(),
     };

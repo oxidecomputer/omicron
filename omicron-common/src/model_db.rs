@@ -307,9 +307,6 @@ impl TryFrom<&tokio_postgres::Row> for Instance {
         Ok(Instance {
             identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
-            ncpus: sql_row_value(value, "ncpus")?,
-            memory: sql_row_value(value, "memory")?,
-            hostname: sql_row_value(value, "hostname")?,
             runtime: InstanceRuntimeState::try_from(value)?,
         })
     }
@@ -325,6 +322,9 @@ impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
         Ok(InstanceRuntimeState {
             run_state: InstanceState::try_from(value)?,
             sled_uuid: sql_row_value(value, "active_server_id")?,
+            ncpus: sql_row_value(value, "ncpus")?,
+            memory: sql_row_value(value, "memory")?,
+            hostname: sql_row_value(value, "hostname")?,
             gen: sql_row_value(value, "state_generation")?,
             time_updated: sql_row_value(value, "time_state_updated")?,
         })

@@ -281,12 +281,14 @@ impl Instance {
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: "Test instance".to_string(),
+                name: initial_runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
-                memory: 256,
-                vcpus: 2,
+                memory: initial_runtime.memory.to_bytes(),
+                // TODO: we should probably make propolis aligned with
+                // InstanceCpuCount here, to avoid any casting...
+                vcpus: initial_runtime.ncpus.0 as u8,
             },
             state: InstanceStates::new(initial_runtime),
             nexus_client,

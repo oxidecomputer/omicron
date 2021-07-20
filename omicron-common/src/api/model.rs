@@ -797,13 +797,6 @@ pub struct Instance {
     /** id for the project containing this Instance */
     pub project_id: Uuid,
 
-    /** number of CPUs allocated for this Instance */
-    pub ncpus: InstanceCpuCount,
-    /** memory allocated for this Instance */
-    pub memory: ByteCount,
-    /** RFC1035-compliant hostname for the Instance. */
-    pub hostname: String, /* TODO-cleanup different type? */
-
     /** state owned by the data plane */
     pub runtime: InstanceRuntimeState,
     /* TODO-completeness: add disks, network, tags, metrics */
@@ -815,9 +808,6 @@ impl Object for Instance {
         InstanceView {
             identity: self.identity.clone(),
             project_id: self.project_id,
-            ncpus: self.ncpus,
-            memory: self.memory,
-            hostname: self.hostname.clone(),
             runtime: self.runtime.to_view(),
         }
     }
@@ -835,6 +825,15 @@ pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     /** which sled is running this Instance */
     pub sled_uuid: Uuid,
+
+    /** number of CPUs allocated for this Instance */
+    pub ncpus: InstanceCpuCount,
+    /** memory allocated for this Instance */
+    pub memory: ByteCount,
+    /** RFC1035-compliant hostname for the Instance. */
+    pub hostname: String, /* TODO-cleanup different type? */
+
+    /* TODO-completeness: add disks, network, tags, metrics */
     /** generation number for this state */
     pub gen: Generation,
     /** timestamp for this information */
@@ -884,13 +883,6 @@ pub struct InstanceView {
 
     /** id for the project containing this Instance */
     pub project_id: Uuid,
-
-    /** number of CPUs allocated for this Instance */
-    pub ncpus: InstanceCpuCount,
-    /** memory, in gigabytes, allocated for this Instance */
-    pub memory: ByteCount,
-    /** RFC1035-compliant hostname for the Instance. */
-    pub hostname: String, /* TODO-cleanup different type? */
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeStateView,

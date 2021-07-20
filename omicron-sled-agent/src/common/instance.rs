@@ -143,12 +143,9 @@ impl InstanceStates {
         next: InstanceState,
         desired: Option<InstanceStateRequested>,
     ) {
-        self.current = InstanceRuntimeState {
-            run_state: next,
-            sled_uuid: self.current.sled_uuid,
-            gen: self.current.gen.next(),
-            time_updated: Utc::now(),
-        };
+        self.current.run_state = next;
+        self.current.gen = self.current.gen.next();
+        self.current.time_updated = Utc::now();
         self.desired = desired
             .map(|run_state| InstanceRuntimeStateRequested { run_state });
     }
