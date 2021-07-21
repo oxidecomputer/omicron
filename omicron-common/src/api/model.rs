@@ -1512,25 +1512,25 @@ impl JsonSchema for MacAddr {
     }
 }
 
-/// A `VNIC` represents a virtual network interface device.
+/// A `NetworkInterface` represents a virtual network interface device.
 #[derive(Clone, Debug)]
-pub struct VNIC {
+pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 
     // TODO: Implement project-scoping
     // /** id for the project containing this Instance */
     // pub project_id: Uuid,
-    /** The VPC to which the NIC belongs. */
+    /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,
 
-    /** The subnet to which the NIC belongs. */
+    /** The subnet to which the interface belongs. */
     pub subnet_id: Uuid,
 
-    /** The MAC address assigned to this NIC. */
+    /** The MAC address assigned to this interface. */
     pub mac: MacAddr,
 
-    /** The IP address assigned to this NIC. */
+    /** The IP address assigned to this interface. */
     pub ip: IpAddr,
 }
 

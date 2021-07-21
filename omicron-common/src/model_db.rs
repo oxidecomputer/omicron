@@ -67,12 +67,12 @@ use crate::api::InstanceRuntimeState;
 use crate::api::InstanceState;
 use crate::api::MacAddr;
 use crate::api::Name;
+use crate::api::NetworkInterface;
 use crate::api::OximeterAssignment;
 use crate::api::OximeterInfo;
 use crate::api::ProducerEndpoint;
 use crate::api::Project;
 use crate::api::VPCSubnet;
-use crate::api::VNIC;
 use crate::api::VPC;
 use crate::api::{Ipv4Net, Ipv6Net};
 use crate::bail_unless;
@@ -457,8 +457,8 @@ impl TryFrom<&tokio_postgres::Row> for VPCSubnet {
     }
 }
 
-/// Load an [`VPC`] from a row in the `VNIC` table.
-impl TryFrom<&tokio_postgres::Row> for VNIC {
+/// Load a [`NetworkInterface`] from a row in the `NetworkInterface` table.
+impl TryFrom<&tokio_postgres::Row> for NetworkInterface {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {

@@ -289,7 +289,7 @@ CREATE UNIQUE INDEX ON omicron.public.VPCSubnet (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.VNIC (
+CREATE TABLE omicron.public.NetworkInterface (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -308,14 +308,14 @@ CREATE TABLE omicron.public.VNIC (
 
 /* TODO-completeness
 
- * We currently have a VNIC table with the IP and MAC addresses inline.
+ * We currently have a NetworkInterface table with the IP and MAC addresses inline.
  * Eventually, we'll probably want to move these to their own tables, and
  * refer to them here, most notably to support multiple IPs per NIC, as well
  * as moving IPs between NICs on different instances, etc.
  */
 
 -- TODO: add project_id to index
-CREATE UNIQUE INDEX ON omicron.public.VNIC (
+CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
     name
 ) WHERE
     time_deleted IS NULL;

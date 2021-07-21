@@ -187,11 +187,11 @@ impl Table for VPCSubnet {
     ];
 }
 
-/** Describes the "VNIC" table */
-pub struct VNIC;
-impl Table for VNIC {
-    type ModelType = api::VNIC;
-    const TABLE_NAME: &'static str = "VNIC";
+/** Describes the "NetworkInterface" table */
+pub struct NetworkInterface;
+impl Table for NetworkInterface {
+    type ModelType = api::NetworkInterface;
+    const TABLE_NAME: &'static str = "NetworkInterface";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
         "name",
@@ -216,7 +216,7 @@ mod test {
     use super::SagaNodeEvent;
     use super::Table;
     use super::{MetricProducer, Oximeter, OximeterAssignment};
-    use super::{VPCSubnet, VNIC, VPC};
+    use super::{NetworkInterface, VPCSubnet, VPC};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -247,7 +247,7 @@ mod test {
         check_table_schema::<OximeterAssignment>(&client).await;
         check_table_schema::<VPC>(&client).await;
         check_table_schema::<VPCSubnet>(&client).await;
-        check_table_schema::<VNIC>(&client).await;
+        check_table_schema::<NetworkInterface>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();
