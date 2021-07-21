@@ -12,7 +12,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use omicron_common::api::{OximeterInfo, ProducerEndpoint};
+use omicron_common::api::external::{OximeterInfo, ProducerEndpoint};
 use omicron_common::backoff;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

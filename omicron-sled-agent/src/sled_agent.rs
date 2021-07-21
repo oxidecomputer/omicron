@@ -1,7 +1,7 @@
 //! Sled agent implementation
 
-use omicron_common::api::Error;
-use omicron_common::api::{
+use omicron_common::api::external::Error;
+use omicron_common::api::external::{
     DiskRuntimeState, DiskStateRequested, InstanceRuntimeState,
     InstanceRuntimeStateRequested,
 };

@@ -1,9 +1,9 @@
 //! Mock structures for testing.
 
 use mockall::mock;
-use omicron_common::api::Error;
-use omicron_common::api::InstanceRuntimeState;
-use omicron_common::api::SledAgentStartupInfo;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceRuntimeState;
+use omicron_common::api::external::SledAgentStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;

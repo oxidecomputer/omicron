@@ -2,7 +2,7 @@
 
 use cfg_if::cfg_if;
 
-use omicron_common::api::Error;
+use omicron_common::api::external::Error;
 use omicron_common::dev::poll;
 use std::time::Duration;
 

@@ -21,19 +21,19 @@
 use super::Pool;
 use chrono::Utc;
 use omicron_common::api;
-use omicron_common::api::CreateResult;
-use omicron_common::api::DataPageParams;
-use omicron_common::api::DeleteResult;
-use omicron_common::api::Error;
-use omicron_common::api::Generation;
-use omicron_common::api::ListResult;
-use omicron_common::api::LookupResult;
-use omicron_common::api::Name;
-use omicron_common::api::OximeterAssignment;
-use omicron_common::api::OximeterInfo;
-use omicron_common::api::ProducerEndpoint;
-use omicron_common::api::ResourceType;
-use omicron_common::api::UpdateResult;
+use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
+use omicron_common::api::external::ListResult;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::OximeterAssignment;
+use omicron_common::api::external::OximeterInfo;
+use omicron_common::api::external::ProducerEndpoint;
+use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
@@ -78,8 +78,8 @@ impl DataStore {
     pub async fn project_create_with_id(
         &self,
         new_id: &Uuid,
-        new_project: &api::ProjectCreateParams,
-    ) -> CreateResult<api::Project> {
+        new_project: &api::external::ProjectCreateParams,
+    ) -> CreateResult<api::external::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -99,7 +99,7 @@ impl DataStore {
     pub async fn project_fetch(
         &self,
         project_name: &Name,
-    ) -> LookupResult<api::Project> {
+    ) -> LookupResult<api::external::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueName, Project>(
             &client,
@@ -154,7 +154,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<api::Project> {
+    ) -> ListResult<api::external::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
@@ -168,7 +168,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::Project> {
+    ) -> ListResult<api::external::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueName,
@@ -182,8 +182,8 @@ impl DataStore {
     pub async fn project_update(
         &self,
         project_name: &Name,
-        update_params: &api::ProjectUpdateParams,
-    ) -> UpdateResult<api::Project> {
+        update_params: &api::external::ProjectUpdateParams,
+    ) -> UpdateResult<api::external::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -212,7 +212,7 @@ impl DataStore {
             Error::not_found_by_name(ResourceType::Project, project_name)
         })
         .await?;
-        Ok(api::Project::try_from(&row)?)
+        Ok(api::external::Project::try_from(&row)?)
     }
 
     /*
@@ -248,9 +248,9 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         project_id: &Uuid,
-        params: &api::InstanceCreateParams,
-        runtime_initial: &api::InstanceRuntimeState,
-    ) -> CreateResult<api::Instance> {
+        params: &api::external::InstanceCreateParams,
+        runtime_initial: &api::external::InstanceRuntimeState,
+    ) -> CreateResult<api::external::Instance> {
         let client = self.pool.acquire().await?;
         let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
@@ -274,7 +274,7 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state == api::InstanceState::Creating,
+            instance.runtime.run_state == api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
         );
@@ -290,7 +290,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::Instance> {
+    ) -> ListResult<api::external::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -303,7 +303,7 @@ impl DataStore {
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
-    ) -> LookupResult<api::Instance> {
+    ) -> LookupResult<api::external::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Instance>(&client, (), instance_id)
             .await
@@ -313,7 +313,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         instance_name: &Name,
-    ) -> LookupResult<api::Instance> {
+    ) -> LookupResult<api::external::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
@@ -335,7 +335,7 @@ impl DataStore {
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
-        new_runtime: &api::InstanceRuntimeState,
+        new_runtime: &api::external::InstanceRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -378,14 +378,14 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        api::InstanceState::Destroyed.sql_serialize(&mut values);
+        api::external::InstanceState::Destroyed.sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
 
-        let stopped = api::InstanceState::Stopped.to_string();
+        let stopped = api::external::InstanceState::Stopped.to_string();
         let p1 = cond_sql.next_param(&stopped);
-        let failed = api::InstanceState::Failed.to_string();
+        let failed = api::external::InstanceState::Failed.to_string();
         let p2 = cond_sql.next_param(&failed);
         cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
 
@@ -402,7 +402,7 @@ impl DataStore {
         let row = &update.found_state;
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         let variant: &str = sql_row_value(&row, "found_instance_state")?;
-        let instance_state = api::InstanceState::try_from(variant)
+        let instance_state = api::external::InstanceState::try_from(variant)
             .map_err(|e| Error::internal_error(&e))?;
         bail_unless!(found_id == *instance_id);
 
@@ -429,9 +429,9 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::DiskAttachment> {
+    ) -> ListResult<api::external::DiskAttachment> {
         let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<LookupByAttachedInstance, Disk, api::DiskAttachment>(
+        sql_fetch_page_by::<LookupByAttachedInstance, Disk, api::external::DiskAttachment>(
             &client,
             (instance_id,),
             pagparams,
@@ -444,9 +444,9 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
         project_id: &Uuid,
-        params: &api::DiskCreateParams,
-        runtime_initial: &api::DiskRuntimeState,
-    ) -> CreateResult<api::Disk> {
+        params: &api::external::DiskCreateParams,
+        runtime_initial: &api::external::DiskRuntimeState,
+    ) -> CreateResult<api::external::Disk> {
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
@@ -473,7 +473,7 @@ impl DataStore {
             .await?;
 
         bail_unless!(
-            disk.runtime.disk_state == api::DiskState::Creating,
+            disk.runtime.disk_state == api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             disk.runtime.disk_state
         );
@@ -489,7 +489,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::Disk> {
+    ) -> ListResult<api::external::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -502,7 +502,7 @@ impl DataStore {
     pub async fn disk_update_runtime(
         &self,
         disk_id: &Uuid,
-        new_runtime: &api::DiskRuntimeState,
+        new_runtime: &api::external::DiskRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -528,7 +528,7 @@ impl DataStore {
         Ok(update.updated)
     }
 
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::Disk> {
+    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::external::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -537,7 +537,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         disk_name: &Name,
-    ) -> LookupResult<api::Disk> {
+    ) -> LookupResult<api::external::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
@@ -553,12 +553,12 @@ impl DataStore {
 
         let mut values = SqlValueSet::new();
         values.set("time_deleted", &now);
-        api::DiskState::Destroyed.sql_serialize(&mut values);
+        api::external::DiskState::Destroyed.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
-        let disk_state_detached = api::DiskState::Detached.to_string();
+        let disk_state_detached = api::external::DiskState::Detached.to_string();
         let p1 = cond_sql.next_param(&disk_state_detached);
-        let disk_state_faulted = api::DiskState::Faulted.to_string();
+        let disk_state_faulted = api::external::DiskState::Faulted.to_string();
         let p2 = cond_sql.next_param(&disk_state_faulted);
         cond_sql.push_str(&format!("disk_state in ({}, {})", p1, p2));
 
@@ -577,13 +577,13 @@ impl DataStore {
         bail_unless!(found_id == *disk_id);
 
         // TODO-cleanup It would be nice to use
-        // api::DiskState::try_from(&tokio_postgres::Row), but the column names
+        // api::external::DiskState::try_from(&tokio_postgres::Row), but the column names
         // are different here.
         let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
         let attach_instance_id: Option<Uuid> =
             sql_row_value(&row, "found_attach_instance_id")?;
         let found_disk_state =
-            api::DiskState::try_from((disk_state_str, attach_instance_id))
+            api::external::DiskState::try_from((disk_state_str, attach_instance_id))
                 .map_err(|e| Error::internal_error(&e))?;
 
         if update.updated {

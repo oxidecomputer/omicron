@@ -5,7 +5,11 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
-use crate::api::Error;
+mod error;
+pub mod http_pagination;
+pub use error::*;
+
+
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -1422,7 +1426,7 @@ pub struct OximeterAssignment {
 mod test {
     use super::ByteCount;
     use super::Name;
-    use crate::api::Error;
+    use crate::api::external::Error;
     use std::convert::TryFrom;
 
     #[test]

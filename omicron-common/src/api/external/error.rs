@@ -4,8 +4,8 @@
  * For HTTP-level error handling, see Dropshot.
  */
 
-use crate::api::Name;
-use crate::api::ResourceType;
+use crate::api::external::Name;
+use crate::api::external::ResourceType;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
@@ -243,7 +243,7 @@ macro_rules! bail_unless {
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
-            return Err($crate::api::Error::internal_error(&format!(
+            return Err($crate::api::external::Error::internal_error(&format!(
                 $($arg)*)))
         }
     };

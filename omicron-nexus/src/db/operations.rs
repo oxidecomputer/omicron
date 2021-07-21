@@ -3,7 +3,7 @@
  * and extract values
  */
 
-use omicron_common::api::Error;
+use omicron_common::api::external::Error;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::DbError;
 use std::convert::TryFrom;

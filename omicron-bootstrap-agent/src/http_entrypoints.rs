@@ -8,7 +8,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::{
+use omicron_common::api::external::{
     BootstrapAgentShareRequest, BootstrapAgentShareResponse,
 };
 use std::sync::Arc;

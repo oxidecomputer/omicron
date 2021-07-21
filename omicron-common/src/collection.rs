@@ -2,11 +2,11 @@
  * Functions for iterating pages from a collection
  */
 
-use crate::api::DataPageParams;
-use crate::api::Error;
-use crate::api::ListResult;
-use crate::api::PaginationOrder::Ascending;
-use crate::api::PaginationOrder::Descending;
+use crate::api::external::DataPageParams;
+use crate::api::external::Error;
+use crate::api::external::ListResult;
+use crate::api::external::PaginationOrder::Ascending;
+use crate::api::external::PaginationOrder::Descending;
 use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;

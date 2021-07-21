@@ -4,11 +4,11 @@
 
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use omicron_common::api::DiskRuntimeState;
-use omicron_common::api::DiskState;
-use omicron_common::api::DiskStateRequested;
-use omicron_common::api::Error;
-use omicron_common::api::Generation;
+use omicron_common::api::external::DiskRuntimeState;
+use omicron_common::api::external::DiskState;
+use omicron_common::api::external::DiskStateRequested;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
 use omicron_common::NexusClient;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;

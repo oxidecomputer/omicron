@@ -3,11 +3,11 @@
  */
 
 use futures::StreamExt;
-use omicron_common::api::DataPageParams;
-use omicron_common::api::Error;
-use omicron_common::api::ListResult;
-use omicron_common::api::LookupResult;
-use omicron_common::api::ResourceType;
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResult;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::ResourceType;
 use omicron_common::db::sql_error_generic;
 use omicron_common::db::sql_row_value;
 use omicron_common::db::DbError;

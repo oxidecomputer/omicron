@@ -1,6 +1,6 @@
 use crate::bootstrap_agent_client::Client as BootstrapClient;
-use omicron_common::api::BootstrapAgentShareResponse;
-use omicron_common::api::Error;
+use omicron_common::api::external::BootstrapAgentShareResponse;
+use omicron_common::api::external::Error;
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;

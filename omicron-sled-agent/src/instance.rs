@@ -5,9 +5,9 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use futures::lock::Mutex;
-use omicron_common::api::Error;
-use omicron_common::api::InstanceRuntimeState;
-use omicron_common::api::InstanceRuntimeStateRequested;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceRuntimeState;
+use omicron_common::api::external::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
@@ -477,7 +477,7 @@ mod test {
         RequestContext, TypedBody,
     };
     use futures::future::FutureExt;
-    use omicron_common::api::{
+    use omicron_common::api::external::{
         Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
     };
     use propolis_client::api;

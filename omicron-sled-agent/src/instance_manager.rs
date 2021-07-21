@@ -1,8 +1,8 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
-use omicron_common::api::Error;
-use omicron_common::api::{
+use omicron_common::api::external::Error;
+use omicron_common::api::external::{
     InstanceRuntimeState, InstanceRuntimeStateRequested,
 };
 use slog::Logger;
@@ -199,7 +199,7 @@ mod test {
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
-    use omicron_common::api::{
+    use omicron_common::api::external::{
         Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
     };
 
