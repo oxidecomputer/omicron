@@ -137,9 +137,9 @@ fn build_target_trait_impl(
     let refs = names.iter().map(|name| format_ident!("{}", name));
     let name = to_snake_case(&format!("{}", item_name));
 
-    // "target-name:field:field:..."
-    let fmt = format!("{{}}{}", ":{}".repeat(values.len()));
-    let key_formatter = quote! { format!(#fmt, #name, #(self.#refs),*) };
+    // key format: "field0_value:field1_value:..."
+    let fmt = vec!["{}"; values.len()].join(":");
+    let key_formatter = quote! { format!(#fmt, #(self.#refs),*) };
     quote! {
         impl ::oximeter::Target for #item_name {
             fn name(&self) -> &'static str {
@@ -177,12 +177,10 @@ fn build_metric_trait_impl(
     let refs =
         names.iter().map(|name| format_ident!("{}", name)).collect::<Vec<_>>();
     let name = to_snake_case(&format!("{}", item_name));
-    let fmt = format!("{}{{}}", "{}:".repeat(values.len()));
-    let key_formatter = if refs.is_empty() {
-        quote! { format!(#fmt, #name) }
-    } else {
-        quote! { format!(#fmt, #(self.#refs),*, #name) }
-    };
+
+    // key format: "field0_value:field1_value:..."
+    let fmt = vec!["{}"; values.len()].join(":");
+    let key_formatter = quote! { format!(#fmt, #(self.#refs),*) };
     let measurement_type =
         syn::parse_str::<syn::Expr>(&format!("{}", measurement_type)).unwrap();
     quote! {
