@@ -933,26 +933,6 @@ pub struct InstanceUpdateParams {
  */
 
 /**
- * A Disk (network block device) in the external API
- */
-#[derive(Clone, Debug)]
-pub struct Disk {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-    /** id for the project containing this Disk */
-    pub project_id: Uuid,
-    /**
-     * id for the snapshot from which this Disk was created (None means a blank
-     * disk)
-     */
-    pub create_snapshot_id: Option<Uuid>,
-    /** size of the Disk */
-    pub size: ByteCount,
-    /** runtime state of the Disk */
-    pub runtime: DiskRuntimeState,
-}
-
-/**
  * Client view of an [`Disk`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -967,20 +947,19 @@ pub struct DiskView {
     pub device_path: String,
 }
 
-impl Object for Disk {
-    type View = DiskView;
-    fn to_view(&self) -> DiskView {
+impl From<crate::api::internal::nexus::Disk> for DiskView {
+    fn from(disk: crate::api::internal::nexus::Disk) -> Self {
         /*
          * TODO-correctness: can the name always be used as a path like this
          * or might it need to be sanitized?
          */
-        let device_path = format!("/mnt/{}", self.identity.name.as_str());
+        let device_path = format!("/mnt/{}", disk.identity.name.as_str());
         DiskView {
-            identity: self.identity.clone(),
-            project_id: self.project_id,
-            snapshot_id: self.create_snapshot_id,
-            size: self.size,
-            state: self.runtime.disk_state.clone(),
+            identity: disk.identity.clone(),
+            project_id: disk.project_id,
+            snapshot_id: disk.create_snapshot_id,
+            size: disk.size,
+            state: disk.runtime.disk_state.clone(),
             device_path,
         }
     }
@@ -1089,20 +1068,6 @@ impl DiskState {
 }
 
 /**
- * Runtime state of the Disk, which includes its attach state and some minimal
- * metadata
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskRuntimeState {
-    /** runtime state of the Disk */
-    pub disk_state: DiskState,
-    /** generation number for this state */
-    pub gen: Generation,
-    /** timestamp for this information */
-    pub time_updated: DateTime<Utc>,
-}
-
-/**
  * Create-time parameters for an [`Disk`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1133,33 +1098,6 @@ impl Object for DiskAttachment {
     type View = Self;
     fn to_view(&self) -> Self::View {
         self.clone()
-    }
-}
-
-/**
- * Used to request a Disk state change
- */
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum DiskStateRequested {
-    Detached,
-    Attached(Uuid),
-    Destroyed,
-    Faulted,
-}
-
-impl DiskStateRequested {
-    /**
-     * Returns whether the requested state is attached to an Instance or not.
-     */
-    pub fn is_attached(&self) -> bool {
-        match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
-
-            DiskStateRequested::Attached(_) => true,
-        }
     }
 }
 
@@ -1342,20 +1280,6 @@ pub struct InstanceEnsureBody {
     pub initial_runtime: InstanceRuntimeState,
     /** requested runtime state of the Instance */
     pub target: InstanceRuntimeStateRequested,
-}
-
-/**
- * Sent from Nexus to a sled agent to establish the runtime state of a Disk
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskEnsureBody {
-    /**
-     * Last runtime state of the Disk known to Nexus (used if the agent has
-     * never seen this Disk before).
-     */
-    pub initial_runtime: DiskRuntimeState,
-    /** requested runtime state of the Disk */
-    pub target: DiskStateRequested,
 }
 
 /*

@@ -1,10 +1,14 @@
 //! Sled agent implementation
 
 use omicron_common::api::external::Error;
-use omicron_common::api::external::{
-    DiskRuntimeState, DiskStateRequested, InstanceRuntimeState,
-    InstanceRuntimeStateRequested,
+use omicron_common::api::{
+    external::{
+        InstanceRuntimeState, InstanceRuntimeStateRequested,
+    },
+    internal::nexus::DiskRuntimeState,
+    internal::sled_agent::DiskStateRequested,
 };
+
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;

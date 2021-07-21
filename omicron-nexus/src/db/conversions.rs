@@ -7,7 +7,7 @@
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::DiskCreateParams;
-use omicron_common::api::external::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;

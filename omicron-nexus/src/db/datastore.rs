@@ -445,8 +445,8 @@ impl DataStore {
         disk_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::DiskCreateParams,
-        runtime_initial: &api::external::DiskRuntimeState,
-    ) -> CreateResult<api::external::Disk> {
+        runtime_initial: &api::internal::nexus::DiskRuntimeState,
+    ) -> CreateResult<api::internal::nexus::Disk> {
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
@@ -461,7 +461,7 @@ impl DataStore {
         params.sql_serialize(&mut values);
         runtime_initial.sql_serialize(&mut values);
 
-        let disk =
+        let disk: api::internal::nexus::Disk =
             sql_insert_unique_idempotent_and_fetch::<Disk, LookupByUniqueId>(
                 &client,
                 &mut values,
@@ -489,7 +489,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::Disk> {
+    ) -> ListResult<api::internal::nexus::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -502,7 +502,7 @@ impl DataStore {
     pub async fn disk_update_runtime(
         &self,
         disk_id: &Uuid,
-        new_runtime: &api::external::DiskRuntimeState,
+        new_runtime: &api::internal::nexus::DiskRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -528,7 +528,7 @@ impl DataStore {
         Ok(update.updated)
     }
 
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::external::Disk> {
+    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::internal::nexus::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -537,7 +537,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         disk_name: &Name,
-    ) -> LookupResult<api::external::Disk> {
+    ) -> LookupResult<api::internal::nexus::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,

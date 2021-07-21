@@ -1,9 +1,9 @@
 //! Describes the states of network-attached storage.
 
 use chrono::Utc;
-use omicron_common::api::external::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::external::DiskState;
-use omicron_common::api::external::DiskStateRequested;
+use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::external::Error;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;

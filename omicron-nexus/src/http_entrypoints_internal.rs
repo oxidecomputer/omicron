@@ -10,7 +10,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::external::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::external::InstanceRuntimeState;
 use omicron_common::api::external::OximeterInfo;
 use omicron_common::api::external::ProducerEndpoint;

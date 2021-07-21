@@ -6,9 +6,9 @@
  */
 
 use crate::api::external::Error;
-use crate::api::external::DiskEnsureBody;
-use crate::api::external::DiskRuntimeState;
-use crate::api::external::DiskStateRequested;
+use crate::api::internal::sled_agent::DiskEnsureBody;
+use crate::api::internal::nexus::DiskRuntimeState;
+use crate::api::internal::sled_agent::DiskStateRequested;
 use crate::api::external::InstanceEnsureBody;
 use crate::api::external::InstanceRuntimeState;
 use crate::api::external::InstanceRuntimeStateRequested;

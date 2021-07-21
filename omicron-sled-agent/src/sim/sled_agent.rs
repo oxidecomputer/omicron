@@ -2,8 +2,8 @@
  * Simulated sled agent implementation
  */
 
-use omicron_common::api::external::DiskRuntimeState;
-use omicron_common::api::external::DiskStateRequested;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceRuntimeState;
 use omicron_common::api::external::InstanceRuntimeStateRequested;

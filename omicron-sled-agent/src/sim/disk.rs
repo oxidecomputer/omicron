@@ -4,9 +4,9 @@
 
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use omicron_common::api::external::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::external::DiskState;
-use omicron_common::api::external::DiskStateRequested;
+use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::NexusClient;

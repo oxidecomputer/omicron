@@ -66,7 +66,7 @@ impl ResourceTable for Instance {
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
-    type ModelType = api::external::Disk;
+    type ModelType = api::internal::nexus::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

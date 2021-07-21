@@ -1,4 +1,4 @@
-//! Internally facing API
+//! Internally facing APIs.
 
-mod nexus;
-mod sled_agent;
+pub mod nexus;
+pub mod sled_agent;

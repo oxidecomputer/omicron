@@ -16,6 +16,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
+use futures::stream::StreamExt;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -289,8 +290,13 @@ async fn project_disks_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+
+    let disk_list = disk_stream
+        .filter(|maybe_disk| futures::future::ready(maybe_disk.is_ok()))
+        .map(|maybe_disk| maybe_disk.unwrap().into())
+        .collect::<Vec<DiskView>>()
+        .await;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
 /**
@@ -314,7 +320,7 @@ async fn project_disks_post(
     let new_disk_params = &new_disk.into_inner();
     let disk =
         nexus.project_create_disk(&project_name, &new_disk_params).await?;
-    Ok(HttpResponseCreated(disk.to_view()))
+    Ok(HttpResponseCreated(disk.into()))
 }
 
 /**
@@ -343,7 +349,7 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let disk = nexus.project_lookup_disk(&project_name, &disk_name).await?;
-    Ok(HttpResponseOk(disk.to_view()))
+    Ok(HttpResponseOk(disk.into()))
 }
 
 /**
