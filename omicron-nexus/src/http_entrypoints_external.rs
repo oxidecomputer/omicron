@@ -396,7 +396,7 @@ async fn project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(instance_stream).await;
+    let view_list = to_list::<api::internal::nexus::Instance, InstanceView>(instance_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -428,7 +428,7 @@ async fn project_instances_post(
     let instance = nexus
         .project_create_instance(&project_name, &new_instance_params)
         .await?;
-    Ok(HttpResponseCreated(instance.to_view()))
+    Ok(HttpResponseCreated(instance.into()))
 }
 
 /**
@@ -458,7 +458,7 @@ async fn project_instances_get_instance(
     let instance_name = &path.instance_name;
     let instance =
         nexus.project_lookup_instance(&project_name, &instance_name).await?;
-    Ok(HttpResponseOk(instance.to_view()))
+    Ok(HttpResponseOk(instance.into()))
 }
 
 /**
@@ -498,7 +498,7 @@ async fn project_instances_instance_reboot(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_reboot(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**
@@ -518,7 +518,7 @@ async fn project_instances_instance_start(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_start(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**
@@ -539,7 +539,7 @@ async fn project_instances_instance_stop(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_stop(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**

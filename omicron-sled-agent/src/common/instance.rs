@@ -2,10 +2,10 @@
 
 use chrono::Utc;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceRuntimeState;
-use omicron_common::api::external::InstanceRuntimeStateRequested;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::InstanceStateRequested;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
@@ -262,8 +262,11 @@ mod test {
     use super::{Action, InstanceStates};
     use chrono::Utc;
     use omicron_common::api::external::{
-        Generation, InstanceRuntimeState, InstanceState as State,
-        InstanceStateRequested as Requested,
+        Generation, InstanceState as State,
+    };
+    use omicron_common::api::internal::{
+        nexus::InstanceRuntimeState,
+        sled_agent::InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
 

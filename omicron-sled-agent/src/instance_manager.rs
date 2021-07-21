@@ -2,9 +2,8 @@
 
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::{
-    InstanceRuntimeState, InstanceRuntimeStateRequested,
-};
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -200,7 +199,11 @@ mod test {
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
     use omicron_common::api::external::{
-        Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
+        Generation, InstanceState,
+    };
+    use omicron_common::api::internal::{
+        nexus::InstanceRuntimeState,
+        sled_agent::InstanceStateRequested,
     };
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";

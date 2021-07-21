@@ -341,10 +341,10 @@ mod test {
     use omicron_common::api::external::DiskState;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::external::InstanceRuntimeState;
-    use omicron_common::api::external::InstanceRuntimeStateRequested;
     use omicron_common::api::external::InstanceState;
-    use omicron_common::api::external::InstanceStateRequested;
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
+    use omicron_common::api::internal::sled_agent::InstanceStateRequested;
     use omicron_common::dev::test_setup_log;
 
     fn make_instance(

@@ -2,11 +2,10 @@
 
 use omicron_common::api::external::Error;
 use omicron_common::api::{
-    external::{
-        InstanceRuntimeState, InstanceRuntimeStateRequested,
-    },
     internal::nexus::DiskRuntimeState,
+    internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
+    internal::sled_agent::InstanceRuntimeStateRequested,
 };
 
 use slog::Logger;

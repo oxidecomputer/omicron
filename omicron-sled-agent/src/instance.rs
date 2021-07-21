@@ -6,8 +6,8 @@ use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceRuntimeState;
-use omicron_common::api::external::InstanceRuntimeStateRequested;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
@@ -478,7 +478,11 @@ mod test {
     };
     use futures::future::FutureExt;
     use omicron_common::api::external::{
-        Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
+        Generation, InstanceState,
+    };
+    use omicron_common::api::internal::{
+        nexus::InstanceRuntimeState,
+        sled_agent::InstanceStateRequested,
     };
     use propolis_client::api;
     use tokio::sync::watch;

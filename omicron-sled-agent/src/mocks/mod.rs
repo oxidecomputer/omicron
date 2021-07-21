@@ -2,7 +2,7 @@
 
 use mockall::mock;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::external::SledAgentStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;

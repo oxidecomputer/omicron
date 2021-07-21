@@ -722,62 +722,6 @@ impl InstanceState {
     }
 }
 
-/**
- * Requestable running state of an Instance.
- *
- * A subset of [`InstanceState`].
- */
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum InstanceStateRequested {
-    Running,
-    Stopped,
-    // Issues a reset command to the instance, such that it should
-    // stop and then immediately become running.
-    Reboot,
-    Destroyed,
-}
-
-impl Display for InstanceStateRequested {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", self.label())
-    }
-}
-
-impl InstanceStateRequested {
-    fn label(&self) -> &str {
-        match self {
-            InstanceStateRequested::Running => "running",
-            InstanceStateRequested::Stopped => "stopped",
-            InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Destroyed => "destroyed",
-        }
-    }
-
-    /**
-     * Returns true if the state represents a stopped Instance.
-     */
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceStateRequested::Running => false,
-            InstanceStateRequested::Stopped => true,
-            InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Destroyed => true,
-        }
-    }
-}
-
 /** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCpuCount(pub u16);
@@ -797,72 +741,6 @@ impl From<&InstanceCpuCount> for i64 {
 }
 
 /**
- * An Instance (VM) in the external API
- */
-#[derive(Clone, Debug)]
-pub struct Instance {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-
-    /** id for the project containing this Instance */
-    pub project_id: Uuid,
-
-    /** number of CPUs allocated for this Instance */
-    pub ncpus: InstanceCpuCount,
-    /** memory allocated for this Instance */
-    pub memory: ByteCount,
-    /** RFC1035-compliant hostname for the Instance. */
-    pub hostname: String, /* TODO-cleanup different type? */
-
-    /** state owned by the data plane */
-    pub runtime: InstanceRuntimeState,
-    /* TODO-completeness: add disks, network, tags, metrics */
-}
-
-impl Object for Instance {
-    type View = InstanceView;
-    fn to_view(&self) -> InstanceView {
-        InstanceView {
-            identity: self.identity.clone(),
-            project_id: self.project_id,
-            ncpus: self.ncpus,
-            memory: self.memory,
-            hostname: self.hostname.clone(),
-            runtime: self.runtime.to_view(),
-        }
-    }
-}
-
-/**
- * Runtime state of the Instance, including the actual running state and minimal
- * metadata
- *
- * This state is owned by the sled agent running that Instance.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    /** runtime state of the Instance */
-    pub run_state: InstanceState,
-    /** which sled is running this Instance */
-    pub sled_uuid: Uuid,
-    /** generation number for this state */
-    pub gen: Generation,
-    /** timestamp for this information */
-    pub time_updated: DateTime<Utc>,
-}
-
-/**
- * Used to request an Instance state change from a sled agent
- *
- * Right now, it's only the run state that can be changed, though we might want
- * to support changing properties like "ncpus" here.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateRequested {
-    pub run_state: InstanceStateRequested,
-}
-
-/**
  * Client view of an [`InstanceRuntimeState`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -872,12 +750,11 @@ pub struct InstanceRuntimeStateView {
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl Object for InstanceRuntimeState {
-    type View = InstanceRuntimeStateView;
-    fn to_view(&self) -> InstanceRuntimeStateView {
+impl From<crate::api::internal::nexus::InstanceRuntimeState> for InstanceRuntimeStateView {
+    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
         InstanceRuntimeStateView {
-            run_state: self.run_state,
-            time_run_state_updated: self.time_updated,
+            run_state: state.run_state,
+            time_run_state_updated: state.time_updated,
         }
     }
 }
@@ -904,6 +781,19 @@ pub struct InstanceView {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeStateView,
+}
+
+impl From<crate::api::internal::nexus::Instance> for InstanceView {
+    fn from(instance: crate::api::internal::nexus::Instance) -> Self {
+        InstanceView {
+            identity: instance.identity.clone(),
+            project_id: instance.project_id,
+            ncpus: instance.ncpus,
+            memory: instance.memory,
+            hostname: instance.hostname.clone(),
+            runtime: instance.runtime.into(),
+        }
+    }
 }
 
 /**
@@ -1272,20 +1162,6 @@ impl From<steno::SagaStateView> for SagaStateView {
 pub struct SledAgentStartupInfo {
     /** the address of the sled agent's API endpoint */
     pub sa_address: SocketAddr,
-}
-
-/**
- * Sent from Nexus to a sled agent to establish the runtime state of an Instance
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /**
-     * Last runtime state of the Instance known to Nexus (used if the agent
-     * has never seen this Instance before).
-     */
-    pub initial_runtime: InstanceRuntimeState,
-    /** requested runtime state of the Instance */
-    pub target: InstanceRuntimeStateRequested,
 }
 
 /*

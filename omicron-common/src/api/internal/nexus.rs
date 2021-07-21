@@ -5,6 +5,8 @@ use crate::api::external::{
     DiskState,
     Generation,
     IdentityMetadata,
+    InstanceCpuCount,
+    InstanceState,
 };
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -46,3 +48,41 @@ pub struct DiskRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
+/// An Instance (VM).
+#[derive(Clone, Debug)]
+pub struct Instance {
+    /// common identifying metadata
+    pub identity: IdentityMetadata,
+
+    /// id for the project containing this Instance
+    pub project_id: Uuid,
+
+    /// number of CPUs allocated for this Instance
+    pub ncpus: InstanceCpuCount,
+    /// memory allocated for this Instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the Instance.
+    // TODO-cleanup different type?
+    pub hostname: String,
+
+    /// state owned by the data plane
+    pub runtime: InstanceRuntimeState,
+
+    // TODO-completeness: add disks, network, tags, metrics
+}
+
+/// Runtime state of the Instance, including the actual running state and minimal
+/// metadata
+///
+/// This state is owned by the sled agent running that Instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceRuntimeState {
+    /// runtime state of the Instance
+    pub run_state: InstanceState,
+    /// which sled is running this Instance
+    pub sled_uuid: Uuid,
+    /// generation number for this state
+    pub gen: Generation,
+    /// timestamp for this information
+    pub time_updated: DateTime<Utc>,
+}

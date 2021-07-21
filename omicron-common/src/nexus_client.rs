@@ -8,7 +8,7 @@
 
 use crate::api::external::Error;
 use crate::api::internal::nexus::DiskRuntimeState;
-use crate::api::external::InstanceRuntimeState;
+use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::external::SledAgentStartupInfo;
 use crate::http_client::HttpClient;
 use http::Method;
