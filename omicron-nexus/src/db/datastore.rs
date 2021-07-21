@@ -79,7 +79,7 @@ impl DataStore {
         &self,
         new_id: &Uuid,
         new_project: &api::external::ProjectCreateParams,
-    ) -> CreateResult<api::external::Project> {
+    ) -> CreateResult<api::internal::nexus::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -99,7 +99,7 @@ impl DataStore {
     pub async fn project_fetch(
         &self,
         project_name: &Name,
-    ) -> LookupResult<api::external::Project> {
+    ) -> LookupResult<api::internal::nexus::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueName, Project>(
             &client,
@@ -154,7 +154,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<api::external::Project> {
+    ) -> ListResult<api::internal::nexus::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
@@ -168,7 +168,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::Project> {
+    ) -> ListResult<api::internal::nexus::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueName,
@@ -183,7 +183,7 @@ impl DataStore {
         &self,
         project_name: &Name,
         update_params: &api::external::ProjectUpdateParams,
-    ) -> UpdateResult<api::external::Project> {
+    ) -> UpdateResult<api::internal::nexus::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -212,7 +212,7 @@ impl DataStore {
             Error::not_found_by_name(ResourceType::Project, project_name)
         })
         .await?;
-        Ok(api::external::Project::try_from(&row)?)
+        Ok(api::internal::nexus::Project::try_from(&row)?)
     }
 
     /*

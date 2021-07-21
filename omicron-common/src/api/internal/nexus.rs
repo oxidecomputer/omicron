@@ -11,6 +11,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// A collection of associated resources.
+pub struct Project {
+    /// common identifying metadata.
+    pub identity: IdentityMetadata,
+}
+
 /// A Disk (network block device).
 #[derive(Clone, Debug)]
 pub struct Disk {

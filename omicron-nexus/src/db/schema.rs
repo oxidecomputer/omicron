@@ -20,7 +20,7 @@ use crate::db;
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
-    type ModelType = api::external::Project;
+    type ModelType = api::internal::nexus::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

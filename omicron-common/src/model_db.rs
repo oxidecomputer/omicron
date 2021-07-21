@@ -69,7 +69,7 @@ use crate::api::external::Name;
 use crate::api::external::OximeterAssignment;
 use crate::api::external::OximeterInfo;
 use crate::api::external::ProducerEndpoint;
-use crate::api::external::Project;
+use crate::api::internal::nexus::Project;
 use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;

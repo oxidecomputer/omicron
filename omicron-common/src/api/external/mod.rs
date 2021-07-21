@@ -510,6 +510,19 @@ pub async fn to_view_list<T: Object>(
         .await
 }
 
+pub async fn to_list<T, U>(
+    object_stream: ObjectStream<T>
+) -> Vec<U>
+where
+    U: From<T>,
+{
+    object_stream
+        .filter(|maybe_object| ready(maybe_object.is_ok()))
+        .map(|maybe_object| maybe_object.unwrap().into())
+        .collect::<Vec<U>>()
+        .await
+}
+
 /*
  * IDENTITY METADATA
  */
@@ -561,21 +574,6 @@ pub struct IdentityMetadataUpdateParams {
  */
 
 /**
- * A Project in the external API
- */
-pub struct Project {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-}
-
-impl Object for Project {
-    type View = ProjectView;
-    fn to_view(&self) -> ProjectView {
-        ProjectView { identity: self.identity.clone() }
-    }
-}
-
-/**
  * Client view of an [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -587,6 +585,14 @@ pub struct ProjectView {
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+}
+
+impl From<crate::api::internal::nexus::Project> for ProjectView {
+    fn from(project: crate::api::internal::nexus::Project) -> Self {
+        ProjectView {
+            identity: project.identity.clone()
+        }
+    }
 }
 
 /**

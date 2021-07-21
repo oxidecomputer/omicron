@@ -16,7 +16,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use futures::stream::StreamExt;
+use omicron_common::api;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -30,6 +30,7 @@ use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_view_list;
+use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
@@ -167,7 +168,7 @@ async fn projects_get(
         }
     };
 
-    let view_list = to_view_list(project_stream).await;
+    let view_list = to_list::<api::internal::nexus::Project, ProjectView>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -185,7 +186,7 @@ async fn projects_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let project = nexus.project_create(&new_project.into_inner()).await?;
-    Ok(HttpResponseCreated(project.to_view()))
+    Ok(HttpResponseCreated(project.into()))
 }
 
 /**
@@ -213,7 +214,7 @@ async fn projects_get_project(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let project = nexus.project_fetch(&project_name).await?;
-    Ok(HttpResponseOk(project.to_view()))
+    Ok(HttpResponseOk(project.into()))
 }
 
 /**
@@ -260,7 +261,7 @@ async fn projects_put_project(
     let newproject = nexus
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
-    Ok(HttpResponseOk(newproject.to_view()))
+    Ok(HttpResponseOk(newproject.into()))
 }
 
 /*
@@ -291,11 +292,7 @@ async fn project_disks_get(
         )
         .await?;
 
-    let disk_list = disk_stream
-        .filter(|maybe_disk| futures::future::ready(maybe_disk.is_ok()))
-        .map(|maybe_disk| maybe_disk.unwrap().into())
-        .collect::<Vec<DiskView>>()
-        .await;
+    let disk_list = to_list::<api::internal::nexus::Disk, DiskView>(disk_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
