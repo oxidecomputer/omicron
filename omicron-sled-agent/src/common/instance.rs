@@ -259,8 +259,8 @@ mod test {
     use super::{Action, InstanceStates};
     use chrono::Utc;
     use omicron_common::api::{
-        Generation, InstanceRuntimeState, InstanceState as State,
-        InstanceStateRequested as Requested,
+        ByteCount, Generation, InstanceCpuCount, InstanceRuntimeState,
+        InstanceState as State, InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
 
@@ -268,6 +268,9 @@ mod test {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_mebibytes_u32(512),
+            hostname: "myvm".to_string(),
             gen: Generation::new(),
             time_updated: Utc::now(),
         })

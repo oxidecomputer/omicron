@@ -336,11 +336,13 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
+    use omicron_common::api::ByteCount;
     use omicron_common::api::DiskRuntimeState;
     use omicron_common::api::DiskState;
     use omicron_common::api::DiskStateRequested;
     use omicron_common::api::Error;
     use omicron_common::api::Generation;
+    use omicron_common::api::InstanceCpuCount;
     use omicron_common::api::InstanceRuntimeState;
     use omicron_common::api::InstanceRuntimeStateRequested;
     use omicron_common::api::InstanceState;
@@ -354,6 +356,9 @@ mod test {
             InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_mebibytes_u32(512),
+                hostname: "myvm".to_string(),
                 gen: Generation::new(),
                 time_updated: Utc::now(),
             }

@@ -480,7 +480,8 @@ mod test {
     };
     use futures::future::FutureExt;
     use omicron_common::api::{
-        Generation, InstanceRuntimeState, InstanceState, InstanceStateRequested,
+        ByteCount, Generation, InstanceCpuCount, InstanceRuntimeState,
+        InstanceState, InstanceStateRequested,
     };
     use propolis_client::api;
     use tokio::sync::watch;
@@ -809,6 +810,9 @@ mod test {
         InstanceRuntimeState {
             run_state: InstanceState::Creating,
             sled_uuid: Uuid::new_v4(),
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_mebibytes_u32(512),
+            hostname: "myvm".to_string(),
             gen: Generation::new(),
             time_updated: Utc::now(),
         }
