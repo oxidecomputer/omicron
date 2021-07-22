@@ -477,12 +477,9 @@ mod test {
         RequestContext, TypedBody,
     };
     use futures::future::FutureExt;
-    use omicron_common::api::external::{
-        Generation, InstanceState,
-    };
+    use omicron_common::api::external::{Generation, InstanceState};
     use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState,
-        sled_agent::InstanceStateRequested,
+        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
     use propolis_client::api;
     use tokio::sync::watch;

@@ -1,11 +1,7 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount,
-    DiskState,
-    Generation,
-    IdentityMetadata,
-    InstanceCpuCount,
+    ByteCount, DiskState, Generation, IdentityMetadata, InstanceCpuCount,
     InstanceState,
 };
 use chrono::{DateTime, Utc};
@@ -77,7 +73,6 @@ pub struct Instance {
 
     /// state owned by the data plane
     pub runtime: InstanceRuntimeState,
-
     // TODO-completeness: add disks, network, tags, metrics
 }
 
@@ -105,7 +100,6 @@ pub struct SledAgentStartupInfo {
 }
 
 // Oximeter producer/collector objects.
-
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.

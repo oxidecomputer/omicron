@@ -27,7 +27,7 @@ pub enum DiskStateRequested {
 }
 
 impl DiskStateRequested {
-     /// Returns whether the requested state is attached to an Instance or not.
+    /// Returns whether the requested state is attached to an Instance or not.
     pub fn is_attached(&self) -> bool {
         match self {
             DiskStateRequested::Detached => false,
@@ -48,7 +48,6 @@ pub struct InstanceEnsureBody {
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
 }
-
 
 /// Requestable running state of an Instance.
 ///
@@ -110,4 +109,3 @@ impl InstanceStateRequested {
 pub struct InstanceRuntimeStateRequested {
     pub run_state: InstanceStateRequested,
 }
-

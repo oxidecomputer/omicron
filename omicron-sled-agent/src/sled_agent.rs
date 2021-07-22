@@ -2,8 +2,7 @@
 
 use omicron_common::api::external::Error;
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState,
-    internal::nexus::InstanceRuntimeState,
+    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };

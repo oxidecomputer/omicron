@@ -29,11 +29,11 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus::OximeterAssignment;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
@@ -274,7 +274,8 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state == api::external::InstanceState::Creating,
+            instance.runtime.run_state
+                == api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
         );
@@ -431,7 +432,11 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResult<api::external::DiskAttachment> {
         let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<LookupByAttachedInstance, Disk, api::external::DiskAttachment>(
+        sql_fetch_page_by::<
+            LookupByAttachedInstance,
+            Disk,
+            api::external::DiskAttachment,
+        >(
             &client,
             (instance_id,),
             pagparams,
@@ -528,7 +533,10 @@ impl DataStore {
         Ok(update.updated)
     }
 
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<api::internal::nexus::Disk> {
+    pub async fn disk_fetch(
+        &self,
+        disk_id: &Uuid,
+    ) -> LookupResult<api::internal::nexus::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -556,7 +564,8 @@ impl DataStore {
         api::external::DiskState::Destroyed.sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
-        let disk_state_detached = api::external::DiskState::Detached.to_string();
+        let disk_state_detached =
+            api::external::DiskState::Detached.to_string();
         let p1 = cond_sql.next_param(&disk_state_detached);
         let disk_state_faulted = api::external::DiskState::Faulted.to_string();
         let p2 = cond_sql.next_param(&disk_state_faulted);
@@ -582,9 +591,11 @@ impl DataStore {
         let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
         let attach_instance_id: Option<Uuid> =
             sql_row_value(&row, "found_attach_instance_id")?;
-        let found_disk_state =
-            api::external::DiskState::try_from((disk_state_str, attach_instance_id))
-                .map_err(|e| Error::internal_error(&e))?;
+        let found_disk_state = api::external::DiskState::try_from((
+            disk_state_str,
+            attach_instance_id,
+        ))
+        .map_err(|e| Error::internal_error(&e))?;
 
         if update.updated {
             Ok(())

@@ -261,9 +261,7 @@ impl InstanceStates {
 mod test {
     use super::{Action, InstanceStates};
     use chrono::Utc;
-    use omicron_common::api::external::{
-        Generation, InstanceState as State,
-    };
+    use omicron_common::api::external::{Generation, InstanceState as State};
     use omicron_common::api::internal::{
         nexus::InstanceRuntimeState,
         sled_agent::InstanceStateRequested as Requested,

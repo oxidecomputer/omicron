@@ -198,12 +198,9 @@ mod test {
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
-    use omicron_common::api::external::{
-        Generation, InstanceState,
-    };
+    use omicron_common::api::external::{Generation, InstanceState};
     use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState,
-        sled_agent::InstanceStateRequested,
+        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";

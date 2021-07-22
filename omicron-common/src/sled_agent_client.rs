@@ -6,11 +6,11 @@
  */
 
 use crate::api::external::Error;
-use crate::api::internal::sled_agent::DiskEnsureBody;
 use crate::api::internal::nexus::DiskRuntimeState;
+use crate::api::internal::nexus::InstanceRuntimeState;
+use crate::api::internal::sled_agent::DiskEnsureBody;
 use crate::api::internal::sled_agent::DiskStateRequested;
 use crate::api::internal::sled_agent::InstanceEnsureBody;
-use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use crate::http_client::HttpClient;
 use async_trait::async_trait;

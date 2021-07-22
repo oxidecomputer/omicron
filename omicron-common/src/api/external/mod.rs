@@ -9,7 +9,6 @@ mod error;
 pub mod http_pagination;
 pub use error::*;
 
-
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -456,9 +455,7 @@ impl Display for ResourceType {
     }
 }
 
-pub async fn to_list<T, U>(
-    object_stream: ObjectStream<T>
-) -> Vec<U>
+pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
     U: From<T>,
 {
@@ -535,9 +532,7 @@ pub struct ProjectView {
 
 impl From<crate::api::internal::nexus::Project> for ProjectView {
     fn from(project: crate::api::internal::nexus::Project) -> Self {
-        ProjectView {
-            identity: project.identity.clone()
-        }
+        ProjectView { identity: project.identity.clone() }
     }
 }
 
@@ -696,7 +691,9 @@ pub struct InstanceRuntimeStateView {
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl From<crate::api::internal::nexus::InstanceRuntimeState> for InstanceRuntimeStateView {
+impl From<crate::api::internal::nexus::InstanceRuntimeState>
+    for InstanceRuntimeStateView
+{
     fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
         InstanceRuntimeStateView {
             run_state: state.run_state,
@@ -951,9 +948,7 @@ pub struct RackView {
 
 impl From<crate::api::internal::nexus::Rack> for RackView {
     fn from(rack: crate::api::internal::nexus::Rack) -> Self {
-        RackView {
-            identity: rack.identity.clone()
-        }
+        RackView { identity: rack.identity.clone() }
     }
 }
 
