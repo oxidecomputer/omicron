@@ -1,5 +1,5 @@
 use crate::bootstrap_agent_client::Client as BootstrapClient;
-use omicron_common::api::external::BootstrapAgentShareResponse;
+use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::api::external::Error;
 use omicron_common::packaging::sha256_digest;
 
@@ -49,14 +49,14 @@ impl BootstrapAgent {
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
-    ) -> Result<BootstrapAgentShareResponse, Error> {
+    ) -> Result<ShareResponse, Error> {
         // TODO-correctness: Validate identity, return whatever
         // information is necessary to establish trust quorum.
         //
         // This current implementation is a placeholder.
         info!(&self.log, "request_share, received identity: {:x?}", identity);
 
-        Ok(BootstrapAgentShareResponse { shared_secret: vec![] })
+        Ok(ShareResponse { shared_secret: vec![] })
     }
 
     /// Performs device initialization:

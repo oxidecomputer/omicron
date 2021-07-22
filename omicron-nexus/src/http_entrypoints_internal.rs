@@ -14,7 +14,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::external::OximeterInfo;
 use omicron_common::api::external::ProducerEndpoint;
-use omicron_common::api::external::SledAgentStartupInfo;
+use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use omicron_common::SledAgentClient;
 use schemars::JsonSchema;
 use serde::Deserialize;

@@ -8,8 +8,8 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::external::{
-    BootstrapAgentShareRequest, BootstrapAgentShareResponse,
+use omicron_common::api::internal::bootstrap_agent::{
+    ShareRequest, ShareResponse,
 };
 use std::sync::Arc;
 
@@ -39,8 +39,8 @@ pub fn ba_api() -> ApiDescription<Arc<BootstrapAgent>> {
 }]
 async fn api_request_share(
     rqctx: Arc<RequestContext<Arc<BootstrapAgent>>>,
-    request: TypedBody<BootstrapAgentShareRequest>,
-) -> Result<HttpResponseOk<BootstrapAgentShareResponse>, HttpError> {
+    request: TypedBody<ShareRequest>,
+) -> Result<HttpResponseOk<ShareResponse>, HttpError> {
     let bootstrap_agent = rqctx.context();
 
     let request = request.into_inner();

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "boostrap_agent",
+    name = "bootstrap_agent",
     about = "See README.adoc for more information"
 )]
 enum Args {

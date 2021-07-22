@@ -11,7 +11,17 @@ use crate::api::external::{
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use uuid::Uuid;
+
+pub struct Rack {
+    pub identity: IdentityMetadata,
+}
+
+pub struct Sled {
+    pub identity: IdentityMetadata,
+    pub service_address: SocketAddr,
+}
 
 /// A collection of associated resources.
 pub struct Project {
@@ -34,7 +44,6 @@ pub struct Disk {
     /// runtime state of the Disk
     pub runtime: DiskRuntimeState,
 }
-
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata
@@ -86,3 +95,11 @@ pub struct InstanceRuntimeState {
     /// timestamp for this information
     pub time_updated: DateTime<Utc>,
 }
+
+/// Sent by a sled agent on startup to Nexus to request further instruction
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentStartupInfo {
+    /// the address of the sled agent's API endpoint
+    pub sa_address: SocketAddr,
+}
+

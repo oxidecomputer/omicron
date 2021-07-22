@@ -29,7 +29,6 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::to_view_list;
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DiskAttachment;
@@ -38,7 +37,6 @@ use omicron_common::api::external::DiskView;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceView;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Object;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
@@ -567,7 +565,7 @@ async fn instance_disks_get(
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
-    let view_list = to_view_list(disk_list).await;
+    let view_list = to_list(disk_list).await;
     Ok(HttpResponseOk(view_list))
 }
 
@@ -601,7 +599,7 @@ async fn instance_disks_get_disk(
     let attachment = nexus
         .instance_get_disk(&project_name, &instance_name, &disk_name)
         .await?;
-    Ok(HttpResponseOk(attachment.to_view()))
+    Ok(HttpResponseOk(attachment))
 }
 
 /**
@@ -624,7 +622,7 @@ async fn instance_disks_put_disk(
     let attachment = nexus
         .instance_attach_disk(&project_name, &instance_name, &disk_name)
         .await?;
-    Ok(HttpResponseCreated(attachment.to_view()))
+    Ok(HttpResponseCreated(attachment))
 }
 
 /**
@@ -670,7 +668,7 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_view_list(rack_stream).await;
+    let view_list = to_list::<api::internal::nexus::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -698,7 +696,7 @@ async fn hardware_racks_get_rack(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let rack_info = nexus.rack_lookup(&path.rack_id).await?;
-    Ok(HttpResponseOk(rack_info.to_view()))
+    Ok(HttpResponseOk(rack_info.into()))
 }
 
 /*
@@ -721,7 +719,7 @@ async fn hardware_sleds_get(
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_view_list(sled_stream).await;
+    let view_list = to_list::<api::internal::nexus::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -749,7 +747,7 @@ async fn hardware_sleds_get_sled(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let sled_info = nexus.sled_lookup(&path.sled_id).await?;
-    Ok(HttpResponseOk(sled_info.to_view()))
+    Ok(HttpResponseOk(sled_info.into()))
 }
 
 /*
@@ -772,7 +770,7 @@ async fn sagas_get(
     let query = query_params.into_inner();
     let pagparams = data_page_params_for(&rqctx, &query)?;
     let saga_stream = nexus.sagas_list(&pagparams).await?;
-    let view_list = to_view_list(saga_stream).await;
+    let view_list = to_list(saga_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 

@@ -457,59 +457,6 @@ impl Display for ResourceType {
     }
 }
 
-/**
- * Object represents a resource in the API and is implemented by concrete
- * types representing specific API resources.
- *
- * Consider a Project, which is about as simple a resource as we have.  The
- * `Project` struct represents a project as understood by the API.  It
- * contains all the fields necessary to implement a Project.  It has several
- * related types:
- *
- * * `ProjectView` is what gets emitted by the API when a user asks for a
- *   Project
- * * `ProjectCreateParams` is what must be provided to the API when a user
- *   wants to create a new project
- * * `ProjectUpdateParams` is what must be provided to the API when a user
- *   wants to update a project.
- *
- * We also have Instances, Disks, Racks, Sleds, and many related types, and we
- * expect to add many more types like images, networking abstractions,
- * organizations, teams, users, system components, and the like.  See RFD 4 for
- * details.  Some resources may not have analogs for all these types because
- * they're immutable (e.g., the `Rack` resource doesn't define a
- * "CreateParams" type).
- *
- * The only thing guaranteed by the `Object` trait is that the type can be
- * converted to a View, which is something that can be serialized.
- */
-/*
- * TODO-coverage: each type could have unit tests for various invalid input
- * types?
- */
-pub trait Object {
-    type View: Serialize + Clone + Debug;
-    fn to_view(&self) -> Self::View;
-}
-
-/**
- * Given an `ObjectStream<Object>` (for some specific `Object` type),
- * return a vector of the objects' views.  Any failures are ignored.
- */
-/*
- * TODO-hardening: Consider how to better deal with these failures.  We should
- * probably at least log something.
- */
-pub async fn to_view_list<T: Object>(
-    object_stream: ObjectStream<T>,
-) -> Vec<T::View> {
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().to_view())
-        .collect::<Vec<T::View>>()
-        .await
-}
-
 pub async fn to_list<T, U>(
     object_stream: ObjectStream<T>
 ) -> Vec<U>
@@ -990,30 +937,9 @@ pub struct DiskAttachment {
     pub disk_state: DiskState,
 }
 
-impl Object for DiskAttachment {
-    type View = Self;
-    fn to_view(&self) -> Self::View {
-        self.clone()
-    }
-}
-
 /*
  * RACKS
  */
-
-/**
- * A Rack in the external API
- */
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-impl Object for Rack {
-    type View = RackView;
-    fn to_view(&self) -> RackView {
-        RackView { identity: self.identity.clone() }
-    }
-}
 
 /**
  * Client view of an [`Rack`]
@@ -1024,27 +950,17 @@ pub struct RackView {
     pub identity: IdentityMetadata,
 }
 
-/*
- * SLEDS
- */
-
-/**
- * A Sled in the external API
- */
-pub struct Sled {
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
-}
-
-impl Object for Sled {
-    type View = SledView;
-    fn to_view(&self) -> SledView {
-        SledView {
-            identity: self.identity.clone(),
-            service_address: self.service_address,
+impl From<crate::api::internal::nexus::Rack> for RackView {
+    fn from(rack: crate::api::internal::nexus::Rack) -> Self {
+        RackView {
+            identity: rack.identity.clone()
         }
     }
 }
+
+/*
+ * SLEDS
+ */
 
 /**
  * Client view of an [`Sled`]
@@ -1055,6 +971,15 @@ pub struct SledView {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
+}
+
+impl From<crate::api::internal::nexus::Sled> for SledView {
+    fn from(sled: crate::api::internal::nexus::Sled) -> Self {
+        SledView {
+            identity: sled.identity.clone(),
+            service_address: sled.service_address,
+        }
+    }
 }
 
 /*
@@ -1088,13 +1013,6 @@ pub struct SagaView {
      */
     #[serde(skip)]
     pub identity: IdentityMetadata,
-}
-
-impl Object for SagaView {
-    type View = Self;
-    fn to_view(&self) -> Self::View {
-        self.clone()
-    }
 }
 
 impl From<steno::SagaView> for SagaView {
@@ -1149,41 +1067,6 @@ impl From<steno::SagaStateView> for SagaStateView {
             },
         }
     }
-}
-
-/*
- * Internal Control Plane API objects
- */
-
-/**
- * Sent by a sled agent on startup to Nexus to request further instruction
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentStartupInfo {
-    /** the address of the sled agent's API endpoint */
-    pub sa_address: SocketAddr,
-}
-
-/*
- * Bootstrap Agent objects
- */
-
-/**
- * Identity signed by local RoT and Oxide certificate chain.
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct BootstrapAgentShareRequest {
-    // TODO-completeness: format TBD; currently opaque.
-    pub identity: Vec<u8>,
-}
-
-/**
- * Sent between bootstrap agents to establish trust quorum.
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct BootstrapAgentShareResponse {
-    // TODO-completeness: format TBD; currently opaque.
-    pub shared_secret: Vec<u8>,
 }
 
 /*
