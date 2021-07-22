@@ -9,7 +9,7 @@ use omicron_common::api;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::{OximeterInfo, ProducerEndpoint};
+use omicron_common::api::internal::nexus::{OximeterInfo, ProducerEndpoint};
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -146,7 +146,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = omicron_common::api::external::OximeterAssignment;
+    type ModelType = omicron_common::api::internal::nexus::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];

@@ -9,7 +9,7 @@ use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
-use omicron_common::api::external::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

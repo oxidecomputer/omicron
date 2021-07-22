@@ -8,7 +8,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
-use omicron_common::api::external::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::dev;
 use slog::o;
 use slog::Logger;

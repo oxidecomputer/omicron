@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
-use omicron_common::api::external::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::producer_server::{
     ProducerServer, ProducerServerConfig, RegistrationInfo,
 };

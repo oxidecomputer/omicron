@@ -9,7 +9,7 @@ use slog::Logger;
 use uuid::Uuid;
 
 use crate::api::external::Error;
-use crate::api::external::ProducerEndpoint;
+use crate::api::internal::nexus::ProducerEndpoint;
 use crate::http_client::HttpClient;
 
 /// Client of an oximeter server

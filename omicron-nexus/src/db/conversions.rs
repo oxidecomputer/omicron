@@ -13,9 +13,9 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::OximeterAssignment;
-use omicron_common::api::external::OximeterInfo;
-use omicron_common::api::external::ProducerEndpoint;
+use omicron_common::api::internal::nexus::OximeterAssignment;
+use omicron_common::api::internal::nexus::OximeterInfo;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::external::ProjectCreateParams;
 
 use super::sql::SqlSerialize;

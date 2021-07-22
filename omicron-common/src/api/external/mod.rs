@@ -30,7 +30,6 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
-use std::time::Duration;
 use uuid::Uuid;
 
 /*
@@ -1067,48 +1066,6 @@ impl From<steno::SagaStateView> for SagaStateView {
             },
         }
     }
-}
-
-/*
- * Oximeter producer/collector objects.
- */
-
-/**
- * Information announced by a metric server, used so that clients can contact it and collect
- * available metric data from it.
- */
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct ProducerEndpoint {
-    pub id: Uuid,
-    pub address: SocketAddr,
-    pub base_route: String,
-    pub interval: Duration,
-}
-
-impl ProducerEndpoint {
-    /**
-     * Return the route that can be used to request metric data.
-     */
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, &self.id)
-    }
-}
-
-/// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterInfo {
-    /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
-
-    /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
-}
-
-/// An assignment of an Oximeter instance to a metric producer for collection.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterAssignment {
-    pub oximeter_id: Uuid,
-    pub producer_id: Uuid,
 }
 
 #[cfg(test)]
