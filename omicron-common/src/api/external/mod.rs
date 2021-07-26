@@ -532,7 +532,7 @@ pub struct ProjectView {
 
 impl From<crate::api::internal::nexus::Project> for ProjectView {
     fn from(project: crate::api::internal::nexus::Project) -> Self {
-        ProjectView { identity: project.identity.clone() }
+        ProjectView { identity: project.identity }
     }
 }
 
@@ -798,7 +798,7 @@ impl From<crate::api::internal::nexus::Disk> for DiskView {
             project_id: disk.project_id,
             snapshot_id: disk.create_snapshot_id,
             size: disk.size,
-            state: disk.runtime.disk_state.clone(),
+            state: disk.runtime.disk_state,
             device_path,
         }
     }
@@ -948,7 +948,7 @@ pub struct RackView {
 
 impl From<crate::api::internal::nexus::Rack> for RackView {
     fn from(rack: crate::api::internal::nexus::Rack) -> Self {
-        RackView { identity: rack.identity.clone() }
+        RackView { identity: rack.identity }
     }
 }
 
