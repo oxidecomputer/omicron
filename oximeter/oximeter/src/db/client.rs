@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use slog::{debug, error, trace, Logger};
 
-use crate::db::model::{self, Schematized};
+use crate::db::model;
 use crate::{types::Sample, Error};
 
 /// A `Client` to the ClickHouse metrics database.
@@ -17,8 +17,7 @@ pub struct Client {
     log: Logger,
     url: String,
     client: reqwest::Client,
-    target_schema: Mutex<BTreeMap<String, model::TargetSchema>>,
-    metric_schema: Mutex<BTreeMap<String, model::MetricSchema>>,
+    schema: Mutex<BTreeMap<String, model::TimeseriesSchema>>,
 }
 
 impl Client {
@@ -31,8 +30,7 @@ impl Client {
             log,
             url,
             client,
-            target_schema: Mutex::new(BTreeMap::new()),
-            metric_schema: Mutex::new(BTreeMap::new()),
+            schema: Mutex::new(BTreeMap::new()),
         };
         out.init_db().await?;
         out.get_schema().await?;
@@ -60,8 +58,7 @@ impl Client {
     ) -> Result<(), Error> {
         trace!(self.log, "unrolling {} total samples", samples.len());
         let mut rows = BTreeMap::new();
-        let mut new_target_schema = Vec::new();
-        let mut new_metric_schema = Vec::new();
+        let mut new_schema = Vec::new();
         for sample in samples.iter() {
             match self.verify_sample_schema(sample) {
                 Err(_) => {
@@ -69,14 +66,10 @@ impl Client {
                     // call.
                     continue;
                 }
-                Ok((new_target, new_metric)) => {
-                    if let Some(target) = new_target {
-                        trace!(self.log, "new target schema: {}", target);
-                        new_target_schema.push(target);
-                    }
-                    if let Some(metric) = new_metric {
-                        trace!(self.log, "new metric schema: {}", metric);
-                        new_metric_schema.push(metric);
+                Ok(schema) => {
+                    if let Some(schema) = schema {
+                        trace!(self.log, "new timeseries schema: {}", schema);
+                        new_schema.push(schema);
                     }
                 }
             }
@@ -102,29 +95,16 @@ impl Client {
         // ClickHouse server. But once we start replicating data, the window within which the race
         // can occur is much larger, since it includes the time it takes ClickHouse to replicate
         // data between nodes.
-        if !new_target_schema.is_empty() {
+        if !new_schema.is_empty() {
             debug!(
                 self.log,
-                "inserting {} new target schema",
-                new_target_schema.len()
+                "inserting {} new timeseries schema",
+                new_schema.len()
             );
             let body = format!(
-                "INSERT INTO {db_name}.target_schema FORMAT JSONEachRow\n{row_data}\n",
+                "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
                 db_name = model::DATABASE_NAME,
-                row_data = new_target_schema.join("\n")
-            );
-            self.execute(body).await?;
-        }
-        if !new_metric_schema.is_empty() {
-            debug!(
-                self.log,
-                "inserting {} new metric schema",
-                new_metric_schema.len()
-            );
-            let body = format!(
-                "INSERT INTO {db_name}.metric_schema FORMAT JSONEachRow\n{row_data}\n",
-                db_name = model::DATABASE_NAME,
-                row_data = new_metric_schema.join("\n")
+                row_data = new_schema.join("\n")
             );
             self.execute(body).await?;
         }
@@ -153,34 +133,43 @@ impl Client {
         Ok(())
     }
 
-    // Verifies that the schema for the target and metric in the sample match the database.
+    // Verifies that the schema for a sample matches the schema in the database.
     //
-    // If either schema does not match, an Err is returned (the caller skips the sample in this
-    // case). If either schema does not _exist_ in the cached map of schema, its value as a row of
-    // JSON is returned, so that the caller may insert them into the database at an appropriate
-    // time.
+    // If the schema does not match, an Err is returned (the caller skips the sample in this case).
+    // If the schema does not _exist_ in the cached map of schema, its value as a row of JSON is
+    // returned, so that the caller may insert them into the database at an appropriate time.
     fn verify_sample_schema(
         &self,
         sample: &Sample,
-    ) -> Result<(Option<String>, Option<String>), Error> {
-        let (target_schema, metric_schema) = model::schema_for(sample);
-        let target_schema = ensure_schema_matches(
-            &mut self.target_schema.lock().unwrap(),
-            target_schema,
-            &self.log,
-        )?
-        .map(|schema| {
-            serde_json::to_string(&model::DbTargetSchema::from(schema)).unwrap()
-        });
-        let metric_schema = ensure_schema_matches(
-            &mut self.metric_schema.lock().unwrap(),
-            metric_schema,
-            &self.log,
-        )?
-        .map(|schema| {
-            serde_json::to_string(&model::DbMetricSchema::from(schema)).unwrap()
-        });
-        Ok((target_schema, metric_schema))
+    ) -> Result<Option<String>, Error> {
+        let schema = model::schema_for(sample);
+        let maybe_new_schema = match self
+            .schema
+            .lock()
+            .unwrap()
+            .entry(schema.timeseries_name.clone())
+        {
+            Entry::Vacant(entry) => Ok(Some(entry.insert(schema).clone())),
+            Entry::Occupied(entry) => {
+                let existing_schema = entry.get();
+                if existing_schema == &schema {
+                    Ok(None)
+                } else {
+                    let err =
+                        error_for_schema_mismatch(&schema, &existing_schema);
+                    error!(
+                        self.log,
+                        "timeseries schema mismatch, sample will be skipped: {}",
+                        err
+                    );
+                    Err(err)
+                }
+            }
+        }?;
+        Ok(maybe_new_schema.map(|schema| {
+            serde_json::to_string(&model::DbTimeseriesSchema::from(schema))
+                .unwrap()
+        }))
     }
 
     // Initialize ClickHouse with the database and metric table schema.
@@ -232,46 +221,24 @@ impl Client {
     }
 
     pub(crate) async fn get_schema(&self) -> Result<(), Error> {
-        debug!(self.log, "retrieving database schema");
-
-        // Target schema
+        debug!(self.log, "retrieving timeseries schema from database");
         let sql = format!(
-            "SELECT * FROM {}.target_schema FORMAT JSONEachRow;",
+            "SELECT * FROM {}.timeseries_schema FORMAT JSONEachRow;",
             model::DATABASE_NAME,
         );
         let body = self.execute_with_body(sql).await?;
         if body.is_empty() {
-            trace!(self.log, "no target schema in database");
+            trace!(self.log, "no timeseries schema in database");
         } else {
-            trace!(self.log, "extracting new target schema");
+            trace!(self.log, "extracting new timeseries schema");
             let new = body.lines().map(|line| {
-                let schema = model::TargetSchema::from(
-                    serde_json::from_str::<model::DbTargetSchema>(line)
+                let schema = model::TimeseriesSchema::from(
+                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
                         .unwrap(),
                 );
-                (schema.target_name.clone(), schema)
+                (schema.timeseries_name.clone(), schema)
             });
-            self.target_schema.lock().unwrap().extend(new);
-        }
-
-        // Metric schema
-        let sql = format!(
-            "SELECT * FROM {}.metric_schema FORMAT JSONEachRow;",
-            model::DATABASE_NAME,
-        );
-        let body = self.execute_with_body(sql).await?;
-        if body.is_empty() {
-            trace!(self.log, "no metric schema in database");
-        } else {
-            trace!(self.log, "extracting new metric schema");
-            let new = body.lines().map(|line| {
-                let schema = model::MetricSchema::from(
-                    serde_json::from_str::<model::DbMetricSchema>(line)
-                        .unwrap(),
-                );
-                (schema.metric_name.clone(), schema)
-            });
-            self.metric_schema.lock().unwrap().extend(new);
+            self.schema.lock().unwrap().extend(new);
         }
         Ok(())
     }
@@ -294,49 +261,26 @@ async fn handle_db_response(
     }
 }
 
-// Helper to verify a new and existing schema, or generate an error for a schema mismatch
-fn ensure_schema_matches<'a, S: Schematized<'a> + Clone>(
-    map: &mut BTreeMap<String, S>,
-    new_schema: S,
-    log: &Logger,
-) -> Result<Option<S>, Error> {
-    match map.entry(new_schema.name().to_string()) {
-        Entry::Vacant(entry) => Ok(Some(entry.insert(new_schema).clone())),
-        Entry::Occupied(entry) => {
-            let existing_schema = entry.get();
-            if existing_schema == &new_schema {
-                Ok(None)
-            } else {
-                let err =
-                    error_for_schema_mismatch(&new_schema, &existing_schema);
-                error!(
-                    log,
-                    "{} schema mismatch, sample will be skipped: {}",
-                    existing_schema.column_name(),
-                    err
-                );
-                Err(err)
-            }
-        }
-    }
-}
-
 // Generate an error describing a schema mismatch
-fn error_for_schema_mismatch<'a, S: Schematized<'a>>(
-    schema: &S,
-    existing_schema: &S,
+fn error_for_schema_mismatch(
+    schema: &model::TimeseriesSchema,
+    existing_schema: &model::TimeseriesSchema,
 ) -> Error {
     let expected = existing_schema
-        .fields()
+        .fields
         .iter()
         .map(|field| (field.name.clone(), field.ty))
         .collect();
     let actual = schema
-        .fields()
+        .fields
         .iter()
         .map(|field| (field.name.clone(), field.ty))
         .collect();
-    Error::SchemaMismatch { name: schema.name().to_string(), expected, actual }
+    Error::SchemaMismatch {
+        name: schema.timeseries_name.clone(),
+        expected,
+        actual,
+    }
 }
 
 #[cfg(test)]
@@ -455,93 +399,62 @@ mod tests {
         let client = Client::new(address, log).await.unwrap();
         let sample = test_util::make_sample();
 
-        // Verify that this sample is considered new, i.e., we return rows to update the target and
-        // metric schema tables.
+        // Verify that this sample is considered new, i.e., we return rows to update the timeseries
+        // schema table.
         let result = client.verify_sample_schema(&sample).unwrap();
         assert!(
-            matches!(result, (Some(_), Some(_))),
+            matches!(result, Some(_)),
             "When verifying a new sample, the rows to be inserted should be returned"
         );
 
         // Clear the internal caches of seen schema
-        client.target_schema.lock().unwrap().clear();
-        client.metric_schema.lock().unwrap().clear();
+        client.schema.lock().unwrap().clear();
 
         // Insert the new sample
         client.insert_samples(&[sample.clone()]).await.unwrap();
 
-        // The internal maps should now contain both the target and metric schema
-        let (actual_target_schema, actual_metric_schema) =
-            model::schema_for(&sample);
-        let expected_target_schema = client
-            .target_schema
+        // The internal map should now contain both the new timeseries schema
+        let actual_schema = model::schema_for(&sample);
+        let expected_schema = client
+            .schema
             .lock()
             .unwrap()
-            .get(&sample.target.name)
+            .get(&sample.timeseries_name())
             .expect(
                 "After inserting a new sample, its schema should be included",
             )
             .clone();
         assert_eq!(
-            expected_target_schema,
-            actual_target_schema,
-            "The target schema for a new sample was not correctly inserted into internal cache",
-        );
-        let expected_metric_schema = client
-            .metric_schema
-            .lock()
-            .unwrap()
-            .get(&sample.metric.name)
-            .expect(
-                "After inserting a new sample, its schema should be included",
-            )
-            .clone();
-        assert_eq!(
-            expected_metric_schema,
-            actual_metric_schema,
-            "The metric schema for a new sample was not correctly inserted into internal cache",
+            actual_schema,
+            expected_schema,
+            "The timeseries schema for a new sample was not correctly inserted into internal cache",
         );
 
-        // This should no longer return a new row to be inserted for the schema, as they've been
-        // included above
+        // This should no longer return a new row to be inserted for the schema of this sample, as
+        // any schema have been included above.
         let result = client.verify_sample_schema(&sample).unwrap();
         assert!(
-            matches!(result, (None, None)),
-            "After inserting new schema, they should no longer be considered new"
+            matches!(result, None),
+            "After inserting new schema, it should no longer be considered new"
         );
 
-        // Verify that they're actually in the database!
+        // Verify that it's actually in the database!
         let sql = String::from(
-            "SELECT * FROM oximeter.target_schema FORMAT JSONEachRow;",
+            "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
         );
         let result = client.execute_with_body(sql).await.unwrap();
         let schema = result
             .lines()
             .map(|line| {
-                model::TargetSchema::from(
-                    serde_json::from_str::<model::DbTargetSchema>(&line)
+                model::TimeseriesSchema::from(
+                    serde_json::from_str::<model::DbTimeseriesSchema>(&line)
                         .unwrap(),
                 )
             })
             .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
-        assert_eq!(expected_target_schema, schema[0]);
+        assert_eq!(expected_schema, schema[0]);
 
-        let sql = String::from(
-            "SELECT * FROM oximeter.metric_schema FORMAT JSONEachRow;",
-        );
-        let result = client.execute_with_body(sql).await.unwrap();
-        let schema = result
-            .lines()
-            .map(|line| {
-                model::MetricSchema::from(
-                    serde_json::from_str::<model::DbMetricSchema>(&line)
-                        .unwrap(),
-                )
-            })
-            .collect::<Vec<model::MetricSchema>>();
-        assert_eq!(schema.len(), 1);
-        assert_eq!(expected_metric_schema, schema[0]);
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 }

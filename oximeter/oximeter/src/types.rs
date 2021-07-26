@@ -4,6 +4,7 @@
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
 
@@ -54,6 +55,18 @@ impl FieldValue {
             FieldValue::IpAddr(_) => FieldType::IpAddr,
             FieldValue::Uuid(_) => FieldType::Uuid,
             FieldValue::Bool(_) => FieldType::Bool,
+        }
+    }
+}
+
+impl fmt::Display for FieldValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FieldValue::String(ref inner) => write!(f, "{}", inner),
+            FieldValue::I64(ref inner) => write!(f, "{}", inner),
+            FieldValue::IpAddr(ref inner) => write!(f, "{}", inner),
+            FieldValue::Uuid(ref inner) => write!(f, "{}", inner),
+            FieldValue::Bool(ref inner) => write!(f, "{}", inner),
         }
     }
 }
@@ -240,7 +253,7 @@ pub enum Error {
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for target/metric {name}, expected fields {expected:?} found fields {actual:?}")]
+    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
     SchemaMismatch {
         name: String,
         expected: BTreeMap<String, FieldType>,
@@ -312,6 +325,31 @@ where
     type Output = Self;
     fn add(self, other: Cumulative<T>) -> Self {
         Self(self.0 + other.0)
+    }
+}
+
+// A helper type for representing the name and fields derived from targets and metrics
+#[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub(crate) struct FieldSet {
+    pub name: String,
+    pub fields: Vec<Field>,
+}
+
+impl FieldSet {
+    pub fn key(&self) -> String {
+        self.fields
+            .iter()
+            .map(|field| field.value.to_string())
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    fn from_target(target: &impl traits::Target) -> Self {
+        Self { name: target.name().to_string(), fields: target.fields() }
+    }
+
+    fn from_metric(metric: &impl traits::Metric) -> Self {
+        Self { name: metric.name().to_string(), fields: metric.fields() }
     }
 }
 
@@ -388,17 +426,17 @@ where
 /// A concrete type representing a single, timestamped measurement from a timeseries.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Sample {
-    /// The key for this sample, which is the contatenation of the target and metric keys.
-    pub key: String,
-
     /// The timestamp for this sample
     pub timestamp: DateTime<Utc>,
 
-    /// The `Target` this sample is derived from.
-    pub target: Target,
+    /// The measured value of the metric at this sample
+    pub measurement: Measurement,
 
-    /// The `Metric` this sample is derived from.
-    pub metric: Metric,
+    // Target name and fields
+    target: FieldSet,
+
+    // Metric name and fields
+    metric: FieldSet,
 }
 
 impl PartialEq for Sample {
@@ -421,7 +459,9 @@ impl Ord for Sample {
     /// Samples are ordered by their target and metric keys, which include the field values of
     /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
     fn cmp(&self, other: &Sample) -> Ordering {
-        self.key.cmp(&other.key).then(self.timestamp.cmp(&other.timestamp))
+        self.timeseries_key()
+            .cmp(&other.timeseries_key())
+            .then(self.timestamp.cmp(&other.timestamp))
     }
 }
 
@@ -448,11 +488,51 @@ impl Sample {
         Meas: traits::DataPoint + Into<Measurement>,
     {
         Self {
-            key: format!("{}:{}", target.key(), metric.key()),
             timestamp: timestamp.unwrap_or_else(Utc::now),
-            target: target.into(),
-            metric: metric.into(),
+            target: FieldSet::from_target(target),
+            metric: FieldSet::from_metric(metric),
+            measurement: metric.measure(),
         }
+    }
+
+    /// Return the timeseries key for this sample, the concatenation of the target/metric field
+    /// values.
+    pub fn timeseries_key(&self) -> String {
+        format!("{}:{}", self.target.key(), self.metric.key())
+    }
+
+    /// Return the name of the timeseries for this sample, the concatenation of the target/metric
+    /// names.
+    pub fn timeseries_name(&self) -> String {
+        format!("{}:{}", self.target.name, self.metric.name)
+    }
+
+    /// Return the fields for this sample.
+    ///
+    /// This returns the target fields and metric fields, chained, although there is no distinction
+    /// between them in this method.
+    pub fn fields(&self) -> Vec<Field> {
+        [self.target.fields.clone(), self.metric.fields.clone()].concat()
+    }
+
+    /// Return the name of this sample's target.
+    pub fn target_name(&self) -> &str {
+        &self.target.name
+    }
+
+    /// Return the fields of this sample's target.
+    pub fn target_fields(&self) -> &Vec<Field> {
+        &self.target.fields
+    }
+
+    /// Return the name of this sample's metric.
+    pub fn metric_name(&self) -> &str {
+        &self.metric.name
+    }
+
+    /// Return the fields of this sample's metric.
+    pub fn metric_fields(&self) -> &Vec<Field> {
+        &self.metric.fields
     }
 }
 
@@ -554,8 +634,12 @@ mod tests {
         let m = Met { good: false, id: 2, value: 1 };
         let timestamp = Utc::now();
         let sample = types::Sample::new(&t, &m, Some(timestamp));
-        assert_eq!(sample.key, format!("{}:{}", t.key(), m.key()));
+        assert_eq!(
+            sample.timeseries_name(),
+            format!("{}:{}", t.name(), m.name())
+        );
+        assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.metric.measurement, Measurement::I64(m.value));
+        assert_eq!(sample.measurement, Measurement::I64(m.value));
     }
 }

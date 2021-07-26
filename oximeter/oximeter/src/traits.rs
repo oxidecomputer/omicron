@@ -77,8 +77,8 @@ pub trait Target {
 
     /// Return the key for this target.
     ///
-    /// Targets are uniquely identified by their name and the sequence of _values_ of their fields.
-    /// These are converted to strings and joined by the `":"` character.
+    /// Targets are uniquely identified by the sequence of _values_ of their fields. These are
+    /// converted to strings and joined by the `":"` character.
     fn key(&self) -> String;
 }
 
@@ -154,9 +154,8 @@ pub trait Metric {
 
     /// Return the key for this metric.
     ///
-    /// Targets are uniquely identified by their name and the sequence of _values_ of their fields.
-    /// These are converted to strings and joined by the `":"` character. Note that the metric name
-    /// occurs _last_.
+    /// Metrics are uniquely identified by the sequence of _values_ of their fields. These are
+    /// converted to strings and joined by the `":"` character.
     fn key(&self) -> String;
 
     /// Return the data type of a measurement for this this metric.
@@ -263,7 +262,7 @@ impl DataPoint for Histogram<f64> {}
 ///
 ///     // No requests yet, there should be zero samples
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.metric.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
+///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
 ///
 ///     // await some request..
 ///     let response_code = route_handler("/", "GET");
@@ -273,7 +272,7 @@ impl DataPoint for Histogram<f64> {}
 ///
 ///     // The incremented counter is reflected in the new sample.
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.metric.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
+///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
 /// }
 /// ```
 pub trait Producer {
@@ -324,7 +323,7 @@ mod tests {
         let t = Targ { good: false, id: 2 };
 
         assert_eq!(t.name(), "targ");
-        assert_eq!(t.key(), "targ:false:2");
+        assert_eq!(t.key(), "false:2");
         assert_eq!(t.field_names(), &["good", "id"]);
         assert_eq!(t.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
@@ -338,7 +337,7 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
 
         assert_eq!(m.name(), "met");
-        assert_eq!(m.key(), "false:2:met");
+        assert_eq!(m.key(), "false:2");
         assert_eq!(m.field_names(), &["good", "id"]);
         assert_eq!(m.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
@@ -354,10 +353,14 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.key, format!("{}:{}", t.key(), m.key()));
-        assert_eq!(sample.metric.measurement, Measurement::I64(0));
+        assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
+        assert_eq!(
+            sample.timeseries_name(),
+            format!("{}:{}", t.name(), m.name())
+        );
+        assert_eq!(sample.measurement, Measurement::I64(0));
         p.metric.value += 10;
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.metric.measurement, Measurement::I64(10));
+        assert_eq!(sample.measurement, Measurement::I64(10));
     }
 }
