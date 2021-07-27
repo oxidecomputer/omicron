@@ -439,7 +439,10 @@ impl TryFrom<&tokio_postgres::Row> for VPC {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self { identity: IdentityMetadata::try_from(value)? })
+        Ok(Self {
+            identity: IdentityMetadata::try_from(value)?,
+            project_id: sql_row_value(value, "project_id")?,
+        })
     }
 }
 

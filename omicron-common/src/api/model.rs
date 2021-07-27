@@ -1318,9 +1318,8 @@ impl From<steno::SagaStateView> for SagaStateView {
 pub struct VPC {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
-    // TODO: Implement project-scoping
-    // /** id for the project containing this Instance */
-    // pub project_id: Uuid,
+    /** id for the project containing this Instance */
+    pub project_id: Uuid,
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
@@ -1438,9 +1437,6 @@ pub struct VPCSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 
-    // TODO: Implement project-scoping
-    // /** id for the project containing this Instance */
-    // pub project_id: Uuid,
     /** The VPC to which the subnet belongs. */
     pub vpc_id: Uuid,
 
@@ -1518,9 +1514,6 @@ pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 
-    // TODO: Implement project-scoping
-    // /** id for the project containing this Instance */
-    // pub project_id: Uuid,
     /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,
 

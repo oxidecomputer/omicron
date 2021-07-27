@@ -164,7 +164,7 @@ impl Table for VPC {
         "time_created",
         "time_modified",
         "time_deleted",
-        // TODO: Add project-scoping: "project_id",
+        "project_id",
     ];
 }
 
@@ -180,7 +180,6 @@ impl Table for VPCSubnet {
         "time_created",
         "time_modified",
         "time_deleted",
-        // TODO: Add project-scoping: "project_id",
         "vpc_id",
         "ipv4_block",
         "ipv6_block",
@@ -199,7 +198,6 @@ impl Table for NetworkInterface {
         "time_created",
         "time_modified",
         "time_deleted",
-        // TODO: Add project-scoping: "project_id",
         "vpc_id",
         "subnet_id",
         "mac",

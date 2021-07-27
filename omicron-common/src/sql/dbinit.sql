@@ -257,10 +257,8 @@ CREATE TABLE omicron.public.VPC (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ
-    /* TODO: Add project-scoping.
-     * project_id UUID NOT NULL REFERENCES omicron.public.Project (id),
-     */
+    time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL
 );
 
 -- TODO: add project_id to index
