@@ -419,7 +419,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fcba08564ecfa90236af056f63b0ca792fc80929"
 dependencies = [
  "async-trait",
  "base64",
@@ -453,7 +453,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#15acd1a0f8b78f3af9098e4839d570589b483fda"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fcba08564ecfa90236af056f63b0ca792fc80929"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -914,9 +914,12 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47be2f14c678be2fdcab04ab1171db51b2762ce6f0a8ee87c8dd4a04ed216135"
+checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "itertools"
@@ -976,6 +979,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "macaddr"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1210,7 +1222,10 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "ipnet",
  "libc",
+ "macaddr",
+ "postgres-protocol",
  "propolis-server",
  "rayon",
  "reqwest",
