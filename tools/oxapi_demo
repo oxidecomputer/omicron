@@ -252,6 +252,12 @@ function cmd_vpc_create_demo
 	    do_curl "/projects/$1/vpcs" -X POST -T -
 }
 
+function cmd_vpc_get
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	do_curl "/projects/$1/vpcs/$2"
+}
+
 function cmd_racks_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"

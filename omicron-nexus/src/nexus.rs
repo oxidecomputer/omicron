@@ -1027,6 +1027,16 @@ impl Nexus {
         Ok(vpc)
     }
 
+    pub async fn project_lookup_vpc(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<VPC> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await
+    }
+
     /*
      * Racks.  We simulate just one for now.
      */

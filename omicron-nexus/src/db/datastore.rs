@@ -764,4 +764,18 @@ impl DataStore {
             .await?;
         Ok(vpc)
     }
+
+    pub async fn vpc_fetch_by_name(
+        &self,
+        project_id: &Uuid,
+        vpc_name: &Name,
+    ) -> LookupResult<api::VPC> {
+        let client = self.pool.acquire().await?;
+        sql_fetch_row_by::<LookupByUniqueNameInProject, VPC>(
+            &client,
+            (project_id,),
+            vpc_name,
+        )
+        .await
+    }
 }

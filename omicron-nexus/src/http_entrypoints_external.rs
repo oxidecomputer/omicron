@@ -85,6 +85,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
+        api.register(project_vpcs_get_vpc)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -657,7 +658,7 @@ async fn instance_disks_delete_disk(
  */
 
 /**
- * List instances in a project.
+ * List VPCs in a project.
  */
 #[endpoint {
      method = GET,
@@ -681,6 +682,35 @@ async fn project_vpcs_get(
         .await?;
     let view_list = to_view_list(vpc_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+}
+
+/**
+ * Path parameters for VPC requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VPCPathParam {
+    project_name: Name,
+    vpc_name: Name,
+}
+
+/**
+ * Get a VPC in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_get_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VPCPathParam>,
+) -> Result<HttpResponseOk<VPCView>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
+    Ok(HttpResponseOk(vpc.to_view()))
 }
 
 /**
