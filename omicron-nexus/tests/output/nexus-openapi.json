@@ -990,7 +990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPCViewResultsPage"
+                  "$ref": "#/components/schemas/VPCResultsPage"
                 }
               }
             }
@@ -1028,7 +1028,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPCView"
+                  "$ref": "#/components/schemas/VPC"
                 }
               }
             }
@@ -1066,7 +1066,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPCView"
+                  "$ref": "#/components/schemas/VPC"
                 }
               }
             }
@@ -1887,23 +1887,7 @@
           "items"
         ]
       },
-      "VPCCreateParams": {
-        "description": "Create-time parameters for a [`VPC`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "VPCView": {
+      "VPC": {
         "description": "Identity-related metadata that's included in nearly all public API objects",
         "type": "object",
         "properties": {
@@ -1944,7 +1928,23 @@
           "timeModified"
         ]
       },
-      "VPCViewResultsPage": {
+      "VPCCreateParams": {
+        "description": "Create-time parameters for a [`VPC`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "VPCResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1952,7 +1952,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VPCView"
+              "$ref": "#/components/schemas/VPC"
             }
           },
           "next_page": {

@@ -45,7 +45,7 @@ use omicron_common::api::external::RackView;
 use omicron_common::api::external::SagaView;
 use omicron_common::api::external::SledView;
 use omicron_common::api::external::VPCCreateParams;
-use omicron_common::api::external::VPCView;
+use omicron_common::api::external::VPC;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -676,7 +676,7 @@ async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VPCView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<VPC>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -688,7 +688,7 @@ async fn project_vpcs_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(vpc_stream).await;
+    let view_list = to_list(vpc_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -711,14 +711,14 @@ struct VPCPathParam {
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VPCPathParam>,
-) -> Result<HttpResponseOk<VPCView>, HttpError> {
+) -> Result<HttpResponseOk<VPC>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
-    Ok(HttpResponseOk(vpc.to_view()))
+    Ok(HttpResponseOk(vpc.into()))
 }
 
 /**
@@ -732,14 +732,14 @@ async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_vpc: TypedBody<VPCCreateParams>,
-) -> Result<HttpResponseCreated<VPCView>, HttpError> {
+) -> Result<HttpResponseCreated<VPC>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let new_vpc_params = &new_vpc.into_inner();
     let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
-    Ok(HttpResponseCreated(vpc.to_view()))
+    Ok(HttpResponseCreated(vpc.into()))
 }
 
 /**

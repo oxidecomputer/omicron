@@ -1,11 +1,11 @@
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::IdentityMetadataCreateParams;
-use omicron_common::api::Name;
-use omicron_common::api::ProjectCreateParams;
-use omicron_common::api::ProjectView;
-use omicron_common::api::VPCCreateParams;
-use omicron_common::api::VPCView;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::ProjectCreateParams;
+use omicron_common::api::external::ProjectView;
+use omicron_common::api::external::VPCCreateParams;
+use omicron_common::api::external::VPC;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
@@ -67,7 +67,7 @@ async fn test_vpcs() {
             description: String::from("sells rainsticks"),
         },
     };
-    let vpc: VPCView = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
+    let vpc: VPC = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "sells rainsticks");
 
@@ -110,15 +110,15 @@ async fn test_vpcs() {
     cptestctx.teardown().await;
 }
 
-async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<VPCView> {
-    objects_list_page::<VPCView>(client, vpcs_url).await.items
+async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<VPC> {
+    objects_list_page::<VPC>(client, vpcs_url).await.items
 }
 
-async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> VPCView {
-    object_get::<VPCView>(client, vpc_url).await
+async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> VPC {
+    object_get::<VPC>(client, vpc_url).await
 }
 
-fn vpcs_eq(vpc1: &VPCView, vpc2: &VPCView) {
+fn vpcs_eq(vpc1: &VPC, vpc2: &VPC) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
 }
