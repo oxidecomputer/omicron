@@ -9,7 +9,6 @@ use omicron_common::api;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{OximeterInfo, ProducerEndpoint};
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -121,7 +120,7 @@ impl Table for SagaNodeEvent {
 /** Describes the "Oximeter" table */
 pub struct Oximeter;
 impl Table for Oximeter {
-    type ModelType = OximeterInfo;
+    type ModelType = api::internal::nexus::OximeterInfo;
     const TABLE_NAME: &'static str = "Oximeter";
     const ALL_COLUMNS: &'static [&'static str] =
         &["id", "time_created", "time_modified", "ip", "port"];
@@ -130,7 +129,7 @@ impl Table for Oximeter {
 /** Describes the "MetricProducer" table */
 pub struct MetricProducer;
 impl Table for MetricProducer {
-    type ModelType = ProducerEndpoint;
+    type ModelType = api::internal::nexus::ProducerEndpoint;
     const TABLE_NAME: &'static str = "MetricProducer";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -146,10 +145,63 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = omicron_common::api::internal::nexus::OximeterAssignment;
+    type ModelType = api::internal::nexus::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];
+}
+
+/** Describes the "VPC" table */
+pub struct VPC;
+impl Table for VPC {
+    type ModelType = api::external::VPC;
+    const TABLE_NAME: &'static str = "VPC";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "project_id",
+    ];
+}
+
+/** Describes the "VPCSubnet" table */
+pub struct VPCSubnet;
+impl Table for VPCSubnet {
+    type ModelType = api::external::VPCSubnet;
+    const TABLE_NAME: &'static str = "VPCSubnet";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "vpc_id",
+        "ipv4_block",
+        "ipv6_block",
+    ];
+}
+
+/** Describes the "NetworkInterface" table */
+pub struct NetworkInterface;
+impl Table for NetworkInterface {
+    type ModelType = api::external::NetworkInterface;
+    const TABLE_NAME: &'static str = "NetworkInterface";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "vpc_id",
+        "subnet_id",
+        "mac",
+        "ip",
+    ];
 }
 
 #[cfg(test)]
@@ -161,6 +213,7 @@ mod test {
     use super::SagaNodeEvent;
     use super::Table;
     use super::{MetricProducer, Oximeter, OximeterAssignment};
+    use super::{NetworkInterface, VPCSubnet, VPC};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -189,6 +242,9 @@ mod test {
         check_table_schema::<Oximeter>(&client).await;
         check_table_schema::<MetricProducer>(&client).await;
         check_table_schema::<OximeterAssignment>(&client).await;
+        check_table_schema::<VPC>(&client).await;
+        check_table_schema::<VPCSubnet>(&client).await;
+        check_table_schema::<NetworkInterface>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();

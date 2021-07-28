@@ -245,6 +245,79 @@ CREATE TABLE omicron.public.OximeterAssignment (
     CONSTRAINT "primary" PRIMARY KEY (oximeter_id, producer_id)
 );
 
+/*
+ * VPCs and networking primitives
+ */
+
+CREATE TABLE omicron.public.VPC (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL
+);
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.VPC (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.VPCSubnet (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    ipv4_block INET,
+    ipv6_block INET
+);
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.VPCSubnet (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.NetworkInterface (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    /* FK into VPC table */
+    vpc_id UUID NOT NULL,
+    /* FK into VPCSubnet table. */
+    subnet_id UUID NOT NULL,
+    mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
+    ip INET NOT NULL
+);
+
+/* TODO-completeness
+
+ * We currently have a NetworkInterface table with the IP and MAC addresses inline.
+ * Eventually, we'll probably want to move these to their own tables, and
+ * refer to them here, most notably to support multiple IPs per NIC, as well
+ * as moving IPs between NICs on different instances, etc.
+ */
+
+-- TODO: add project_id to index
+CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 /*
