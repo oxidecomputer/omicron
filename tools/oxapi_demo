@@ -245,6 +245,13 @@ function cmd_disk_delete
 	do_curl "/projects/$1/disks/$2" -X DELETE
 }
 
+function cmd_vpc_create_demo
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	mkjson name="$2" description="a disk called $2" |
+	    do_curl "/projects/$1/vpcs" -X POST -T -
+}
+
 function cmd_racks_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"

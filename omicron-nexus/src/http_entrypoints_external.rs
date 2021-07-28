@@ -44,6 +44,7 @@ use omicron_common::api::ProjectView;
 use omicron_common::api::RackView;
 use omicron_common::api::SagaView;
 use omicron_common::api::SledView;
+use omicron_common::api::VPCCreateParams;
 use omicron_common::api::VPCView;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -83,6 +84,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_delete_disk)?;
 
         api.register(project_vpcs_get)?;
+        api.register(project_vpcs_post)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -679,6 +681,27 @@ async fn project_vpcs_get(
         .await?;
     let view_list = to_view_list(vpc_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+}
+
+/**
+ * Create a VPC in a project.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_vpc: TypedBody<VPCCreateParams>,
+) -> Result<HttpResponseCreated<VPCView>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_vpc_params = &new_vpc.into_inner();
+    let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
+    Ok(HttpResponseCreated(vpc.to_view()))
 }
 
 /*

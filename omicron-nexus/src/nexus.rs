@@ -42,6 +42,7 @@ use omicron_common::api::ResourceType;
 use omicron_common::api::SagaView;
 use omicron_common::api::Sled;
 use omicron_common::api::UpdateResult;
+use omicron_common::api::VPCCreateParams;
 use omicron_common::api::VPC;
 use omicron_common::bail_unless;
 use omicron_common::collection::collection_page;
@@ -1009,6 +1010,21 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_vpcs(&project_id, pagparams).await
+    }
+
+    pub async fn project_create_vpc(
+        &self,
+        project_name: &Name,
+        params: &VPCCreateParams,
+    ) -> CreateResult<VPC> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let id = Uuid::new_v4();
+        let vpc = self
+            .db_datastore
+            .project_create_vpc(&id, &project_id, params)
+            .await?;
+        Ok(vpc)
     }
 
     /*

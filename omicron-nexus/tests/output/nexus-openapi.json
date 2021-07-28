@@ -997,6 +997,43 @@
           }
         },
         "x-dropshot-pagination": true
+      },
+      "post": {
+        "description": "Create a VPC in a project.",
+        "operationId": "project_vpcs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VPCCreateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VPCView"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/sagas": {
@@ -1781,6 +1818,22 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "VPCCreateParams": {
+        "description": "Create-time parameters for a [`VPC`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
         ]
       },
       "VPCView": {

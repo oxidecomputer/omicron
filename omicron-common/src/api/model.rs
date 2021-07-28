@@ -1341,6 +1341,16 @@ impl Object for VPC {
     }
 }
 
+/**
+ * Create-time parameters for a [`VPC`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VPCCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnet::Ipv4Net);

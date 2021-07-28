@@ -17,6 +17,7 @@ use omicron_common::api::OximeterAssignment;
 use omicron_common::api::OximeterInfo;
 use omicron_common::api::ProducerEndpoint;
 use omicron_common::api::ProjectCreateParams;
+use omicron_common::api::VPCCreateParams;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;
@@ -80,6 +81,12 @@ impl SqlSerialize for DiskState {
         let attach_id = &self.attached_instance_id().map(|id| *id);
         output.set("attach_instance_id", attach_id);
         output.set("disk_state", &self.label());
+    }
+}
+
+impl SqlSerialize for VPCCreateParams {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        self.identity.sql_serialize(output);
     }
 }
 

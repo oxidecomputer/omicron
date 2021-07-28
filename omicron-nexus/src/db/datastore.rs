@@ -736,4 +736,32 @@ impl DataStore {
         >(&client, (project_id,), pagparams, VPC::ALL_COLUMNS)
         .await
     }
+
+    pub async fn project_create_vpc(
+        &self,
+        vpc_id: &Uuid,
+        project_id: &Uuid,
+        params: &api::VPCCreateParams,
+    ) -> Result<api::VPC, Error> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let mut values = SqlValueSet::new();
+        values.set("id", vpc_id);
+        values.set("time_created", &now);
+        values.set("time_modified", &now);
+        values.set("project_id", project_id);
+        params.sql_serialize(&mut values);
+
+        let vpc =
+            sql_insert_unique_idempotent_and_fetch::<VPC, LookupByUniqueId>(
+                &client,
+                &values,
+                params.identity.name.as_str(),
+                "id",
+                (),
+                &vpc_id,
+            )
+            .await?;
+        Ok(vpc)
+    }
 }
