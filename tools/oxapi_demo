@@ -157,6 +157,12 @@ function cmd_project_list_disks
 	do_curl "/projects/$1/disks"
 }
 
+function cmd_project_list_vpcs
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1/vpcs"
+}
+
 function cmd_instance_create_demo
 {
 	# memory is 1024 * 1024 * 256

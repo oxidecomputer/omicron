@@ -42,6 +42,7 @@ use omicron_common::api::ResourceType;
 use omicron_common::api::SagaView;
 use omicron_common::api::Sled;
 use omicron_common::api::UpdateResult;
+use omicron_common::api::VPC;
 use omicron_common::bail_unless;
 use omicron_common::collection::collection_page;
 use omicron_common::OximeterClient;
@@ -998,6 +999,16 @@ impl Nexus {
             .disk_update_runtime(&disk.identity.id, &new_runtime)
             .await
             .map(|_| ())
+    }
+
+    pub async fn project_list_vpcs(
+        &self,
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResult<VPC> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore.project_list_vpcs(&project_id, pagparams).await
     }
 
     /*

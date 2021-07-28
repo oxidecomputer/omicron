@@ -433,6 +433,7 @@ pub enum ResourceType {
     Rack,
     Sled,
     SagaDbg,
+    VPC,
 }
 
 impl Display for ResourceType {
@@ -448,6 +449,7 @@ impl Display for ResourceType {
                 ResourceType::Rack => "rack",
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
+                ResourceType::VPC => "vpc",
             }
         )
     }
@@ -1318,8 +1320,25 @@ impl From<steno::SagaStateView> for SagaStateView {
 pub struct VPC {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
-    /** id for the project containing this Instance */
+    /** id for the project containing this VPC */
     pub project_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VPCView {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /** id for the project containing this VPC */
+    pub project_id: Uuid,
+}
+
+impl Object for VPC {
+    type View = VPCView;
+    fn to_view(&self) -> VPCView {
+        VPCView { identity: self.identity.clone(), project_id: self.project_id }
+    }
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.

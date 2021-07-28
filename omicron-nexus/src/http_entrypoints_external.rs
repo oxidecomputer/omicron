@@ -44,6 +44,7 @@ use omicron_common::api::ProjectView;
 use omicron_common::api::RackView;
 use omicron_common::api::SagaView;
 use omicron_common::api::SledView;
+use omicron_common::api::VPCView;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -80,6 +81,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_get_disk)?;
         api.register(instance_disks_put_disk)?;
         api.register(instance_disks_delete_disk)?;
+
+        api.register(project_vpcs_get)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -645,6 +648,37 @@ async fn instance_disks_delete_disk(
         .instance_detach_disk(&project_name, &instance_name, &disk_name)
         .await?;
     Ok(HttpResponseDeleted())
+}
+
+/*
+ * VPCs
+ */
+
+/**
+ * List instances in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VPCView>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_stream = nexus
+        .project_list_vpcs(
+            &project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    let view_list = to_view_list(vpc_stream).await;
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
 /*
