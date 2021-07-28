@@ -667,7 +667,7 @@ async fn instance_disks_delete_disk(
  }]
 async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedById>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VPCView>>, HttpError> {
     let apictx = rqctx.context();
@@ -682,7 +682,7 @@ async fn project_vpcs_get(
         )
         .await?;
     let view_list = to_view_list(vpc_stream).await;
-    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
 /**

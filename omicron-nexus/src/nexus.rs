@@ -1005,7 +1005,7 @@ impl Nexus {
     pub async fn project_list_vpcs(
         &self,
         project_name: &Name,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResult<VPC> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;

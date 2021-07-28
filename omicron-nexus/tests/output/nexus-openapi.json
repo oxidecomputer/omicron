@@ -970,7 +970,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameSortMode"
             },
             "style": "form"
           },

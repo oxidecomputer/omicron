@@ -48,7 +48,6 @@ use super::schema::Disk;
 use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
-use super::schema::LookupByUniqueIdInProject;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
@@ -726,11 +725,11 @@ impl DataStore {
     pub async fn project_list_vpcs(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResult<api::VPC> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
-            LookupByUniqueIdInProject,
+            LookupByUniqueNameInProject,
             VPC,
             <VPC as Table>::ModelType,
         >(&client, (project_id,), pagparams, VPC::ALL_COLUMNS)

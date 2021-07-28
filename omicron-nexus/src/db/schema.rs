@@ -400,25 +400,6 @@ impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueNameInProject {
 }
 
 /**
- * Implementation of [`LookupKey`] for looking up objects within a project by
- * the project_id and the object's id
- */
-pub struct LookupByUniqueIdInProject;
-impl<'a, R: ResourceTable> LookupKey<'a, R> for LookupByUniqueIdInProject {
-    type ScopeKey = (&'a Uuid,);
-    const SCOPE_KEY_COLUMN_NAMES: &'static [&'static str] = &["project_id"];
-    type ItemKey = Uuid;
-    const ITEM_KEY_COLUMN_NAME: &'static str = "id";
-
-    fn where_select_error(
-        _scope_key: Self::ScopeKey,
-        item_key: &Self::ItemKey,
-    ) -> Error {
-        Error::not_found_by_id(R::RESOURCE_TYPE, item_key)
-    }
-}
-
-/**
  * Implementation of [`LookupKey`] for looking up objects by name within the
  * scope of an instance (SQL column "attach_instance_id").  This is really just
  * intended for finding attached disks.
