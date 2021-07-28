@@ -1,8 +1,4 @@
-//! Externally facing API
+//! APIs, both internal and external.
 
-mod error;
-pub mod http_pagination;
-mod model;
-
-pub use error::*;
-pub use model::*;
+pub mod external;
+pub mod internal;

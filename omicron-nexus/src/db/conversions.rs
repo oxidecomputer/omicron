@@ -6,18 +6,18 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::DiskCreateParams;
-use omicron_common::api::DiskRuntimeState;
-use omicron_common::api::DiskState;
-use omicron_common::api::IdentityMetadataCreateParams;
-use omicron_common::api::InstanceCreateParams;
-use omicron_common::api::InstanceRuntimeState;
-use omicron_common::api::InstanceState;
-use omicron_common::api::OximeterAssignment;
-use omicron_common::api::OximeterInfo;
-use omicron_common::api::ProducerEndpoint;
-use omicron_common::api::ProjectCreateParams;
-use omicron_common::api::VPCCreateParams;
+use omicron_common::api::external::DiskCreateParams;
+use omicron_common::api::external::DiskState;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InstanceCreateParams;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::ProjectCreateParams;
+use omicron_common::api::external::VPCCreateParams;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::OximeterAssignment;
+use omicron_common::api::internal::nexus::OximeterInfo;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;

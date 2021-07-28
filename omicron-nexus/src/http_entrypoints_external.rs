@@ -16,36 +16,36 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use omicron_common::api::http_pagination::data_page_params_for;
-use omicron_common::api::http_pagination::data_page_params_nameid_id;
-use omicron_common::api::http_pagination::data_page_params_nameid_name;
-use omicron_common::api::http_pagination::pagination_field_for_scan_params;
-use omicron_common::api::http_pagination::PagField;
-use omicron_common::api::http_pagination::PaginatedById;
-use omicron_common::api::http_pagination::PaginatedByName;
-use omicron_common::api::http_pagination::PaginatedByNameOrId;
-use omicron_common::api::http_pagination::ScanById;
-use omicron_common::api::http_pagination::ScanByName;
-use omicron_common::api::http_pagination::ScanByNameOrId;
-use omicron_common::api::http_pagination::ScanParams;
-use omicron_common::api::to_view_list;
-use omicron_common::api::DataPageParams;
-use omicron_common::api::DiskAttachment;
-use omicron_common::api::DiskCreateParams;
-use omicron_common::api::DiskView;
-use omicron_common::api::InstanceCreateParams;
-use omicron_common::api::InstanceView;
-use omicron_common::api::Name;
-use omicron_common::api::Object;
-use omicron_common::api::PaginationOrder;
-use omicron_common::api::ProjectCreateParams;
-use omicron_common::api::ProjectUpdateParams;
-use omicron_common::api::ProjectView;
-use omicron_common::api::RackView;
-use omicron_common::api::SagaView;
-use omicron_common::api::SledView;
-use omicron_common::api::VPCCreateParams;
-use omicron_common::api::VPCView;
+use omicron_common::api;
+use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
+use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
+use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
+use omicron_common::api::external::http_pagination::PagField;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::PaginatedByName;
+use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanByName;
+use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::to_list;
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DiskAttachment;
+use omicron_common::api::external::DiskCreateParams;
+use omicron_common::api::external::DiskView;
+use omicron_common::api::external::InstanceCreateParams;
+use omicron_common::api::external::InstanceView;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::PaginationOrder;
+use omicron_common::api::external::ProjectCreateParams;
+use omicron_common::api::external::ProjectUpdateParams;
+use omicron_common::api::external::ProjectView;
+use omicron_common::api::external::RackView;
+use omicron_common::api::external::SagaView;
+use omicron_common::api::external::SledView;
+use omicron_common::api::external::VPCCreateParams;
+use omicron_common::api::external::VPCView;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -173,7 +173,9 @@ async fn projects_get(
         }
     };
 
-    let view_list = to_view_list(project_stream).await;
+    let view_list =
+        to_list::<api::internal::nexus::Project, ProjectView>(project_stream)
+            .await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -191,7 +193,7 @@ async fn projects_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let project = nexus.project_create(&new_project.into_inner()).await?;
-    Ok(HttpResponseCreated(project.to_view()))
+    Ok(HttpResponseCreated(project.into()))
 }
 
 /**
@@ -219,7 +221,7 @@ async fn projects_get_project(
     let path = path_params.into_inner();
     let project_name = &path.project_name;
     let project = nexus.project_fetch(&project_name).await?;
-    Ok(HttpResponseOk(project.to_view()))
+    Ok(HttpResponseOk(project.into()))
 }
 
 /**
@@ -266,7 +268,7 @@ async fn projects_put_project(
     let newproject = nexus
         .project_update(&project_name, &updated_project.into_inner())
         .await?;
-    Ok(HttpResponseOk(newproject.to_view()))
+    Ok(HttpResponseOk(newproject.into()))
 }
 
 /*
@@ -296,8 +298,10 @@ async fn project_disks_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(disk_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+
+    let disk_list =
+        to_list::<api::internal::nexus::Disk, DiskView>(disk_stream).await;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
 /**
@@ -321,7 +325,7 @@ async fn project_disks_post(
     let new_disk_params = &new_disk.into_inner();
     let disk =
         nexus.project_create_disk(&project_name, &new_disk_params).await?;
-    Ok(HttpResponseCreated(disk.to_view()))
+    Ok(HttpResponseCreated(disk.into()))
 }
 
 /**
@@ -350,7 +354,7 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let disk = nexus.project_lookup_disk(&project_name, &disk_name).await?;
-    Ok(HttpResponseOk(disk.to_view()))
+    Ok(HttpResponseOk(disk.into()))
 }
 
 /**
@@ -400,7 +404,10 @@ async fn project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_view_list(instance_stream).await;
+    let view_list = to_list::<api::internal::nexus::Instance, InstanceView>(
+        instance_stream,
+    )
+    .await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -432,7 +439,7 @@ async fn project_instances_post(
     let instance = nexus
         .project_create_instance(&project_name, &new_instance_params)
         .await?;
-    Ok(HttpResponseCreated(instance.to_view()))
+    Ok(HttpResponseCreated(instance.into()))
 }
 
 /**
@@ -462,7 +469,7 @@ async fn project_instances_get_instance(
     let instance_name = &path.instance_name;
     let instance =
         nexus.project_lookup_instance(&project_name, &instance_name).await?;
-    Ok(HttpResponseOk(instance.to_view()))
+    Ok(HttpResponseOk(instance.into()))
 }
 
 /**
@@ -502,7 +509,7 @@ async fn project_instances_instance_reboot(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_reboot(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**
@@ -522,7 +529,7 @@ async fn project_instances_instance_start(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_start(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**
@@ -543,7 +550,7 @@ async fn project_instances_instance_stop(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let instance = nexus.instance_stop(&project_name, &instance_name).await?;
-    Ok(HttpResponseAccepted(instance.to_view()))
+    Ok(HttpResponseAccepted(instance.into()))
 }
 
 /**
@@ -571,7 +578,7 @@ async fn instance_disks_get(
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
-    let view_list = to_view_list(disk_list).await;
+    let view_list = to_list(disk_list).await;
     Ok(HttpResponseOk(view_list))
 }
 
@@ -605,7 +612,7 @@ async fn instance_disks_get_disk(
     let attachment = nexus
         .instance_get_disk(&project_name, &instance_name, &disk_name)
         .await?;
-    Ok(HttpResponseOk(attachment.to_view()))
+    Ok(HttpResponseOk(attachment))
 }
 
 /**
@@ -628,7 +635,7 @@ async fn instance_disks_put_disk(
     let attachment = nexus
         .instance_attach_disk(&project_name, &instance_name, &disk_name)
         .await?;
-    Ok(HttpResponseCreated(attachment.to_view()))
+    Ok(HttpResponseCreated(attachment))
 }
 
 /**
@@ -775,7 +782,8 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_view_list(rack_stream).await;
+    let view_list =
+        to_list::<api::internal::nexus::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -803,7 +811,7 @@ async fn hardware_racks_get_rack(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let rack_info = nexus.rack_lookup(&path.rack_id).await?;
-    Ok(HttpResponseOk(rack_info.to_view()))
+    Ok(HttpResponseOk(rack_info.into()))
 }
 
 /*
@@ -826,7 +834,8 @@ async fn hardware_sleds_get(
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_view_list(sled_stream).await;
+    let view_list =
+        to_list::<api::internal::nexus::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -854,7 +863,7 @@ async fn hardware_sleds_get_sled(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let sled_info = nexus.sled_lookup(&path.sled_id).await?;
-    Ok(HttpResponseOk(sled_info.to_view()))
+    Ok(HttpResponseOk(sled_info.into()))
 }
 
 /*
@@ -877,7 +886,7 @@ async fn sagas_get(
     let query = query_params.into_inner();
     let pagparams = data_page_params_for(&rqctx, &query)?;
     let saga_stream = nexus.sagas_list(&pagparams).await?;
-    let view_list = to_view_list(saga_stream).await;
+    let view_list = to_list(saga_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
