@@ -943,7 +943,7 @@
     },
     "/projects/{project_name}/vpcs": {
       "get": {
-        "description": "List instances in a project.",
+        "description": "List VPCs in a project.",
         "operationId": "project_vpcs_get",
         "parameters": [
           {
@@ -1032,6 +1032,73 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/projects/{project_name}/vpcs/{vpc_name}": {
+      "get": {
+        "description": "Get a VPC in a project.",
+        "operationId": "project_vpcs_get_vpc",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VPCView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete a vpc from a project.",
+        "operationId": "project_vpcs_delete_vpc",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           }
         }
       }

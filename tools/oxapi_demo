@@ -258,6 +258,12 @@ function cmd_vpc_get
 	do_curl "/projects/$1/vpcs/$2"
 }
 
+function cmd_vpc_delete
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	do_curl "/projects/$1/vpcs/$2" -X DELETE
+}
+
 function cmd_racks_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"

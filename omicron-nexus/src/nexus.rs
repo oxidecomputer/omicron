@@ -1037,6 +1037,15 @@ impl Nexus {
         self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await
     }
 
+    pub async fn project_delete_vpc(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> DeleteResult {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        self.db_datastore.project_delete_vpc(&vpc.identity.id).await
+    }
+
     /*
      * Racks.  We simulate just one for now.
      */

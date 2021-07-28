@@ -86,6 +86,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
         api.register(project_vpcs_get_vpc)?;
+        api.register(project_vpcs_delete_vpc)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -732,6 +733,26 @@ async fn project_vpcs_post(
     let new_vpc_params = &new_vpc.into_inner();
     let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
     Ok(HttpResponseCreated(vpc.to_view()))
+}
+
+/**
+ * Delete a vpc from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_delete_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VPCPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    nexus.project_delete_vpc(&project_name, &vpc_name).await?;
+    Ok(HttpResponseDeleted())
 }
 
 /*

@@ -46,7 +46,7 @@ async fn test_vpcs() {
     let vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 0);
 
-    // /* Make sure we get a 404 if we fetch one. */
+    /* Make sure we get a 404 if we fetch one. */
     let vpc_url = format!("{}/just-rainsticks", vpcs_url);
 
     let error = client
@@ -54,18 +54,11 @@ async fn test_vpcs() {
         .await;
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
-    // /* Ditto if we try to delete one. */
-    // let error = client
-    //     .make_request_error(
-    //         Method::DELETE,
-    //         &vpc_url,
-    //         StatusCode::NOT_FOUND,
-    //     )
-    //     .await;
-    // assert_eq!(
-    //     error.message,
-    //     "not found: vpc with name \"just-rainsticks\""
-    // );
+    /* Ditto if we try to delete one. */
+    let error = client
+        .make_request_error(Method::DELETE, &vpc_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
     /* Create a VPC. */
     let new_vpc = VPCCreateParams {
@@ -97,6 +90,22 @@ async fn test_vpcs() {
     /* Fetch the VPC and expect it to match. */
     let vpc = vpc_get(&client, &vpc_url).await;
     vpcs_eq(&vpcs[0], &vpc);
+
+    /* Delete the VPC. */
+    client
+        .make_request_no_body(Method::DELETE, &vpc_url, StatusCode::NO_CONTENT)
+        .await
+        .unwrap();
+
+    /* Now we expect a 404 on fetch */
+    let error = client
+        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+
+    /* And the list should be empty again */
+    let vpcs = vpcs_list(&client, &vpcs_url).await;
+    assert_eq!(vpcs.len(), 0);
 
     cptestctx.teardown().await;
 }

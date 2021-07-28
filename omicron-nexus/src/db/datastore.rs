@@ -778,4 +778,23 @@ impl DataStore {
         )
         .await
     }
+
+    pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        sql_execute_maybe_one(
+            &client,
+            format!(
+                "UPDATE {} SET time_deleted = $1 WHERE \
+                    time_deleted IS NULL AND id = $2 LIMIT 2 \
+                    RETURNING {}",
+                VPC::TABLE_NAME,
+                VPC::ALL_COLUMNS.join(", ")
+            )
+            .as_str(),
+            &[&now, &vpc_id],
+            || Error::not_found_by_id(ResourceType::VPC, vpc_id),
+        )
+        .await
+    }
 }
