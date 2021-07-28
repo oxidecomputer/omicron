@@ -12,11 +12,11 @@ version = "1.0.1"
 features = ["serde"]
 
 [dependencies.proc-macro2]
-version = "1.0.26"
+version = "1.0.28"
 
 [dependencies.quote]
 version = "1.0.9"
 
 [dependencies.syn]
-version = "1.0.73"
+version = "1.0.74"
 features = [ "full", "derive", "extra-traits" ]

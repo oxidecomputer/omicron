@@ -1,11 +1,11 @@
 //! Describes the states of VM instances.
 
 use chrono::Utc;
-use omicron_common::api::Error;
-use omicron_common::api::InstanceRuntimeState;
-use omicron_common::api::InstanceRuntimeStateRequested;
-use omicron_common::api::InstanceState;
-use omicron_common::api::InstanceStateRequested;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// Action to be taken on behalf of state transition.
@@ -258,9 +258,12 @@ impl InstanceStates {
 mod test {
     use super::{Action, InstanceStates};
     use chrono::Utc;
-    use omicron_common::api::{
-        ByteCount, Generation, InstanceCpuCount, InstanceRuntimeState,
-        InstanceState as State, InstanceStateRequested as Requested,
+    use omicron_common::api::external::{
+        ByteCount, Generation, InstanceCpuCount, InstanceState as State,
+    };
+    use omicron_common::api::internal::{
+        nexus::InstanceRuntimeState,
+        sled_agent::InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
 

@@ -8,8 +8,8 @@ use hyper::Body;
 use slog::Logger;
 use uuid::Uuid;
 
-use crate::api::Error;
-use crate::api::ProducerEndpoint;
+use crate::api::external::Error;
+use crate::api::internal::nexus::ProducerEndpoint;
 use crate::http_client::HttpClient;
 
 /// Client of an oximeter server

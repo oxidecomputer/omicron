@@ -1,10 +1,9 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
-use omicron_common::api::Error;
-use omicron_common::api::{
-    InstanceRuntimeState, InstanceRuntimeStateRequested,
-};
+use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -199,9 +198,11 @@ mod test {
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
-    use omicron_common::api::{
-        ByteCount, Generation, InstanceCpuCount, InstanceRuntimeState,
-        InstanceState, InstanceStateRequested,
+    use omicron_common::api::external::{
+        ByteCount, Generation, InstanceCpuCount, InstanceState,
+    };
+    use omicron_common::api::internal::{
+        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";

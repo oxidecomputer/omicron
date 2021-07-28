@@ -6,7 +6,7 @@ use crate::db;
 use crate::db::schema;
 use crate::db::sql::Table;
 use crate::db::sql_operations::sql_paginate;
-use omicron_common::api::Error;
+use omicron_common::api::external::Error;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;

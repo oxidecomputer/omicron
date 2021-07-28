@@ -25,7 +25,7 @@ pub const DATABASE_NAME: &str = "oximeter";
 ///
 /// ClickHouse's type system lacks a boolean, and using `u8` to represent them. This a safe wrapper
 /// type around that for serializing to/from the database.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct DbBool {
     inner: u8,
@@ -52,55 +52,39 @@ impl From<DbBool> for bool {
     }
 }
 
-/// The source, target or metric, to which a field corresponds.
-///
-/// Tables with field information, whether from a target or metric, are largely the same. This enum
-/// indicates which of these this field row derives from, and is used to populate the
-/// `{target,metric}_name` column of the corresponding field tables.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+/// The source, target or metric, from which a field is derived.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum FieldSource {
-    #[serde(rename = "target_name")]
-    Target(String),
-    #[serde(rename = "metric_name")]
-    Metric(String),
-}
-
-impl FieldSource {
-    /// Return the stem of the table name for the corresponding row.
-    pub fn table_stem(&self) -> &'static str {
-        match self {
-            FieldSource::Target(_) => "target_fields",
-            FieldSource::Metric(_) => "metric_fields",
-        }
-    }
+    Target,
+    Metric,
 }
 
 /// Information about a target or metric field as contained in a schema.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Field {
-    /// The field name
     pub name: String,
-
-    /// The field type
     pub ty: FieldType,
+    pub source: FieldSource,
 }
 
 // The list of fields in a schema as represented in the actual schema tables in the database.
 //
-// Data about the schema in ClickHouse is represented in the `{target,metric}_schema` tables. These
-// contain the fields as a nested table, which is stored as a struct of arrays. This type is used
+// Data about the schema in ClickHouse is represented in the `timeseries_schema` table. this
+// contains the fields as a nested table, which is stored as a struct of arrays. This type is used
 // to convert between that representation in the database, and the representation we prefer, i.e.,
 // the `Field` type above. In other words, we prefer to work with an array of structs, but
 // ClickHouse requires a struct of arrays. `Field` is the former, `DbFieldList` is the latter.
 //
 // Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
 // the nested column names.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) struct DbFieldList {
     #[serde(rename = "fields.name")]
     pub names: Vec<String>,
     #[serde(rename = "fields.type")]
     pub types: Vec<FieldType>,
+    #[serde(rename = "fields.source")]
+    pub sources: Vec<FieldSource>,
 }
 
 impl From<DbFieldList> for Vec<Field> {
@@ -108,132 +92,47 @@ impl From<DbFieldList> for Vec<Field> {
         list.names
             .into_iter()
             .zip(list.types.into_iter())
-            .map(|(name, ty)| Field { name, ty })
+            .zip(list.sources.into_iter())
+            .map(|((name, ty), source)| Field { name, ty, source })
             .collect()
     }
 }
 
 impl From<Vec<Field>> for DbFieldList {
     fn from(list: Vec<Field>) -> Self {
-        let (names, types) =
-            list.into_iter().map(|field| (field.name, field.ty)).unzip();
-        DbFieldList { names, types }
-    }
-}
-
-// A trait describing types in one of the database's schema tables.
-pub(crate) trait Schematized<'a>:
-    PartialEq<Self> + Deserialize<'a> + Serialize + Sized
-{
-    // The column in the DB with the object's name
-    fn column_name(&self) -> &str;
-    // The name of the object the schema represents, i.e., the entry in the `column_name` table.
-    fn name(&self) -> &str;
-    // The list of fields for this schema.
-    fn fields(&self) -> &[Field];
-}
-
-/// A representation of a row in one of the target_schema table.
-///
-/// Targets describe the source of telemetry or metric data, i.e., the object that the measurement
-/// is derived from. These are described by the [`Target`](crate::traits::Target) trait.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TargetSchema {
-    pub target_name: String,
-    pub fields: Vec<Field>,
-    #[serde(with = "serde_timestamp")]
-    pub created: DateTime<Utc>,
-}
-
-impl Schematized<'_> for TargetSchema {
-    fn column_name(&self) -> &str {
-        "target_name"
-    }
-
-    fn name(&self) -> &str {
-        &self.target_name
-    }
-
-    fn fields(&self) -> &[Field] {
-        &self.fields
-    }
-}
-
-impl PartialEq for TargetSchema {
-    fn eq(&self, other: &TargetSchema) -> bool {
-        self.target_name == other.target_name && self.fields == other.fields
-    }
-}
-
-// The internal representation of `TargetSchema` used in the database
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct DbTargetSchema {
-    pub target_name: String,
-    #[serde(flatten)]
-    pub fields: DbFieldList,
-    #[serde(with = "serde_timestamp")]
-    pub created: DateTime<Utc>,
-}
-
-impl From<DbTargetSchema> for TargetSchema {
-    fn from(schema: DbTargetSchema) -> Self {
-        TargetSchema {
-            target_name: schema.target_name,
-            fields: schema.fields.into(),
-            created: schema.created,
+        let mut names = Vec::with_capacity(list.len());
+        let mut types = Vec::with_capacity(list.len());
+        let mut sources = Vec::with_capacity(list.len());
+        for field in list.into_iter() {
+            names.push(field.name);
+            types.push(field.ty);
+            sources.push(field.source);
         }
+        DbFieldList { names, types, sources }
     }
 }
 
-impl From<TargetSchema> for DbTargetSchema {
-    fn from(schema: TargetSchema) -> Self {
-        DbTargetSchema {
-            target_name: schema.target_name,
-            fields: schema.fields.into(),
-            created: schema.created,
-        }
-    }
-}
-
-/// A representation of a row in one of the metric_schema table.
-///
-/// Metrics describe the aspect or feature of a target that metric data captures. This is the
-/// actual feature being measured, and is described by the [`Metric`](crate::traits::Metric) trait.
+/// The `TimeseriesSchema` struct represents the schema of a timeseries.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MetricSchema {
-    pub metric_name: String,
+pub struct TimeseriesSchema {
+    pub timeseries_name: String,
     pub fields: Vec<Field>,
     pub measurement_type: MeasurementType,
-    #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
 }
 
-impl PartialEq for MetricSchema {
-    fn eq(&self, other: &MetricSchema) -> bool {
-        self.metric_name == other.metric_name
-            && self.fields == other.fields
+impl PartialEq for TimeseriesSchema {
+    fn eq(&self, other: &TimeseriesSchema) -> bool {
+        self.timeseries_name == other.timeseries_name
             && self.measurement_type == other.measurement_type
+            && self.fields == other.fields
     }
 }
 
-impl Schematized<'_> for MetricSchema {
-    fn column_name(&self) -> &str {
-        "metric_name"
-    }
-
-    fn name(&self) -> &str {
-        &self.metric_name
-    }
-
-    fn fields(&self) -> &[Field] {
-        &self.fields
-    }
-}
-
-// The internal representation of `MetricSchema` used in the database
+// The `DbTimeseriesSchema` type models the `oximeter.timeseries_schema` table.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct DbMetricSchema {
-    pub metric_name: String,
+pub(crate) struct DbTimeseriesSchema {
+    pub timeseries_name: String,
     #[serde(flatten)]
     pub fields: DbFieldList,
     pub measurement_type: MeasurementType,
@@ -241,10 +140,10 @@ pub(crate) struct DbMetricSchema {
     pub created: DateTime<Utc>,
 }
 
-impl From<DbMetricSchema> for MetricSchema {
-    fn from(schema: DbMetricSchema) -> Self {
-        MetricSchema {
-            metric_name: schema.metric_name,
+impl From<DbTimeseriesSchema> for TimeseriesSchema {
+    fn from(schema: DbTimeseriesSchema) -> TimeseriesSchema {
+        TimeseriesSchema {
+            timeseries_name: schema.timeseries_name,
             fields: schema.fields.into(),
             measurement_type: schema.measurement_type,
             created: schema.created,
@@ -252,10 +151,10 @@ impl From<DbMetricSchema> for MetricSchema {
     }
 }
 
-impl From<MetricSchema> for DbMetricSchema {
-    fn from(schema: MetricSchema) -> Self {
-        DbMetricSchema {
-            metric_name: schema.metric_name,
+impl From<TimeseriesSchema> for DbTimeseriesSchema {
+    fn from(schema: TimeseriesSchema) -> DbTimeseriesSchema {
+        DbTimeseriesSchema {
+            timeseries_name: schema.timeseries_name,
             fields: schema.fields.into(),
             measurement_type: schema.measurement_type,
             created: schema.created,
@@ -302,10 +201,9 @@ mod serde_timestamp {
 
 macro_rules! define_field_row {
     {$name:ident, $value_type:ty, $table_suffix:literal} => {
-        #[derive(Clone, Debug, Deserialize, Serialize)]
+        #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         pub struct $name {
-            #[serde(flatten)]
-            pub source: FieldSource,
+            pub timeseries_name: String,
             pub timeseries_key: String,
             pub field_name: String,
             pub field_value: $value_type,
@@ -316,9 +214,8 @@ macro_rules! define_field_row {
         impl $name {
             pub fn table_name(&self) -> String {
                 format!(
-                    "{db_name}.{stem}_{type_}",
+                    "{db_name}.fields_{type_}",
                     db_name = DATABASE_NAME,
-                    stem = self.source.table_stem(),
                     type_ = $table_suffix,
                 )
             }
@@ -334,10 +231,9 @@ define_field_row! {UuidFieldRow, Uuid, "uuid"}
 
 macro_rules! define_measurement_row {
     {$name:ident, $value_type:ty, $table_suffix:literal} => {
-        #[derive(Clone, Debug, Deserialize, Serialize)]
+        #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         pub struct $name {
-            pub target_name: String,
-            pub metric_name: String,
+            pub timeseries_name: String,
             pub timeseries_key: String,
             #[serde(with = "serde_timestamp")]
             pub timestamp: DateTime<Utc>,
@@ -369,7 +265,7 @@ define_measurement_row! { CumulativeF64MeasurementRow, f64, "cumulativef64" }
 /// The tables storing measurements of a histogram metric use a pair of arrays to represent them,
 /// for the bins and counts, respectively. This handles conversion between the type used to
 /// represent histograms in Rust, [`histogram::Histogram`], and this in-database representation.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DbHistogram<T> {
     pub bins: Vec<T>,
     pub counts: Vec<u64>,
@@ -396,10 +292,9 @@ where
 
 macro_rules! define_histogram_measurement_row {
     {$name:ident, $value_type:ty, $table_suffix:literal} => {
-        #[derive(Clone, Debug, Deserialize, Serialize)]
+        #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         pub struct $name {
-            pub target_name: String,
-            pub metric_name: String,
+            pub timeseries_name: String,
             pub timeseries_key: String,
             #[serde(with = "serde_timestamp")]
             pub timestamp: DateTime<Utc>,
@@ -422,26 +317,18 @@ macro_rules! define_histogram_measurement_row {
 define_histogram_measurement_row! { HistogramI64MeasurementRow, DbHistogram<i64>, "histogrami64" }
 define_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64>, "histogramf64" }
 
-// Helper to collect the field rows, for either the targets or metrics, from a sample.
-fn unroll_from_source(
-    sample: &Sample,
-    source: FieldSource,
-) -> BTreeMap<String, Vec<String>> {
+// Helper to collect the field rows from a sample, for both targets and metrics.
+fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
-    let fields = match source {
-        FieldSource::Target(_) => &sample.target.fields,
-        FieldSource::Metric(_) => &sample.metric.fields,
-    };
-    for field in fields.iter() {
-        let source = source.clone();
-        let timeseries_key = sample.key.clone();
+    for field in sample.fields() {
+        let timeseries_name = sample.timeseries_name();
+        let timeseries_key = sample.timeseries_key();
         let field_name = field.name.clone();
         let timestamp = sample.timestamp;
-
         let (table_name, row_string) = match &field.value {
             FieldValue::Bool(inner) => {
                 let row = BoolFieldRow {
-                    source,
+                    timeseries_name,
                     timeseries_key,
                     field_name,
                     field_value: DbBool::from(*inner),
@@ -451,7 +338,7 @@ fn unroll_from_source(
             }
             FieldValue::I64(inner) => {
                 let row = I64FieldRow {
-                    source,
+                    timeseries_name,
                     timeseries_key,
                     field_name,
                     field_value: *inner,
@@ -461,7 +348,7 @@ fn unroll_from_source(
             }
             FieldValue::String(inner) => {
                 let row = StringFieldRow {
-                    source,
+                    timeseries_name,
                     timeseries_key,
                     field_name,
                     field_value: inner.clone(),
@@ -483,7 +370,7 @@ fn unroll_from_source(
                     IpAddr::V6(addr) => *addr,
                 };
                 let row = IpAddrFieldRow {
-                    source,
+                    timeseries_name,
                     timeseries_key,
                     field_name,
                     field_value,
@@ -493,7 +380,7 @@ fn unroll_from_source(
             }
             FieldValue::Uuid(inner) => {
                 let row = UuidFieldRow {
-                    source,
+                    timeseries_name,
                     timeseries_key,
                     field_name,
                     field_value: *inner,
@@ -517,16 +404,7 @@ pub(crate) fn unroll_field_rows(
     sample: &Sample,
 ) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
-    for (table, rows) in unroll_from_source(
-        sample,
-        FieldSource::Target(sample.target.name.clone()),
-    ) {
-        out.entry(table).or_insert_with(Vec::new).extend(rows);
-    }
-    for (table, rows) in unroll_from_source(
-        sample,
-        FieldSource::Metric(sample.metric.name.clone()),
-    ) {
+    for (table, rows) in unroll_from_source(sample) {
         out.entry(table).or_insert_with(Vec::new).extend(rows);
     }
     out
@@ -535,15 +413,13 @@ pub(crate) fn unroll_field_rows(
 /// Return the table name and serialized measurement row for a [`Sample`], to insert into
 /// ClickHouse.
 pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
-    let target_name = sample.target.name.clone();
-    let metric_name = sample.metric.name.clone();
-    let timeseries_key = sample.key.clone();
+    let timeseries_name = sample.timeseries_name();
+    let timeseries_key = sample.timeseries_key();
     let timestamp = sample.timestamp;
-    match sample.metric.measurement {
+    match sample.measurement {
         Measurement::Bool(inner) => {
             let row = BoolMeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: DbBool::from(inner),
@@ -552,8 +428,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::I64(inner) => {
             let row = I64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner,
@@ -562,8 +437,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::F64(inner) => {
             let row = F64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner,
@@ -572,8 +446,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::String(ref inner) => {
             let row = StringMeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner.clone(),
@@ -582,8 +455,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::Bytes(ref inner) => {
             let row = BytesMeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner.clone(),
@@ -592,8 +464,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::CumulativeI64(inner) => {
             let row = CumulativeI64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner.value(),
@@ -602,8 +473,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::CumulativeF64(inner) => {
             let row = CumulativeF64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: inner.value(),
@@ -612,8 +482,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::HistogramI64(ref inner) => {
             let row = HistogramI64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: DbHistogram::from(inner),
@@ -622,8 +491,7 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
         }
         Measurement::HistogramF64(ref inner) => {
             let row = HistogramF64MeasurementRow {
-                target_name,
-                metric_name,
+                timeseries_name,
                 timeseries_key,
                 timestamp,
                 value: DbHistogram::from(inner),
@@ -633,39 +501,29 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     }
 }
 
-/// Return the schema for the target and metric, from a sample containing them
-pub(crate) fn schema_for(sample: &Sample) -> (TargetSchema, MetricSchema) {
+/// Return the schema for a `Sample`.
+pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
     let created = Utc::now();
-    let target_schema = TargetSchema {
-        target_name: sample.target.name.clone(),
-        fields: sample
-            .target
-            .fields
-            .iter()
-            .map(|field| {
-                let name = field.name.clone();
-                let ty = field.value.field_type();
-                Field { name, ty }
-            })
-            .collect(),
+    let fields = sample
+        .target_fields()
+        .iter()
+        .map(|field| Field {
+            name: field.name.clone(),
+            ty: field.value.field_type(),
+            source: FieldSource::Target,
+        })
+        .chain(sample.metric_fields().iter().map(|field| Field {
+            name: field.name.clone(),
+            ty: field.value.field_type(),
+            source: FieldSource::Metric,
+        }))
+        .collect();
+    TimeseriesSchema {
+        timeseries_name: sample.timeseries_name(),
+        fields,
+        measurement_type: sample.measurement.measurement_type(),
         created,
-    };
-    let metric_schema = MetricSchema {
-        metric_name: sample.metric.name.clone(),
-        fields: sample
-            .metric
-            .fields
-            .iter()
-            .map(|field| {
-                let name = field.name.clone();
-                let ty = field.value.field_type();
-                Field { name, ty }
-            })
-            .collect(),
-        measurement_type: sample.metric.measurement.measurement_type(),
-        created,
-    };
-    (target_schema, metric_schema)
+    }
 }
 
 #[cfg(test)]
@@ -699,21 +557,13 @@ mod tests {
     #[test]
     fn test_unroll_from_source() {
         let sample = test_util::make_sample();
-        let out = unroll_from_source(
-            &sample,
-            FieldSource::Target(sample.target.name.clone()),
-        );
-        assert_eq!(out["oximeter.target_fields_string"].len(), 2);
-        assert_eq!(out["oximeter.target_fields_i64"].len(), 1);
+        let out = unroll_from_source(&sample);
+        assert_eq!(out["oximeter.fields_string"].len(), 2);
+        assert_eq!(out["oximeter.fields_i64"].len(), 1);
         let unpacked: StringFieldRow =
-            serde_json::from_str(&out["oximeter.target_fields_string"][0])
-                .unwrap();
-        if let FieldSource::Target(name) = unpacked.source {
-            assert_eq!(name, sample.target.name);
-        } else {
-            panic!("Expected the packed row to have a source matching FieldSource::Target");
-        }
-        let field = &sample.target.fields[0];
+            serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
+        assert_eq!(unpacked.timeseries_name, sample.timeseries_name());
+        let field = &sample.target_fields()[0];
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
             assert_eq!(v, &unpacked.field_value);
@@ -734,7 +584,7 @@ mod tests {
             unpacked.value.counts,
         )
         .unwrap();
-        if let Measurement::HistogramF64(hist) = sample.metric.measurement {
+        if let Measurement::HistogramF64(hist) = sample.measurement {
             assert_eq!(
                 hist, unpacked_hist,
                 "Unpacking histogram from database representation failed"
@@ -742,68 +592,5 @@ mod tests {
         } else {
             panic!("Expected a histogram measurement");
         }
-    }
-
-    #[test]
-    fn test_target_schema_partial_eq() {
-        let first = TargetSchema {
-            target_name: "target_name".to_string(),
-            fields: vec![Field {
-                name: "field_name".to_string(),
-                ty: FieldType::I64,
-            }],
-            created: Utc::now(),
-        };
-        assert_eq!(first, first);
-
-        let mut bad_target_name = first.clone();
-        bad_target_name.target_name = "another_target_name".into();
-        assert_ne!(first, bad_target_name);
-
-        let mut bad_field_name = first.clone();
-        bad_field_name.fields[0].name = "another_field_name".into();
-        assert_ne!(first, bad_field_name);
-
-        let mut bad_field_type = first.clone();
-        bad_field_type.fields[0].ty = FieldType::Bool;
-        assert_ne!(first, bad_field_type);
-
-        let mut different_timestamp = first.clone();
-        different_timestamp.created = Utc::now();
-        assert_eq!(first, different_timestamp);
-    }
-
-    #[test]
-    fn test_metric_schema_partial_eq() {
-        let first = MetricSchema {
-            metric_name: "metric_name".to_string(),
-            fields: vec![Field {
-                name: "field_name".to_string(),
-                ty: FieldType::I64,
-            }],
-            measurement_type: MeasurementType::F64,
-            created: Utc::now(),
-        };
-        assert_eq!(first, first);
-
-        let mut bad_metric_name = first.clone();
-        bad_metric_name.metric_name = "another_metric_name".into();
-        assert_ne!(first, bad_metric_name);
-
-        let mut bad_field_name = first.clone();
-        bad_field_name.fields[0].name = "another_field_name".into();
-        assert_ne!(first, bad_field_name);
-
-        let mut bad_field_type = first.clone();
-        bad_field_type.fields[0].ty = FieldType::Bool;
-        assert_ne!(first, bad_field_type);
-
-        let mut bad_measurement_type = first.clone();
-        bad_measurement_type.measurement_type = MeasurementType::I64;
-        assert_ne!(first, bad_measurement_type);
-
-        let mut different_timestamp = first.clone();
-        different_timestamp.created = Utc::now();
-        assert_eq!(first, different_timestamp);
     }
 }

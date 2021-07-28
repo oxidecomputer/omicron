@@ -8,7 +8,7 @@ use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
-use omicron_common::api::Error;
+use omicron_common::api::external::Error;
 use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -336,17 +336,17 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
-    use omicron_common::api::ByteCount;
-    use omicron_common::api::DiskRuntimeState;
-    use omicron_common::api::DiskState;
-    use omicron_common::api::DiskStateRequested;
-    use omicron_common::api::Error;
-    use omicron_common::api::Generation;
-    use omicron_common::api::InstanceCpuCount;
-    use omicron_common::api::InstanceRuntimeState;
-    use omicron_common::api::InstanceRuntimeStateRequested;
-    use omicron_common::api::InstanceState;
-    use omicron_common::api::InstanceStateRequested;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::DiskState;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::Generation;
+    use omicron_common::api::external::InstanceCpuCount;
+    use omicron_common::api::external::InstanceState;
+    use omicron_common::api::internal::nexus::DiskRuntimeState;
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_common::api::internal::sled_agent::DiskStateRequested;
+    use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
+    use omicron_common::api::internal::sled_agent::InstanceStateRequested;
     use omicron_common::dev::test_setup_log;
 
     fn make_instance(

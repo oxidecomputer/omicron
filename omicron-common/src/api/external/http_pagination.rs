@@ -38,10 +38,10 @@
  * each resource paginated that way).  Where possible, we should share code.
  */
 
-use crate::api::DataPageParams;
-use crate::api::Name;
-use crate::api::ObjectIdentity;
-use crate::api::PaginationOrder;
+use crate::api::external::DataPageParams;
+use crate::api::external::Name;
+use crate::api::external::ObjectIdentity;
+use crate::api::external::PaginationOrder;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
@@ -505,9 +505,8 @@ mod test {
     use super::ScanByName;
     use super::ScanByNameOrId;
     use super::ScanParams;
-    use crate::api::IdentityMetadata;
-    use crate::api::ObjectIdentity;
-    use api_identity::ObjectIdentity;
+    use crate::api::external::IdentityMetadata;
+    use crate::api::external::ObjectIdentity;
     use chrono::Utc;
     use dropshot::PaginationOrder;
     use dropshot::PaginationParams;

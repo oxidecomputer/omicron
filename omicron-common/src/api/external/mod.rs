@@ -5,7 +5,10 @@
  * internal APIs.  The contents here are all HTTP-agnostic.
  */
 
-use crate::api::Error;
+mod error;
+pub mod http_pagination;
+pub use error::*;
+
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -26,7 +29,6 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
-use std::time::Duration;
 use uuid::Uuid;
 
 /*
@@ -453,56 +455,14 @@ impl Display for ResourceType {
     }
 }
 
-/**
- * Object represents a resource in the API and is implemented by concrete
- * types representing specific API resources.
- *
- * Consider a Project, which is about as simple a resource as we have.  The
- * `Project` struct represents a project as understood by the API.  It
- * contains all the fields necessary to implement a Project.  It has several
- * related types:
- *
- * * `ProjectView` is what gets emitted by the API when a user asks for a
- *   Project
- * * `ProjectCreateParams` is what must be provided to the API when a user
- *   wants to create a new project
- * * `ProjectUpdateParams` is what must be provided to the API when a user
- *   wants to update a project.
- *
- * We also have Instances, Disks, Racks, Sleds, and many related types, and we
- * expect to add many more types like images, networking abstractions,
- * organizations, teams, users, system components, and the like.  See RFD 4 for
- * details.  Some resources may not have analogs for all these types because
- * they're immutable (e.g., the `Rack` resource doesn't define a
- * "CreateParams" type).
- *
- * The only thing guaranteed by the `Object` trait is that the type can be
- * converted to a View, which is something that can be serialized.
- */
-/*
- * TODO-coverage: each type could have unit tests for various invalid input
- * types?
- */
-pub trait Object {
-    type View: Serialize + Clone + Debug;
-    fn to_view(&self) -> Self::View;
-}
-
-/**
- * Given an `ObjectStream<Object>` (for some specific `Object` type),
- * return a vector of the objects' views.  Any failures are ignored.
- */
-/*
- * TODO-hardening: Consider how to better deal with these failures.  We should
- * probably at least log something.
- */
-pub async fn to_view_list<T: Object>(
-    object_stream: ObjectStream<T>,
-) -> Vec<T::View> {
+pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
+where
+    U: From<T>,
+{
     object_stream
         .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().to_view())
-        .collect::<Vec<T::View>>()
+        .map(|maybe_object| maybe_object.unwrap().into())
+        .collect::<Vec<U>>()
         .await
 }
 
@@ -557,21 +517,6 @@ pub struct IdentityMetadataUpdateParams {
  */
 
 /**
- * A Project in the external API
- */
-pub struct Project {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-}
-
-impl Object for Project {
-    type View = ProjectView;
-    fn to_view(&self) -> ProjectView {
-        ProjectView { identity: self.identity.clone() }
-    }
-}
-
-/**
  * Client view of an [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -583,6 +528,12 @@ pub struct ProjectView {
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+}
+
+impl From<crate::api::internal::nexus::Project> for ProjectView {
+    fn from(project: crate::api::internal::nexus::Project) -> Self {
+        ProjectView { identity: project.identity }
+    }
 }
 
 /**
@@ -712,62 +663,6 @@ impl InstanceState {
     }
 }
 
-/**
- * Requestable running state of an Instance.
- *
- * A subset of [`InstanceState`].
- */
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum InstanceStateRequested {
-    Running,
-    Stopped,
-    // Issues a reset command to the instance, such that it should
-    // stop and then immediately become running.
-    Reboot,
-    Destroyed,
-}
-
-impl Display for InstanceStateRequested {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", self.label())
-    }
-}
-
-impl InstanceStateRequested {
-    fn label(&self) -> &str {
-        match self {
-            InstanceStateRequested::Running => "running",
-            InstanceStateRequested::Stopped => "stopped",
-            InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Destroyed => "destroyed",
-        }
-    }
-
-    /**
-     * Returns true if the state represents a stopped Instance.
-     */
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceStateRequested::Running => false,
-            InstanceStateRequested::Stopped => true,
-            InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Destroyed => true,
-        }
-    }
-}
-
 /** The number of CPUs in an Instance */
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCpuCount(pub u16);
@@ -787,74 +682,6 @@ impl From<&InstanceCpuCount> for i64 {
 }
 
 /**
- * An Instance (VM) in the external API
- */
-#[derive(Clone, Debug)]
-pub struct Instance {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-
-    /** id for the project containing this Instance */
-    pub project_id: Uuid,
-
-    /** state owned by the data plane */
-    pub runtime: InstanceRuntimeState,
-    /* TODO-completeness: add disks, network, tags, metrics */
-}
-
-impl Object for Instance {
-    type View = InstanceView;
-    fn to_view(&self) -> InstanceView {
-        InstanceView {
-            identity: self.identity.clone(),
-            project_id: self.project_id,
-            ncpus: self.runtime.ncpus,
-            memory: self.runtime.memory,
-            hostname: self.runtime.hostname.clone(),
-            runtime: self.runtime.to_view(),
-        }
-    }
-}
-
-/**
- * Runtime state of the Instance, including the actual running state and minimal
- * metadata
- *
- * This state is owned by the sled agent running that Instance.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    /** runtime state of the Instance */
-    pub run_state: InstanceState,
-    /** which sled is running this Instance */
-    pub sled_uuid: Uuid,
-
-    /** number of CPUs allocated for this Instance */
-    pub ncpus: InstanceCpuCount,
-    /** memory allocated for this Instance */
-    pub memory: ByteCount,
-    /** RFC1035-compliant hostname for the Instance. */
-    pub hostname: String, /* TODO-cleanup different type? */
-
-    /* TODO-completeness: add disks, network, tags, metrics */
-    /** generation number for this state */
-    pub gen: Generation,
-    /** timestamp for this information */
-    pub time_updated: DateTime<Utc>,
-}
-
-/**
- * Used to request an Instance state change from a sled agent
- *
- * Right now, it's only the run state that can be changed, though we might want
- * to support changing properties like "ncpus" here.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateRequested {
-    pub run_state: InstanceStateRequested,
-}
-
-/**
  * Client view of an [`InstanceRuntimeState`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -864,12 +691,13 @@ pub struct InstanceRuntimeStateView {
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl Object for InstanceRuntimeState {
-    type View = InstanceRuntimeStateView;
-    fn to_view(&self) -> InstanceRuntimeStateView {
+impl From<crate::api::internal::nexus::InstanceRuntimeState>
+    for InstanceRuntimeStateView
+{
+    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
         InstanceRuntimeStateView {
-            run_state: self.run_state,
-            time_run_state_updated: self.time_updated,
+            run_state: state.run_state,
+            time_run_state_updated: state.time_updated,
         }
     }
 }
@@ -896,6 +724,19 @@ pub struct InstanceView {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeStateView,
+}
+
+impl From<crate::api::internal::nexus::Instance> for InstanceView {
+    fn from(instance: crate::api::internal::nexus::Instance) -> Self {
+        InstanceView {
+            identity: instance.identity.clone(),
+            project_id: instance.project_id,
+            ncpus: instance.runtime.ncpus,
+            memory: instance.runtime.memory,
+            hostname: instance.runtime.hostname.clone(),
+            runtime: instance.runtime.into(),
+        }
+    }
 }
 
 /**
@@ -931,26 +772,6 @@ pub struct InstanceUpdateParams {
  */
 
 /**
- * A Disk (network block device) in the external API
- */
-#[derive(Clone, Debug)]
-pub struct Disk {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-    /** id for the project containing this Disk */
-    pub project_id: Uuid,
-    /**
-     * id for the snapshot from which this Disk was created (None means a blank
-     * disk)
-     */
-    pub create_snapshot_id: Option<Uuid>,
-    /** size of the Disk */
-    pub size: ByteCount,
-    /** runtime state of the Disk */
-    pub runtime: DiskRuntimeState,
-}
-
-/**
  * Client view of an [`Disk`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -965,20 +786,19 @@ pub struct DiskView {
     pub device_path: String,
 }
 
-impl Object for Disk {
-    type View = DiskView;
-    fn to_view(&self) -> DiskView {
+impl From<crate::api::internal::nexus::Disk> for DiskView {
+    fn from(disk: crate::api::internal::nexus::Disk) -> Self {
         /*
          * TODO-correctness: can the name always be used as a path like this
          * or might it need to be sanitized?
          */
-        let device_path = format!("/mnt/{}", self.identity.name.as_str());
+        let device_path = format!("/mnt/{}", disk.identity.name.as_str());
         DiskView {
-            identity: self.identity.clone(),
-            project_id: self.project_id,
-            snapshot_id: self.create_snapshot_id,
-            size: self.size,
-            state: self.runtime.disk_state.clone(),
+            identity: disk.identity.clone(),
+            project_id: disk.project_id,
+            snapshot_id: disk.create_snapshot_id,
+            size: disk.size,
+            state: disk.runtime.disk_state,
             device_path,
         }
     }
@@ -1087,20 +907,6 @@ impl DiskState {
 }
 
 /**
- * Runtime state of the Disk, which includes its attach state and some minimal
- * metadata
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskRuntimeState {
-    /** runtime state of the Disk */
-    pub disk_state: DiskState,
-    /** generation number for this state */
-    pub gen: Generation,
-    /** timestamp for this information */
-    pub time_updated: DateTime<Utc>,
-}
-
-/**
  * Create-time parameters for an [`Disk`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1127,57 +933,9 @@ pub struct DiskAttachment {
     pub disk_state: DiskState,
 }
 
-impl Object for DiskAttachment {
-    type View = Self;
-    fn to_view(&self) -> Self::View {
-        self.clone()
-    }
-}
-
-/**
- * Used to request a Disk state change
- */
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum DiskStateRequested {
-    Detached,
-    Attached(Uuid),
-    Destroyed,
-    Faulted,
-}
-
-impl DiskStateRequested {
-    /**
-     * Returns whether the requested state is attached to an Instance or not.
-     */
-    pub fn is_attached(&self) -> bool {
-        match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
-
-            DiskStateRequested::Attached(_) => true,
-        }
-    }
-}
-
 /*
  * RACKS
  */
-
-/**
- * A Rack in the external API
- */
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-impl Object for Rack {
-    type View = RackView;
-    fn to_view(&self) -> RackView {
-        RackView { identity: self.identity.clone() }
-    }
-}
 
 /**
  * Client view of an [`Rack`]
@@ -1188,27 +946,15 @@ pub struct RackView {
     pub identity: IdentityMetadata,
 }
 
+impl From<crate::api::internal::nexus::Rack> for RackView {
+    fn from(rack: crate::api::internal::nexus::Rack) -> Self {
+        RackView { identity: rack.identity }
+    }
+}
+
 /*
  * SLEDS
  */
-
-/**
- * A Sled in the external API
- */
-pub struct Sled {
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
-}
-
-impl Object for Sled {
-    type View = SledView;
-    fn to_view(&self) -> SledView {
-        SledView {
-            identity: self.identity.clone(),
-            service_address: self.service_address,
-        }
-    }
-}
 
 /**
  * Client view of an [`Sled`]
@@ -1219,6 +965,15 @@ pub struct SledView {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
+}
+
+impl From<crate::api::internal::nexus::Sled> for SledView {
+    fn from(sled: crate::api::internal::nexus::Sled) -> Self {
+        SledView {
+            identity: sled.identity.clone(),
+            service_address: sled.service_address,
+        }
+    }
 }
 
 /*
@@ -1252,13 +1007,6 @@ pub struct SagaView {
      */
     #[serde(skip)]
     pub identity: IdentityMetadata,
-}
-
-impl Object for SagaView {
-    type View = Self;
-    fn to_view(&self) -> Self::View {
-        self.clone()
-    }
 }
 
 impl From<steno::SagaView> for SagaView {
@@ -1529,116 +1277,11 @@ pub struct NetworkInterface {
     pub ip: IpAddr,
 }
 
-/*
- * Internal Control Plane API objects
- */
-
-/**
- * Sent by a sled agent on startup to Nexus to request further instruction
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentStartupInfo {
-    /** the address of the sled agent's API endpoint */
-    pub sa_address: SocketAddr,
-}
-
-/**
- * Sent from Nexus to a sled agent to establish the runtime state of an Instance
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /**
-     * Last runtime state of the Instance known to Nexus (used if the agent
-     * has never seen this Instance before).
-     */
-    pub initial_runtime: InstanceRuntimeState,
-    /** requested runtime state of the Instance */
-    pub target: InstanceRuntimeStateRequested,
-}
-
-/**
- * Sent from Nexus to a sled agent to establish the runtime state of a Disk
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskEnsureBody {
-    /**
-     * Last runtime state of the Disk known to Nexus (used if the agent has
-     * never seen this Disk before).
-     */
-    pub initial_runtime: DiskRuntimeState,
-    /** requested runtime state of the Disk */
-    pub target: DiskStateRequested,
-}
-
-/*
- * Bootstrap Agent objects
- */
-
-/**
- * Identity signed by local RoT and Oxide certificate chain.
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct BootstrapAgentShareRequest {
-    // TODO-completeness: format TBD; currently opaque.
-    pub identity: Vec<u8>,
-}
-
-/**
- * Sent between bootstrap agents to establish trust quorum.
- */
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct BootstrapAgentShareResponse {
-    // TODO-completeness: format TBD; currently opaque.
-    pub shared_secret: Vec<u8>,
-}
-
-/*
- * Oximeter producer/collector objects.
- */
-
-/**
- * Information announced by a metric server, used so that clients can contact it and collect
- * available metric data from it.
- */
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct ProducerEndpoint {
-    pub id: Uuid,
-    pub address: SocketAddr,
-    pub base_route: String,
-    pub interval: Duration,
-}
-
-impl ProducerEndpoint {
-    /**
-     * Return the route that can be used to request metric data.
-     */
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, &self.id)
-    }
-}
-
-/// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterInfo {
-    /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
-
-    /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
-}
-
-/// An assignment of an Oximeter instance to a metric producer for collection.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterAssignment {
-    pub oximeter_id: Uuid,
-    pub producer_id: Uuid,
-}
-
 #[cfg(test)]
 mod test {
     use super::ByteCount;
     use super::Name;
-    use crate::api::Error;
+    use crate::api::external::Error;
     use std::convert::TryFrom;
 
     #[test]
