@@ -6,10 +6,9 @@
  */
 
 use omicron_common::api;
-use omicron_common::api::Error;
-use omicron_common::api::Name;
-use omicron_common::api::ResourceType;
-use omicron_common::api::{OximeterInfo, ProducerEndpoint};
+use omicron_common::api::external::Error;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -20,7 +19,7 @@ use crate::db;
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
-    type ModelType = api::Project;
+    type ModelType = api::internal::nexus::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -39,7 +38,7 @@ impl ResourceTable for Project {
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
-    type ModelType = api::Instance;
+    type ModelType = api::internal::nexus::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -66,7 +65,7 @@ impl ResourceTable for Instance {
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
-    type ModelType = api::Disk;
+    type ModelType = api::internal::nexus::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -121,7 +120,7 @@ impl Table for SagaNodeEvent {
 /** Describes the "Oximeter" table */
 pub struct Oximeter;
 impl Table for Oximeter {
-    type ModelType = OximeterInfo;
+    type ModelType = api::internal::nexus::OximeterInfo;
     const TABLE_NAME: &'static str = "Oximeter";
     const ALL_COLUMNS: &'static [&'static str] =
         &["id", "time_created", "time_modified", "ip", "port"];
@@ -130,7 +129,7 @@ impl Table for Oximeter {
 /** Describes the "MetricProducer" table */
 pub struct MetricProducer;
 impl Table for MetricProducer {
-    type ModelType = ProducerEndpoint;
+    type ModelType = api::internal::nexus::ProducerEndpoint;
     const TABLE_NAME: &'static str = "MetricProducer";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -146,7 +145,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = omicron_common::api::OximeterAssignment;
+    type ModelType = api::internal::nexus::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];
@@ -155,7 +154,7 @@ impl Table for OximeterAssignment {
 /** Describes the "VPC" table */
 pub struct VPC;
 impl Table for VPC {
-    type ModelType = api::VPC;
+    type ModelType = api::external::VPC;
     const TABLE_NAME: &'static str = "VPC";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -171,7 +170,7 @@ impl Table for VPC {
 /** Describes the "VPCSubnet" table */
 pub struct VPCSubnet;
 impl Table for VPCSubnet {
-    type ModelType = api::VPCSubnet;
+    type ModelType = api::external::VPCSubnet;
     const TABLE_NAME: &'static str = "VPCSubnet";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -189,7 +188,7 @@ impl Table for VPCSubnet {
 /** Describes the "NetworkInterface" table */
 pub struct NetworkInterface;
 impl Table for NetworkInterface {
-    type ModelType = api::NetworkInterface;
+    type ModelType = api::external::NetworkInterface;
     const TABLE_NAME: &'static str = "NetworkInterface";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

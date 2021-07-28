@@ -5,12 +5,12 @@
 use super::simulatable::Simulatable;
 
 use async_trait::async_trait;
-use omicron_common::api::Error;
-use omicron_common::api::Generation;
-use omicron_common::api::InstanceRuntimeState;
-use omicron_common::api::InstanceRuntimeStateRequested;
-use omicron_common::api::InstanceState;
-use omicron_common::api::InstanceStateRequested;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::NexusClient;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;

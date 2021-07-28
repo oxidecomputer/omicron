@@ -4,15 +4,15 @@
 
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::ByteCount;
-use omicron_common::api::IdentityMetadataCreateParams;
-use omicron_common::api::InstanceCpuCount;
-use omicron_common::api::InstanceCreateParams;
-use omicron_common::api::InstanceState;
-use omicron_common::api::InstanceView;
-use omicron_common::api::Name;
-use omicron_common::api::ProjectCreateParams;
-use omicron_common::api::ProjectView;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceCreateParams;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::InstanceView;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::ProjectCreateParams;
+use omicron_common::api::external::ProjectView;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
