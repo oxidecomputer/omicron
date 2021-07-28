@@ -24,7 +24,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
@@ -1311,6 +1311,220 @@ impl From<steno::SagaStateView> for SagaStateView {
             },
         }
     }
+}
+
+/// A Virtual Private Cloud (VPC) object.
+#[derive(Clone, Debug)]
+pub struct VPC {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+    /** id for the project containing this Instance */
+    pub project_id: Uuid,
+}
+
+/// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Ipv4Net(pub ipnet::Ipv4Net);
+
+impl std::ops::Deref for Ipv4Net {
+    type Target = ipnet::Ipv4Net;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Ipv4Net {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for Ipv4Net {
+    fn schema_name() -> String {
+        "Ipv4Net".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject {
+                metadata: Some(Box::new(schemars::schema::Metadata {
+                    title: Some("An IPv4 subnet".to_string()),
+                    description: Some("An IPv4 subnet, including prefix and subnet mask".to_string()),
+                    examples: vec!["192.168.1.0/24".into()],
+                    ..Default::default()
+                })),
+                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
+                string: Some(Box::new(schemars::schema::StringValidation {
+                    // Fully-specified IPv4 address. Up to 15 chars for address, plus slash and up to 2 subnet digits.
+                    max_length: Some(18),
+                    min_length: None,
+                    // Addresses must be from an RFC 1918 private address space
+                    pattern: Some(
+                        concat!(
+                            // 10.x.x.x/8
+                            r#"^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$"#,
+                            // 172.16.x.x/12
+                            r#"^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$"#,
+                            // 192.168.x.x/16
+                            r#"^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$"#,
+                        ).to_string(),
+                    ),
+                })),
+                ..Default::default()
+            }
+        )
+    }
+}
+
+/// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Ipv6Net(pub ipnet::Ipv6Net);
+
+impl std::ops::Deref for Ipv6Net {
+    type Target = ipnet::Ipv6Net;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Ipv6Net {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for Ipv6Net {
+    fn schema_name() -> String {
+        "Ipv6Net".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject {
+                metadata: Some(Box::new(schemars::schema::Metadata {
+                    title: Some("An IPv6 subnet".to_string()),
+                    description: Some("An IPv6 subnet, including prefix and subnet mask".to_string()),
+                    examples: vec!["fd12:3456::/64".into()],
+                    ..Default::default()
+                })),
+                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
+                string: Some(Box::new(schemars::schema::StringValidation {
+                    // Fully-specified IPv6 address. 4 hex chars per segment, 8 segments, 7
+                    // ":"-separators, slash and up to 3 subnet digits
+                    max_length: Some(43),
+                    min_length: None,
+                    pattern: Some(
+                        // Conforming to unique local addressing scheme, `fd00::/8`
+                        concat!(
+                            r#"^(fd|FD)00:((([0-8a-fA-F]{1,4}\:){6}[0-8a-fA-F]{1,4})|(([0-8a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
+                        ).to_string(),
+                    ),
+                })),
+                ..Default::default()
+            }
+        )
+    }
+}
+
+/// A VPC subnet represents a logical grouping for instances that allows network traffic between
+/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
+#[derive(Clone, Debug)]
+pub struct VPCSubnet {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    /** The VPC to which the subnet belongs. */
+    pub vpc_id: Uuid,
+
+    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
+    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
+    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
+    //
+    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
+    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
+    // not given.
+    /** The IPv4 subnet CIDR block. */
+    pub ipv4_block: Option<Ipv4Net>,
+
+    /** The IPv6 subnet CIDR block. */
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
+/// hardware devices on a network.
+// NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
+// this crate does not implement `JsonSchema`, nor the the SQL conversion traits `FromSql` and
+// `ToSql`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl std::ops::Deref for MacAddr {
+    type Target = macaddr::MacAddr6;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for MacAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for MacAddr {
+    fn schema_name() -> String {
+        "MacAddr".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A MAC address".to_string()),
+                description: Some(
+                    "A Media Access Control address, in EUI-48 format"
+                        .to_string(),
+                ),
+                examples: vec!["ff:ff:ff:ff:ff:ff".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(17), // 12 hex characters and 5 ":"-separators
+                min_length: Some(17),
+                pattern: Some(
+                    r#"^([0-8a-fA-F]{2}:){5}[0-8a-fA-F]{2}$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+/// A `NetworkInterface` represents a virtual network interface device.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct NetworkInterface {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    /** The VPC to which the interface belongs. */
+    pub vpc_id: Uuid,
+
+    /** The subnet to which the interface belongs. */
+    pub subnet_id: Uuid,
+
+    /** The MAC address assigned to this interface. */
+    pub mac: MacAddr,
+
+    /** The IP address assigned to this interface. */
+    pub ip: IpAddr,
 }
 
 /*

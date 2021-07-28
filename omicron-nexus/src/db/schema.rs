@@ -152,6 +152,59 @@ impl Table for OximeterAssignment {
         &["oximeter_id", "producer_id", "time_created"];
 }
 
+/** Describes the "VPC" table */
+pub struct VPC;
+impl Table for VPC {
+    type ModelType = api::VPC;
+    const TABLE_NAME: &'static str = "VPC";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "project_id",
+    ];
+}
+
+/** Describes the "VPCSubnet" table */
+pub struct VPCSubnet;
+impl Table for VPCSubnet {
+    type ModelType = api::VPCSubnet;
+    const TABLE_NAME: &'static str = "VPCSubnet";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "vpc_id",
+        "ipv4_block",
+        "ipv6_block",
+    ];
+}
+
+/** Describes the "NetworkInterface" table */
+pub struct NetworkInterface;
+impl Table for NetworkInterface {
+    type ModelType = api::NetworkInterface;
+    const TABLE_NAME: &'static str = "NetworkInterface";
+    const ALL_COLUMNS: &'static [&'static str] = &[
+        "id",
+        "name",
+        "description",
+        "time_created",
+        "time_modified",
+        "time_deleted",
+        "vpc_id",
+        "subnet_id",
+        "mac",
+        "ip",
+    ];
+}
+
 #[cfg(test)]
 mod test {
     use super::Disk;
@@ -161,6 +214,7 @@ mod test {
     use super::SagaNodeEvent;
     use super::Table;
     use super::{MetricProducer, Oximeter, OximeterAssignment};
+    use super::{NetworkInterface, VPCSubnet, VPC};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -189,6 +243,9 @@ mod test {
         check_table_schema::<Oximeter>(&client).await;
         check_table_schema::<MetricProducer>(&client).await;
         check_table_schema::<OximeterAssignment>(&client).await;
+        check_table_schema::<VPC>(&client).await;
+        check_table_schema::<VPCSubnet>(&client).await;
+        check_table_schema::<NetworkInterface>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();
