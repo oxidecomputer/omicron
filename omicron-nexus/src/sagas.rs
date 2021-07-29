@@ -16,6 +16,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use serde::Deserialize;
@@ -125,7 +126,7 @@ async fn sic_alloc_server(
 
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<InstanceRuntimeState, ActionError> {
+) -> Result<InstanceHardware, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
@@ -151,7 +152,10 @@ async fn sic_create_instance_record(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(instance.runtime)
+    Ok(InstanceHardware {
+        runtime: instance.runtime,
+        nics: vec![],
+    })
 }
 
 async fn sic_instance_ensure(
@@ -167,7 +171,7 @@ async fn sic_instance_ensure(
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let initial_runtime =
-        sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
+        sagactx.lookup::<InstanceHardware>("initial_runtime")?;
     let sa = osagactx
         .sled_client(&sled_uuid)
         .await

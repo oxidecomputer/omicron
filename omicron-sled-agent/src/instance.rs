@@ -6,7 +6,9 @@ use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
@@ -130,6 +132,7 @@ struct InstanceInner {
     log: Logger,
     runtime_id: u64,
     properties: propolis_client::api::InstanceProperties,
+    nics: Vec<NetworkInterface>,
     state: InstanceStates,
     nexus_client: Arc<NexusClient>,
     running_state: Option<RunningState>,
@@ -157,7 +160,7 @@ impl InstanceInner {
 
         // Notify Nexus of the state change.
         self.nexus_client
-            .notify_instance_updated(&self.properties.id, self.state.current())
+            .notify_instance_updated(self.id(), self.state.current())
             .await?;
 
         // Take the next action, if any.
@@ -176,7 +179,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(self.properties.id, request)
+            .instance_state_put(*self.id(), request)
             .await
             .map_err(|e| Error::InternalError {
                 message: format!("Failed to set state of instance: {}", e),
@@ -186,7 +189,10 @@ impl InstanceInner {
     async fn ensure(&self) -> Result<(), Error> {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
+            nics: vec![], // TODO TODO
         };
+        println!("Ensuring instance: {:?}", request.properties);
+
         self.running_state
             .as_ref()
             .expect("Propolis client should be initialized before usage")
@@ -243,7 +249,7 @@ mockall::mock! {
             log: Logger,
             id: Uuid,
             runtime_id: u64,
-            initial_runtime: InstanceRuntimeState,
+            initial: InstanceHardware,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
         pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
@@ -266,13 +272,13 @@ impl Instance {
     /// * `runtime_id`: A unique (to the sled) numeric ID which may be used to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
-    /// * `initial_runtime`: State of the instance at initialization time.
+    /// * `initial`: State of the instance at initialization time.
     /// * `nexus_client`: Connection to Nexus, used for sending notifications.
     pub fn new(
         log: Logger,
         id: Uuid,
         runtime_id: u64,
-        initial_runtime: InstanceRuntimeState,
+        initial: InstanceHardware,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
         let instance = InstanceInner {
@@ -281,16 +287,18 @@ impl Instance {
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: initial_runtime.hostname.clone(),
+                name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
-                memory: initial_runtime.memory.to_bytes(),
+                // TODO: aligning the byte type would be handy
+                memory: initial.runtime.memory.to_whole_mebibytes(),
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
-                vcpus: initial_runtime.ncpus.0 as u8,
+                vcpus: initial.runtime.ncpus.0 as u8,
             },
-            state: InstanceStates::new(initial_runtime),
+            nics: initial.nics,
+            state: InstanceStates::new(initial.runtime),
             nexus_client,
             running_state: None,
         };
@@ -364,6 +372,15 @@ impl Instance {
 
         inner.running_state =
             Some(RunningState { client, ticket, monitor_task: None });
+
+        // Instantiate all requested VNICs within the zone.
+        // Note that Propolis could theoretically do this itself.
+        //
+        // TODO: Prevent collision here with the other VNIC types?
+        // Sanitize the name?
+        for nic in &inner.nics {
+            Zones::create_vnic(&zname, &vnic_name, &format!("vnic-{}", nic.mac.to_string()))?;
+        }
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
@@ -535,6 +552,7 @@ mod test {
 
         if let Some(server) = server.as_ref() {
             if server.id == id {
+                // TODO: Patch this up with real values
                 let instance_info = api::Instance {
                     properties: api::InstanceProperties {
                         id,

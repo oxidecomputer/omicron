@@ -40,6 +40,7 @@ use omicron_common::api::internal::nexus::Project;
 use omicron_common::api::internal::nexus::Rack;
 use omicron_common::api::internal::nexus::Sled;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::bail_unless;
@@ -484,6 +485,19 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
+        // TODO TODO TODO TODO TODO TODO
+        //
+        // 1) (not here) Create a default VPC for the project when it is created
+        // RFD21: "When a project is created, a default VPC is created as well."
+        // 1a) (not here) Create a default subnet for a VPC when created
+        // 2) Look up the VPC subnet here, unless one is specified (?).
+        // 2a) Allocate an address within that range.
+        // 2b) Allocate a mac address (?).
+        // 3) Create a network interface from all the allocated stats.
+        // 4) Pass it alongside the "hw info".
+        //
+        // TODO TODO TODO TODO TODO TODO
+
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
             create_params: params.clone(),
@@ -739,10 +753,15 @@ impl Nexus {
          * not the newest one, that's fine.  That might just mean the sled agent
          * beat us to it.
          */
+        let instance_hardware = InstanceHardware {
+            runtime: instance.runtime.clone(),
+            nics: vec![],
+        };
+
         let new_runtime = sa
             .instance_ensure(
                 instance.identity.id,
-                instance.runtime.clone(),
+                instance_hardware,
                 requested,
             )
             .await?;

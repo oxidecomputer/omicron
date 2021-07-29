@@ -3,6 +3,7 @@
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -97,12 +98,12 @@ impl InstanceManager {
     }
 
     /// Idempotently ensures that the given Instance (described by
-    /// `initial_runtime`) exists on this server in the given runtime state
+    /// `initial_hardware`) exists on this server in the given runtime state
     /// (described by `target`).
     pub async fn ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
@@ -129,7 +130,7 @@ impl InstanceManager {
                         instance_log,
                         instance_id,
                         self.inner.next_id.fetch_add(1, Ordering::SeqCst),
-                        initial_runtime,
+                        initial_hardware,
                         self.inner.nexus_client.clone(),
                     )?,
                 );

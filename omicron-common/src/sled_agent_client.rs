@@ -11,6 +11,7 @@ use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::sled_agent::DiskEnsureBody;
 use crate::api::internal::sled_agent::DiskStateRequested;
 use crate::api::internal::sled_agent::InstanceEnsureBody;
+use crate::api::internal::sled_agent::InstanceHardware;
 use crate::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use crate::http_client::HttpClient;
 use async_trait::async_trait;
@@ -54,7 +55,7 @@ impl Client {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial_runtime: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let path = format!("/instances/{}", instance_id);

@@ -5,7 +5,7 @@ use omicron_common::api::external::Error;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
 
-const DLADM: &str = "/usr/sbin/dladm";
+pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
