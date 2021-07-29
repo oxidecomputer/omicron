@@ -261,9 +261,9 @@ CREATE TABLE omicron.public.VPC (
     project_id UUID NOT NULL
 );
 
--- TODO: add project_id to index
 CREATE UNIQUE INDEX ON omicron.public.VPC (
-    name
+    name,
+    project_id
 ) WHERE
     time_deleted IS NULL;
 
@@ -281,9 +281,10 @@ CREATE TABLE omicron.public.VPCSubnet (
     ipv6_block INET
 );
 
--- TODO: add project_id to index
+/* Subnet and network interface names are unique per VPC, not project */
 CREATE UNIQUE INDEX ON omicron.public.VPCSubnet (
-    name
+    name,
+    vpc_id
 ) WHERE
     time_deleted IS NULL;
 
@@ -312,9 +313,9 @@ CREATE TABLE omicron.public.NetworkInterface (
  * as moving IPs between NICs on different instances, etc.
  */
 
--- TODO: add project_id to index
 CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
-    name
+    name,
+    vpc_id
 ) WHERE
     time_deleted IS NULL;
 
