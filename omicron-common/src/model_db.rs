@@ -64,8 +64,8 @@ use crate::api::external::InstanceState;
 use crate::api::external::MacAddr;
 use crate::api::external::Name;
 use crate::api::external::NetworkInterface;
-use crate::api::external::VPCSubnet;
-use crate::api::external::VPC;
+use crate::api::external::Vpc;
+use crate::api::external::VpcSubnet;
 use crate::api::external::{Ipv4Net, Ipv6Net};
 use crate::api::internal::nexus::Disk;
 use crate::api::internal::nexus::DiskRuntimeState;
@@ -434,8 +434,8 @@ impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
     }
 }
 
-/// Load an [`VPC`] from a row in the `VPC` table.
-impl TryFrom<&tokio_postgres::Row> for VPC {
+/// Load an [`Vpc`] from a row in the `Vpc` table.
+impl TryFrom<&tokio_postgres::Row> for Vpc {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
@@ -446,8 +446,8 @@ impl TryFrom<&tokio_postgres::Row> for VPC {
     }
 }
 
-/// Load an [`VPCSubnet`] from a row in the `VPCSubnet` table.
-impl TryFrom<&tokio_postgres::Row> for VPCSubnet {
+/// Load a [`VpcSubnet`] from a row in the `VpcSubnet` table.
+impl TryFrom<&tokio_postgres::Row> for VpcSubnet {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {

@@ -44,8 +44,8 @@ use omicron_common::api::external::ProjectView;
 use omicron_common::api::external::RackView;
 use omicron_common::api::external::SagaView;
 use omicron_common::api::external::SledView;
-use omicron_common::api::external::VPCCreateParams;
-use omicron_common::api::external::VPC;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -676,7 +676,7 @@ async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VPC>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -696,7 +696,7 @@ async fn project_vpcs_get(
  * Path parameters for VPC requests
  */
 #[derive(Deserialize, JsonSchema)]
-struct VPCPathParam {
+struct VpcPathParam {
     project_name: Name,
     vpc_name: Name,
 }
@@ -710,8 +710,8 @@ struct VPCPathParam {
  }]
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VPCPathParam>,
-) -> Result<HttpResponseOk<VPC>, HttpError> {
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -731,8 +731,8 @@ async fn project_vpcs_get_vpc(
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_vpc: TypedBody<VPCCreateParams>,
-) -> Result<HttpResponseCreated<VPC>, HttpError> {
+    new_vpc: TypedBody<VpcCreateParams>,
+) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -751,7 +751,7 @@ async fn project_vpcs_post(
  }]
 async fn project_vpcs_delete_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VPCPathParam>,
+    path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

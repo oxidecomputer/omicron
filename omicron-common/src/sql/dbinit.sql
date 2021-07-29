@@ -249,7 +249,7 @@ CREATE TABLE omicron.public.OximeterAssignment (
  * VPCs and networking primitives
  */
 
-CREATE TABLE omicron.public.VPC (
+CREATE TABLE omicron.public.Vpc (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -261,13 +261,13 @@ CREATE TABLE omicron.public.VPC (
     project_id UUID NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.VPC (
+CREATE UNIQUE INDEX ON omicron.public.Vpc (
     name,
     project_id
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.VPCSubnet (
+CREATE TABLE omicron.public.VpcSubnet (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -282,7 +282,7 @@ CREATE TABLE omicron.public.VPCSubnet (
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
-CREATE UNIQUE INDEX ON omicron.public.VPCSubnet (
+CREATE UNIQUE INDEX ON omicron.public.VpcSubnet (
     name,
     vpc_id
 ) WHERE

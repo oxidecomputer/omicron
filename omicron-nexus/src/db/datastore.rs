@@ -51,7 +51,7 @@ use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
-use super::schema::VPC;
+use super::schema::Vpc;
 use super::sql::SqlSerialize;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
@@ -737,13 +737,13 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::VPC> {
+    ) -> ListResult<api::external::Vpc> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
-            VPC,
-            <VPC as Table>::ModelType,
-        >(&client, (project_id,), pagparams, VPC::ALL_COLUMNS)
+            Vpc,
+            <Vpc as Table>::ModelType,
+        >(&client, (project_id,), pagparams, Vpc::ALL_COLUMNS)
         .await
     }
 
@@ -751,8 +751,8 @@ impl DataStore {
         &self,
         vpc_id: &Uuid,
         project_id: &Uuid,
-        params: &api::external::VPCCreateParams,
-    ) -> Result<api::external::VPC, Error> {
+        params: &api::external::VpcCreateParams,
+    ) -> Result<api::external::Vpc, Error> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -762,7 +762,7 @@ impl DataStore {
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
 
-        sql_insert_unique_idempotent_and_fetch::<VPC, LookupByUniqueId>(
+        sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
             &client,
             &values,
             params.identity.name.as_str(),
@@ -777,9 +777,9 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         vpc_name: &Name,
-    ) -> LookupResult<api::external::VPC> {
+    ) -> LookupResult<api::external::Vpc> {
         let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueNameInProject, VPC>(
+        sql_fetch_row_by::<LookupByUniqueNameInProject, Vpc>(
             &client,
             (project_id,),
             vpc_name,
@@ -795,11 +795,11 @@ impl DataStore {
             format!(
                 "UPDATE {} SET time_deleted = $1 WHERE \
                     time_deleted IS NULL AND id = $2",
-                VPC::TABLE_NAME,
+                Vpc::TABLE_NAME,
             )
             .as_str(),
             &[&now, &vpc_id],
-            || Error::not_found_by_id(ResourceType::VPC, vpc_id),
+            || Error::not_found_by_id(ResourceType::Vpc, vpc_id),
         )
         .await
     }

@@ -4,8 +4,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectView;
-use omicron_common::api::external::VPCCreateParams;
-use omicron_common::api::external::VPC;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
@@ -53,13 +53,13 @@ async fn test_vpcs() {
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
     /* Create a VPC. */
-    let new_vpc = VPCCreateParams {
+    let new_vpc = VpcCreateParams {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from("just-rainsticks").unwrap(),
             description: String::from("sells rainsticks"),
         },
     };
-    let vpc: VPC = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
+    let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "sells rainsticks");
 
@@ -75,7 +75,7 @@ async fn test_vpcs() {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     /* creating a VPC with the same name in another project works, though */
-    let vpc2: VPC = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
+    let vpc2: Vpc = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
     assert_eq!(vpc2.identity.description, "sells rainsticks");
 
@@ -107,15 +107,15 @@ async fn test_vpcs() {
     cptestctx.teardown().await;
 }
 
-async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<VPC> {
-    objects_list_page::<VPC>(client, vpcs_url).await.items
+async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<Vpc> {
+    objects_list_page::<Vpc>(client, vpcs_url).await.items
 }
 
-async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> VPC {
-    object_get::<VPC>(client, vpc_url).await
+async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
+    object_get::<Vpc>(client, vpc_url).await
 }
 
-fn vpcs_eq(vpc1: &VPC, vpc2: &VPC) {
+fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
 }

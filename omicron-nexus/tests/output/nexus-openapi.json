@@ -990,7 +990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPCResultsPage"
+                  "$ref": "#/components/schemas/VpcResultsPage"
                 }
               }
             }
@@ -1016,7 +1016,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VPCCreateParams"
+                "$ref": "#/components/schemas/VpcCreateParams"
               }
             }
           },
@@ -1028,7 +1028,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPC"
+                  "$ref": "#/components/schemas/Vpc"
                 }
               }
             }
@@ -1066,7 +1066,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VPC"
+                  "$ref": "#/components/schemas/Vpc"
                 }
               }
             }
@@ -1887,7 +1887,7 @@
           "items"
         ]
       },
-      "VPC": {
+      "Vpc": {
         "description": "Identity-related metadata that's included in nearly all public API objects",
         "type": "object",
         "properties": {
@@ -1928,8 +1928,8 @@
           "timeModified"
         ]
       },
-      "VPCCreateParams": {
-        "description": "Create-time parameters for a [`VPC`]",
+      "VpcCreateParams": {
+        "description": "Create-time parameters for a [`Vpc`]",
         "type": "object",
         "properties": {
           "description": {
@@ -1944,7 +1944,7 @@
           "name"
         ]
       },
-      "VPCResultsPage": {
+      "VpcResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1952,7 +1952,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VPC"
+              "$ref": "#/components/schemas/Vpc"
             }
           },
           "next_page": {

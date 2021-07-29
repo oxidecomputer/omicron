@@ -435,7 +435,7 @@ pub enum ResourceType {
     Rack,
     Sled,
     SagaDbg,
-    VPC,
+    Vpc,
 }
 
 impl Display for ResourceType {
@@ -451,7 +451,7 @@ impl Display for ResourceType {
                 ResourceType::Rack => "rack",
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
-                ResourceType::VPC => "vpc",
+                ResourceType::Vpc => "vpc",
             }
         )
     }
@@ -1067,7 +1067,7 @@ impl From<steno::SagaStateView> for SagaStateView {
 
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct VPC {
+pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -1076,11 +1076,11 @@ pub struct VPC {
 }
 
 /**
- * Create-time parameters for a [`VPC`]
+ * Create-time parameters for a [`Vpc`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct VPCCreateParams {
+pub struct VpcCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
@@ -1196,7 +1196,7 @@ impl JsonSchema for Ipv6Net {
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(Clone, Debug)]
-pub struct VPCSubnet {
+pub struct VpcSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 

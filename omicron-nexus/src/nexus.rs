@@ -30,8 +30,8 @@ use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::SagaView;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::VPCCreateParams;
-use omicron_common::api::external::VPC;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::internal::nexus::Disk;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::Instance;
@@ -1006,7 +1006,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<VPC> {
+    ) -> ListResult<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_vpcs(&project_id, pagparams).await
@@ -1015,8 +1015,8 @@ impl Nexus {
     pub async fn project_create_vpc(
         &self,
         project_name: &Name,
-        params: &VPCCreateParams,
-    ) -> CreateResult<VPC> {
+        params: &VpcCreateParams,
+    ) -> CreateResult<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let id = Uuid::new_v4();
@@ -1031,7 +1031,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         vpc_name: &Name,
-    ) -> LookupResult<VPC> {
+    ) -> LookupResult<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await

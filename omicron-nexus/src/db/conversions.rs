@@ -12,7 +12,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::VPCCreateParams;
+use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterAssignment;
@@ -84,7 +84,7 @@ impl SqlSerialize for DiskState {
     }
 }
 
-impl SqlSerialize for VPCCreateParams {
+impl SqlSerialize for VpcCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.identity.sql_serialize(output);
     }
