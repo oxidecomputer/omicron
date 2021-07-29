@@ -46,6 +46,7 @@ use omicron_common::api::external::SagaView;
 use omicron_common::api::external::SledView;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcUpdateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -86,6 +87,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
         api.register(project_vpcs_get_vpc)?;
+        api.register(project_vpcs_put_vpc)?;
         api.register(project_vpcs_delete_vpc)?;
 
         api.register(hardware_racks_get)?;
@@ -740,6 +742,31 @@ async fn project_vpcs_post(
     let new_vpc_params = &new_vpc.into_inner();
     let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
     Ok(HttpResponseCreated(vpc))
+}
+
+/**
+ * Update a VPC.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_put_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    updated_vpc: TypedBody<VpcUpdateParams>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let new_vpc = nexus
+        .project_update_vpc(
+            &path.project_name,
+            &path.vpc_name,
+            &updated_vpc.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(new_vpc))
 }
 
 /**

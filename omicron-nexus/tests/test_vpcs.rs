@@ -1,11 +1,13 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectView;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcUpdateParams;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
@@ -88,6 +90,19 @@ async fn test_vpcs() {
     let vpc = vpc_get(&client, &vpc_url).await;
     vpcs_eq(&vpcs[0], &vpc);
 
+    /* Update the VPC with a new description */
+    let update_params = VpcUpdateParams {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("another description")),
+        },
+    };
+    vpc_put(&client, &vpc_url, update_params).await;
+
+    /* Fetch the VPC again. It should have the updated description. */
+    let vpc = vpc_get(&client, &vpc_url).await;
+    assert_eq!(&vpc.identity.description, "another description");
+
     /* Delete the VPC. */
     client
         .make_request_no_body(Method::DELETE, &vpc_url, StatusCode::NO_CONTENT)
@@ -113,6 +128,17 @@ async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<Vpc> {
 
 async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
     object_get::<Vpc>(client, vpc_url).await
+}
+
+async fn vpc_put(
+    client: &ClientTestContext,
+    vpc_url: &str,
+    params: VpcUpdateParams,
+) {
+    client
+        .make_request(Method::PUT, &vpc_url, Some(params), StatusCode::OK)
+        .await
+        .unwrap();
 }
 
 fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {

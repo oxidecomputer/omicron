@@ -773,6 +773,51 @@ impl DataStore {
         .await
     }
 
+    /*
+     * TODO-cleanup: this copies project update, but the fact that they have the
+     * same fields is only temporary. We need a more generic solution to updating
+     * some fields on a model, something along the lines of Diesel's AsChangeset.
+     */
+    pub async fn project_update_vpc(
+        &self,
+        vpc_id: &Uuid,
+        params: &api::external::VpcUpdateParams,
+    ) -> Result<api::external::Vpc, Error> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+
+        let mut sql =
+            format!("UPDATE {} SET time_modified = $1 ", Vpc::TABLE_NAME);
+        let mut sql_params: Vec<&(dyn ToSql + Sync)> = vec![&now];
+
+        if let Some(new_name) = &params.identity.name {
+            sql.push_str(&format!(", name = ${} ", sql_params.len() + 1));
+            sql_params.push(new_name);
+        }
+
+        if let Some(new_description) = &params.identity.description {
+            sql.push_str(&format!(
+                ", description = ${} ",
+                sql_params.len() + 1
+            ));
+            sql_params.push(new_description);
+        }
+
+        sql.push_str(&format!(
+            " WHERE id = ${} AND time_deleted IS NULL LIMIT 2 RETURNING {}",
+            sql_params.len() + 1,
+            Vpc::ALL_COLUMNS.join(", ")
+        ));
+        sql_params.push(vpc_id);
+
+        let row =
+            sql_query_maybe_one(&client, sql.as_str(), &sql_params, || {
+                Error::not_found_by_id(ResourceType::Vpc, vpc_id)
+            })
+            .await?;
+        Ok(api::external::Vpc::try_from(&row)?)
+    }
+
     pub async fn vpc_fetch_by_name(
         &self,
         project_id: &Uuid,

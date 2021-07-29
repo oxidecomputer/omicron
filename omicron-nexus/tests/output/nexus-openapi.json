@@ -1073,6 +1073,52 @@
           }
         }
       },
+      "put": {
+        "description": "Update a VPC.",
+        "operationId": "project_vpcs_put_vpc",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "description": "Delete a vpc from a project.",
         "operationId": "project_vpcs_delete_vpc",
@@ -1963,6 +2009,18 @@
         "required": [
           "items"
         ]
+      },
+      "VpcUpdateParams": {
+        "description": "Updateable properties of a [`Vpc`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        }
       },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
