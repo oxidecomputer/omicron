@@ -30,6 +30,10 @@ async fn test_vpcs() {
     let vpcs_url = format!("/projects/{}/vpcs", project_name);
     let _ = create_project(&client, &project_name).await;
 
+    let project_name2 = "pokemon";
+    let vpcs_url2 = format!("/projects/{}/vpcs", project_name2);
+    let _ = create_project(&client, &project_name2).await;
+
     /* List vpcs.  There aren't any yet. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 0);
@@ -64,11 +68,16 @@ async fn test_vpcs() {
         .make_request_error_body(
             Method::POST,
             &vpcs_url,
-            new_vpc,
+            new_vpc.clone(),
             StatusCode::BAD_REQUEST,
         )
         .await;
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
+
+    /* creating a VPC with the same name in another project works, though */
+    let vpc2: VPC = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
+    assert_eq!(vpc2.identity.name, "just-rainsticks");
+    assert_eq!(vpc2.identity.description, "sells rainsticks");
 
     /* List VPCs again and expect to find the one we just created. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
