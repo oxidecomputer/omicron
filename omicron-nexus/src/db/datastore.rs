@@ -762,17 +762,15 @@ impl DataStore {
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
 
-        let vpc =
-            sql_insert_unique_idempotent_and_fetch::<VPC, LookupByUniqueId>(
-                &client,
-                &values,
-                params.identity.name.as_str(),
-                "id",
-                (),
-                &vpc_id,
-            )
-            .await?;
-        Ok(vpc)
+        sql_insert_unique_idempotent_and_fetch::<VPC, LookupByUniqueId>(
+            &client,
+            &values,
+            params.identity.name.as_str(),
+            "id",
+            (),
+            &vpc_id,
+        )
+        .await
     }
 
     pub async fn vpc_fetch_by_name(
@@ -796,10 +794,8 @@ impl DataStore {
             &client,
             format!(
                 "UPDATE {} SET time_deleted = $1 WHERE \
-                    time_deleted IS NULL AND id = $2 LIMIT 2 \
-                    RETURNING {}",
+                    time_deleted IS NULL AND id = $2",
                 VPC::TABLE_NAME,
-                VPC::ALL_COLUMNS.join(", ")
             )
             .as_str(),
             &[&now, &vpc_id],
