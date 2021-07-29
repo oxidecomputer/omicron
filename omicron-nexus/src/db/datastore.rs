@@ -737,7 +737,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::VPC> {
+    ) -> ListResult<api::external::VPC> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -752,7 +752,7 @@ impl DataStore {
         vpc_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::VPCCreateParams,
-    ) -> Result<api::internal::nexus::VPC, Error> {
+    ) -> Result<api::external::VPC, Error> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -777,7 +777,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         vpc_name: &Name,
-    ) -> LookupResult<api::internal::nexus::VPC> {
+    ) -> LookupResult<api::external::VPC> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, VPC>(
             &client,

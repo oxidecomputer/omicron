@@ -92,14 +92,6 @@ pub struct InstanceRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug)]
-pub struct VPC {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-    /** id for the project containing this VPC */
-    pub project_id: Uuid,
-}
-
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {

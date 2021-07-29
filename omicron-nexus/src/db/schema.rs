@@ -154,7 +154,7 @@ impl Table for OximeterAssignment {
 /** Describes the "VPC" table */
 pub struct VPC;
 impl Table for VPC {
-    type ModelType = api::internal::nexus::VPC;
+    type ModelType = api::external::VPC;
     const TABLE_NAME: &'static str = "VPC";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

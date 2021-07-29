@@ -24,8 +24,6 @@ extern crate slog;
 async fn test_vpcs() {
     let cptestctx = test_setup("test_vpcs").await;
     let client = &cptestctx.external_client;
-    // let apictx = &cptestctx.server.apictx;
-    // let nexus = &apictx.nexus;
 
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";

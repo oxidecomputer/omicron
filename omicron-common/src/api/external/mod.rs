@@ -1075,12 +1075,6 @@ pub struct VPC {
     pub project_id: Uuid,
 }
 
-impl From<crate::api::internal::nexus::VPC> for VPC {
-    fn from(vpc: crate::api::internal::nexus::VPC) -> Self {
-        VPC { identity: vpc.identity, project_id: vpc.project_id }
-    }
-}
-
 /**
  * Create-time parameters for a [`VPC`]
  */

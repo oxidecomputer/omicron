@@ -718,7 +718,7 @@ async fn project_vpcs_get_vpc(
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
-    Ok(HttpResponseOk(vpc.into()))
+    Ok(HttpResponseOk(vpc))
 }
 
 /**
@@ -739,7 +739,7 @@ async fn project_vpcs_post(
     let project_name = &path.project_name;
     let new_vpc_params = &new_vpc.into_inner();
     let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
-    Ok(HttpResponseCreated(vpc.into()))
+    Ok(HttpResponseCreated(vpc))
 }
 
 /**
