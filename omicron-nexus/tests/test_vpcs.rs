@@ -28,17 +28,7 @@ async fn test_vpcs() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let vpcs_url = format!("/projects/{}/vpcs", project_name);
-    let _: ProjectView = objects_post(
-        &client,
-        "/projects",
-        ProjectCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
-                description: "a pier".to_string(),
-            },
-        },
-    )
-    .await;
+    let _ = create_project(&client, &project_name).await;
 
     /* List vpcs.  There aren't any yet. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -119,4 +109,21 @@ async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> VPC {
 fn vpcs_eq(vpc1: &VPC, vpc2: &VPC) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
+}
+
+async fn create_project(
+    client: &ClientTestContext,
+    project_name: &str,
+) -> ProjectView {
+    objects_post(
+        &client,
+        "/projects",
+        ProjectCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from(project_name).unwrap(),
+                description: "a pier".to_string(),
+            },
+        },
+    )
+    .await
 }
