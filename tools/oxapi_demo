@@ -157,6 +157,12 @@ function cmd_project_list_disks
 	do_curl "/projects/$1/disks"
 }
 
+function cmd_project_list_vpcs
+{
+	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
+	do_curl "/projects/$1/vpcs"
+}
+
 function cmd_instance_create_demo
 {
 	# memory is 1024 * 1024 * 256
@@ -237,6 +243,25 @@ function cmd_disk_delete
 {
 	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
 	do_curl "/projects/$1/disks/$2" -X DELETE
+}
+
+function cmd_vpc_create_demo
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	mkjson name="$2" description="a disk called $2" |
+	    do_curl "/projects/$1/vpcs" -X POST -T -
+}
+
+function cmd_vpc_get
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	do_curl "/projects/$1/vpcs/$2"
+}
+
+function cmd_vpc_delete
+{
+	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	do_curl "/projects/$1/vpcs/$2" -X DELETE
 }
 
 function cmd_racks_list

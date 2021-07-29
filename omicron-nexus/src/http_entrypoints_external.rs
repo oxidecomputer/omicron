@@ -44,6 +44,8 @@ use omicron_common::api::external::ProjectView;
 use omicron_common::api::external::RackView;
 use omicron_common::api::external::SagaView;
 use omicron_common::api::external::SledView;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -80,6 +82,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_get_disk)?;
         api.register(instance_disks_put_disk)?;
         api.register(instance_disks_delete_disk)?;
+
+        api.register(project_vpcs_get)?;
+        api.register(project_vpcs_post)?;
+        api.register(project_vpcs_get_vpc)?;
+        api.register(project_vpcs_delete_vpc)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -651,6 +658,107 @@ async fn instance_disks_delete_disk(
     nexus
         .instance_detach_disk(&project_name, &instance_name, &disk_name)
         .await?;
+    Ok(HttpResponseDeleted())
+}
+
+/*
+ * VPCs
+ */
+
+/**
+ * List VPCs in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_stream = nexus
+        .project_list_vpcs(
+            &project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    let view_list = to_list(vpc_stream).await;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+}
+
+/**
+ * Path parameters for VPC requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    project_name: Name,
+    vpc_name: Name,
+}
+
+/**
+ * Get a VPC in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_get_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
+    Ok(HttpResponseOk(vpc))
+}
+
+/**
+ * Create a VPC in a project.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_vpc: TypedBody<VpcCreateParams>,
+) -> Result<HttpResponseCreated<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_vpc_params = &new_vpc.into_inner();
+    let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
+    Ok(HttpResponseCreated(vpc))
+}
+
+/**
+ * Delete a vpc from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_delete_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    nexus.project_delete_vpc(&project_name, &vpc_name).await?;
     Ok(HttpResponseDeleted())
 }
 

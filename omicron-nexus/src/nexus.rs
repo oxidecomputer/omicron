@@ -30,6 +30,8 @@ use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::SagaView;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::internal::nexus::Disk;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::Instance;
@@ -998,6 +1000,50 @@ impl Nexus {
             .disk_update_runtime(&disk.identity.id, &new_runtime)
             .await
             .map(|_| ())
+    }
+
+    pub async fn project_list_vpcs(
+        &self,
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<Vpc> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore.project_list_vpcs(&project_id, pagparams).await
+    }
+
+    pub async fn project_create_vpc(
+        &self,
+        project_name: &Name,
+        params: &VpcCreateParams,
+    ) -> CreateResult<Vpc> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let id = Uuid::new_v4();
+        let vpc = self
+            .db_datastore
+            .project_create_vpc(&id, &project_id, params)
+            .await?;
+        Ok(vpc)
+    }
+
+    pub async fn project_lookup_vpc(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<Vpc> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await
+    }
+
+    pub async fn project_delete_vpc(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> DeleteResult {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        self.db_datastore.project_delete_vpc(&vpc.identity.id).await
     }
 
     /*

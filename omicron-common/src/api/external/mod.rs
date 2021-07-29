@@ -435,6 +435,7 @@ pub enum ResourceType {
     Rack,
     Sled,
     SagaDbg,
+    Vpc,
 }
 
 impl Display for ResourceType {
@@ -450,6 +451,7 @@ impl Display for ResourceType {
                 ResourceType::Rack => "rack",
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
+                ResourceType::Vpc => "vpc",
             }
         )
     }
@@ -1063,13 +1065,24 @@ impl From<steno::SagaStateView> for SagaStateView {
     }
 }
 
-/// A Virtual Private Cloud (VPC) object.
-#[derive(Clone, Debug)]
-pub struct VPC {
-    /** common identifying metadata */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Vpc {
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /** id for the project containing this Instance */
+
+    /** id for the project containing this VPC */
     pub project_id: Uuid,
+}
+
+/**
+ * Create-time parameters for a [`Vpc`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
@@ -1183,7 +1196,7 @@ impl JsonSchema for Ipv6Net {
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(Clone, Debug)]
-pub struct VPCSubnet {
+pub struct VpcSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 
