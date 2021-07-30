@@ -2,6 +2,7 @@
 
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::MacAddr;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
 
@@ -34,10 +35,24 @@ impl Dladm {
     }
 
     /// Creates a new VNIC atop a physical device.
-    pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), Error> {
+    pub fn create_vnic(physical: &str, vnic_name: &str, mac: Option<MacAddr>) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
+        let mut args = vec![
+            DLADM.to_string(),
+            "create-vnic".to_string(),
+            "-t".to_string(),
+            "-l".to_string(),
+            physical.to_string(),
+        ];
+
+        if let Some(mac) = mac {
+            args.push("-m".to_string());
+            args.push(mac.0.to_string());
+        }
+
+        args.push(vnic_name.to_string());
         let cmd =
-            command.args(&[DLADM, "create-vnic", "-l", physical, vnic_name]);
+            command.args(&args);
         execute(cmd)?;
         Ok(())
     }

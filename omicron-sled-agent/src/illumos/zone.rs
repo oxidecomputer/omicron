@@ -6,7 +6,6 @@ use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-use crate::illumos::dladm::DLADM;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -123,7 +122,7 @@ impl Zones {
     pub fn configure_child_zone(
         log: &Logger,
         name: &str,
-        vnic: &str,
+        vnics: Vec<String>,
     ) -> Result<(), Error> {
         info!(log, "Creating child zone: {}", name);
         let mut cfg = zone::Config::create(
@@ -142,10 +141,12 @@ impl Zones {
             options: vec!["ro".to_string()],
             ..Default::default()
         });
-        cfg.add_net(&zone::Net {
-            physical: vnic.to_string(),
-            ..Default::default()
-        });
+        for vnic in &vnics {
+            cfg.add_net(&zone::Net {
+                physical: vnic.to_string(),
+                ..Default::default()
+            });
+        }
         cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });
@@ -183,23 +184,6 @@ impl Zones {
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
-    }
-
-    /// Creates a VNIC within a zone.
-    // TODO: de-dup with "fn create_vnic" in dladm.rs?
-    pub fn create_vnic(zone: &str, physical: &str, vnic_name: &str) -> Result<(), Error> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZLOGIN,
-            zone,
-            DLADM,
-            "create-vnic",
-            "-l",
-            physical,
-            vnic_name
-        ]);
-        execute(cmd)?;
-        Ok(())
     }
 
     /// Creates an IP address within a Zone.

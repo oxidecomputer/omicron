@@ -332,23 +332,41 @@ impl Instance {
         let mut inner = self.inner.lock().await;
 
         // Create the VNIC which will be attached to the zone.
-        let physical_dl = Dladm::find_physical()?;
-        info!(inner.log, "Saw physical DL: {}", physical_dl);
-
+        //
         // It would be preferable to use the UUID of the instance as a component
         // of the "per-Zone, control plane VNIC", but VNIC names are somewhat
         // restrictive. They must end with numerics, and they must be less than
         // 32 characters.
         //
-        // Instead, we just use a per-agent incrementing number.
+        // Instead, we just use a per-agent incrementing number. We do the same
+        // for the guest-accessible NICs too.
+        let physical_dl = Dladm::find_physical()?;
+        info!(inner.log, "Saw physical DL: {}", physical_dl);
         let propolis_nic = vnic_name(inner.allocate_nic_id());
-        Dladm::create_vnic(&physical_dl, &propolis_nic)?;
+        Dladm::create_vnic(&physical_dl, &propolis_nic, None)?;
         info!(inner.log, "Created vnic: {}", propolis_nic);
 
+        // Instantiate all guest-requested VNICs.
+        //
+        // TODO: Ideally, we'd allocate VNICs directly within the Zone.
+        // However, this seems to have been a SmartOS feature which
+        // doesn't exist in illumos.
+        //
+        // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
+        let guest_nics = inner.nics.clone().into_iter().map(|nic| {
+            let nic_name = guest_vnic_name(inner.allocate_nic_id());
+            // TODO: IP allocation?
+            Dladm::create_vnic(&physical_dl, &nic_name, Some(nic.mac))?;
+            Ok(nic_name)
+        }).collect::<Result<Vec<_>, Error>>()?;
+
         // Create a zone for the propolis instance, using the previously
-        // configured VNIC.
+        // configured VNICs.
         let zname = zone_name(inner.id());
-        Zones::configure_child_zone(&inner.log, &zname, &propolis_nic)?;
+
+        let mut nics_to_put_in_zone = guest_nics.clone();
+        nics_to_put_in_zone.push(propolis_nic.clone());
+        Zones::configure_child_zone(&inner.log, &zname, nics_to_put_in_zone)?;
         info!(inner.log, "Configured child zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
@@ -390,13 +408,6 @@ impl Instance {
 
         inner.running_state =
             Some(RunningState { client, ticket, monitor_task: None });
-
-        // Instantiate all requested VNICs within the zone.
-        let guest_nics = (0..inner.nics.len()).into_iter().map(|_| {
-            let nic = guest_vnic_name(inner.allocate_nic_id());
-            Zones::create_vnic(&zname, &physical_dl, &nic)?;
-            Ok(nic)
-        }).collect::<Result<Vec<_>, Error>>()?;
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
@@ -721,7 +732,7 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|phys, vnic| {
+            .returning(|phys, vnic, maybe_mac| {
                 assert_eq!(phys, "physical");
                 assert_eq!(vnic, vnic_name(0));
                 Ok(())
