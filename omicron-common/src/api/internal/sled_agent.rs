@@ -40,7 +40,7 @@ impl DiskStateRequested {
 }
 
 /// Describes the instance hardware.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceHardware {
     pub runtime: internal::nexus::InstanceRuntimeState,
     pub nics: Vec<external::NetworkInterface>,
