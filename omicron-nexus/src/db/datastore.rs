@@ -19,6 +19,7 @@
  */
 
 use super::Pool;
+use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -786,35 +787,15 @@ impl DataStore {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
-        let mut sql =
-            format!("UPDATE {} SET time_modified = $1 ", Vpc::TABLE_NAME);
-        let mut sql_params: Vec<&(dyn ToSql + Sync)> = vec![&now];
+        let sql = project_update_vpc_sql(&now, vpc_id, params);
 
-        if let Some(new_name) = &params.identity.name {
-            sql.push_str(&format!(", name = ${} ", sql_params.len() + 1));
-            sql_params.push(new_name);
-        }
-
-        if let Some(new_description) = &params.identity.description {
-            sql.push_str(&format!(
-                ", description = ${} ",
-                sql_params.len() + 1
-            ));
-            sql_params.push(new_description);
-        }
-
-        sql.push_str(&format!(
-            " WHERE id = ${} AND time_deleted IS NULL LIMIT 2 RETURNING {}",
-            sql_params.len() + 1,
-            Vpc::ALL_COLUMNS.join(", ")
-        ));
-        sql_params.push(vpc_id);
-
-        let row =
-            sql_query_maybe_one(&client, sql.as_str(), &sql_params, || {
-                Error::not_found_by_id(ResourceType::Vpc, vpc_id)
-            })
-            .await?;
+        let row = sql_query_maybe_one(
+            &client,
+            sql.sql_fragment(),
+            sql.sql_params(),
+            || Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+        )
+        .await?;
         Ok(api::external::Vpc::try_from(&row)?)
     }
 
@@ -847,5 +828,90 @@ impl DataStore {
             || Error::not_found_by_id(ResourceType::Vpc, vpc_id),
         )
         .await
+    }
+}
+
+fn project_update_vpc_sql<'a>(
+    now: &'a DateTime<Utc>,
+    vpc_id: &'a Uuid,
+    params: &'a api::external::VpcUpdateParams,
+) -> SqlString<'a> {
+    let mut sql = SqlString::new();
+    sql.push_str(&format!(
+        "UPDATE {} SET time_modified = $1 ",
+        Vpc::TABLE_NAME
+    ));
+    sql.next_param(now);
+
+    if let Some(new_name) = &params.identity.name {
+        sql.next_param(new_name);
+        sql.push_str(&format!(", name = ${} ", sql.sql_params().len()));
+    }
+
+    if let Some(new_description) = &params.identity.description {
+        sql.next_param(new_description);
+        sql.push_str(&format!(", description = ${} ", sql.sql_params().len()));
+    }
+
+    sql.next_param(vpc_id);
+    sql.push_str(&format!(
+        " WHERE id = ${} AND time_deleted IS NULL LIMIT 2 RETURNING {}",
+        sql.sql_params().len(),
+        Vpc::ALL_COLUMNS.join(", ")
+    ));
+    sql
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_update_vpc_sql;
+    use chrono::Utc;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
+    use omicron_common::api::external::Name;
+    use omicron_common::api::external::VpcUpdateParams;
+    use std::convert::TryFrom;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_project_update_sql_with_name() {
+        let now = Utc::now();
+        let vpc_id = Uuid::new_v4();
+        let name = Name::try_from(String::from("a-vpc")).unwrap();
+        let params = VpcUpdateParams {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(name),
+                description: None,
+            },
+        };
+        let sql = project_update_vpc_sql(&now, &vpc_id, &params);
+        assert_eq!(
+            "UPDATE Vpc SET time_modified = $1 , name = $2  \
+             WHERE id = $3 AND time_deleted IS NULL LIMIT 2 \
+             RETURNING id, name, description, time_created, time_modified, time_deleted, project_id", 
+            sql.sql_fragment()
+        );
+        // not sure how to fix the type errors that come from asserting the contents of the vec
+        assert_eq!(sql.sql_params().len(), 3);
+    }
+
+    #[test]
+    fn test_project_update_sql_with_desc() {
+        let now = Utc::now();
+        let vpc_id = Uuid::new_v4();
+        let description = String::from("desc");
+        let params = VpcUpdateParams {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(description),
+            },
+        };
+        let sql = project_update_vpc_sql(&now, &vpc_id, &params);
+        assert_eq!(
+            "UPDATE Vpc SET time_modified = $1 , description = $2  \
+             WHERE id = $3 AND time_deleted IS NULL LIMIT 2 \
+             RETURNING id, name, description, time_created, time_modified, time_deleted, project_id", 
+            sql.sql_fragment()
+        );
+        assert_eq!(sql.sql_params().len(), 3);
     }
 }
