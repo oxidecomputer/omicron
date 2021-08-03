@@ -1046,9 +1046,9 @@ impl Nexus {
     ) -> UpdateResult<()> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        let vpc =
-            self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        self.db_datastore.project_update_vpc(&vpc.identity.id, params).await
+        self.db_datastore
+            .project_update_vpc(&project_id, &vpc_name, params)
+            .await
     }
 
     pub async fn project_delete_vpc(
