@@ -755,18 +755,18 @@ async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<VpcUpdateParams>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
+) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let new_vpc = nexus
+    nexus
         .project_update_vpc(
             &path.project_name,
             &path.vpc_name,
             &updated_vpc.into_inner(),
         )
         .await?;
-    Ok(HttpResponseOk(new_vpc))
+    Ok(HttpResponseOk(()))
 }
 
 /**

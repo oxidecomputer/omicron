@@ -1043,7 +1043,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcUpdateParams,
-    ) -> UpdateResult<Vpc> {
+    ) -> UpdateResult<()> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpc =
