@@ -773,11 +773,6 @@ impl DataStore {
         .await
     }
 
-    /*
-     * TODO-cleanup: this copies project update, but the fact that they have the
-     * same fields is only temporary. We need a more generic solution to updating
-     * some fields on a model, something along the lines of Diesel's AsChangeset.
-     */
     pub async fn project_update_vpc(
         &self,
         project_id: &Uuid,
@@ -813,6 +808,8 @@ impl DataStore {
         )
         .await?;
 
+        // TODO-correctness figure out how to get sql_update_precond to return
+        // the whole row
         Ok(())
     }
 
