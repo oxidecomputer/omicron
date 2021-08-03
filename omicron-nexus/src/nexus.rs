@@ -32,6 +32,7 @@ use omicron_common::api::external::SagaView;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus::Disk;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::Instance;
@@ -1035,6 +1036,19 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await
+    }
+
+    pub async fn project_update_vpc(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcUpdateParams,
+    ) -> UpdateResult<()> {
+        let project_id =
+            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        self.db_datastore
+            .project_update_vpc(&project_id, &vpc_name, params)
+            .await
     }
 
     pub async fn project_delete_vpc(

@@ -773,6 +773,46 @@ impl DataStore {
         .await
     }
 
+    pub async fn project_update_vpc(
+        &self,
+        project_id: &Uuid,
+        vpc_name: &Name,
+        params: &api::external::VpcUpdateParams,
+    ) -> Result<(), Error> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+
+        let mut values = SqlValueSet::new();
+        values.set("time_modified", &now);
+
+        if let Some(new_name) = &params.identity.name {
+            values.set("name", new_name);
+        }
+
+        if let Some(new_description) = &params.identity.description {
+            values.set("description", new_description);
+        }
+
+        // dummy condition because sql_update_precond breaks otherwise
+        // TODO-cleanup: write sql_update that takes no preconditions?
+        let mut cond_sql = SqlString::new();
+        cond_sql.push_str("true");
+
+        sql_update_precond::<Vpc, LookupByUniqueNameInProject>(
+            &client,
+            (project_id,),
+            vpc_name,
+            &[],
+            &values,
+            cond_sql,
+        )
+        .await?;
+
+        // TODO-correctness figure out how to get sql_update_precond to return
+        // the whole row
+        Ok(())
+    }
+
     pub async fn vpc_fetch_by_name(
         &self,
         project_id: &Uuid,
