@@ -312,16 +312,19 @@ impl Nexus {
 
         // Create a default VPC associated with the project.
         let vpc_id = Uuid::new_v4();
-        let _ = self.db_datastore.project_create_vpc(
-            &vpc_id,
-            &project_id,
-            &VpcCreateParams {
-                identity: IdentityMetadataCreateParams {
-                    name: Name::try_from("default").unwrap(),
-                    description: "Default VPC".to_string(),
+        let _ = self
+            .db_datastore
+            .project_create_vpc(
+                &vpc_id,
+                &project_id,
+                &VpcCreateParams {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from("default").unwrap(),
+                        description: "Default VPC".to_string(),
+                    },
                 },
-            },
-        );
+            )
+            .await?;
 
         Ok(project)
     }

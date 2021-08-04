@@ -19,7 +19,6 @@ pub mod common;
 use common::identity_eq;
 use common::test_setup;
 
-#[macro_use]
 extern crate slog;
 
 #[tokio::test]
@@ -36,9 +35,11 @@ async fn test_vpcs() {
     let vpcs_url2 = format!("/projects/{}/vpcs", project_name2);
     let _ = create_project(&client, &project_name2).await;
 
-    /* List vpcs.  There aren't any yet. */
-    let vpcs = vpcs_list(&client, &vpcs_url).await;
-    assert_eq!(vpcs.len(), 0);
+    /* List vpcs.  We see the default VPC, and nothing else. */
+    let mut vpcs = vpcs_list(&client, &vpcs_url).await;
+    assert_eq!(vpcs.len(), 1);
+    assert_eq!(vpcs[0].identity.name, "default");
+    let default_vpc = vpcs.remove(0);
 
     /* Make sure we get a 404 if we fetch one. */
     let vpc_url = format!("{}/just-rainsticks", vpcs_url);
@@ -83,12 +84,13 @@ async fn test_vpcs() {
 
     /* List VPCs again and expect to find the one we just created. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
-    assert_eq!(vpcs.len(), 1);
-    vpcs_eq(&vpcs[0], &vpc);
+    assert_eq!(vpcs.len(), 2);
+    vpcs_eq(&vpcs[0], &default_vpc);
+    vpcs_eq(&vpcs[1], &vpc);
 
     /* Fetch the VPC and expect it to match. */
     let vpc = vpc_get(&client, &vpc_url).await;
-    vpcs_eq(&vpcs[0], &vpc);
+    vpcs_eq(&vpcs[1], &vpc);
 
     /* Update the VPC with a new description */
     let update_params = VpcUpdateParams {
@@ -115,9 +117,10 @@ async fn test_vpcs() {
         .await;
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
-    /* And the list should be empty again */
+    /* And the list should be empty (aside from default VPC) again */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
-    assert_eq!(vpcs.len(), 0);
+    assert_eq!(vpcs.len(), 1);
+    vpcs_eq(&vpcs[0], &default_vpc);
 
     cptestctx.teardown().await;
 }
