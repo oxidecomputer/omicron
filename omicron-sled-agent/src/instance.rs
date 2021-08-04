@@ -794,15 +794,15 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|| Ok("physical".to_string()));
+            .returning(|| Ok(PhysicalLink("physical".to_string())));
 
         let dladm_create_vnic_ctx = MockDladm::create_vnic_context();
         dladm_create_vnic_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|phys, vnic, maybe_mac| {
-                assert_eq!(phys, "physical");
+            .returning(|phys, vnic, _maybe_mac| {
+                assert_eq!(phys.0, "physical");
                 assert_eq!(vnic, vnic_name(0));
                 Ok(())
             });
@@ -813,9 +813,10 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, zone, vnic| {
+            .returning(|_, zone, vnics| {
                 assert_eq!(zone, zone_name(&test_uuid()));
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnics.len(), 1);
+                assert_eq!(vnics[0], vnic_name(0));
                 Ok(())
             });
 

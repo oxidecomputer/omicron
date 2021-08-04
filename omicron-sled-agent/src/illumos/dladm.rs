@@ -10,7 +10,7 @@ pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// The name of a physical datalink.
 #[derive(Debug)]
-pub struct PhysicalLink(String);
+pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
