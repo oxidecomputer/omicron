@@ -2,10 +2,14 @@
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
+use crate::illumos::{
+    dladm::{PhysicalLink, VNIC_PREFIX},
+    zone::ZONE_PREFIX
+};
 use crate::instance_manager::{IdAllocator, InstanceTicket};
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -132,12 +136,71 @@ impl Drop for RunningState {
     }
 }
 
+/// Represents an allocated VNIC on the system.
+/// The VNIC is de-allocated when it goes out of scope.
+///
+/// Note that the "ownership" of the VNIC is based on convention;
+/// another process in the global zone could also modify / destroy
+/// the VNIC while this object is alive.
+#[derive(Debug)]
+struct Vnic {
+    name: String,
+    deleted: bool,
+}
+
+impl Vnic {
+    // Creates a new NIC, intended for usage by the guest.
+    fn new_guest(
+       allocator: &IdAllocator,
+       physical_dl: &PhysicalLink,
+       mac: Option<MacAddr>
+    ) -> Result<Self, Error> {
+        let name = guest_vnic_name(allocator.next());
+        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Ok(Vnic {
+            name,
+            deleted: false,
+        })
+    }
+
+    // Creates a new NIC, intended for allowing Propolis to communicate
+    // with the control plane.
+    fn new_control(
+       allocator: &IdAllocator,
+       physical_dl: &PhysicalLink,
+       mac: Option<MacAddr>
+    ) -> Result<Self, Error> {
+        let name = vnic_name(allocator.next());
+        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Ok(Vnic {
+            name,
+            deleted: false,
+        })
+    }
+
+    // Deletes a NIC (if it has not already been deleted).
+    fn delete(&mut self) -> Result<(), Error> {
+        if self.deleted {
+            Ok(())
+        } else {
+            self.deleted = true;
+            Dladm::delete_vnic(&self.name)
+        }
+    }
+}
+
+impl Drop for Vnic {
+    fn drop(&mut self) {
+        let _ = self.delete();
+    }
+}
+
 struct InstanceInner {
     log: Logger,
     nic_id_allocator: IdAllocator,
     properties: propolis_client::api::InstanceProperties,
-    nics: Vec<NetworkInterface>,
-    allocated_nics: Vec<String>,
+    requested_nics: Vec<NetworkInterface>,
+    allocated_nics: Vec<Vnic>,
     state: InstanceStates,
     nexus_client: Arc<NexusClient>,
     running_state: Option<RunningState>,
@@ -146,12 +209,6 @@ struct InstanceInner {
 impl InstanceInner {
     fn id(&self) -> &Uuid {
         &self.properties.id
-    }
-
-    fn allocate_nic_id(&mut self) -> u64 {
-        let id = self.nic_id_allocator.next();
-        self.allocated_nics.push(vnic_name(id));
-        id
     }
 
     async fn observe_state(
@@ -197,11 +254,11 @@ impl InstanceInner {
             })
     }
 
-    async fn ensure(&self, guest_nics: Vec<String>) -> Result<(), Error> {
+    async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
-        let nics = self.nics.iter().enumerate().map(|(i, _)| {
+        let nics = self.requested_nics.iter().enumerate().map(|(i, _)| {
             propolis_client::api::NetworkInterfaceRequest {
-                name: guest_nics[i].clone(),
+                name: guest_nics[i].name.clone(),
                 slot: propolis_client::api::Slot(i as u8),
             }
         }).collect();
@@ -211,6 +268,7 @@ impl InstanceInner {
             nics,
         };
 
+        info!(self.log, "Sending ensure request to propolis: {:?}", request);
         self.running_state
             .as_ref()
             .expect("Propolis client should be initialized before usage")
@@ -299,6 +357,7 @@ impl Instance {
         initial: InstanceHardware,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
+        info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
             nic_id_allocator,
@@ -315,7 +374,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
-            nics: initial.nics,
+            requested_nics: initial.nics,
             allocated_nics: vec![],
             state: InstanceStates::new(initial.runtime),
             nexus_client,
@@ -341,10 +400,7 @@ impl Instance {
         // Instead, we just use a per-agent incrementing number. We do the same
         // for the guest-accessible NICs too.
         let physical_dl = Dladm::find_physical()?;
-        info!(inner.log, "Saw physical DL: {}", physical_dl);
-        let propolis_nic = vnic_name(inner.allocate_nic_id());
-        Dladm::create_vnic(&physical_dl, &propolis_nic, None)?;
-        info!(inner.log, "Created vnic: {}", propolis_nic);
+        let control_nic = Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
 
         // Instantiate all guest-requested VNICs.
         //
@@ -353,19 +409,19 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
-        let guest_nics = inner.nics.clone().into_iter().map(|nic| {
-            let nic_name = guest_vnic_name(inner.allocate_nic_id());
-            // TODO: IP allocation?
-            Dladm::create_vnic(&physical_dl, &nic_name, Some(nic.mac))?;
-            Ok(nic_name)
+        let guest_nics = inner.requested_nics.clone().into_iter().map(|nic| {
+            Vnic::new_guest(&inner.nic_id_allocator, &physical_dl, Some(nic.mac))
         }).collect::<Result<Vec<_>, Error>>()?;
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = zone_name(inner.id());
 
-        let mut nics_to_put_in_zone = guest_nics.clone();
-        nics_to_put_in_zone.push(propolis_nic.clone());
+        let nics_to_put_in_zone: Vec<String> = guest_nics.iter()
+            .map(|nic| nic.name.clone())
+            .chain(std::iter::once(control_nic.name.clone()))
+            .collect();
+
         Zones::configure_child_zone(&inner.log, &zname, nics_to_put_in_zone)?;
         info!(inner.log, "Configured child zone: {}", zname);
 
@@ -381,7 +437,7 @@ impl Instance {
             .await?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
-        let ip = Zones::create_address(&zname, &interface_name(&propolis_nic))?;
+        let ip = Zones::create_address(&zname, &interface_name(&control_nic.name))?;
         info!(inner.log, "Created address {} for zone: {}", ip, zname);
 
         // Run Propolis in the Zone.
@@ -411,7 +467,7 @@ impl Instance {
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(guest_nics).await?;
+        inner.ensure(&guest_nics).await?;
 
         // Monitor propolis for state changes in the background.
         let self_clone = self.clone();
@@ -425,6 +481,10 @@ impl Instance {
                 }
             }));
 
+        // Store the VNICs while the instance is running.
+        inner.allocated_nics =
+            guest_nics.into_iter().chain(std::iter::once(control_nic)).collect();
+
         Ok(())
     }
 
@@ -435,8 +495,17 @@ impl Instance {
         let zname = zone_name(inner.id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
-        for nic in &inner.allocated_nics {
-            Dladm::delete_vnic(&nic)?;
+
+        // Explicitly remove NICs.
+        //
+        // The NICs would self-delete on drop anyway, but this allows us
+        // to explicitly record errors.
+        let mut nics = vec![];
+        std::mem::swap(&mut inner.allocated_nics, &mut nics);
+        for mut nic in nics {
+            if let Err(e) = nic.delete() {
+                error!(inner.log, "Failed to delete NIC {:?}: {}", nic, e);
+            }
         }
         inner.running_state.as_mut().unwrap().ticket.terminate();
 

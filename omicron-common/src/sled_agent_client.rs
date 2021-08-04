@@ -55,13 +55,13 @@ impl Client {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         instance_id: Uuid,
-        initial_runtime: InstanceHardware,
+        initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let path = format!("/instances/{}", instance_id);
         let body = Body::from(
             serde_json::to_string(&InstanceEnsureBody {
-                initial_runtime,
+                initial,
                 target,
             })
             .unwrap(),

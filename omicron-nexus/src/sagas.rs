@@ -12,6 +12,7 @@
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
+use omicron_common::api::external;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
@@ -22,6 +23,7 @@ use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -154,7 +156,22 @@ async fn sic_create_instance_record(
         .map_err(ActionError::action_failed)?;
     Ok(InstanceHardware {
         runtime: instance.runtime,
-        nics: vec![],
+        // TODO TODO TODO: Avoid hard-coding!
+        nics: vec![
+            external::NetworkInterface {
+                identity: external::IdentityMetadata {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from("my-nic".to_string()).unwrap(),
+                    description: "Look a VNIC".to_string(),
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                },
+                vpc_id: Uuid::new_v4(),
+                subnet_id: Uuid::new_v4(),
+                mac: external::MacAddr(macaddr::MacAddr6::new(2, 8, 20, 1, 6, 24)),
+                ip: std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 8)),
+            }
+        ],
     })
 }
 

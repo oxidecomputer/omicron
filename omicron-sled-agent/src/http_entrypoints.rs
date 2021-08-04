@@ -56,7 +56,7 @@ async fn instance_put(
     Ok(HttpResponseOk(
         sa.instance_ensure(
             instance_id,
-            body_args.initial_runtime,
+            body_args.initial,
             body_args.target,
         )
         .await?,

@@ -51,7 +51,7 @@ pub struct InstanceHardware {
 pub struct InstanceEnsureBody {
     /// Last runtime state of the Instance known to Nexus (used if the agent
     /// has never seen this Instance before).
-    pub initial_runtime: InstanceHardware,
+    pub initial: InstanceHardware,
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
 }

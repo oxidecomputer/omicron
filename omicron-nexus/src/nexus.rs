@@ -11,6 +11,7 @@ use chrono::Utc;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
+use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -753,8 +754,13 @@ impl Nexus {
          * not the newest one, that's fine.  That might just mean the sled agent
          * beat us to it.
          */
+
         let instance_hardware = InstanceHardware {
             runtime: instance.runtime.clone(),
+            // TODO TODO TODO: Avoid hard-coding this NIC!
+            //
+            // TODO: also, this same thing is called in sagas.rs.
+            // When is one used vs the other?
             nics: vec![],
         };
 
