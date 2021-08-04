@@ -20,6 +20,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
@@ -297,8 +298,32 @@ impl Nexus {
         &self,
         new_project: &ProjectCreateParams,
     ) -> CreateResult<Project> {
-        let id = Uuid::new_v4();
-        Ok(self.db_datastore.project_create_with_id(&id, new_project).await?)
+        // TODO: We probably want to have "project creation" and "default VPC
+        // creation" co-located within a saga for atomicity.
+        //
+        // Until then, we just perform the operations sequentially.
+
+        // Create a project.
+        let project_id = Uuid::new_v4();
+        let project = self
+            .db_datastore
+            .project_create_with_id(&project_id, new_project)
+            .await?;
+
+        // Create a default VPC associated with the project.
+        let vpc_id = Uuid::new_v4();
+        let _ = self.db_datastore.project_create_vpc(
+            &vpc_id,
+            &project_id,
+            &VpcCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from("default").unwrap(),
+                    description: "Default VPC".to_string(),
+                },
+            },
+        );
+
+        Ok(project)
     }
 
     pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
