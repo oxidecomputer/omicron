@@ -51,6 +51,7 @@ use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Project;
+use super::schema::Vpc;
 use super::sql::SqlSerialize;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
@@ -730,5 +731,116 @@ impl DataStore {
             found_saga_state,
         );
         Ok(())
+    }
+
+    pub async fn project_list_vpcs(
+        &self,
+        project_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResult<api::external::Vpc> {
+        let client = self.pool.acquire().await?;
+        sql_fetch_page_by::<
+            LookupByUniqueNameInProject,
+            Vpc,
+            <Vpc as Table>::ModelType,
+        >(&client, (project_id,), pagparams, Vpc::ALL_COLUMNS)
+        .await
+    }
+
+    pub async fn project_create_vpc(
+        &self,
+        vpc_id: &Uuid,
+        project_id: &Uuid,
+        params: &api::external::VpcCreateParams,
+    ) -> Result<api::external::Vpc, Error> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        let mut values = SqlValueSet::new();
+        values.set("id", vpc_id);
+        values.set("time_created", &now);
+        values.set("time_modified", &now);
+        values.set("project_id", project_id);
+        params.sql_serialize(&mut values);
+
+        sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
+            &client,
+            &values,
+            params.identity.name.as_str(),
+            "id",
+            (),
+            &vpc_id,
+        )
+        .await
+    }
+
+    pub async fn project_update_vpc(
+        &self,
+        project_id: &Uuid,
+        vpc_name: &Name,
+        params: &api::external::VpcUpdateParams,
+    ) -> Result<(), Error> {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+
+        let mut values = SqlValueSet::new();
+        values.set("time_modified", &now);
+
+        if let Some(new_name) = &params.identity.name {
+            values.set("name", new_name);
+        }
+
+        if let Some(new_description) = &params.identity.description {
+            values.set("description", new_description);
+        }
+
+        // dummy condition because sql_update_precond breaks otherwise
+        // TODO-cleanup: write sql_update that takes no preconditions?
+        let mut cond_sql = SqlString::new();
+        cond_sql.push_str("true");
+
+        sql_update_precond::<Vpc, LookupByUniqueNameInProject>(
+            &client,
+            (project_id,),
+            vpc_name,
+            &[],
+            &values,
+            cond_sql,
+        )
+        .await?;
+
+        // TODO-correctness figure out how to get sql_update_precond to return
+        // the whole row
+        Ok(())
+    }
+
+    pub async fn vpc_fetch_by_name(
+        &self,
+        project_id: &Uuid,
+        vpc_name: &Name,
+    ) -> LookupResult<api::external::Vpc> {
+        let client = self.pool.acquire().await?;
+        sql_fetch_row_by::<LookupByUniqueNameInProject, Vpc>(
+            &client,
+            (project_id,),
+            vpc_name,
+        )
+        .await
+    }
+
+    pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
+        let client = self.pool.acquire().await?;
+        let now = Utc::now();
+        sql_execute_maybe_one(
+            &client,
+            format!(
+                "UPDATE {} SET time_deleted = $1 WHERE \
+                    time_deleted IS NULL AND id = $2",
+                Vpc::TABLE_NAME,
+            )
+            .as_str(),
+            &[&now, &vpc_id],
+            || Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+        )
+        .await
     }
 }
