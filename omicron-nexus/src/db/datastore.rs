@@ -761,8 +761,6 @@ impl DataStore {
         values.set("time_modified", &now);
         values.set("project_id", project_id);
         params.sql_serialize(&mut values);
-        let vpc_type = String::from("system");
-        values.set("vpc_type", &vpc_type);
 
         sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
             &client,

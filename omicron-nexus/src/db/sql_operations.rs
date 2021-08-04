@@ -649,9 +649,6 @@ where
         .as_str(),
     );
 
-    println!("{:?}", sql.sql_fragment());
-    println!("{:?}", sql.sql_params());
-
     sql_execute(client, sql.sql_fragment(), sql.sql_params())
         .await
         .map_err(|e| sql_error_on_create(R::RESOURCE_TYPE, unique_value, e))
@@ -796,18 +793,13 @@ where
     R: ResourceTable,
     L: LookupKey<'a, R>,
 {
-    println!("inserting.....");
-    let r = sql_insert_unique_idempotent::<R>(
+    sql_insert_unique_idempotent::<R>(
         client,
         values,
         unique_value,
         ignore_conflicts_on,
     )
-    .await;
-
-    println!("{:?}", r.unwrap_err());
-
-    println!("inserted");
+    .await?;
 
     /*
      * If we get here, then we successfully inserted the record.  It would
