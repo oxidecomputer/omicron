@@ -1,11 +1,11 @@
 //! Structures stored to the database.
 
+use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, IdentityMetadata, InstanceCpuCount,
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
-use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -142,7 +142,18 @@ impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
 
 /// A wrapper around the external "InstanceState" object,
 /// which may be stored to disk.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
 pub struct InstanceState(pub external::InstanceState);
 
 /// Serialization to the database.
@@ -160,7 +171,7 @@ impl TryFrom<&tokio_postgres::Row> for InstanceState {
         let variant: &str = sql_row_value(value, "instance_state")?;
         Ok(InstanceState(
             external::InstanceState::try_from(variant)
-                .map_err(|err| Error::InternalError { message: err })?
+                .map_err(|err| Error::InternalError { message: err })?,
         ))
     }
 }

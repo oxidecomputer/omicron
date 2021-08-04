@@ -2,8 +2,8 @@
  * Handler functions (entrypoints) for external HTTP APIs
  */
 
-use crate::db;
 use super::ServerContext;
+use crate::db;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -407,10 +407,8 @@ async fn project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_list::<db::types::Instance, InstanceView>(
-        instance_stream,
-    )
-    .await;
+    let view_list =
+        to_list::<db::types::Instance, InstanceView>(instance_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 

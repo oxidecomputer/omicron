@@ -380,7 +380,8 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        db::types::InstanceState(api::external::InstanceState::Destroyed).sql_serialize(&mut values);
+        db::types::InstanceState(api::external::InstanceState::Destroyed)
+            .sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
