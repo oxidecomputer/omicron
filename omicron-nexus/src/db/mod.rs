@@ -14,6 +14,7 @@ mod sql_operations;
 
 pub mod schema;
 pub mod sql; /* public for examples only */
+pub mod types;
 
 pub use config::Config;
 pub use datastore::DataStore;

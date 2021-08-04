@@ -38,7 +38,7 @@ impl ResourceTable for Project {
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
-    type ModelType = api::internal::nexus::Instance;
+    type ModelType = db::types::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

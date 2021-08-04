@@ -33,10 +33,9 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
+use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::Disk;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::Instance;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::Project;
@@ -473,7 +472,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<Instance> {
+    ) -> ListResult<db::types::Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_instances(&project_id, pagparams).await
@@ -483,7 +482,7 @@ impl Nexus {
         self: &Arc<Self>,
         project_name: &Name,
         params: &InstanceCreateParams,
-    ) -> CreateResult<Instance> {
+    ) -> CreateResult<db::types::Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
@@ -577,7 +576,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         instance_name: &Name,
-    ) -> LookupResult<Instance> {
+    ) -> LookupResult<db::types::Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore
@@ -587,7 +586,7 @@ impl Nexus {
 
     fn check_runtime_change_allowed(
         &self,
-        runtime: &InstanceRuntimeState,
+        runtime: &db::types::InstanceRuntimeState,
     ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
@@ -638,7 +637,7 @@ impl Nexus {
      */
     async fn instance_sled(
         &self,
-        instance: &Instance,
+        instance: &db::types::Instance,
     ) -> Result<Arc<SledAgentClient>, Error> {
         let said = &instance.runtime.sled_uuid;
         self.sled_client(&said).await
@@ -651,7 +650,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<Instance> {
+    ) -> UpdateResult<db::types::Instance> {
         /*
          * To implement reboot, we issue a call to the sled agent to set a
          * runtime state of "reboot". We cannot simply stop the Instance and
@@ -687,7 +686,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<Instance> {
+    ) -> UpdateResult<db::types::Instance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -710,7 +709,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<Instance> {
+    ) -> UpdateResult<db::types::Instance> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
@@ -732,7 +731,7 @@ impl Nexus {
      */
     async fn instance_set_runtime(
         &self,
-        instance: &Instance,
+        instance: &db::types::Instance,
         sa: Arc<SledAgentClient>,
         requested: InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
@@ -745,13 +744,13 @@ impl Nexus {
         let new_runtime = sa
             .instance_ensure(
                 instance.identity.id,
-                instance.runtime.clone(),
+                instance.runtime.clone().into(),
                 requested,
             )
             .await?;
 
         self.db_datastore
-            .instance_update_runtime(&instance.identity.id, &new_runtime)
+            .instance_update_runtime(&instance.identity.id, &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -822,7 +821,7 @@ impl Nexus {
         let instance_id = &instance.identity.id;
 
         fn disk_attachment_for(
-            instance: &Instance,
+            instance: &db::types::Instance,
             disk: &Disk,
         ) -> CreateResult<DiskAttachment> {
             let instance_id = &instance.identity.id;
@@ -1190,13 +1189,13 @@ impl Nexus {
     pub async fn notify_instance_updated(
         &self,
         id: &Uuid,
-        new_runtime_state: &InstanceRuntimeState,
+        new_runtime_state: &nexus::InstanceRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
 
         let result = self
             .db_datastore
-            .instance_update_runtime(id, new_runtime_state)
+            .instance_update_runtime(id, &(new_runtime_state.clone().into()))
             .await;
 
         match result {

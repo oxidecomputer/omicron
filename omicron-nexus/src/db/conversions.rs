@@ -10,11 +10,9 @@ use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterAssignment;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
@@ -42,21 +40,6 @@ impl SqlSerialize for InstanceCreateParams {
         output.set("ncpus", &self.ncpus);
         output.set("memory", &self.memory);
         output.set("hostname", &self.hostname);
-    }
-}
-
-impl SqlSerialize for InstanceState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("instance_state", &self.label());
-    }
-}
-
-impl SqlSerialize for InstanceRuntimeState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.run_state.sql_serialize(output);
-        output.set("active_server_id", &self.sled_uuid);
-        output.set("state_generation", &self.gen);
-        output.set("time_state_updated", &self.time_updated);
     }
 }
 

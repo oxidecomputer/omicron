@@ -250,8 +250,8 @@ impl DataStore {
         instance_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::InstanceCreateParams,
-        runtime_initial: &api::internal::nexus::InstanceRuntimeState,
-    ) -> CreateResult<api::internal::nexus::Instance> {
+        runtime_initial: &db::types::InstanceRuntimeState,
+    ) -> CreateResult<db::types::Instance> {
         let client = self.pool.acquire().await?;
         let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
@@ -292,7 +292,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Instance> {
+    ) -> ListResult<db::types::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -305,7 +305,7 @@ impl DataStore {
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
-    ) -> LookupResult<api::internal::nexus::Instance> {
+    ) -> LookupResult<db::types::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Instance>(&client, (), instance_id)
             .await
@@ -315,7 +315,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         instance_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Instance> {
+    ) -> LookupResult<db::types::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
@@ -337,7 +337,7 @@ impl DataStore {
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
-        new_runtime: &api::internal::nexus::InstanceRuntimeState,
+        new_runtime: &db::types::InstanceRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 

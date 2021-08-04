@@ -69,7 +69,6 @@ use crate::api::external::VpcSubnet;
 use crate::api::external::{Ipv4Net, Ipv6Net};
 use crate::api::internal::nexus::Disk;
 use crate::api::internal::nexus::DiskRuntimeState;
-use crate::api::internal::nexus::Instance;
 use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::nexus::OximeterAssignment;
 use crate::api::internal::nexus::OximeterInfo;
@@ -299,6 +298,7 @@ impl TryFrom<&tokio_postgres::Row> for Project {
     }
 }
 
+/*
 /// Load an [`Instance`] from a whole row of the "Instance" table.
 impl TryFrom<&tokio_postgres::Row> for Instance {
     type Error = Error;
@@ -314,6 +314,7 @@ impl TryFrom<&tokio_postgres::Row> for Instance {
         })
     }
 }
+*/
 
 /// Load an [`InstanceRuntimeState`] from a row of the "Instance" table,
 /// using the "instance_state", "active_server_id", "state_generation", and

@@ -39,12 +39,15 @@ impl DiskStateRequested {
     }
 }
 
+/// Runtime state of an instance.
+pub type InstanceRuntimeState = internal::nexus::InstanceRuntimeState;
+
 /// Sent to a sled agent to establish the runtime state of an Instance
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// Last runtime state of the Instance known to Nexus (used if the agent
     /// has never seen this Instance before).
-    pub initial_runtime: internal::nexus::InstanceRuntimeState,
+    pub initial_runtime: InstanceRuntimeState,
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
 }

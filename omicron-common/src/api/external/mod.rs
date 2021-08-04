@@ -459,7 +459,7 @@ impl Display for ResourceType {
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
-    U: From<T>,
+    T: Into<U>,
 {
     object_stream
         .filter(|maybe_object| ready(maybe_object.is_ok()))
@@ -726,19 +726,6 @@ pub struct InstanceView {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeStateView,
-}
-
-impl From<crate::api::internal::nexus::Instance> for InstanceView {
-    fn from(instance: crate::api::internal::nexus::Instance) -> Self {
-        InstanceView {
-            identity: instance.identity.clone(),
-            project_id: instance.project_id,
-            ncpus: instance.ncpus,
-            memory: instance.memory,
-            hostname: instance.hostname.clone(),
-            runtime: instance.runtime.into(),
-        }
-    }
 }
 
 /**
