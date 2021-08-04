@@ -247,6 +247,19 @@ impl TryFrom<String> for MacAddr {
 }
 impl_sql_wrapping!(MacAddr, String);
 
+// Conversion to/from SQL types for VpcType.
+
+impl From<&VpcType> for String {
+    fn from(t: &VpcType) -> String {
+        match t {
+            VpcType::System => String::from("system"),
+            VpcType::Custom => String::from("custom"),
+        }
+    }
+}
+
+impl_sql_wrapping!(VpcType, String);
+
 /*
  * TryFrom impls used for more complex Rust types
  */
@@ -443,8 +456,8 @@ impl TryFrom<&tokio_postgres::Row> for Vpc {
         Ok(Self {
             identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
-            dns_name: Name::try_from("a").unwrap(),
-            vpc_type: VpcType::System,
+            dns_name: sql_row_value(value, "dns_name")?,
+            vpc_type: sql_row_value(value, "vpc_type")?,
             vpc_subnets: vec![],
         })
     }

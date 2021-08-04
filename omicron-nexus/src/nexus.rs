@@ -1021,10 +1021,12 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let id = Uuid::new_v4();
+        println!("here");
         let vpc = self
             .db_datastore
             .project_create_vpc(&id, &project_id, params)
             .await?;
+        println!("{:?}", vpc);
         Ok(vpc)
     }
 

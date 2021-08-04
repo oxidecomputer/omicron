@@ -1071,6 +1071,22 @@ pub enum VpcType {
     Custom,
 }
 
+impl TryFrom<String> for VpcType {
+    type Error = String;
+
+    fn try_from(variant: String) -> Result<Self, Self::Error> {
+        let r = match variant.as_str() {
+            "system" => VpcType::System,
+            "custom" => VpcType::Custom,
+            _ => return Err(format!("Unexpected variant {}", variant)),
+        };
+        Ok(r)
+    }
+}
+
+// impl TryFrom<&str> for VpcType {
+// }
+
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Vpc {
@@ -1098,6 +1114,7 @@ pub struct Vpc {
 pub struct VpcCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    pub dns_name: Name,
 }
 
 /**

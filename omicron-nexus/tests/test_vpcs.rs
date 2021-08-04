@@ -60,6 +60,7 @@ async fn test_vpcs() {
             name: Name::try_from("just-rainsticks").unwrap(),
             description: String::from("sells rainsticks"),
         },
+        dns_name: Name::try_from("abc").unwrap(),
     };
     let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
