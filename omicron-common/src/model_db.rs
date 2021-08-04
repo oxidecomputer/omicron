@@ -60,7 +60,6 @@ use crate::api::external::Error;
 use crate::api::external::Generation;
 use crate::api::external::IdentityMetadata;
 use crate::api::external::InstanceCpuCount;
-use crate::api::external::InstanceState;
 use crate::api::external::MacAddr;
 use crate::api::external::Name;
 use crate::api::external::NetworkInterface;
@@ -69,7 +68,6 @@ use crate::api::external::VpcSubnet;
 use crate::api::external::{Ipv4Net, Ipv6Net};
 use crate::api::internal::nexus::Disk;
 use crate::api::internal::nexus::DiskRuntimeState;
-use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::nexus::OximeterAssignment;
 use crate::api::internal::nexus::OximeterInfo;
 use crate::api::internal::nexus::ProducerEndpoint;
@@ -279,56 +277,12 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for InstanceState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let variant: &str = sql_row_value(value, "instance_state")?;
-        InstanceState::try_from(variant)
-            .map_err(|err| Error::InternalError { message: err })
-    }
-}
-
 /// Load an [`Project`] from a whole row of the "Project" table.
 impl TryFrom<&tokio_postgres::Row> for Project {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         Ok(Project { identity: IdentityMetadata::try_from(value)? })
-    }
-}
-
-/*
-/// Load an [`Instance`] from a whole row of the "Instance" table.
-impl TryFrom<&tokio_postgres::Row> for Instance {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Instance {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            ncpus: sql_row_value(value, "ncpus")?,
-            memory: sql_row_value(value, "memory")?,
-            hostname: sql_row_value(value, "hostname")?,
-            runtime: InstanceRuntimeState::try_from(value)?,
-        })
-    }
-}
-*/
-
-/// Load an [`InstanceRuntimeState`] from a row of the "Instance" table,
-/// using the "instance_state", "active_server_id", "state_generation", and
-/// "time_state_updated" columns.
-impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(InstanceRuntimeState {
-            run_state: InstanceState::try_from(value)?,
-            sled_uuid: sql_row_value(value, "active_server_id")?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
     }
 }
 

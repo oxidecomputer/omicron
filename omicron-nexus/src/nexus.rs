@@ -586,7 +586,7 @@ impl Nexus {
 
     fn check_runtime_change_allowed(
         &self,
-        runtime: &db::types::InstanceRuntimeState,
+        runtime: &nexus::InstanceRuntimeState,
     ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
@@ -667,7 +667,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime)?;
+        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -690,7 +690,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime)?;
+        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -713,7 +713,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime)?;
+        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,

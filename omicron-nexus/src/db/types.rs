@@ -2,7 +2,6 @@
 
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, IdentityMetadata, InstanceCpuCount,
-    InstanceState,
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
@@ -87,7 +86,7 @@ pub struct InstanceRuntimeState {
 impl Into<external::InstanceRuntimeStateView> for InstanceRuntimeState {
     fn into(self) -> external::InstanceRuntimeStateView {
         external::InstanceRuntimeStateView {
-            run_state: self.run_state,
+            run_state: self.run_state.0,
             time_run_state_updated: self.time_updated,
         }
     }
@@ -97,7 +96,7 @@ impl Into<external::InstanceRuntimeStateView> for InstanceRuntimeState {
 impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn from(state: internal::nexus::InstanceRuntimeState) -> Self {
         Self {
-            run_state: state.run_state,
+            run_state: InstanceState(state.run_state),
             sled_uuid: state.sled_uuid,
             gen: state.gen,
             time_updated: state.time_updated,
@@ -109,7 +108,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
 impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> internal::nexus::InstanceRuntimeState {
         internal::sled_agent::InstanceRuntimeState {
-            run_state: self.run_state,
+            run_state: self.run_state.0,
             sled_uuid: self.sled_uuid,
             gen: self.gen,
             time_updated: self.time_updated,
@@ -141,9 +140,27 @@ impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
     }
 }
 
+/// A wrapper around the external "InstanceState" object,
+/// which may be stored to disk.
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, JsonSchema)]
+pub struct InstanceState(pub external::InstanceState);
+
+/// Serialization to the database.
 impl SqlSerialize for InstanceState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("instance_state", &self.label());
+        output.set("instance_state", &self.0.label());
     }
 }
 
+/// Deserialization from the database.
+impl TryFrom<&tokio_postgres::Row> for InstanceState {
+    type Error = Error;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        let variant: &str = sql_row_value(value, "instance_state")?;
+        Ok(InstanceState(
+            external::InstanceState::try_from(variant)
+                .map_err(|err| Error::InternalError { message: err })?
+        ))
+    }
+}

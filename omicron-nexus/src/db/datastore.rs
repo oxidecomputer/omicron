@@ -275,7 +275,7 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state
+            instance.runtime.run_state.0
                 == api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
@@ -380,7 +380,7 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        api::external::InstanceState::Destroyed.sql_serialize(&mut values);
+        db::types::InstanceState(api::external::InstanceState::Destroyed).sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
