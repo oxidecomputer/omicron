@@ -151,11 +151,11 @@ impl Table for OximeterAssignment {
         &["oximeter_id", "producer_id", "time_created"];
 }
 
-/** Describes the "VPC" table */
-pub struct VPC;
-impl Table for VPC {
-    type ModelType = api::external::VPC;
-    const TABLE_NAME: &'static str = "VPC";
+/** Describes the "Vpc" table */
+pub struct Vpc;
+impl Table for Vpc {
+    type ModelType = api::external::Vpc;
+    const TABLE_NAME: &'static str = "Vpc";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
         "name",
@@ -167,11 +167,15 @@ impl Table for VPC {
     ];
 }
 
-/** Describes the "VPCSubnet" table */
-pub struct VPCSubnet;
-impl Table for VPCSubnet {
-    type ModelType = api::external::VPCSubnet;
-    const TABLE_NAME: &'static str = "VPCSubnet";
+impl ResourceTable for Vpc {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Vpc;
+}
+
+/** Describes the "VpcSubnet" table */
+pub struct VpcSubnet;
+impl Table for VpcSubnet {
+    type ModelType = api::external::VpcSubnet;
+    const TABLE_NAME: &'static str = "VpcSubnet";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
         "name",
@@ -213,7 +217,7 @@ mod test {
     use super::SagaNodeEvent;
     use super::Table;
     use super::{MetricProducer, Oximeter, OximeterAssignment};
-    use super::{NetworkInterface, VPCSubnet, VPC};
+    use super::{NetworkInterface, Vpc, VpcSubnet};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -242,8 +246,8 @@ mod test {
         check_table_schema::<Oximeter>(&client).await;
         check_table_schema::<MetricProducer>(&client).await;
         check_table_schema::<OximeterAssignment>(&client).await;
-        check_table_schema::<VPC>(&client).await;
-        check_table_schema::<VPCSubnet>(&client).await;
+        check_table_schema::<Vpc>(&client).await;
+        check_table_schema::<VpcSubnet>(&client).await;
         check_table_schema::<NetworkInterface>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
