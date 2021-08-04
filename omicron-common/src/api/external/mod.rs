@@ -1065,6 +1065,12 @@ impl From<steno::SagaStateView> for SagaStateView {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum VpcType {
+    System,
+    Custom,
+}
+
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Vpc {
@@ -1073,6 +1079,15 @@ pub struct Vpc {
 
     /** id for the project containing this VPC */
     pub project_id: Uuid,
+
+    /** The name used for the VPC in DNS. */
+    pub dns_name: Name,
+
+    // temp name since it can't be named `type`. since the
+    pub vpc_type: VpcType,
+
+    // TODO-correctness does the model include this? do we always return these?
+    pub vpc_subnets: Vec<VpcSubnet>,
 }
 
 /**
@@ -1205,7 +1220,7 @@ impl JsonSchema for Ipv6Net {
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
-#[derive(Clone, Debug)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,

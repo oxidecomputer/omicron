@@ -66,6 +66,7 @@ use crate::api::external::Name;
 use crate::api::external::NetworkInterface;
 use crate::api::external::Vpc;
 use crate::api::external::VpcSubnet;
+use crate::api::external::VpcType;
 use crate::api::external::{Ipv4Net, Ipv6Net};
 use crate::api::internal::nexus::Disk;
 use crate::api::internal::nexus::DiskRuntimeState;
@@ -442,6 +443,9 @@ impl TryFrom<&tokio_postgres::Row> for Vpc {
         Ok(Self {
             identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
+            dns_name: Name::try_from("a").unwrap(),
+            vpc_type: VpcType::System,
+            vpc_subnets: vec![],
         })
     }
 }
