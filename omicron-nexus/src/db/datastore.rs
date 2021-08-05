@@ -775,8 +775,7 @@ impl DataStore {
 
     pub async fn project_update_vpc(
         &self,
-        project_id: &Uuid,
-        vpc_name: &Name,
+        vpc_id: &Uuid,
         params: &api::external::VpcUpdateParams,
     ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
@@ -802,10 +801,10 @@ impl DataStore {
         let mut cond_sql = SqlString::new();
         cond_sql.push_str("true");
 
-        sql_update_precond::<Vpc, LookupByUniqueNameInProject>(
+        sql_update_precond::<Vpc, LookupByUniqueId>(
             &client,
-            (project_id,),
-            vpc_name,
+            (),
+            vpc_id,
             &[],
             &values,
             cond_sql,

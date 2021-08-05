@@ -96,18 +96,28 @@ async fn test_vpcs() {
     let vpc = vpc_get(&client, &vpc_url).await;
     vpcs_eq(&vpcs[1], &vpc);
 
-    /* Update the VPC with a new description */
+    /* Update the VPC */
     let update_params = VpcUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: None,
+            name: Some(Name::try_from("new-name").unwrap()),
             description: Some(String::from("another description")),
         },
         dns_name: Some(Name::try_from("def").unwrap()),
     };
     vpc_put(&client, &vpc_url, update_params).await;
 
+    // fetching by old name fails
+    let error = client
+        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+
+    // new url with new name
+    let vpc_url = format!("{}/new-name", vpcs_url);
+
     /* Fetch the VPC again. It should have the updated properties. */
     let vpc = vpc_get(&client, &vpc_url).await;
+    assert_eq!(vpc.identity.name, "new-name");
     assert_eq!(vpc.identity.description, "another description");
     assert_eq!(vpc.dns_name, "def");
 
@@ -121,7 +131,7 @@ async fn test_vpcs() {
     let error = client
         .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+    assert_eq!(error.message, "not found: vpc with name \"new-name\"");
 
     /* And the list should be empty (aside from default VPC) again */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
