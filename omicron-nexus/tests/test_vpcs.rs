@@ -39,6 +39,7 @@ async fn test_vpcs() {
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     assert_eq!(vpcs[0].identity.name, "default");
+    assert_eq!(vpcs[0].dns_name, "default");
     let default_vpc = vpcs.remove(0);
 
     /* Make sure we get a 404 if we fetch one. */
@@ -61,10 +62,12 @@ async fn test_vpcs() {
             name: Name::try_from("just-rainsticks").unwrap(),
             description: String::from("sells rainsticks"),
         },
+        dns_name: Name::try_from("abc").unwrap(),
     };
     let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "sells rainsticks");
+    assert_eq!(vpc.dns_name, "abc");
 
     /* Attempt to create a second VPC with a conflicting name. */
     let error = client
@@ -80,7 +83,6 @@ async fn test_vpcs() {
     /* creating a VPC with the same name in another project works, though */
     let vpc2: Vpc = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
-    assert_eq!(vpc2.identity.description, "sells rainsticks");
 
     /* List VPCs again and expect to find the one we just created. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -92,18 +94,30 @@ async fn test_vpcs() {
     let vpc = vpc_get(&client, &vpc_url).await;
     vpcs_eq(&vpcs[1], &vpc);
 
-    /* Update the VPC with a new description */
+    /* Update the VPC */
     let update_params = VpcUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: None,
+            name: Some(Name::try_from("new-name").unwrap()),
             description: Some(String::from("another description")),
         },
+        dns_name: Some(Name::try_from("def").unwrap()),
     };
     vpc_put(&client, &vpc_url, update_params).await;
 
-    /* Fetch the VPC again. It should have the updated description. */
+    // fetching by old name fails
+    let error = client
+        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+
+    // new url with new name
+    let vpc_url = format!("{}/new-name", vpcs_url);
+
+    /* Fetch the VPC again. It should have the updated properties. */
     let vpc = vpc_get(&client, &vpc_url).await;
-    assert_eq!(&vpc.identity.description, "another description");
+    assert_eq!(vpc.identity.name, "new-name");
+    assert_eq!(vpc.identity.description, "another description");
+    assert_eq!(vpc.dns_name, "def");
 
     /* Delete the VPC. */
     client
@@ -115,7 +129,7 @@ async fn test_vpcs() {
     let error = client
         .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+    assert_eq!(error.message, "not found: vpc with name \"new-name\"");
 
     /* And the list should be empty (aside from default VPC) again */
     let vpcs = vpcs_list(&client, &vpcs_url).await;

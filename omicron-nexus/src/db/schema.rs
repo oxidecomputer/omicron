@@ -164,6 +164,7 @@ impl Table for Vpc {
         "time_modified",
         "time_deleted",
         "project_id",
+        "dns_name",
     ];
 }
 
