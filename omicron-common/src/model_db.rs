@@ -66,7 +66,6 @@ use crate::api::external::Name;
 use crate::api::external::NetworkInterface;
 use crate::api::external::Vpc;
 use crate::api::external::VpcSubnet;
-use crate::api::external::VpcType;
 use crate::api::external::{Ipv4Net, Ipv6Net};
 use crate::api::internal::nexus::Disk;
 use crate::api::internal::nexus::DiskRuntimeState;
@@ -246,19 +245,6 @@ impl TryFrom<String> for MacAddr {
     }
 }
 impl_sql_wrapping!(MacAddr, String);
-
-// Conversion to/from SQL types for VpcType.
-
-impl From<&VpcType> for String {
-    fn from(t: &VpcType) -> String {
-        match t {
-            VpcType::System => String::from("system"),
-            VpcType::Custom => String::from("custom"),
-        }
-    }
-}
-
-impl_sql_wrapping!(VpcType, String);
 
 /*
  * TryFrom impls used for more complex Rust types
@@ -457,7 +443,6 @@ impl TryFrom<&tokio_postgres::Row> for Vpc {
             identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
             dns_name: sql_row_value(value, "dns_name")?,
-            vpc_type: sql_row_value(value, "vpc_type")?,
             vpc_subnets: vec![],
         })
     }

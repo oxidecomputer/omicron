@@ -165,7 +165,6 @@ impl Table for Vpc {
         "time_deleted",
         "project_id",
         "dns_name",
-        "vpc_type",
     ];
 }
 

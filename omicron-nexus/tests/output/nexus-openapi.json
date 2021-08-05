@@ -1979,9 +1979,6 @@
             "items": {
               "$ref": "#/components/schemas/VpcSubnet"
             }
-          },
-          "vpcType": {
-            "$ref": "#/components/schemas/VpcType"
           }
         },
         "required": [
@@ -1992,8 +1989,7 @@
           "projectId",
           "timeCreated",
           "timeModified",
-          "vpcSubnets",
-          "vpcType"
+          "vpcSubnets"
         ]
       },
       "VpcCreateParams": {
@@ -2008,16 +2004,12 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "vpcType": {
-            "$ref": "#/components/schemas/VpcType"
           }
         },
         "required": [
           "description",
           "dnsName",
-          "name",
-          "vpcType"
+          "name"
         ]
       },
       "VpcResultsPage": {
@@ -2062,13 +2054,6 @@
         "required": [
           "identity",
           "vpc_id"
-        ]
-      },
-      "VpcType": {
-        "type": "string",
-        "enum": [
-          "System",
-          "Custom"
         ]
       },
       "VpcUpdateParams": {

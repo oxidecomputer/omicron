@@ -249,11 +249,6 @@ CREATE TABLE omicron.public.OximeterAssignment (
  * VPCs and networking primitives
  */
 
-/*
- * TODO See notes above about cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
- */
--- CREATE TYPE omicron.public.VpcType AS ENUM ('system', 'custom');
 
 CREATE TABLE omicron.public.Vpc (
     /* Identity metadata */
@@ -265,8 +260,7 @@ CREATE TABLE omicron.public.Vpc (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
-    dns_name STRING(63) NOT NULL,
-    vpc_type TEXT NOT NULL
+    dns_name STRING(63) NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Vpc (

@@ -33,7 +33,6 @@ use omicron_common::api::external::SagaView;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
-use omicron_common::api::external::VpcType;
 use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus::Disk;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -324,7 +323,6 @@ impl Nexus {
                         description: "Default VPC".to_string(),
                     },
                     dns_name: Name::try_from("abc").unwrap(),
-                    vpc_type: VpcType::System,
                 },
             )
             .await?;

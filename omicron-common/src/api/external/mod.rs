@@ -1065,33 +1065,6 @@ impl From<steno::SagaStateView> for SagaStateView {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum VpcType {
-    System,
-    Custom,
-}
-
-impl TryFrom<String> for VpcType {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "system" => Ok(VpcType::System),
-            "custom" => Ok(VpcType::Custom),
-            _ => Err(format!(
-                "{} is not a valid VPC type. Must be 'custom' or 'system'.",
-                value,
-            )),
-        }
-    }
-}
-
-impl TryFrom<&str> for VpcType {
-    type Error = String;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        VpcType::try_from(String::from(value))
-    }
-}
-
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Vpc {
@@ -1103,13 +1076,6 @@ pub struct Vpc {
 
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
-
-    // temp name since it can't be named `type`. since there are only two
-    // options, this could also be boolean flag like `system: true`, which on
-    // the one hand works nicely to get around the DB enum issue (though that
-    // can be fixed by upgrading cockroach), but on the other hand requires a
-    // more annoying DB change to add a third type if we ever want to
-    pub vpc_type: VpcType,
 
     // TODO-correctness does the model include this? do we always return these?
     pub vpc_subnets: Vec<VpcSubnet>,
@@ -1124,7 +1090,6 @@ pub struct VpcCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     pub dns_name: Name,
-    pub vpc_type: VpcType,
 }
 
 /**

@@ -7,7 +7,6 @@ use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectView;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
-use omicron_common::api::external::VpcType;
 use omicron_common::api::external::VpcUpdateParams;
 use std::convert::TryFrom;
 
@@ -63,13 +62,11 @@ async fn test_vpcs() {
             description: String::from("sells rainsticks"),
         },
         dns_name: Name::try_from("abc").unwrap(),
-        vpc_type: VpcType::System,
     };
     let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "sells rainsticks");
     assert_eq!(vpc.dns_name, "abc");
-    assert_eq!(vpc.vpc_type, VpcType::System);
 
     /* Attempt to create a second VPC with a conflicting name. */
     let error = client
