@@ -76,24 +76,15 @@ impl DataStore {
     }
 
     /// Create a project
-    pub async fn project_create_with_id(
+    pub async fn project_create(
         &self,
-        new_id: &Uuid,
-        new_project: &api::external::ProjectCreateParams,
+        new_project: &db::types::Project,
     ) -> CreateResult<db::types::Project> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("id", new_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         new_project.sql_serialize(&mut values);
-        sql_insert_unique::<Project>(
-            &client,
-            &values,
-            &new_project.identity.name.as_str(),
-        )
-        .await
+        sql_insert_unique::<Project>(&client, &values, &new_project.name())
+            .await
     }
 
     /// Fetch metadata for a project
@@ -253,14 +244,14 @@ impl DataStore {
         runtime_initial: &db::types::InstanceRuntimeState,
     ) -> CreateResult<db::types::Instance> {
         let client = self.pool.acquire().await?;
-        let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
-        values.set("id", instance_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
-        runtime_initial.sql_serialize(&mut values);
+        let instance = db::types::Instance::new(
+            *instance_id,
+            *project_id,
+            params,
+            runtime_initial.clone(),
+        );
+        instance.sql_serialize(&mut values);
         let instance = sql_insert_unique_idempotent_and_fetch::<
             Instance,
             LookupByUniqueId,
@@ -275,8 +266,8 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state.0
-                == api::external::InstanceState::Creating,
+            instance.runtime.run_state.state()
+                == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
         );
@@ -380,7 +371,7 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        db::types::InstanceState(api::external::InstanceState::Destroyed)
+        db::types::InstanceState::new(api::external::InstanceState::Destroyed)
             .sql_serialize(&mut values);
         values.set("time_deleted", &now);
 

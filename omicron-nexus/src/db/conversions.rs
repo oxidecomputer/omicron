@@ -9,8 +9,6 @@ use chrono::Utc;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterAssignment;
@@ -25,21 +23,6 @@ impl SqlSerialize for IdentityMetadataCreateParams {
         output.set("name", &self.name);
         output.set("description", &self.description);
         output.set("time_deleted", &(None as Option<DateTime<Utc>>));
-    }
-}
-
-impl SqlSerialize for ProjectCreateParams {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output)
-    }
-}
-
-impl SqlSerialize for InstanceCreateParams {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("ncpus", &self.ncpus);
-        output.set("memory", &self.memory);
-        output.set("hostname", &self.hostname);
     }
 }
 

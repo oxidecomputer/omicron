@@ -296,25 +296,20 @@ impl Nexus {
         &self,
         new_project: &ProjectCreateParams,
     ) -> CreateResult<Project> {
-        let id = Uuid::new_v4();
-        self.db_datastore
-            .project_create_with_id(&id, new_project)
-            .await
-            .map(|p| p.into())
+        let project = db::types::Project::new(new_project);
+        self.db_datastore.project_create(&project).await.map(|p| p.into())
     }
 
     pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
-        self.db_datastore
-            .project_fetch(name)
-            .await
-            .map(|p| p.into())
+        self.db_datastore.project_fetch(name).await.map(|p| p.into())
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResult<Project> {
-        let db_stream = self.db_datastore.projects_list_by_name(pagparams).await?;
+        let db_stream =
+            self.db_datastore.projects_list_by_name(pagparams).await?;
         let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
         Ok(api_stream)
     }
@@ -323,7 +318,8 @@ impl Nexus {
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<Project> {
-        let db_stream = self.db_datastore.projects_list_by_id(pagparams).await?;
+        let db_stream =
+            self.db_datastore.projects_list_by_id(pagparams).await?;
         let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
         Ok(api_stream)
     }
