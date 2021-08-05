@@ -80,7 +80,7 @@ impl DataStore {
         &self,
         new_id: &Uuid,
         new_project: &api::external::ProjectCreateParams,
-    ) -> CreateResult<api::internal::nexus::Project> {
+    ) -> CreateResult<db::types::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
         let mut values = SqlValueSet::new();
@@ -100,7 +100,7 @@ impl DataStore {
     pub async fn project_fetch(
         &self,
         project_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Project> {
+    ) -> LookupResult<db::types::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueName, Project>(
             &client,
@@ -155,7 +155,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<api::internal::nexus::Project> {
+    ) -> ListResult<db::types::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
@@ -169,7 +169,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Project> {
+    ) -> ListResult<db::types::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueName,
@@ -184,7 +184,7 @@ impl DataStore {
         &self,
         project_name: &Name,
         update_params: &api::external::ProjectUpdateParams,
-    ) -> UpdateResult<api::internal::nexus::Project> {
+    ) -> UpdateResult<db::types::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -213,7 +213,7 @@ impl DataStore {
             Error::not_found_by_name(ResourceType::Project, project_name)
         })
         .await?;
-        Ok(api::internal::nexus::Project::try_from(&row)?)
+        Ok(db::types::Project::try_from(&row)?)
     }
 
     /*

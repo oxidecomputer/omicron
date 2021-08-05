@@ -71,7 +71,6 @@ use crate::api::internal::nexus::DiskRuntimeState;
 use crate::api::internal::nexus::OximeterAssignment;
 use crate::api::internal::nexus::OximeterInfo;
 use crate::api::internal::nexus::ProducerEndpoint;
-use crate::api::internal::nexus::Project;
 use crate::bail_unless;
 use chrono::DateTime;
 use chrono::Utc;
@@ -274,15 +273,6 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
             time_created: sql_row_value(value, "time_created")?,
             time_modified: sql_row_value(value, "time_modified")?,
         })
-    }
-}
-
-/// Load an [`Project`] from a whole row of the "Project" table.
-impl TryFrom<&tokio_postgres::Row> for Project {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Project { identity: IdentityMetadata::try_from(value)? })
     }
 }
 

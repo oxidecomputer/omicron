@@ -6,13 +6,35 @@ use omicron_common::api::external::{
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use uuid::Uuid;
 
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;
+
+pub struct Project(pub internal::nexus::Project);
+
+impl Into<internal::nexus::Project> for Project {
+    fn into(self) -> internal::nexus::Project {
+        self.0
+    }
+}
+
+impl From<internal::nexus::Project> for Project {
+    fn from(project: internal::nexus::Project) -> Self {
+        Self(project)
+    }
+}
+
+/// Deserialization from DB.
+impl TryFrom<&tokio_postgres::Row> for Project {
+    type Error = Error;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        Ok(Project(internal::nexus::Project { identity: IdentityMetadata::try_from(value)? }))
+    }
+}
 
 /// An Instance (VM).
 #[derive(Clone, Debug)]
@@ -70,7 +92,7 @@ impl TryFrom<&tokio_postgres::Row> for Instance {
 /// metadata
 ///
 /// This state is owned by the sled agent running that Instance.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
     pub run_state: InstanceState,
@@ -152,7 +174,6 @@ impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
     PartialEq,
     PartialOrd,
     Serialize,
-    JsonSchema,
 )]
 pub struct InstanceState(pub external::InstanceState);
 

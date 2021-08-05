@@ -297,25 +297,35 @@ impl Nexus {
         new_project: &ProjectCreateParams,
     ) -> CreateResult<Project> {
         let id = Uuid::new_v4();
-        Ok(self.db_datastore.project_create_with_id(&id, new_project).await?)
+        self.db_datastore
+            .project_create_with_id(&id, new_project)
+            .await
+            .map(|p| p.into())
     }
 
     pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
-        Ok(self.db_datastore.project_fetch(name).await?)
+        self.db_datastore
+            .project_fetch(name)
+            .await
+            .map(|p| p.into())
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResult<Project> {
-        self.db_datastore.projects_list_by_name(pagparams).await
+        let db_stream = self.db_datastore.projects_list_by_name(pagparams).await?;
+        let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
+        Ok(api_stream)
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<Project> {
-        self.db_datastore.projects_list_by_id(pagparams).await
+        let db_stream = self.db_datastore.projects_list_by_id(pagparams).await?;
+        let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
+        Ok(api_stream)
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
@@ -327,7 +337,10 @@ impl Nexus {
         name: &Name,
         new_params: &ProjectUpdateParams,
     ) -> UpdateResult<Project> {
-        Ok(self.db_datastore.project_update(name, new_params).await?)
+        self.db_datastore
+            .project_update(name, new_params)
+            .await
+            .map(|p| p.into())
     }
 
     /*
