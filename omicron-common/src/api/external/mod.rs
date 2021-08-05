@@ -1065,7 +1065,7 @@ impl From<steno::SagaStateView> for SagaStateView {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Eq, PartialEq, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum VpcType {
     System,
     Custom,
@@ -1135,6 +1135,7 @@ pub struct VpcCreateParams {
 pub struct VpcUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    pub dns_name: Option<Name>,
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.

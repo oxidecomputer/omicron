@@ -793,6 +793,10 @@ impl DataStore {
             values.set("description", new_description);
         }
 
+        if let Some(dns_name) = &params.dns_name {
+            values.set("dns_name", dns_name);
+        }
+
         // dummy condition because sql_update_precond breaks otherwise
         // TODO-cleanup: write sql_update that takes no preconditions?
         let mut cond_sql = SqlString::new();

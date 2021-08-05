@@ -67,6 +67,8 @@ async fn test_vpcs() {
     let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "sells rainsticks");
+    assert_eq!(vpc.dns_name, "abc");
+    assert_eq!(vpc.vpc_type, VpcType::System);
 
     /* Attempt to create a second VPC with a conflicting name. */
     let error = client
@@ -82,7 +84,6 @@ async fn test_vpcs() {
     /* creating a VPC with the same name in another project works, though */
     let vpc2: Vpc = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
-    assert_eq!(vpc2.identity.description, "sells rainsticks");
 
     /* List VPCs again and expect to find the one we just created. */
     let vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -99,12 +100,14 @@ async fn test_vpcs() {
             name: None,
             description: Some(String::from("another description")),
         },
+        dns_name: Some(Name::try_from("def").unwrap()),
     };
     vpc_put(&client, &vpc_url, update_params).await;
 
-    /* Fetch the VPC again. It should have the updated description. */
+    /* Fetch the VPC again. It should have the updated properties. */
     let vpc = vpc_get(&client, &vpc_url).await;
-    assert_eq!(&vpc.identity.description, "another description");
+    assert_eq!(vpc.identity.description, "another description");
+    assert_eq!(vpc.dns_name, "def");
 
     /* Delete the VPC. */
     client

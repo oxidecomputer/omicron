@@ -2078,6 +2078,9 @@
           "description": {
             "type": "string"
           },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
