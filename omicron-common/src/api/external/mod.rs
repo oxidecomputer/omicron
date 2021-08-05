@@ -1074,6 +1074,7 @@ pub struct Vpc {
     /** id for the project containing this VPC */
     pub project_id: Uuid,
 
+    // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
 

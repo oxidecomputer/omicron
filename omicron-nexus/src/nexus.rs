@@ -322,7 +322,9 @@ impl Nexus {
                         name: Name::try_from("default").unwrap(),
                         description: "Default VPC".to_string(),
                     },
-                    dns_name: Name::try_from("abc").unwrap(),
+                    // TODO-robustness this will need to be None if we decide to handle
+                    // the logic around name and dns_name by making dns_name optional
+                    dns_name: Name::try_from("default").unwrap(),
                 },
             )
             .await?;

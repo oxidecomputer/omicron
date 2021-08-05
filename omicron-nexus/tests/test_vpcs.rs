@@ -39,6 +39,7 @@ async fn test_vpcs() {
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     assert_eq!(vpcs[0].identity.name, "default");
+    assert_eq!(vpcs[0].dns_name, "default");
     let default_vpc = vpcs.remove(0);
 
     /* Make sure we get a 404 if we fetch one. */
