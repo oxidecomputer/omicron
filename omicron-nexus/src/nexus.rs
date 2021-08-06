@@ -294,12 +294,11 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
-        new_project: &params::ProjectCreate,
+        params: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         // Create a project.
-        let db_project: db::model::Project = new_project.into();
         let project: db::model::Project =
-            self.db_datastore.project_create(&db_project).await?;
+            self.db_datastore.project_create(&params.into()).await?;
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
         //
@@ -355,9 +354,9 @@ impl Nexus {
     pub async fn project_update(
         &self,
         name: &Name,
-        new_params: &params::ProjectUpdate,
+        params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        self.db_datastore.project_update(name, new_params).await
+        self.db_datastore.project_update(name, params).await
     }
 
     /*
