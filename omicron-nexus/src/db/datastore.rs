@@ -162,7 +162,7 @@ impl DataStore {
         sql_fetch_page_by::<
             LookupByUniqueName,
             Project,
-            <Project as Table>::ModelType,
+            <Project as Table>::Model,
         >(&client, (), pagparams, Project::ALL_COLUMNS)
         .await
     }
@@ -285,7 +285,7 @@ impl DataStore {
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
             Instance,
-            <Instance as Table>::ModelType,
+            <Instance as Table>::Model,
         >(&client, (project_id,), pagparams, Instance::ALL_COLUMNS)
         .await
     }
@@ -489,7 +489,7 @@ impl DataStore {
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
             Disk,
-            <Disk as Table>::ModelType,
+            <Disk as Table>::Model,
         >(&client, (project_id,), pagparams, Disk::ALL_COLUMNS)
         .await
     }
@@ -726,7 +726,7 @@ impl DataStore {
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
             Vpc,
-            <Vpc as Table>::ModelType,
+            <Vpc as Table>::Model,
         >(&client, (project_id,), pagparams, Vpc::ALL_COLUMNS)
         .await
     }
