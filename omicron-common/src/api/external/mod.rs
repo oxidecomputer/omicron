@@ -459,7 +459,7 @@ impl Display for ResourceType {
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
-    U: From<T>,
+    T: Into<U>,
 {
     object_stream
         .filter(|maybe_object| ready(maybe_object.is_ok()))
@@ -530,12 +530,6 @@ pub struct ProjectView {
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-impl From<crate::api::internal::nexus::Project> for ProjectView {
-    fn from(project: crate::api::internal::nexus::Project) -> Self {
-        ProjectView { identity: project.identity }
-    }
 }
 
 /**
@@ -728,19 +722,6 @@ pub struct InstanceView {
     pub runtime: InstanceRuntimeStateView,
 }
 
-impl From<crate::api::internal::nexus::Instance> for InstanceView {
-    fn from(instance: crate::api::internal::nexus::Instance) -> Self {
-        InstanceView {
-            identity: instance.identity.clone(),
-            project_id: instance.project_id,
-            ncpus: instance.ncpus,
-            memory: instance.memory,
-            hostname: instance.hostname.clone(),
-            runtime: instance.runtime.into(),
-        }
-    }
-}
-
 /**
  * Create-time parameters for an [`Instance`]
  */
@@ -786,24 +767,6 @@ pub struct DiskView {
     pub size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
-}
-
-impl From<crate::api::internal::nexus::Disk> for DiskView {
-    fn from(disk: crate::api::internal::nexus::Disk) -> Self {
-        /*
-         * TODO-correctness: can the name always be used as a path like this
-         * or might it need to be sanitized?
-         */
-        let device_path = format!("/mnt/{}", disk.identity.name.as_str());
-        DiskView {
-            identity: disk.identity.clone(),
-            project_id: disk.project_id,
-            snapshot_id: disk.create_snapshot_id,
-            size: disk.size,
-            state: disk.runtime.disk_state,
-            device_path,
-        }
-    }
 }
 
 /**
@@ -948,12 +911,6 @@ pub struct RackView {
     pub identity: IdentityMetadata,
 }
 
-impl From<crate::api::internal::nexus::Rack> for RackView {
-    fn from(rack: crate::api::internal::nexus::Rack) -> Self {
-        RackView { identity: rack.identity }
-    }
-}
-
 /*
  * SLEDS
  */
@@ -967,15 +924,6 @@ pub struct SledView {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
-}
-
-impl From<crate::api::internal::nexus::Sled> for SledView {
-    fn from(sled: crate::api::internal::nexus::Sled) -> Self {
-        SledView {
-            identity: sled.identity.clone(),
-            service_address: sled.service_address,
-        }
-    }
 }
 
 /*

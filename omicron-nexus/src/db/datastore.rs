@@ -31,9 +31,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus::OximeterAssignment;
-use omicron_common::api::internal::nexus::OximeterInfo;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
@@ -76,31 +73,22 @@ impl DataStore {
     }
 
     /// Create a project
-    pub async fn project_create_with_id(
+    pub async fn project_create(
         &self,
-        new_id: &Uuid,
-        new_project: &api::external::ProjectCreateParams,
-    ) -> CreateResult<api::internal::nexus::Project> {
+        new_project: &db::model::Project,
+    ) -> CreateResult<db::model::Project> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("id", new_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         new_project.sql_serialize(&mut values);
-        sql_insert_unique::<Project>(
-            &client,
-            &values,
-            &new_project.identity.name.as_str(),
-        )
-        .await
+        sql_insert_unique::<Project>(&client, &values, &new_project.name())
+            .await
     }
 
     /// Fetch metadata for a project
     pub async fn project_fetch(
         &self,
         project_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Project> {
+    ) -> LookupResult<db::model::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueName, Project>(
             &client,
@@ -155,7 +143,7 @@ impl DataStore {
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<api::internal::nexus::Project> {
+    ) -> ListResult<db::model::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_from_table::<LookupByUniqueId, Project>(
             &client,
@@ -169,7 +157,7 @@ impl DataStore {
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Project> {
+    ) -> ListResult<db::model::Project> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueName,
@@ -184,7 +172,7 @@ impl DataStore {
         &self,
         project_name: &Name,
         update_params: &api::external::ProjectUpdateParams,
-    ) -> UpdateResult<api::internal::nexus::Project> {
+    ) -> UpdateResult<db::model::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -213,7 +201,7 @@ impl DataStore {
             Error::not_found_by_name(ResourceType::Project, project_name)
         })
         .await?;
-        Ok(api::internal::nexus::Project::try_from(&row)?)
+        Ok(db::model::Project::try_from(&row)?)
     }
 
     /*
@@ -250,17 +238,17 @@ impl DataStore {
         instance_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::InstanceCreateParams,
-        runtime_initial: &api::internal::nexus::InstanceRuntimeState,
-    ) -> CreateResult<api::internal::nexus::Instance> {
+        runtime_initial: &db::model::InstanceRuntimeState,
+    ) -> CreateResult<db::model::Instance> {
         let client = self.pool.acquire().await?;
-        let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
-        values.set("id", instance_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
-        runtime_initial.sql_serialize(&mut values);
+        let instance = db::model::Instance::new(
+            *instance_id,
+            *project_id,
+            params,
+            runtime_initial.clone(),
+        );
+        instance.sql_serialize(&mut values);
         let instance = sql_insert_unique_idempotent_and_fetch::<
             Instance,
             LookupByUniqueId,
@@ -275,8 +263,8 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            instance.runtime.run_state
-                == api::external::InstanceState::Creating,
+            instance.runtime.run_state.state()
+                == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime.run_state
         );
@@ -292,7 +280,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Instance> {
+    ) -> ListResult<db::model::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -305,7 +293,7 @@ impl DataStore {
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
-    ) -> LookupResult<api::internal::nexus::Instance> {
+    ) -> LookupResult<db::model::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Instance>(&client, (), instance_id)
             .await
@@ -315,7 +303,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         instance_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Instance> {
+    ) -> LookupResult<db::model::Instance> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Instance>(
             &client,
@@ -337,7 +325,7 @@ impl DataStore {
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
-        new_runtime: &api::internal::nexus::InstanceRuntimeState,
+        new_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -380,7 +368,8 @@ impl DataStore {
         let now = Utc::now();
 
         let mut values = SqlValueSet::new();
-        api::external::InstanceState::Destroyed.sql_serialize(&mut values);
+        db::model::InstanceState::new(api::external::InstanceState::Destroyed)
+            .sql_serialize(&mut values);
         values.set("time_deleted", &now);
 
         let mut cond_sql = SqlString::new();
@@ -431,12 +420,12 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::DiskAttachment> {
+    ) -> ListResult<db::model::DiskAttachment> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByAttachedInstance,
             Disk,
-            api::external::DiskAttachment,
+            db::model::DiskAttachment,
         >(
             &client,
             (instance_id,),
@@ -451,23 +440,22 @@ impl DataStore {
         disk_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::DiskCreateParams,
-        runtime_initial: &api::internal::nexus::DiskRuntimeState,
-    ) -> CreateResult<api::internal::nexus::Disk> {
+        runtime_initial: &db::model::DiskRuntimeState,
+    ) -> CreateResult<db::model::Disk> {
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
          */
         let client = self.pool.acquire().await?;
-        let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
-        values.set("id", disk_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
-        runtime_initial.sql_serialize(&mut values);
-
-        let disk: api::internal::nexus::Disk =
+        let disk = db::model::Disk::new(
+            *disk_id,
+            *project_id,
+            params.clone(),
+            runtime_initial.clone(),
+        );
+        disk.sql_serialize(&mut values);
+        let disk =
             sql_insert_unique_idempotent_and_fetch::<Disk, LookupByUniqueId>(
                 &client,
                 &mut values,
@@ -479,7 +467,8 @@ impl DataStore {
             .await?;
 
         bail_unless!(
-            disk.runtime.disk_state == api::external::DiskState::Creating,
+            disk.runtime.disk_state.state()
+                == &api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             disk.runtime.disk_state
         );
@@ -495,7 +484,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Disk> {
+    ) -> ListResult<db::model::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -508,7 +497,7 @@ impl DataStore {
     pub async fn disk_update_runtime(
         &self,
         disk_id: &Uuid,
-        new_runtime: &api::internal::nexus::DiskRuntimeState,
+        new_runtime: &db::model::DiskRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -537,7 +526,7 @@ impl DataStore {
     pub async fn disk_fetch(
         &self,
         disk_id: &Uuid,
-    ) -> LookupResult<api::internal::nexus::Disk> {
+    ) -> LookupResult<db::model::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -546,7 +535,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         disk_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Disk> {
+    ) -> LookupResult<db::model::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
@@ -562,7 +551,8 @@ impl DataStore {
 
         let mut values = SqlValueSet::new();
         values.set("time_deleted", &now);
-        api::external::DiskState::Destroyed.sql_serialize(&mut values);
+        db::model::DiskState::new(api::external::DiskState::Destroyed)
+            .sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
         let disk_state_detached =
@@ -613,13 +603,10 @@ impl DataStore {
     // Create a record for a new Oximeter instance
     pub async fn oximeter_create(
         &self,
-        info: &OximeterInfo,
+        info: &db::model::OximeterInfo,
     ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         info.sql_serialize(&mut values);
         sql_insert::<schema::Oximeter>(&client, &values).await
     }
@@ -627,13 +614,10 @@ impl DataStore {
     // Create a record for a new producer endpoint
     pub async fn producer_endpoint_create(
         &self,
-        producer: &ProducerEndpoint,
+        producer: &db::model::ProducerEndpoint,
     ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         producer.sql_serialize(&mut values);
         sql_insert::<schema::MetricProducer>(&client, &values).await
     }
@@ -648,7 +632,7 @@ impl DataStore {
         let now = Utc::now();
         let mut values = SqlValueSet::new();
         values.set("time_created", &now);
-        let reg = OximeterAssignment { oximeter_id, producer_id };
+        let reg = db::model::OximeterAssignment { oximeter_id, producer_id };
         reg.sql_serialize(&mut values);
         sql_insert::<schema::OximeterAssignment>(&client, &values).await
     }
@@ -737,7 +721,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::Vpc> {
+    ) -> ListResult<db::model::Vpc> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -752,15 +736,11 @@ impl DataStore {
         vpc_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::VpcCreateParams,
-    ) -> Result<api::external::Vpc, Error> {
+    ) -> Result<db::model::Vpc, Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("id", vpc_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
+        let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
+        vpc.sql_serialize(&mut values);
 
         sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
             &client,
@@ -820,7 +800,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         vpc_name: &Name,
-    ) -> LookupResult<api::external::Vpc> {
+    ) -> LookupResult<db::model::Vpc> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Vpc>(
             &client,

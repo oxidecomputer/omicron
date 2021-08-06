@@ -1,46 +1,12 @@
 //! APIs exposed by Nexus.
 
-use crate::api::external::{
-    ByteCount, DiskState, Generation, IdentityMetadata, InstanceCpuCount,
-    InstanceState,
-};
+use crate::api::external::{DiskState, Generation, InstanceState};
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
-
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-pub struct Sled {
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
-}
-
-/// A collection of associated resources.
-pub struct Project {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
-}
-
-/// A Disk (network block device).
-#[derive(Clone, Debug)]
-pub struct Disk {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
-    /// id for the project containing this Disk
-    pub project_id: Uuid,
-    /// id for the snapshot from which this Disk was created (None means a blank
-    /// disk)
-    pub create_snapshot_id: Option<Uuid>,
-    /// size of the Disk
-    pub size: ByteCount,
-    /// runtime state of the Disk
-    pub runtime: DiskRuntimeState,
-}
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata
@@ -52,28 +18,6 @@ pub struct DiskRuntimeState {
     pub gen: Generation,
     /// timestamp for this information
     pub time_updated: DateTime<Utc>,
-}
-
-/// An Instance (VM).
-#[derive(Clone, Debug)]
-pub struct Instance {
-    /// common identifying metadata
-    pub identity: IdentityMetadata,
-
-    /// id for the project containing this Instance
-    pub project_id: Uuid,
-
-    /// number of CPUs allocated for this Instance
-    pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
-    // TODO-cleanup different type?
-    pub hostname: String,
-
-    /// state owned by the data plane
-    pub runtime: InstanceRuntimeState,
-    // TODO-completeness: add disks, network, tags, metrics
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal
@@ -128,12 +72,4 @@ pub struct OximeterInfo {
 
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
-}
-
-/// An assignment of an Oximeter instance to a metric producer for collection.
-// TODO: Goes to storage
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterAssignment {
-    pub oximeter_id: Uuid,
-    pub producer_id: Uuid,
 }

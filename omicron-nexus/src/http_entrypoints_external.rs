@@ -3,6 +3,7 @@
  */
 
 use super::ServerContext;
+use crate::db;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -16,7 +17,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use omicron_common::api;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -176,8 +176,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<api::internal::nexus::Project, ProjectView>(project_stream)
-            .await;
+        to_list::<db::model::Project, ProjectView>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -301,8 +300,7 @@ async fn project_disks_get(
         )
         .await?;
 
-    let disk_list =
-        to_list::<api::internal::nexus::Disk, DiskView>(disk_stream).await;
+    let disk_list = to_list::<db::model::Disk, DiskView>(disk_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
@@ -406,10 +404,8 @@ async fn project_instances_get(
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_list::<api::internal::nexus::Instance, InstanceView>(
-        instance_stream,
-    )
-    .await;
+    let view_list =
+        to_list::<db::model::Instance, InstanceView>(instance_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -580,7 +576,8 @@ async fn instance_disks_get(
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
-    let view_list = to_list(disk_list).await;
+    let view_list =
+        to_list::<db::model::DiskAttachment, DiskAttachment>(disk_list).await;
     Ok(HttpResponseOk(view_list))
 }
 
@@ -809,8 +806,7 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list =
-        to_list::<api::internal::nexus::Rack, RackView>(rack_stream).await;
+    let view_list = to_list::<db::model::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -861,8 +857,7 @@ async fn hardware_sleds_get(
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list =
-        to_list::<api::internal::nexus::Sled, SledView>(sled_stream).await;
+    let view_list = to_list::<db::model::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 

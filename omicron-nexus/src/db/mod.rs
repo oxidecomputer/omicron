@@ -3,7 +3,6 @@
  */
 
 mod config;
-mod conversions;
 mod datastore;
 mod operations;
 mod pool;
@@ -12,6 +11,7 @@ mod saga_types;
 mod sec_store;
 mod sql_operations;
 
+pub mod model;
 pub mod schema;
 pub mod sql; /* public for examples only */
 
