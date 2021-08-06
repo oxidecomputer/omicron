@@ -5,6 +5,8 @@
 use super::ServerContext;
 use crate::db;
 
+use crate::params;
+use crate::views;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -38,9 +40,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Rack;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
@@ -156,7 +155,7 @@ pub fn external_api() -> NexusApiDescription {
 async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::Project>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -176,7 +175,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<db::model::Project, Project>(project_stream).await;
+        to_list::<db::model::Project, views::Project>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -189,8 +188,8 @@ async fn projects_get(
 }]
 async fn projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_project: TypedBody<ProjectCreateParams>,
-) -> Result<HttpResponseCreated<Project>, HttpError> {
+    new_project: TypedBody<params::ProjectCreate>,
+) -> Result<HttpResponseCreated<views::Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let project = nexus.project_create(&new_project.into_inner()).await?;
@@ -216,7 +215,7 @@ struct ProjectPathParam {
 async fn projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
+) -> Result<HttpResponseOk<views::Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -260,8 +259,8 @@ async fn projects_delete_project(
 async fn projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    updated_project: TypedBody<ProjectUpdateParams>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
+    updated_project: TypedBody<params::ProjectUpdate>,
+) -> Result<HttpResponseOk<views::Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

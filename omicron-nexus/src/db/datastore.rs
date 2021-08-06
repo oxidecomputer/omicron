@@ -62,6 +62,7 @@ use super::sql_operations::sql_insert_unique;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
+use crate::params;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -171,7 +172,7 @@ impl DataStore {
     pub async fn project_update(
         &self,
         project_name: &Name,
-        update_params: &api::external::ProjectUpdateParams,
+        update_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let client = self.pool.acquire().await?;
         let now = Utc::now();

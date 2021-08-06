@@ -1,5 +1,6 @@
 //! Structures stored to the database.
 
+use crate::params;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, InstanceCpuCount,
@@ -138,12 +139,12 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 
 /// Describes a project within the database.
 pub struct Project {
-    identity: IdentityMetadata,
+    pub identity: IdentityMetadata,
 }
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(params: &external::ProjectCreateParams) -> Self {
+    pub fn new(params: &params::ProjectCreate) -> Self {
         let id = Uuid::new_v4();
         Self { identity: IdentityMetadata::new(id, params.identity.clone()) }
     }
@@ -157,19 +158,7 @@ impl Project {
     }
 }
 
-/// Conversion to the internal API type.
-impl Into<external::Project> for Project {
-    fn into(self) -> external::Project {
-        external::Project { identity: self.identity.into() }
-    }
-}
-
 /// Conversion from the internal API type.
-impl From<external::Project> for Project {
-    fn from(project: external::Project) -> Self {
-        Self { identity: project.identity.into() }
-    }
-}
 
 /// Serialization to DB.
 impl SqlSerialize for Project {

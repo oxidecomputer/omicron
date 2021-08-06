@@ -3,6 +3,7 @@
  */
 
 use crate::db;
+use crate::params;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -27,8 +28,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
@@ -295,7 +294,7 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
-        new_project: &ProjectCreateParams,
+        new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         // Create a project.
         let db_project = db::model::Project::new(new_project);
@@ -356,7 +355,7 @@ impl Nexus {
     pub async fn project_update(
         &self,
         name: &Name,
-        new_params: &ProjectUpdateParams,
+        new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         self.db_datastore.project_update(name, new_params).await
     }

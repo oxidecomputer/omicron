@@ -1257,6 +1257,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_identity",
  "async-trait",
  "bb8",
  "bb8-postgres",
