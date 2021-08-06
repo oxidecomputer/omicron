@@ -17,7 +17,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use omicron_common::api;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -177,7 +176,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<api::internal::nexus::Project, ProjectView>(project_stream)
+        to_list::<db::types::Project, ProjectView>(project_stream)
             .await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
@@ -809,7 +808,7 @@ async fn hardware_racks_get(
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list =
-        to_list::<api::internal::nexus::Rack, RackView>(rack_stream).await;
+        to_list::<db::types::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -861,7 +860,7 @@ async fn hardware_sleds_get(
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
     let view_list =
-        to_list::<api::internal::nexus::Sled, SledView>(sled_stream).await;
+        to_list::<db::types::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 

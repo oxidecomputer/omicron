@@ -38,9 +38,6 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::Project;
-use omicron_common::api::internal::nexus::Rack;
-use omicron_common::api::internal::nexus::Sled;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
@@ -299,7 +296,7 @@ impl Nexus {
     pub async fn project_create(
         &self,
         new_project: &ProjectCreateParams,
-    ) -> CreateResult<Project> {
+    ) -> CreateResult<db::types::Project> {
         // Create a project.
         let project = db::types::Project::new(new_project);
         let project: db::types::Project = self
@@ -334,28 +331,22 @@ impl Nexus {
         Ok(project.into())
     }
 
-    pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
+    pub async fn project_fetch(&self, name: &Name) -> LookupResult<db::types::Project> {
         self.db_datastore.project_fetch(name).await.map(|p| p.into())
     }
 
     pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<Project> {
-        let db_stream =
-            self.db_datastore.projects_list_by_name(pagparams).await?;
-        let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
-        Ok(api_stream)
+    ) -> ListResult<db::types::Project> {
+        self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<Project> {
-        let db_stream =
-            self.db_datastore.projects_list_by_id(pagparams).await?;
-        let api_stream = Box::pin(db_stream.map(|r| r.map(|p| p.into())));
-        Ok(api_stream)
+    ) -> ListResult<db::types::Project> {
+        self.db_datastore.projects_list_by_id(pagparams).await
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
@@ -366,7 +357,7 @@ impl Nexus {
         &self,
         name: &Name,
         new_params: &ProjectUpdateParams,
-    ) -> UpdateResult<Project> {
+    ) -> UpdateResult<db::types::Project> {
         self.db_datastore
             .project_update(name, new_params)
             .await
@@ -410,7 +401,7 @@ impl Nexus {
             .db_datastore
             .project_create_disk(
                 &disk_id,
-                &project.identity.id,
+                &project.id(),
                 params,
                 &db::types::DiskRuntimeState {
                     disk_state: db::types::DiskState::new(DiskState::Creating),
@@ -1125,14 +1116,14 @@ impl Nexus {
      * Racks.  We simulate just one for now.
      */
 
-    fn as_rack(&self) -> Rack {
-        Rack { identity: self.api_rack_identity.clone() }
+    fn as_rack(&self) -> db::types::Rack {
+        db::types::Rack { identity: self.api_rack_identity.clone().into() }
     }
 
     pub async fn racks_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<Rack> {
+    ) -> ListResult<db::types::Rack> {
         if let Some(marker) = pagparams.marker {
             if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
@@ -1142,7 +1133,7 @@ impl Nexus {
         Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
     }
 
-    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<Rack> {
+    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<db::types::Rack> {
         if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
@@ -1160,14 +1151,14 @@ impl Nexus {
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<Sled> {
+    ) -> ListResult<db::types::Sled> {
         let sled_agents = self.sled_agents.lock().await;
         let sleds = collection_page(&sled_agents, pagparams)?
             .filter(|maybe_object| ready(maybe_object.is_ok()))
             .map(|sa| {
                 let sa = sa.unwrap();
-                Ok(Sled {
-                    identity: IdentityMetadata {
+                Ok(db::types::Sled {
+                    identity: db::types::IdentityMetadata {
                         /* TODO-correctness cons up real metadata here */
                         id: sa.id,
                         name: Name::try_from(format!("sled-{}", sa.id))
@@ -1179,19 +1170,19 @@ impl Nexus {
                     service_address: sa.service_address,
                 })
             })
-            .collect::<Vec<Result<Sled, Error>>>()
+            .collect::<Vec<Result<db::types::Sled, Error>>>()
             .await;
         Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<Sled> {
+    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<db::types::Sled> {
         let nexuses = self.sled_agents.lock().await;
         let sa = nexuses.get(sled_id).ok_or_else(|| {
             Error::not_found_by_id(ResourceType::Sled, sled_id)
         })?;
 
-        Ok(Sled {
-            identity: IdentityMetadata {
+        Ok(db::types::Sled {
+            identity: db::types::IdentityMetadata {
                 /* TODO-correctness cons up real metadata here */
                 id: sa.id,
                 name: Name::try_from(format!("sled-{}", sa.id)).unwrap(),

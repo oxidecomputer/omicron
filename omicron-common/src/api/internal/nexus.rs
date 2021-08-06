@@ -1,7 +1,7 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    DiskState, Generation, IdentityMetadata, InstanceState,
+    DiskState, Generation, InstanceState,
 };
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -9,42 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
-
-// TODO: Do a pass of this file. If stuff was moved to a DB repr, it's not
-// needed here.
-
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-pub struct Sled {
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
-}
-
-/// A collection of associated resources.
-pub struct Project {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
-}
-
-/*
-/// A Disk (network block device).
-#[derive(Clone, Debug)]
-pub struct Disk {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
-    /// id for the project containing this Disk
-    pub project_id: Uuid,
-    /// id for the snapshot from which this Disk was created (None means a blank
-    /// disk)
-    pub create_snapshot_id: Option<Uuid>,
-    /// size of the Disk
-    pub size: ByteCount,
-    /// runtime state of the Disk
-    pub runtime: DiskRuntimeState,
-}
-*/
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata

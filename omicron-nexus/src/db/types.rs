@@ -6,7 +6,6 @@ use omicron_common::api::external::{
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
-use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -15,8 +14,41 @@ use uuid::Uuid;
 use super::sql::SqlSerialize;
 use super::sql::SqlValueSet;
 
-// TODO: Check derives; may not all be necessary
 // TODO: Break up types into multiple files
+
+// NOTE: This object is not currently stored in the database.
+//
+// However, it likely will be in the future - for the single-rack
+// case, however, it is synthesized.
+pub struct Rack {
+    pub identity: IdentityMetadata,
+}
+
+impl Into<external::RackView> for Rack {
+    fn into(self) -> external::RackView {
+        external::RackView {
+            identity: self.identity.into(),
+        }
+    }
+}
+
+// NOTE: This object is not currently stored in the database.
+//
+// However, it likely will be in the future. At the moment,
+// Nexus simply reports all the live connections it knows about.
+pub struct Sled {
+    pub identity: IdentityMetadata,
+    pub service_address: SocketAddr,
+}
+
+impl Into<external::SledView> for Sled {
+    fn into(self) -> external::SledView {
+        external::SledView {
+            identity: self.identity.into(),
+            service_address: self.service_address,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct IdentityMetadata {
@@ -79,7 +111,6 @@ impl SqlSerialize for IdentityMetadata {
 }
 
 /// Deserialization from the DB.
-// TODO: delete from model_db, move here when everything else has migrated.
 impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
     type Error = Error;
 
@@ -129,15 +160,15 @@ impl Project {
 }
 
 /// Conversion to the internal API type.
-impl Into<internal::nexus::Project> for Project {
-    fn into(self) -> internal::nexus::Project {
-        internal::nexus::Project { identity: self.identity.into() }
+impl Into<external::ProjectView> for Project {
+    fn into(self) -> external::ProjectView {
+        external::ProjectView { identity: self.identity.into() }
     }
 }
 
 /// Conversion from the internal API type.
-impl From<internal::nexus::Project> for Project {
-    fn from(project: internal::nexus::Project) -> Self {
+impl From<external::ProjectView> for Project {
+    fn from(project: external::ProjectView) -> Self {
         Self { identity: project.identity.into() }
     }
 }
@@ -246,7 +277,7 @@ impl TryFrom<&tokio_postgres::Row> for Instance {
 /// metadata
 ///
 /// This state is owned by the sled agent running that Instance.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
     pub run_state: InstanceState,
@@ -318,9 +349,7 @@ impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
 
 /// A wrapper around the external "InstanceState" object,
 /// which may be stored to disk.
-#[derive(
-    Copy, Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
-)]
+#[derive(Copy, Clone, Debug)]
 pub struct InstanceState(external::InstanceState);
 
 impl InstanceState {

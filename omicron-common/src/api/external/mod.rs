@@ -532,12 +532,6 @@ pub struct ProjectView {
     pub identity: IdentityMetadata,
 }
 
-impl From<crate::api::internal::nexus::Project> for ProjectView {
-    fn from(project: crate::api::internal::nexus::Project) -> Self {
-        ProjectView { identity: project.identity }
-    }
-}
-
 /**
  * Create-time parameters for an [`Project`]
  */
@@ -775,26 +769,6 @@ pub struct DiskView {
     pub device_path: String,
 }
 
-/*
-impl From<crate::api::internal::nexus::Disk> for DiskView {
-    fn from(disk: crate::api::internal::nexus::Disk) -> Self {
-        /*
-         * TODO-correctness: can the name always be used as a path like this
-         * or might it need to be sanitized?
-         */
-        let device_path = format!("/mnt/{}", disk.identity.name.as_str());
-        DiskView {
-            identity: disk.identity.clone(),
-            project_id: disk.project_id,
-            snapshot_id: disk.create_snapshot_id,
-            size: disk.size,
-            state: disk.runtime.disk_state,
-            device_path,
-        }
-    }
-}
-*/
-
 /**
  * State of a Disk (primarily: attached or not)
  */
@@ -937,12 +911,6 @@ pub struct RackView {
     pub identity: IdentityMetadata,
 }
 
-impl From<crate::api::internal::nexus::Rack> for RackView {
-    fn from(rack: crate::api::internal::nexus::Rack) -> Self {
-        RackView { identity: rack.identity }
-    }
-}
-
 /*
  * SLEDS
  */
@@ -956,15 +924,6 @@ pub struct SledView {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
-}
-
-impl From<crate::api::internal::nexus::Sled> for SledView {
-    fn from(sled: crate::api::internal::nexus::Sled) -> Self {
-        SledView {
-            identity: sled.identity.clone(),
-            service_address: sled.service_address,
-        }
-    }
 }
 
 /*
