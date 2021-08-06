@@ -24,9 +24,9 @@ pub struct Rack {
     pub identity: IdentityMetadata,
 }
 
-impl Into<external::RackView> for Rack {
-    fn into(self) -> external::RackView {
-        external::RackView { identity: self.identity.into() }
+impl Into<external::Rack> for Rack {
+    fn into(self) -> external::Rack {
+        external::Rack { identity: self.identity.into() }
     }
 }
 
@@ -39,9 +39,9 @@ pub struct Sled {
     pub service_address: SocketAddr,
 }
 
-impl Into<external::SledView> for Sled {
-    fn into(self) -> external::SledView {
-        external::SledView {
+impl Into<external::Sled> for Sled {
+    fn into(self) -> external::Sled {
+        external::Sled {
             identity: self.identity.into(),
             service_address: self.service_address,
         }
@@ -158,15 +158,15 @@ impl Project {
 }
 
 /// Conversion to the internal API type.
-impl Into<external::ProjectView> for Project {
-    fn into(self) -> external::ProjectView {
-        external::ProjectView { identity: self.identity.into() }
+impl Into<external::Project> for Project {
+    fn into(self) -> external::Project {
+        external::Project { identity: self.identity.into() }
     }
 }
 
 /// Conversion from the internal API type.
-impl From<external::ProjectView> for Project {
-    fn from(project: external::ProjectView) -> Self {
+impl From<external::Project> for Project {
+    fn from(project: external::Project) -> Self {
         Self { identity: project.identity.into() }
     }
 }
@@ -230,9 +230,9 @@ impl Instance {
 }
 
 /// Conversion to the external API type.
-impl Into<external::InstanceView> for Instance {
-    fn into(self) -> external::InstanceView {
-        external::InstanceView {
+impl Into<external::Instance> for Instance {
+    fn into(self) -> external::Instance {
+        external::Instance {
             identity: self.identity.clone().into(),
             project_id: self.project_id,
             ncpus: self.ncpus,
@@ -288,9 +288,9 @@ pub struct InstanceRuntimeState {
 }
 
 /// Conversion to the external API type.
-impl Into<external::InstanceRuntimeStateView> for InstanceRuntimeState {
-    fn into(self) -> external::InstanceRuntimeStateView {
-        external::InstanceRuntimeStateView {
+impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
+    fn into(self) -> external::InstanceRuntimeState {
+        external::InstanceRuntimeState {
             run_state: self.run_state.0,
             time_run_state_updated: self.time_updated,
         }
@@ -414,10 +414,10 @@ impl Disk {
 }
 
 /// Conversion to the external API type.
-impl Into<external::DiskView> for Disk {
-    fn into(self) -> external::DiskView {
+impl Into<external::Disk> for Disk {
+    fn into(self) -> external::Disk {
         let device_path = format!("/mnt/{}", self.identity.name.as_str());
-        external::DiskView {
+        external::Disk {
             identity: self.identity.clone().into(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,

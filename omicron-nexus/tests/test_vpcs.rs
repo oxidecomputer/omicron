@@ -3,8 +3,8 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectView;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
@@ -166,7 +166,7 @@ fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
 async fn create_project(
     client: &ClientTestContext,
     project_name: &str,
-) -> ProjectView {
+) -> Project {
     objects_post(
         &client,
         "/projects",

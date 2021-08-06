@@ -31,19 +31,19 @@ use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
-use omicron_common::api::external::DiskView;
+use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::InstanceView;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::PaginationOrder;
+use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
-use omicron_common::api::external::ProjectView;
-use omicron_common::api::external::RackView;
-use omicron_common::api::external::SagaView;
-use omicron_common::api::external::SledView;
+use omicron_common::api::external::Rack;
+use omicron_common::api::external::Saga;
+use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
@@ -156,7 +156,7 @@ pub fn external_api() -> NexusApiDescription {
 async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<ProjectView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -176,7 +176,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<db::model::Project, ProjectView>(project_stream).await;
+        to_list::<db::model::Project, Project>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -190,7 +190,7 @@ async fn projects_get(
 async fn projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_project: TypedBody<ProjectCreateParams>,
-) -> Result<HttpResponseCreated<ProjectView>, HttpError> {
+) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let project = nexus.project_create(&new_project.into_inner()).await?;
@@ -216,7 +216,7 @@ struct ProjectPathParam {
 async fn projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ProjectView>, HttpError> {
+) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -261,7 +261,7 @@ async fn projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<ProjectUpdateParams>,
-) -> Result<HttpResponseOk<ProjectView>, HttpError> {
+) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -287,7 +287,7 @@ async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<DiskView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -300,7 +300,7 @@ async fn project_disks_get(
         )
         .await?;
 
-    let disk_list = to_list::<db::model::Disk, DiskView>(disk_stream).await;
+    let disk_list = to_list::<db::model::Disk, Disk>(disk_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
@@ -317,7 +317,7 @@ async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<DiskCreateParams>,
-) -> Result<HttpResponseCreated<DiskView>, HttpError> {
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -347,7 +347,7 @@ struct DiskPathParam {
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseOk<DiskView>, HttpError> {
+) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -392,7 +392,7 @@ async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<InstanceView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -405,7 +405,7 @@ async fn project_instances_get(
         )
         .await?;
     let view_list =
-        to_list::<db::model::Instance, InstanceView>(instance_stream).await;
+        to_list::<db::model::Instance, Instance>(instance_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -428,7 +428,7 @@ async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<InstanceCreateParams>,
-) -> Result<HttpResponseCreated<InstanceView>, HttpError> {
+) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -459,7 +459,7 @@ struct InstancePathParam {
 async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<InstanceView>, HttpError> {
+) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -500,7 +500,7 @@ async fn project_instances_delete_instance(
 async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -520,7 +520,7 @@ async fn project_instances_instance_reboot(
 async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -541,7 +541,7 @@ async fn project_instances_instance_start(
 async fn project_instances_instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<InstanceView>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -800,13 +800,13 @@ async fn project_vpcs_delete_vpc(
 async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<RackView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_list::<db::model::Rack, RackView>(rack_stream).await;
+    let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -829,7 +829,7 @@ struct RackPathParam {
 async fn hardware_racks_get_rack(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
-) -> Result<HttpResponseOk<RackView>, HttpError> {
+) -> Result<HttpResponseOk<Rack>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -851,13 +851,13 @@ async fn hardware_racks_get_rack(
 async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SledView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_list::<db::model::Sled, SledView>(sled_stream).await;
+    let view_list = to_list::<db::model::Sled, Sled>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -880,7 +880,7 @@ struct SledPathParam {
 async fn hardware_sleds_get_sled(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
-) -> Result<HttpResponseOk<SledView>, HttpError> {
+) -> Result<HttpResponseOk<Sled>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -902,7 +902,7 @@ async fn hardware_sleds_get_sled(
 async fn sagas_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -930,7 +930,7 @@ struct SagaPathParam {
 async fn sagas_get_saga(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SagaPathParam>,
-) -> Result<HttpResponseOk<SagaView>, HttpError> {
+) -> Result<HttpResponseOk<Saga>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

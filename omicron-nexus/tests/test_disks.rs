@@ -5,17 +5,17 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
-use omicron_common::api::external::DiskView;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::InstanceView;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectView;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -50,7 +50,7 @@ async fn test_disks() {
     /* Create a project for testing. */
     let project_name = "springfield-squidport-disks";
     let url_disks = format!("/projects/{}/disks", project_name);
-    let project: ProjectView = objects_post(
+    let project: Project = objects_post(
         &client,
         "/projects",
         ProjectCreateParams {
@@ -88,8 +88,7 @@ async fn test_disks() {
         snapshot_id: None,
         size: ByteCount::from_gibibytes_u32(1),
     };
-    let disk: DiskView =
-        objects_post(&client, &url_disks, new_disk.clone()).await;
+    let disk: Disk = objects_post(&client, &url_disks, new_disk.clone()).await;
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project.identity.id);
@@ -128,7 +127,7 @@ async fn test_disks() {
 
     /* Create an instance to attach the disk. */
     let url_instances = format!("/projects/{}/instances", project_name);
-    let instance: InstanceView = objects_post(
+    let instance: Instance = objects_post(
         &client,
         &url_instances,
         InstanceCreateParams {
@@ -241,7 +240,7 @@ async fn test_disks() {
      * Create a second instance and try to attach the disk to that.  This should
      * fail and the disk should remain attached to the first instance.
      */
-    let instance2: InstanceView = objects_post(
+    let instance2: Instance = objects_post(
         &client,
         &url_instances,
         InstanceCreateParams {
@@ -515,18 +514,15 @@ async fn test_disks() {
     cptestctx.teardown().await;
 }
 
-async fn disk_get(client: &ClientTestContext, disk_url: &str) -> DiskView {
-    object_get::<DiskView>(client, disk_url).await
+async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
+    object_get::<Disk>(client, disk_url).await
 }
 
-async fn disks_list(
-    client: &ClientTestContext,
-    list_url: &str,
-) -> Vec<DiskView> {
-    objects_list_page::<DiskView>(client, list_url).await.items
+async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
+    objects_list_page::<Disk>(client, list_url).await.items
 }
 
-fn disks_eq(disk1: &DiskView, disk2: &DiskView) {
+fn disks_eq(disk1: &Disk, disk2: &Disk) {
     identity_eq(&disk1.identity, &disk2.identity);
     assert_eq!(disk1.project_id, disk2.project_id);
     assert_eq!(disk1.snapshot_id, disk2.snapshot_id);

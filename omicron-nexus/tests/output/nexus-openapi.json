@@ -50,7 +50,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackViewResultsPage"
+                  "$ref": "#/components/schemas/RackResultsPage"
                 }
               }
             }
@@ -82,7 +82,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackView"
+                  "$ref": "#/components/schemas/Rack"
                 }
               }
             }
@@ -130,7 +130,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledViewResultsPage"
+                  "$ref": "#/components/schemas/SledResultsPage"
                 }
               }
             }
@@ -162,7 +162,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledView"
+                  "$ref": "#/components/schemas/Sled"
                 }
               }
             }
@@ -210,7 +210,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectViewResultsPage"
+                  "$ref": "#/components/schemas/ProjectResultsPage"
                 }
               }
             }
@@ -237,7 +237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -266,7 +266,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -303,7 +303,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -380,7 +380,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskViewResultsPage"
+                  "$ref": "#/components/schemas/DiskResultsPage"
                 }
               }
             }
@@ -418,7 +418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -456,7 +456,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -542,7 +542,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceViewResultsPage"
+                  "$ref": "#/components/schemas/InstanceResultsPage"
                 }
               }
             }
@@ -580,7 +580,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -618,7 +618,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -857,7 +857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -895,7 +895,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -933,7 +933,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -1182,7 +1182,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaViewResultsPage"
+                  "$ref": "#/components/schemas/SagaResultsPage"
                 }
               }
             }
@@ -1213,7 +1213,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaView"
+                  "$ref": "#/components/schemas/Saga"
                 }
               }
             }
@@ -1323,6 +1323,62 @@
         "format": "uint64",
         "minimum": 0
       },
+      "Disk": {
+        "description": "Client view of an [`Disk`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "devicePath": {
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "snapshotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DiskState"
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "devicePath",
+          "id",
+          "name",
+          "projectId",
+          "size",
+          "state",
+          "timeCreated",
+          "timeModified"
+        ]
+      },
       "DiskAttachment": {
         "description": "Describes a Disk's attachment to an Instance",
         "type": "object",
@@ -1372,6 +1428,26 @@
           "description",
           "name",
           "size"
+        ]
+      },
+      "DiskResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Disk"
+            }
+          },
+          "next_page": {
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "DiskState": {
@@ -1430,82 +1506,6 @@
           }
         ]
       },
-      "DiskView": {
-        "description": "Client view of an [`Disk`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "devicePath": {
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "projectId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "size": {
-            "$ref": "#/components/schemas/ByteCount"
-          },
-          "snapshotId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/DiskState"
-          },
-          "timeCreated": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeModified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "devicePath",
-          "id",
-          "name",
-          "projectId",
-          "size",
-          "state",
-          "timeCreated",
-          "timeModified"
-        ]
-      },
-      "DiskViewResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DiskView"
-            }
-          },
-          "next_page": {
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "IdentityMetadata": {
         "description": "Identity-related metadata that's included in nearly all public API objects",
         "type": "object",
@@ -1541,56 +1541,7 @@
           "timeModified"
         ]
       },
-      "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
-      },
-      "InstanceCreateParams": {
-        "description": "Create-time parameters for an [`Instance`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "hostname": {
-            "type": "string"
-          },
-          "memory": {
-            "$ref": "#/components/schemas/ByteCount"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
-          }
-        },
-        "required": [
-          "description",
-          "hostname",
-          "memory",
-          "name",
-          "ncpus"
-        ]
-      },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "repairing",
-          "failed",
-          "destroyed"
-        ]
-      },
-      "InstanceView": {
+      "Instance": {
         "description": "Client view of an [`Instance`]",
         "type": "object",
         "properties": {
@@ -1653,7 +1604,41 @@
           "timeRunStateUpdated"
         ]
       },
-      "InstanceViewResultsPage": {
+      "InstanceCpuCount": {
+        "description": "The number of CPUs in an Instance",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
+      "InstanceCreateParams": {
+        "description": "Create-time parameters for an [`Instance`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          }
+        },
+        "required": [
+          "description",
+          "hostname",
+          "memory",
+          "name",
+          "ncpus"
+        ]
+      },
+      "InstanceResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1661,7 +1646,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/InstanceView"
+              "$ref": "#/components/schemas/Instance"
             }
           },
           "next_page": {
@@ -1671,6 +1656,21 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "InstanceState": {
+        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "type": "string",
+        "enum": [
+          "creating",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "rebooting",
+          "repairing",
+          "failed",
+          "destroyed"
         ]
       },
       "Ipv4Net": {
@@ -1694,35 +1694,7 @@
         "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
         "maxLength": 63
       },
-      "ProjectCreateParams": {
-        "description": "Create-time parameters for an [`Project`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "ProjectUpdateParams": {
-        "description": "Updateable properties of an [`Project`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        }
-      },
-      "ProjectView": {
+      "Project": {
         "description": "Client view of an [`Project`]",
         "type": "object",
         "properties": {
@@ -1757,7 +1729,23 @@
           "timeModified"
         ]
       },
-      "ProjectViewResultsPage": {
+      "ProjectCreateParams": {
+        "description": "Create-time parameters for an [`Project`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "ProjectResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1765,7 +1753,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectView"
+              "$ref": "#/components/schemas/Project"
             }
           },
           "next_page": {
@@ -1777,7 +1765,19 @@
           "items"
         ]
       },
-      "RackView": {
+      "ProjectUpdateParams": {
+        "description": "Updateable properties of an [`Project`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        }
+      },
+      "Rack": {
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
@@ -1789,7 +1789,7 @@
           "identity"
         ]
       },
-      "RackViewResultsPage": {
+      "RackResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1797,7 +1797,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RackView"
+              "$ref": "#/components/schemas/Rack"
             }
           },
           "next_page": {
@@ -1809,7 +1809,43 @@
           "items"
         ]
       },
-      "SagaStateView": {
+      "Saga": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SagaState"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ]
+      },
+      "SagaResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Saga"
+            }
+          },
+          "next_page": {
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SagaState": {
         "anyOf": [
           {
             "type": "string",
@@ -1845,43 +1881,7 @@
           }
         ]
       },
-      "SagaView": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/SagaStateView"
-          }
-        },
-        "required": [
-          "id",
-          "state"
-        ]
-      },
-      "SagaViewResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SagaView"
-            }
-          },
-          "next_page": {
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "SledView": {
+      "Sled": {
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
@@ -1920,7 +1920,7 @@
           "timeModified"
         ]
       },
-      "SledViewResultsPage": {
+      "SledResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1928,7 +1928,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SledView"
+              "$ref": "#/components/schemas/Sled"
             }
           },
           "next_page": {

@@ -11,6 +11,7 @@ use chrono::Utc;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
+use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -29,7 +30,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::SagaView;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
@@ -544,7 +544,7 @@ impl Nexus {
          *
          * How can we fix this?  Right now we have internal representations like
          * Instance and analaogous end-user-facing representations like
-         * InstanceView.  The former is not even serializable.  The saga
+         * Instance.  The former is not even serializable.  The saga
          * _could_ emit the View version, but that's not great for two (related)
          * reasons: (1) other sagas might want to provision instances and get
          * back the internal representation to do other things with the
@@ -1203,7 +1203,7 @@ impl Nexus {
     pub async fn sagas_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<SagaView> {
+    ) -> ListResult<external::Saga> {
         /*
          * The endpoint we're serving only supports `ScanById`, which only
          * supports an ascending scan.
@@ -1217,16 +1217,16 @@ impl Nexus {
             .saga_list(marker, pagparams.limit)
             .await
             .into_iter()
-            .map(SagaView::from)
+            .map(external::Saga::from)
             .map(Ok);
         Ok(futures::stream::iter(saga_list).boxed())
     }
 
-    pub async fn saga_get(&self, id: Uuid) -> LookupResult<SagaView> {
+    pub async fn saga_get(&self, id: Uuid) -> LookupResult<external::Saga> {
         self.sec_client
             .saga_get(steno::SagaId::from(id))
             .await
-            .map(SagaView::from)
+            .map(external::Saga::from)
             .map(Ok)
             .map_err(|_: ()| {
                 Error::not_found_by_id(ResourceType::SagaDbg, &id)

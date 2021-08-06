@@ -6,13 +6,13 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::InstanceView;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectView;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -43,7 +43,7 @@ async fn test_instances() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
-    let _: ProjectView = objects_post(
+    let _: Project = objects_post(
         &client,
         "/projects",
         ProjectCreateParams {
@@ -92,7 +92,7 @@ async fn test_instances() {
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: String::from("rainsticks"),
     };
-    let instance: InstanceView =
+    let instance: Instance =
         objects_post(&client, &url_instances, new_instance.clone()).await;
     assert_eq!(instance.identity.name, "just-rainsticks");
     assert_eq!(instance.identity.description, "sells rainsticks");
@@ -388,15 +388,15 @@ async fn test_instances() {
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
-) -> InstanceView {
-    object_get::<InstanceView>(client, instance_url).await
+) -> Instance {
+    object_get::<Instance>(client, instance_url).await
 }
 
 async fn instances_list(
     client: &ClientTestContext,
     instances_url: &str,
-) -> Vec<InstanceView> {
-    objects_list_page::<InstanceView>(client, instances_url).await.items
+) -> Vec<Instance> {
+    objects_list_page::<Instance>(client, instances_url).await.items
 }
 
 /**
@@ -411,7 +411,7 @@ async fn instance_post(
     client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
-) -> InstanceView {
+) -> Instance {
     let url = format!(
         "{}/{}",
         instance_url,
@@ -430,10 +430,10 @@ async fn instance_post(
         )
         .await
         .unwrap();
-    read_json::<InstanceView>(&mut response).await
+    read_json::<Instance>(&mut response).await
 }
 
-fn instances_eq(instance1: &InstanceView, instance2: &InstanceView) {
+fn instances_eq(instance1: &Instance, instance2: &Instance) {
     identity_eq(&instance1.identity, &instance2.identity);
     assert_eq!(instance1.project_id, instance2.project_id);
 
