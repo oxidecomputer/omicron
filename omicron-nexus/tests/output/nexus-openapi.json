@@ -50,7 +50,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackViewResultsPage"
+                  "$ref": "#/components/schemas/RackResultsPage"
                 }
               }
             }
@@ -82,7 +82,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackView"
+                  "$ref": "#/components/schemas/Rack"
                 }
               }
             }
@@ -130,7 +130,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledViewResultsPage"
+                  "$ref": "#/components/schemas/SledResultsPage"
                 }
               }
             }
@@ -162,7 +162,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledView"
+                  "$ref": "#/components/schemas/Sled"
                 }
               }
             }
@@ -210,7 +210,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectViewResultsPage"
+                  "$ref": "#/components/schemas/ProjectResultsPage"
                 }
               }
             }
@@ -237,7 +237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -266,7 +266,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -303,7 +303,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -380,7 +380,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskViewResultsPage"
+                  "$ref": "#/components/schemas/DiskResultsPage"
                 }
               }
             }
@@ -418,7 +418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -456,7 +456,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -542,7 +542,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceViewResultsPage"
+                  "$ref": "#/components/schemas/InstanceResultsPage"
                 }
               }
             }
@@ -580,7 +580,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -618,7 +618,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -857,7 +857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -895,7 +895,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -933,7 +933,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -1182,7 +1182,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaViewResultsPage"
+                  "$ref": "#/components/schemas/SagaResultsPage"
                 }
               }
             }
@@ -1213,7 +1213,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaView"
+                  "$ref": "#/components/schemas/Saga"
                 }
               }
             }
@@ -1430,7 +1430,7 @@
           }
         ]
       },
-      "DiskView": {
+      "Disk": {
         "description": "Client view of an [`Disk`]",
         "type": "object",
         "properties": {
@@ -1486,7 +1486,7 @@
           "timeModified"
         ]
       },
-      "DiskViewResultsPage": {
+      "DiskResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1494,7 +1494,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DiskView"
+              "$ref": "#/components/schemas/Disk"
             }
           },
           "next_page": {
@@ -1590,7 +1590,7 @@
           "destroyed"
         ]
       },
-      "InstanceView": {
+      "Instance": {
         "description": "Client view of an [`Instance`]",
         "type": "object",
         "properties": {
@@ -1653,7 +1653,7 @@
           "timeRunStateUpdated"
         ]
       },
-      "InstanceViewResultsPage": {
+      "InstanceResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1661,7 +1661,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/InstanceView"
+              "$ref": "#/components/schemas/Instance"
             }
           },
           "next_page": {
@@ -1722,7 +1722,7 @@
           }
         }
       },
-      "ProjectView": {
+      "Project": {
         "description": "Client view of an [`Project`]",
         "type": "object",
         "properties": {
@@ -1757,7 +1757,7 @@
           "timeModified"
         ]
       },
-      "ProjectViewResultsPage": {
+      "ProjectResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1765,7 +1765,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectView"
+              "$ref": "#/components/schemas/Project"
             }
           },
           "next_page": {
@@ -1777,7 +1777,7 @@
           "items"
         ]
       },
-      "RackView": {
+      "Rack": {
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
@@ -1789,7 +1789,7 @@
           "identity"
         ]
       },
-      "RackViewResultsPage": {
+      "RackResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1797,7 +1797,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RackView"
+              "$ref": "#/components/schemas/Rack"
             }
           },
           "next_page": {
@@ -1809,7 +1809,7 @@
           "items"
         ]
       },
-      "SagaStateView": {
+      "SagaState": {
         "anyOf": [
           {
             "type": "string",
@@ -1845,7 +1845,7 @@
           }
         ]
       },
-      "SagaView": {
+      "Saga": {
         "type": "object",
         "properties": {
           "id": {
@@ -1853,7 +1853,7 @@
             "format": "uuid"
           },
           "state": {
-            "$ref": "#/components/schemas/SagaStateView"
+            "$ref": "#/components/schemas/SagaState"
           }
         },
         "required": [
@@ -1861,7 +1861,7 @@
           "state"
         ]
       },
-      "SagaViewResultsPage": {
+      "SagaResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1869,7 +1869,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SagaView"
+              "$ref": "#/components/schemas/Saga"
             }
           },
           "next_page": {
@@ -1881,7 +1881,7 @@
           "items"
         ]
       },
-      "SledView": {
+      "Sled": {
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
@@ -1920,7 +1920,7 @@
           "timeModified"
         ]
       },
-      "SledViewResultsPage": {
+      "SledResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1928,7 +1928,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SledView"
+              "$ref": "#/components/schemas/Sled"
             }
           },
           "next_page": {

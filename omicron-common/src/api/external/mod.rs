@@ -523,7 +523,7 @@ pub struct IdentityMetadataUpdateParams {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectView {
+pub struct Project {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
      * intent in RFD 4?
@@ -682,16 +682,16 @@ impl From<&InstanceCpuCount> for i64 {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InstanceRuntimeStateView {
+pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
 }
 
 impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeStateView
+    for InstanceRuntimeState
 {
     fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeStateView {
+        InstanceRuntimeState {
             run_state: state.run_state,
             time_run_state_updated: state.time_updated,
         }
@@ -703,7 +703,7 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InstanceView {
+pub struct Instance {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -719,7 +719,7 @@ pub struct InstanceView {
     pub hostname: String, /* TODO-cleanup different type? */
 
     #[serde(flatten)]
-    pub runtime: InstanceRuntimeStateView,
+    pub runtime: InstanceRuntimeState,
 }
 
 /**
@@ -759,7 +759,7 @@ pub struct InstanceUpdateParams {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DiskView {
+pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
@@ -907,7 +907,7 @@ pub struct DiskAttachment {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RackView {
+pub struct Rack {
     pub identity: IdentityMetadata,
 }
 
@@ -920,7 +920,7 @@ pub struct RackView {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SledView {
+pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
@@ -934,9 +934,9 @@ pub struct SledView {
  * users.
  */
 #[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
-pub struct SagaView {
+pub struct Saga {
     pub id: Uuid,
-    pub state: SagaStateView,
+    pub state: SagaState,
     /*
      * TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
      * want to paginate these objects.  http_pagination.rs provides a bunch of
@@ -959,13 +959,13 @@ pub struct SagaView {
     pub identity: IdentityMetadata,
 }
 
-impl From<steno::SagaView> for SagaView {
+impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        SagaView {
+        Saga {
             id: Uuid::from(s.id),
-            state: SagaStateView::from(s.state),
+            state: SagaState::from(s.state),
             identity: IdentityMetadata {
-                /* TODO-cleanup See the note in SagaView above. */
+                /* TODO-cleanup See the note in Saga above. */
                 id: Uuid::from(s.id),
                 name: Name::try_from(format!("saga-{}", s.id)).unwrap(),
                 description: format!("saga {}", s.id),
@@ -982,7 +982,7 @@ impl From<steno::SagaView> for SagaView {
  */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum SagaStateView {
+pub enum SagaState {
     Running,
     #[serde(rename_all = "camelCase")]
     Done {
@@ -992,18 +992,18 @@ pub enum SagaStateView {
     },
 }
 
-impl From<steno::SagaStateView> for SagaStateView {
+impl From<steno::SagaStateView> for SagaState {
     fn from(st: steno::SagaStateView) -> Self {
         match st {
-            steno::SagaStateView::Ready { .. } => SagaStateView::Running,
-            steno::SagaStateView::Running { .. } => SagaStateView::Running,
+            steno::SagaStateView::Ready { .. } => SagaState::Running,
+            steno::SagaStateView::Running { .. } => SagaState::Running,
             steno::SagaStateView::Done { result, .. } => match result.kind {
-                Ok(_) => SagaStateView::Done {
+                Ok(_) => SagaState::Done {
                     failed: false,
                     error_node_name: None,
                     error_info: None,
                 },
-                Err(e) => SagaStateView::Done {
+                Err(e) => SagaState::Done {
                     failed: true,
                     error_node_name: Some(e.error_node_name),
                     error_info: Some(e.error_source),
