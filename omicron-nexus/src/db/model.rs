@@ -1,6 +1,5 @@
 //! Structures stored to the database.
 
-use crate::params;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, InstanceCpuCount,
@@ -59,7 +58,10 @@ pub struct IdentityMetadata {
 }
 
 impl IdentityMetadata {
-    fn new(id: Uuid, params: external::IdentityMetadataCreateParams) -> Self {
+    pub fn new(
+        id: Uuid,
+        params: external::IdentityMetadataCreateParams,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id,
@@ -143,12 +145,6 @@ pub struct Project {
 }
 
 impl Project {
-    /// Creates a new database Project object.
-    pub fn new(params: &params::ProjectCreate) -> Self {
-        let id = Uuid::new_v4();
-        Self { identity: IdentityMetadata::new(id, params.identity.clone()) }
-    }
-
     pub fn name(&self) -> &str {
         self.identity.name.as_str()
     }

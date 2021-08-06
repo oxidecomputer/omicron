@@ -297,7 +297,7 @@ impl Nexus {
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         // Create a project.
-        let db_project = db::model::Project::new(new_project);
+        let db_project: db::model::Project = new_project.into();
         let project: db::model::Project =
             self.db_datastore.project_create(&db_project).await?;
         // TODO: We probably want to have "project creation" and "default VPC
