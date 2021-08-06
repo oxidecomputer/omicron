@@ -139,7 +139,7 @@ async fn list_unfinished_sagas(
     sql_paginate::<
         schema::LookupGenericByUniqueId,
         schema::Saga,
-        <schema::Saga as Table>::ModelType,
+        <schema::Saga as Table>::Model,
     >(&client, (), schema::Saga::ALL_COLUMNS, sql)
     .await
 }
@@ -222,7 +222,7 @@ pub async fn load_saga_log(
     let log_records = sql_paginate::<
         schema::LookupSagaNodeEvent,
         schema::SagaNodeEvent,
-        <schema::SagaNodeEvent as Table>::ModelType,
+        <schema::SagaNodeEvent as Table>::Model,
     >(
         &client,
         (&saga.id.0,),

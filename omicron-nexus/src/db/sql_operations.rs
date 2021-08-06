@@ -56,7 +56,7 @@ pub async fn sql_fetch_row_by<'a, L, R>(
     client: &tokio_postgres::Client,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<R::ModelType>
+) -> LookupResult<R::Model>
 where
     L: LookupKey<'a, R>,
     R: ResourceTable,
@@ -64,7 +64,7 @@ where
     let row =
         sql_fetch_row_raw::<L, R>(client, scope_key, item_key, R::ALL_COLUMNS)
             .await?;
-    R::ModelType::try_from(&row)
+    R::Model::try_from(&row)
 }
 
 /// Fetch a page of rows from a table using the specified lookup
@@ -72,13 +72,13 @@ pub async fn sql_fetch_page_from_table<'a, L, T>(
     client: &'a tokio_postgres::Client,
     scope_key: L::ScopeKey,
     pagparams: &'a DataPageParams<'a, L::ItemKey>,
-) -> ListResult<T::ModelType>
+) -> ListResult<T::Model>
 where
     L: LookupKey<'a, T>,
     L::ScopeKey: 'a,
     T: Table,
 {
-    sql_fetch_page_by::<L, T, T::ModelType>(
+    sql_fetch_page_by::<L, T, T::Model>(
         client,
         scope_key,
         pagparams,
@@ -529,7 +529,7 @@ pub async fn sql_insert_unique<R>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,
     unique_value: &str,
-) -> Result<R::ModelType, Error>
+) -> Result<R::Model, Error>
 where
     R: ResourceTable,
 {
@@ -559,7 +559,7 @@ where
                 sql_error_on_create(R::RESOURCE_TYPE, unique_value, e)
             })?;
 
-    R::ModelType::try_from(&row)
+    R::Model::try_from(&row)
 }
 
 ///
@@ -788,7 +788,7 @@ pub async fn sql_insert_unique_idempotent_and_fetch<'a, R, L>(
     ignore_conflicts_on: &'static str,
     scope_key: L::ScopeKey,
     item_key: &'a L::ItemKey,
-) -> LookupResult<R::ModelType>
+) -> LookupResult<R::Model>
 where
     R: ResourceTable,
     L: LookupKey<'a, R>,

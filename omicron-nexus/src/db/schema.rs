@@ -17,12 +17,12 @@ use crate::db;
 
 // TODO: Now that db/model.rs is a thing, we could actually impl Table
 // for all those real structs? Might help to reduce things a bit; the
-// schema does use them as ModelTypes anyway.
+// schema does use them as Models anyway.
 
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
-    type ModelType = db::model::Project;
+    type Model = db::model::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -41,7 +41,7 @@ impl ResourceTable for Project {
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
-    type ModelType = db::model::Instance;
+    type Model = db::model::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -68,7 +68,7 @@ impl ResourceTable for Instance {
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
-    type ModelType = db::model::Disk;
+    type Model = db::model::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -94,7 +94,7 @@ impl ResourceTable for Disk {
 /** Describes the "Saga" table */
 pub struct Saga;
 impl Table for Saga {
-    type ModelType = db::saga_types::Saga;
+    type Model = db::saga_types::Saga;
     const TABLE_NAME: &'static str = "Saga";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -113,7 +113,7 @@ impl Table for Saga {
 /** Describes the "SagaNodeEvent" table */
 pub struct SagaNodeEvent;
 impl Table for SagaNodeEvent {
-    type ModelType = db::saga_types::SagaNodeEvent;
+    type Model = db::saga_types::SagaNodeEvent;
     const TABLE_NAME: &'static str = "SagaNodeEvent";
     const ALL_COLUMNS: &'static [&'static str] =
         &["saga_id", "node_id", "event_type", "data", "event_time", "creator"];
@@ -123,7 +123,7 @@ impl Table for SagaNodeEvent {
 /** Describes the "Oximeter" table */
 pub struct Oximeter;
 impl Table for Oximeter {
-    type ModelType = db::model::OximeterInfo;
+    type Model = db::model::OximeterInfo;
     const TABLE_NAME: &'static str = "Oximeter";
     const ALL_COLUMNS: &'static [&'static str] =
         &["id", "time_created", "time_modified", "ip", "port"];
@@ -132,7 +132,7 @@ impl Table for Oximeter {
 /** Describes the "MetricProducer" table */
 pub struct MetricProducer;
 impl Table for MetricProducer {
-    type ModelType = db::model::ProducerEndpoint;
+    type Model = db::model::ProducerEndpoint;
     const TABLE_NAME: &'static str = "MetricProducer";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -148,7 +148,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = db::model::OximeterAssignment;
+    type Model = db::model::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];
@@ -157,7 +157,7 @@ impl Table for OximeterAssignment {
 /** Describes the "Vpc" table */
 pub struct Vpc;
 impl Table for Vpc {
-    type ModelType = db::model::Vpc;
+    type Model = db::model::Vpc;
     const TABLE_NAME: &'static str = "Vpc";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -178,7 +178,7 @@ impl ResourceTable for Vpc {
 /** Describes the "VpcSubnet" table */
 pub struct VpcSubnet;
 impl Table for VpcSubnet {
-    type ModelType = db::model::VpcSubnet;
+    type Model = db::model::VpcSubnet;
     const TABLE_NAME: &'static str = "VpcSubnet";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -196,7 +196,7 @@ impl Table for VpcSubnet {
 /** Describes the "NetworkInterface" table */
 pub struct NetworkInterface;
 impl Table for NetworkInterface {
-    type ModelType = db::model::NetworkInterface;
+    type Model = db::model::NetworkInterface;
     const TABLE_NAME: &'static str = "NetworkInterface";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

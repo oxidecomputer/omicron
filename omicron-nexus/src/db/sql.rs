@@ -241,7 +241,7 @@ pub trait SqlSerialize {
 pub trait Table {
     /** Struct that represents rows of this table when the full row is needed */
     /* TODO-cleanup what does the 'static actually mean here? */
-    type ModelType: for<'a> TryFrom<&'a tokio_postgres::Row, Error = Error>
+    type Model: for<'a> TryFrom<&'a tokio_postgres::Row, Error = Error>
         + Send
         + 'static;
     /** Name of the table */
