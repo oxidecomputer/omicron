@@ -123,7 +123,7 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
         // separate types so that the control plane can't accidentally do things
         // like attach a disk to a deleted Instance.  We haven't figured any of
         // this out, and there's no need yet.
-        if time_deleted.is_none() {
+        if time_deleted.is_some() {
             return Err(external::Error::internal_error(
                 "model does not support objects that have been deleted",
             ));
