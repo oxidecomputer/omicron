@@ -22,7 +22,7 @@ use crate::db;
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
-    type ModelType = db::types::Project;
+    type ModelType = db::model::Project;
     const TABLE_NAME: &'static str = "Project";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -41,7 +41,7 @@ impl ResourceTable for Project {
 /** Describes the "Instance" table */
 pub struct Instance;
 impl Table for Instance {
-    type ModelType = db::types::Instance;
+    type ModelType = db::model::Instance;
     const TABLE_NAME: &'static str = "Instance";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -68,7 +68,7 @@ impl ResourceTable for Instance {
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
-    type ModelType = db::types::Disk;
+    type ModelType = db::model::Disk;
     const TABLE_NAME: &'static str = "Disk";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -123,7 +123,7 @@ impl Table for SagaNodeEvent {
 /** Describes the "Oximeter" table */
 pub struct Oximeter;
 impl Table for Oximeter {
-    type ModelType = db::types::OximeterInfo;
+    type ModelType = db::model::OximeterInfo;
     const TABLE_NAME: &'static str = "Oximeter";
     const ALL_COLUMNS: &'static [&'static str] =
         &["id", "time_created", "time_modified", "ip", "port"];
@@ -132,7 +132,7 @@ impl Table for Oximeter {
 /** Describes the "MetricProducer" table */
 pub struct MetricProducer;
 impl Table for MetricProducer {
-    type ModelType = db::types::ProducerEndpoint;
+    type ModelType = db::model::ProducerEndpoint;
     const TABLE_NAME: &'static str = "MetricProducer";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -148,7 +148,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = db::types::OximeterAssignment;
+    type ModelType = db::model::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];
@@ -157,7 +157,7 @@ impl Table for OximeterAssignment {
 /** Describes the "Vpc" table */
 pub struct Vpc;
 impl Table for Vpc {
-    type ModelType = db::types::Vpc;
+    type ModelType = db::model::Vpc;
     const TABLE_NAME: &'static str = "Vpc";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -178,7 +178,7 @@ impl ResourceTable for Vpc {
 /** Describes the "VpcSubnet" table */
 pub struct VpcSubnet;
 impl Table for VpcSubnet {
-    type ModelType = db::types::VpcSubnet;
+    type ModelType = db::model::VpcSubnet;
     const TABLE_NAME: &'static str = "VpcSubnet";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -196,7 +196,7 @@ impl Table for VpcSubnet {
 /** Describes the "NetworkInterface" table */
 pub struct NetworkInterface;
 impl Table for NetworkInterface {
-    type ModelType = db::types::NetworkInterface;
+    type ModelType = db::model::NetworkInterface;
     const TABLE_NAME: &'static str = "NetworkInterface";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

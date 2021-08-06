@@ -176,7 +176,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<db::types::Project, ProjectView>(project_stream).await;
+        to_list::<db::model::Project, ProjectView>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -300,7 +300,7 @@ async fn project_disks_get(
         )
         .await?;
 
-    let disk_list = to_list::<db::types::Disk, DiskView>(disk_stream).await;
+    let disk_list = to_list::<db::model::Disk, DiskView>(disk_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
@@ -405,7 +405,7 @@ async fn project_instances_get(
         )
         .await?;
     let view_list =
-        to_list::<db::types::Instance, InstanceView>(instance_stream).await;
+        to_list::<db::model::Instance, InstanceView>(instance_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
 }
 
@@ -577,7 +577,7 @@ async fn instance_disks_get(
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
     let view_list =
-        to_list::<db::types::DiskAttachment, DiskAttachment>(disk_list).await;
+        to_list::<db::model::DiskAttachment, DiskAttachment>(disk_list).await;
     Ok(HttpResponseOk(view_list))
 }
 
@@ -806,7 +806,7 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_list::<db::types::Rack, RackView>(rack_stream).await;
+    let view_list = to_list::<db::model::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -857,7 +857,7 @@ async fn hardware_sleds_get(
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_list::<db::types::Sled, SledView>(sled_stream).await;
+    let view_list = to_list::<db::model::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
