@@ -273,6 +273,8 @@ impl TryFrom<&tokio_postgres::Row> for Vpc {
         Ok(Self {
             identity: IdentityMetadata::try_from(value)?,
             project_id: sql_row_value(value, "project_id")?,
+            dns_name: sql_row_value(value, "dns_name")?,
+            vpc_subnets: vec![],
         })
     }
 }

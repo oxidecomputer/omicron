@@ -1673,6 +1673,20 @@
           "items"
         ]
       },
+      "Ipv4Net": {
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$",
+        "maxLength": 18
+      },
+      "Ipv6Net": {
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(fd|FD)00:((([0-8a-fA-F]{1,4}\\:){6}[0-8a-fA-F]{1,4})|(([0-8a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
+        "maxLength": 43
+      },
       "Name": {
         "title": "A name used in the API",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
@@ -1934,6 +1948,9 @@
             "description": "human-readable free-form text about a resource",
             "type": "string"
           },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -1956,15 +1973,23 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vpcSubnets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcSubnet"
+            }
           }
         },
         "required": [
           "description",
+          "dnsName",
           "id",
           "name",
           "projectId",
           "timeCreated",
-          "timeModified"
+          "timeModified",
+          "vpcSubnets"
         ]
       },
       "VpcCreateParams": {
@@ -1974,12 +1999,16 @@
           "description": {
             "type": "string"
           },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
           "description",
+          "dnsName",
           "name"
         ]
       },
@@ -2003,12 +2032,39 @@
           "items"
         ]
       },
+      "VpcSubnet": {
+        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/IdentityMetadata"
+          },
+          "ipv4_block": {
+            "$ref": "#/components/schemas/Ipv4Net"
+          },
+          "ipv6_block": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the subnet belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "identity",
+          "vpc_id"
+        ]
+      },
       "VpcUpdateParams": {
         "description": "Updateable properties of a [`Vpc`]",
         "type": "object",
         "properties": {
           "description": {
             "type": "string"
+          },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
           },
           "name": {
             "$ref": "#/components/schemas/Name"

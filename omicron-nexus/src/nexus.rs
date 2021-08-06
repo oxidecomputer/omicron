@@ -20,6 +20,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
@@ -299,8 +300,35 @@ impl Nexus {
         &self,
         new_project: &ProjectCreateParams,
     ) -> CreateResult<Project> {
+        // Create a project.
         let project = db::types::Project::new(new_project);
-        self.db_datastore.project_create(&project).await.map(|p| p.into())
+        let project: db::types::Project =
+            self.db_datastore.project_create(&project).await.map(|p| p.into())?;
+        // TODO: We probably want to have "project creation" and "default VPC
+        // creation" co-located within a saga for atomicity.
+        //
+        // Until then, we just perform the operations sequentially.
+
+        // Create a default VPC associated with the project.
+        let id = Uuid::new_v4();
+        let _ = self
+            .db_datastore
+            .project_create_vpc(
+                &id,
+                project.id(),
+                &VpcCreateParams {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from("default").unwrap(),
+                        description: "Default VPC".to_string(),
+                    },
+                    // TODO-robustness this will need to be None if we decide to handle
+                    // the logic around name and dns_name by making dns_name optional
+                    dns_name: Name::try_from("default").unwrap(),
+                },
+            )
+            .await?;
+
+        Ok(project.into())
     }
 
     pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
@@ -1057,9 +1085,9 @@ impl Nexus {
     ) -> UpdateResult<()> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        self.db_datastore
-            .project_update_vpc(&project_id, &vpc_name, params)
-            .await
+        let vpc =
+            self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
+        self.db_datastore.project_update_vpc(&vpc.identity.id, params).await
     }
 
     pub async fn project_delete_vpc(

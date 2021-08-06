@@ -23,5 +23,6 @@ impl SqlSerialize for IdentityMetadataCreateParams {
 impl SqlSerialize for VpcCreateParams {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         self.identity.sql_serialize(output);
+        output.set("dns_name", &self.dns_name);
     }
 }

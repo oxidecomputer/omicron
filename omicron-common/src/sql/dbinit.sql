@@ -249,6 +249,7 @@ CREATE TABLE omicron.public.OximeterAssignment (
  * VPCs and networking primitives
  */
 
+
 CREATE TABLE omicron.public.Vpc (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -258,7 +259,8 @@ CREATE TABLE omicron.public.Vpc (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    project_id UUID NOT NULL
+    project_id UUID NOT NULL,
+    dns_name STRING(63) NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Vpc (

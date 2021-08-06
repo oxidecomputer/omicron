@@ -83,6 +83,10 @@ impl Project {
     pub fn name(&self) -> &str {
         self.0.identity.name.as_str()
     }
+
+    pub fn id(&self) -> &Uuid {
+        &self.0.identity.id
+    }
 }
 
 /// Conversion to the internal API type.
@@ -577,6 +581,8 @@ impl ProducerEndpoint {
 impl SqlSerialize for ProducerEndpoint {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         output.set("id", &self.id);
+        output.set("time_created", &self.time_created);
+        output.set("time_modified", &self.time_modified);
         output.set("ip", &self.address.ip());
         output.set("port", &i32::from(self.address.port()));
         output.set("interval", &self.interval.as_secs_f64());

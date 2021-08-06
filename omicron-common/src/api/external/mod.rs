@@ -1062,6 +1062,13 @@ pub struct Vpc {
 
     /** id for the project containing this VPC */
     pub project_id: Uuid,
+
+    // TODO-design should this be optional?
+    /** The name used for the VPC in DNS. */
+    pub dns_name: Name,
+
+    // TODO-correctness does the model include this? do we always return these?
+    pub vpc_subnets: Vec<VpcSubnet>,
 }
 
 /**
@@ -1072,6 +1079,7 @@ pub struct Vpc {
 pub struct VpcCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    pub dns_name: Name,
 }
 
 /**
@@ -1082,6 +1090,7 @@ pub struct VpcCreateParams {
 pub struct VpcUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    pub dns_name: Option<Name>,
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
@@ -1194,7 +1203,7 @@ impl JsonSchema for Ipv6Net {
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
-#[derive(Clone, Debug)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
