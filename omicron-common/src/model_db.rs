@@ -54,8 +54,6 @@ use std::time::Duration;
 
 use super::db::sql_row_value;
 use crate::api::external::ByteCount;
-use crate::api::external::DiskAttachment;
-use crate::api::external::DiskState;
 use crate::api::external::Error;
 use crate::api::external::Generation;
 use crate::api::external::IdentityMetadata;
@@ -66,8 +64,6 @@ use crate::api::external::NetworkInterface;
 use crate::api::external::Vpc;
 use crate::api::external::VpcSubnet;
 use crate::api::external::{Ipv4Net, Ipv6Net};
-use crate::api::internal::nexus::Disk;
-use crate::api::internal::nexus::DiskRuntimeState;
 use crate::api::internal::nexus::OximeterAssignment;
 use crate::api::internal::nexus::OximeterInfo;
 use crate::api::internal::nexus::ProducerEndpoint;
@@ -273,66 +269,6 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
             time_created: sql_row_value(value, "time_created")?,
             time_modified: sql_row_value(value, "time_modified")?,
         })
-    }
-}
-
-/// Load an [`Disk`] from a row of the "Disk" table.
-impl TryFrom<&tokio_postgres::Row> for Disk {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Disk {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
-            size: sql_row_value(value, "size_bytes")?,
-            runtime: DiskRuntimeState::try_from(value)?,
-        })
-    }
-}
-
-/// Load an [`DiskAttachment`] from a database row containing those columns
-/// of the Disk table that describe the attachment: "id", "name", "disk_state",
-/// "attach_instance_id"
-impl TryFrom<&tokio_postgres::Row> for DiskAttachment {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskAttachment {
-            instance_id: sql_row_value(value, "attach_instance_id")?,
-            disk_id: sql_row_value(value, "id")?,
-            disk_name: sql_row_value(value, "name")?,
-            disk_state: DiskState::try_from(value)?,
-        })
-    }
-}
-
-/// Load an [`DiskRuntimeState`'] from a row from the Disk table, using the
-/// columns needed for [`DiskState`], plus "state_generation" and
-/// "time_state_updated".
-impl TryFrom<&tokio_postgres::Row> for DiskRuntimeState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskRuntimeState {
-            disk_state: DiskState::try_from(value)?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
-    }
-}
-
-/// Load an [`DiskState`] from a row from the Disk table, using the columns
-/// "disk_state" and "attach_instance_id".
-impl TryFrom<&tokio_postgres::Row> for DiskState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let disk_state_str: &str = sql_row_value(value, "disk_state")?;
-        let instance_uuid: Option<Uuid> =
-            sql_row_value(value, "attach_instance_id")?;
-        DiskState::try_from((disk_state_str, instance_uuid))
-            .map_err(|e| Error::internal_error(&e))
     }
 }
 

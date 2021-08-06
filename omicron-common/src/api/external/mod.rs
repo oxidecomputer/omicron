@@ -775,6 +775,7 @@ pub struct DiskView {
     pub device_path: String,
 }
 
+/*
 impl From<crate::api::internal::nexus::Disk> for DiskView {
     fn from(disk: crate::api::internal::nexus::Disk) -> Self {
         /*
@@ -792,6 +793,7 @@ impl From<crate::api::internal::nexus::Disk> for DiskView {
         }
     }
 }
+*/
 
 /**
  * State of a Disk (primarily: attached or not)

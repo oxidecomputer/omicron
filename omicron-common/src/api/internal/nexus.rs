@@ -1,7 +1,7 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, IdentityMetadata, InstanceState,
+    DiskState, Generation, IdentityMetadata, InstanceState,
 };
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
+
+// TODO: Do a pass of this file. If stuff was moved to a DB repr, it's not
+// needed here.
 
 pub struct Rack {
     pub identity: IdentityMetadata,
@@ -25,6 +28,7 @@ pub struct Project {
     pub identity: IdentityMetadata,
 }
 
+/*
 /// A Disk (network block device).
 #[derive(Clone, Debug)]
 pub struct Disk {
@@ -40,6 +44,7 @@ pub struct Disk {
     /// runtime state of the Disk
     pub runtime: DiskRuntimeState,
 }
+*/
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata

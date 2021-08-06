@@ -423,12 +423,12 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::DiskAttachment> {
+    ) -> ListResult<db::types::DiskAttachment> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByAttachedInstance,
             Disk,
-            api::external::DiskAttachment,
+            db::types::DiskAttachment,
         >(
             &client,
             (instance_id,),
@@ -443,23 +443,22 @@ impl DataStore {
         disk_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::DiskCreateParams,
-        runtime_initial: &api::internal::nexus::DiskRuntimeState,
-    ) -> CreateResult<api::internal::nexus::Disk> {
+        runtime_initial: &db::types::DiskRuntimeState,
+    ) -> CreateResult<db::types::Disk> {
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
          */
         let client = self.pool.acquire().await?;
-        let now = runtime_initial.time_updated;
         let mut values = SqlValueSet::new();
-        values.set("id", disk_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
-        runtime_initial.sql_serialize(&mut values);
-
-        let disk: api::internal::nexus::Disk =
+        let disk = db::types::Disk::new(
+            *disk_id,
+            *project_id,
+            params.clone(),
+            runtime_initial.clone(),
+        );
+        disk.sql_serialize(&mut values);
+        let disk =
             sql_insert_unique_idempotent_and_fetch::<Disk, LookupByUniqueId>(
                 &client,
                 &mut values,
@@ -471,7 +470,7 @@ impl DataStore {
             .await?;
 
         bail_unless!(
-            disk.runtime.disk_state == api::external::DiskState::Creating,
+            disk.runtime.disk_state.state() == &api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             disk.runtime.disk_state
         );
@@ -487,7 +486,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::internal::nexus::Disk> {
+    ) -> ListResult<db::types::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -500,7 +499,7 @@ impl DataStore {
     pub async fn disk_update_runtime(
         &self,
         disk_id: &Uuid,
-        new_runtime: &api::internal::nexus::DiskRuntimeState,
+        new_runtime: &db::types::DiskRuntimeState,
     ) -> Result<bool, Error> {
         let client = self.pool.acquire().await?;
 
@@ -529,7 +528,7 @@ impl DataStore {
     pub async fn disk_fetch(
         &self,
         disk_id: &Uuid,
-    ) -> LookupResult<api::internal::nexus::Disk> {
+    ) -> LookupResult<db::types::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
     }
@@ -538,7 +537,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         disk_name: &Name,
-    ) -> LookupResult<api::internal::nexus::Disk> {
+    ) -> LookupResult<db::types::Disk> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
@@ -554,7 +553,7 @@ impl DataStore {
 
         let mut values = SqlValueSet::new();
         values.set("time_deleted", &now);
-        api::external::DiskState::Destroyed.sql_serialize(&mut values);
+        db::types::DiskState::new(api::external::DiskState::Destroyed).sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
         let disk_state_detached =
