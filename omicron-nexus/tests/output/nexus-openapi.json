@@ -225,7 +225,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectCreateParams"
+                "$ref": "#/components/schemas/ProjectCreate"
               }
             }
           },
@@ -291,7 +291,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectUpdateParams"
+                "$ref": "#/components/schemas/ProjectUpdate"
               }
             }
           },
@@ -1729,7 +1729,7 @@
           "timeModified"
         ]
       },
-      "ProjectCreateParams": {
+      "ProjectCreate": {
         "description": "Create-time parameters for an [`Project`]",
         "type": "object",
         "properties": {
@@ -1765,7 +1765,7 @@
           "items"
         ]
       },
-      "ProjectUpdateParams": {
+      "ProjectUpdate": {
         "description": "Updateable properties of an [`Project`]",
         "type": "object",
         "properties": {
