@@ -331,7 +331,10 @@ impl Nexus {
         Ok(project.into())
     }
 
-    pub async fn project_fetch(&self, name: &Name) -> LookupResult<db::types::Project> {
+    pub async fn project_fetch(
+        &self,
+        name: &Name,
+    ) -> LookupResult<db::types::Project> {
         self.db_datastore.project_fetch(name).await.map(|p| p.into())
     }
 
@@ -1133,7 +1136,10 @@ impl Nexus {
         Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
     }
 
-    pub async fn rack_lookup(&self, rack_id: &Uuid) -> LookupResult<db::types::Rack> {
+    pub async fn rack_lookup(
+        &self,
+        rack_id: &Uuid,
+    ) -> LookupResult<db::types::Rack> {
         if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
@@ -1175,7 +1181,10 @@ impl Nexus {
         Ok(futures::stream::iter(sleds).boxed())
     }
 
-    pub async fn sled_lookup(&self, sled_id: &Uuid) -> LookupResult<db::types::Sled> {
+    pub async fn sled_lookup(
+        &self,
+        sled_id: &Uuid,
+    ) -> LookupResult<db::types::Sled> {
         let nexuses = self.sled_agents.lock().await;
         let sa = nexuses.get(sled_id).ok_or_else(|| {
             Error::not_found_by_id(ResourceType::Sled, sled_id)

@@ -26,9 +26,7 @@ pub struct Rack {
 
 impl Into<external::RackView> for Rack {
     fn into(self) -> external::RackView {
-        external::RackView {
-            identity: self.identity.into(),
-        }
+        external::RackView { identity: self.identity.into() }
     }
 }
 

@@ -176,8 +176,7 @@ async fn projects_get(
     };
 
     let view_list =
-        to_list::<db::types::Project, ProjectView>(project_stream)
-            .await;
+        to_list::<db::types::Project, ProjectView>(project_stream).await;
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
 }
 
@@ -807,8 +806,7 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let rack_stream =
         nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list =
-        to_list::<db::types::Rack, RackView>(rack_stream).await;
+    let view_list = to_list::<db::types::Rack, RackView>(rack_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 
@@ -859,8 +857,7 @@ async fn hardware_sleds_get(
     let query = query_params.into_inner();
     let sled_stream =
         nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list =
-        to_list::<db::types::Sled, SledView>(sled_stream).await;
+    let view_list = to_list::<db::types::Sled, SledView>(sled_stream).await;
     Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
 }
 

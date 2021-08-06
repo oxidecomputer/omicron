@@ -1,8 +1,6 @@
 //! APIs exposed by Nexus.
 
-use crate::api::external::{
-    DiskState, Generation, InstanceState,
-};
+use crate::api::external::{DiskState, Generation, InstanceState};
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
