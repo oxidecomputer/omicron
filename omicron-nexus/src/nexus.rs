@@ -299,11 +299,8 @@ impl Nexus {
     ) -> CreateResult<db::types::Project> {
         // Create a project.
         let db_project = db::types::Project::new(new_project);
-        let project: db::types::Project = self
-            .db_datastore
-            .project_create(&db_project)
-            .await
-            .map(|p| p.into())?;
+        let project: db::types::Project =
+            self.db_datastore.project_create(&db_project).await?;
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
         //
@@ -328,14 +325,14 @@ impl Nexus {
             )
             .await?;
 
-        Ok(project.into())
+        Ok(project)
     }
 
     pub async fn project_fetch(
         &self,
         name: &Name,
     ) -> LookupResult<db::types::Project> {
-        self.db_datastore.project_fetch(name).await.map(|p| p.into())
+        self.db_datastore.project_fetch(name).await
     }
 
     pub async fn projects_list_by_name(
@@ -361,10 +358,7 @@ impl Nexus {
         name: &Name,
         new_params: &ProjectUpdateParams,
     ) -> UpdateResult<db::types::Project> {
-        self.db_datastore
-            .project_update(name, new_params)
-            .await
-            .map(|p| p.into())
+        self.db_datastore.project_update(name, new_params).await
     }
 
     /*
@@ -1102,8 +1096,7 @@ impl Nexus {
         Ok(self
             .db_datastore
             .project_update_vpc(&vpc.identity.id, params)
-            .await?
-            .into())
+            .await?)
     }
 
     pub async fn project_delete_vpc(
