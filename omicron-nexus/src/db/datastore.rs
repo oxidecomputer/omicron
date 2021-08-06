@@ -31,9 +31,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus::OximeterAssignment;
-use omicron_common::api::internal::nexus::OximeterInfo;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
@@ -604,13 +601,10 @@ impl DataStore {
     // Create a record for a new Oximeter instance
     pub async fn oximeter_create(
         &self,
-        info: &OximeterInfo,
+        info: &db::types::OximeterInfo,
     ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         info.sql_serialize(&mut values);
         sql_insert::<schema::Oximeter>(&client, &values).await
     }
@@ -618,13 +612,10 @@ impl DataStore {
     // Create a record for a new producer endpoint
     pub async fn producer_endpoint_create(
         &self,
-        producer: &ProducerEndpoint,
+        producer: &db::types::ProducerEndpoint,
     ) -> Result<(), Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
         producer.sql_serialize(&mut values);
         sql_insert::<schema::MetricProducer>(&client, &values).await
     }
@@ -639,7 +630,7 @@ impl DataStore {
         let now = Utc::now();
         let mut values = SqlValueSet::new();
         values.set("time_created", &now);
-        let reg = OximeterAssignment { oximeter_id, producer_id };
+        let reg = db::types::OximeterAssignment { oximeter_id, producer_id };
         reg.sql_serialize(&mut values);
         sql_insert::<schema::OximeterAssignment>(&client, &values).await
     }

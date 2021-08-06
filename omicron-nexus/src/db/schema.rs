@@ -16,6 +16,10 @@ use super::sql::ResourceTable;
 use super::sql::Table;
 use crate::db;
 
+// TODO: Now that db/types.rs is a thing, we could actually impl Table
+// for all those real structs? Might help to reduce things a bit; the
+// schema does use them as ModelTypes anyway.
+
 /** Describes the "Project" table */
 pub struct Project;
 impl Table for Project {
@@ -120,7 +124,7 @@ impl Table for SagaNodeEvent {
 /** Describes the "Oximeter" table */
 pub struct Oximeter;
 impl Table for Oximeter {
-    type ModelType = api::internal::nexus::OximeterInfo;
+    type ModelType = db::types::OximeterInfo;
     const TABLE_NAME: &'static str = "Oximeter";
     const ALL_COLUMNS: &'static [&'static str] =
         &["id", "time_created", "time_modified", "ip", "port"];
@@ -129,7 +133,7 @@ impl Table for Oximeter {
 /** Describes the "MetricProducer" table */
 pub struct MetricProducer;
 impl Table for MetricProducer {
-    type ModelType = api::internal::nexus::ProducerEndpoint;
+    type ModelType = db::types::ProducerEndpoint;
     const TABLE_NAME: &'static str = "MetricProducer";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -145,7 +149,7 @@ impl Table for MetricProducer {
 /** Describes the "OximeterAssignment" table */
 pub struct OximeterAssignment;
 impl Table for OximeterAssignment {
-    type ModelType = api::internal::nexus::OximeterAssignment;
+    type ModelType = db::types::OximeterAssignment;
     const TABLE_NAME: &'static str = "OximeterAssignment";
     const ALL_COLUMNS: &'static [&'static str] =
         &["oximeter_id", "producer_id", "time_created"];

@@ -57,6 +57,9 @@ use steno::SagaTemplate;
 use steno::SagaType;
 use uuid::Uuid;
 
+// TODO: When referring to API types, we should try to include
+// the prefix unless it is unambiguous.
+
 /**
  * Exposes additional [`Nexus`] interfaces for use by the test suite
  */
@@ -205,7 +208,8 @@ impl Nexus {
         oximeter_info: &OximeterInfo,
     ) -> Result<(), Error> {
         // Insert into the DB
-        self.db_datastore.oximeter_create(oximeter_info).await?;
+        let db_info = db::types::OximeterInfo::new(&oximeter_info);
+        self.db_datastore.oximeter_create(&db_info).await?;
 
         let id = oximeter_info.collector_id;
         let client_log =
@@ -1312,7 +1316,8 @@ impl Nexus {
         &self,
         producer_info: ProducerEndpoint,
     ) -> Result<(), Error> {
-        self.db_datastore.producer_endpoint_create(&producer_info).await?;
+        let db_info = db::types::ProducerEndpoint::new(&producer_info);
+        self.db_datastore.producer_endpoint_create(&db_info).await?;
         let collector = self.next_collector().await?;
         collector.register_producer(&producer_info).await?;
         self.db_datastore

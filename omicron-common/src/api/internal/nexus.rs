@@ -111,11 +111,3 @@ pub struct OximeterInfo {
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
 }
-
-/// An assignment of an Oximeter instance to a metric producer for collection.
-// TODO: Goes to storage
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterAssignment {
-    pub oximeter_id: Uuid,
-    pub producer_id: Uuid,
-}
