@@ -789,9 +789,7 @@ impl TryFrom<&tokio_postgres::Row> for Vpc {
 
 impl SqlSerialize for Vpc {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.identity.id);
-        output.set("time_created", &self.identity.time_created);
-        output.set("time_modified", &self.identity.time_modified);
+        self.identity.sql_serialize(output);
         output.set("project_id", &self.project_id);
         output.set("dns_name", &self.dns_name);
     }
