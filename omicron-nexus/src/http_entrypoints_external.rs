@@ -302,8 +302,7 @@ async fn project_disks_get(
         )
         .await?;
 
-    let disk_list =
-        to_list::<db::types::Disk, DiskView>(disk_stream).await;
+    let disk_list = to_list::<db::types::Disk, DiskView>(disk_stream).await;
     Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
 }
 
@@ -579,7 +578,8 @@ async fn instance_disks_get(
     let disk_list = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
-    let view_list = to_list::<db::types::DiskAttachment, DiskAttachment>(disk_list).await;
+    let view_list =
+        to_list::<db::types::DiskAttachment, DiskAttachment>(disk_list).await;
     Ok(HttpResponseOk(view_list))
 }
 

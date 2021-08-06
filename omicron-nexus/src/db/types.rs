@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    self, ByteCount, Error, Generation, IdentityMetadata, InstanceCpuCount,
+    self, ByteCount, Error, Generation, InstanceCpuCount,
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
@@ -18,8 +18,54 @@ use super::sql::SqlValueSet;
 // TODO: Check derives; may not all be necessary
 // TODO: Break up types into multiple files
 
+#[derive(Clone, Debug)]
+pub struct IdentityMetadata {
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl IdentityMetadata {
+    fn new(id: Uuid, params: external::IdentityMetadataCreateParams) -> Self {
+        let now = Utc::now();
+        Self {
+            id,
+            name: params.name,
+            description: params.description,
+            time_created: now,
+            time_modified: now,
+        }
+    }
+}
+
+impl Into<external::IdentityMetadata> for IdentityMetadata {
+    fn into(self) -> external::IdentityMetadata {
+        external::IdentityMetadata {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+        }
+    }
+}
+
+impl From<external::IdentityMetadata> for IdentityMetadata {
+    fn from(metadata: external::IdentityMetadata) -> Self {
+        Self {
+            id: metadata.id,
+            name: metadata.name,
+            description: metadata.description,
+            time_created: metadata.time_created,
+            time_modified: metadata.time_modified,
+        }
+    }
+}
+
 /// Serialization to DB.
-impl SqlSerialize for external::IdentityMetadata {
+impl SqlSerialize for IdentityMetadata {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
         output.set("id", &self.id);
         output.set("name", &self.name);
@@ -34,7 +80,6 @@ impl SqlSerialize for external::IdentityMetadata {
 
 /// Deserialization from the DB.
 // TODO: delete from model_db, move here when everything else has migrated.
-/*
 impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
     type Error = Error;
 
@@ -48,7 +93,9 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
         // like attach a disk to a deleted Instance.  We haven't figured any of
         // this out, and there's no need yet.
         if time_deleted.is_none() {
-            return Err(external::Error::internal_error("model does not support objects that have been deleted"));
+            return Err(external::Error::internal_error(
+                "model does not support objects that have been deleted",
+            ));
         }
         Ok(IdentityMetadata {
             id: sql_row_value(value, "id")?,
@@ -59,54 +106,46 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
         })
     }
 }
-*/
 
 /// Describes a project within the database.
-pub struct Project(internal::nexus::Project);
+pub struct Project {
+    identity: IdentityMetadata,
+}
 
 impl Project {
     /// Creates a new database Project object.
     pub fn new(params: &external::ProjectCreateParams) -> Self {
         let id = Uuid::new_v4();
-        let now = Utc::now();
-        Self(internal::nexus::Project {
-            identity: external::IdentityMetadata {
-                id,
-                name: params.identity.name.clone(),
-                description: params.identity.description.clone(),
-                time_created: now,
-                time_modified: now,
-            },
-        })
+        Self { identity: IdentityMetadata::new(id, params.identity.clone()) }
     }
 
     pub fn name(&self) -> &str {
-        self.0.identity.name.as_str()
+        self.identity.name.as_str()
     }
 
     pub fn id(&self) -> &Uuid {
-        &self.0.identity.id
+        &self.identity.id
     }
 }
 
 /// Conversion to the internal API type.
 impl Into<internal::nexus::Project> for Project {
     fn into(self) -> internal::nexus::Project {
-        self.0
+        internal::nexus::Project { identity: self.identity.into() }
     }
 }
 
 /// Conversion from the internal API type.
 impl From<internal::nexus::Project> for Project {
     fn from(project: internal::nexus::Project) -> Self {
-        Self(project)
+        Self { identity: project.identity.into() }
     }
 }
 
 /// Serialization to DB.
 impl SqlSerialize for Project {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.0.identity.sql_serialize(output);
+        self.identity.sql_serialize(output);
     }
 }
 
@@ -115,9 +154,7 @@ impl TryFrom<&tokio_postgres::Row> for Project {
     type Error = Error;
 
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Project(internal::nexus::Project {
-            identity: IdentityMetadata::try_from(value)?,
-        }))
+        Ok(Project { identity: IdentityMetadata::try_from(value)? })
     }
 }
 
@@ -149,15 +186,11 @@ impl Instance {
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
     ) -> Self {
-        let now = Utc::now();
         Self {
-            identity: external::IdentityMetadata {
-                id: instance_id,
-                name: params.identity.name.clone(),
-                description: params.identity.description.clone(),
-                time_created: now,
-                time_modified: now,
-            },
+            identity: IdentityMetadata::new(
+                instance_id,
+                params.identity.clone(),
+            ),
             project_id,
             ncpus: params.ncpus,
             memory: params.memory,
@@ -171,7 +204,7 @@ impl Instance {
 impl Into<external::InstanceView> for Instance {
     fn into(self) -> external::InstanceView {
         external::InstanceView {
-            identity: self.identity.clone(),
+            identity: self.identity.clone().into(),
             project_id: self.project_id,
             ncpus: self.ncpus,
             memory: self.memory,
@@ -341,17 +374,10 @@ impl Disk {
         disk_id: Uuid,
         project_id: Uuid,
         params: external::DiskCreateParams,
-        runtime_initial: DiskRuntimeState
+        runtime_initial: DiskRuntimeState,
     ) -> Self {
-        let now = Utc::now();
         Self {
-            identity: external::IdentityMetadata {
-                id: disk_id,
-                name: params.identity.name.clone(),
-                description: params.identity.description.clone(),
-                time_created: now,
-                time_modified: now,
-            },
+            identity: IdentityMetadata::new(disk_id, params.identity),
             project_id,
             create_snapshot_id: params.snapshot_id,
             size: params.size,
@@ -365,7 +391,7 @@ impl Into<external::DiskView> for Disk {
     fn into(self) -> external::DiskView {
         let device_path = format!("/mnt/{}", self.identity.name.as_str());
         external::DiskView {
-            identity: self.identity.clone(),
+            identity: self.identity.clone().into(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             size: self.size,
@@ -506,12 +532,10 @@ impl TryFrom<&tokio_postgres::Row> for DiskState {
         let disk_state_str: &str = sql_row_value(value, "disk_state")?;
         let instance_uuid: Option<Uuid> =
             sql_row_value(value, "attach_instance_id")?;
-        Ok(
-            DiskState(
+        Ok(DiskState(
             external::DiskState::try_from((disk_state_str, instance_uuid))
-                .map_err(|e| Error::internal_error(&e))?
-            )
-        )
+                .map_err(|e| Error::internal_error(&e))?,
+        ))
     }
 }
 
@@ -596,14 +620,22 @@ impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
     fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
         let id: Uuid = sql_row_value(value, "id")?;
         let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> = sql_row_value(value, "time_modified")?;
+        let time_modified: DateTime<Utc> =
+            sql_row_value(value, "time_modified")?;
         let ip: IpAddr = sql_row_value(value, "ip")?;
         let port: i32 = sql_row_value(value, "port")?;
         let address = SocketAddr::new(ip, port as _);
         let base_route: String = sql_row_value(value, "route")?;
         let interval =
             Duration::from_secs_f64(sql_row_value(value, "interval")?);
-        Ok(Self { id, time_created, time_modified, address, base_route, interval })
+        Ok(Self {
+            id,
+            time_created,
+            time_modified,
+            address,
+            base_route,
+            interval,
+        })
     }
 }
 
@@ -650,14 +682,10 @@ impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
         let ip: IpAddr = sql_row_value(value, "ip")?;
         let port: i32 = sql_row_value(value, "port")?;
         let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> = sql_row_value(value, "time_modified")?;
+        let time_modified: DateTime<Utc> =
+            sql_row_value(value, "time_modified")?;
         let address = SocketAddr::new(ip, port as _);
-        Ok(Self {
-            collector_id,
-            time_created,
-            time_modified,
-            address
-        })
+        Ok(Self { collector_id, time_created, time_modified, address })
     }
 }
 
@@ -685,3 +713,101 @@ impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Vpc {
+    pub identity: IdentityMetadata,
+    pub project_id: Uuid,
+    pub dns_name: external::Name,
+}
+
+impl Vpc {
+    pub fn new(
+        vpc_id: Uuid,
+        project_id: Uuid,
+        params: external::VpcCreateParams,
+    ) -> Self {
+        Self {
+            identity: IdentityMetadata::new(vpc_id, params.identity),
+            project_id,
+            dns_name: params.dns_name,
+        }
+    }
+}
+
+impl Into<external::Vpc> for Vpc {
+    fn into(self) -> external::Vpc {
+        external::Vpc {
+            identity: self.identity.into(),
+            project_id: self.project_id,
+            dns_name: self.dns_name,
+            // VPC subnets are accessed through a separate row lookup.
+            vpc_subnets: vec![],
+        }
+    }
+}
+
+impl TryFrom<&tokio_postgres::Row> for Vpc {
+    type Error = Error;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        Ok(Self {
+            identity: IdentityMetadata::try_from(value)?,
+            project_id: sql_row_value(value, "project_id")?,
+            dns_name: sql_row_value(value, "dns_name")?,
+        })
+    }
+}
+
+impl SqlSerialize for Vpc {
+    fn sql_serialize(&self, output: &mut SqlValueSet) {
+        output.set("id", &self.identity.id);
+        output.set("time_created", &self.identity.time_created);
+        output.set("time_modified", &self.identity.time_modified);
+        output.set("project_id", &self.project_id);
+        output.set("dns_name", &self.dns_name);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VpcSubnet {
+    pub identity: IdentityMetadata,
+    pub vpc_id: Uuid,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
+}
+
+impl TryFrom<&tokio_postgres::Row> for VpcSubnet {
+    type Error = Error;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        Ok(Self {
+            identity: IdentityMetadata::try_from(value)?,
+            vpc_id: sql_row_value(value, "vpc_id")?,
+            ipv4_block: sql_row_value(value, "ipv4_block")?,
+            ipv6_block: sql_row_value(value, "ipv6_block")?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NetworkInterface {
+    pub identity: IdentityMetadata,
+    pub vpc_id: Uuid,
+    pub subnet_id: Uuid,
+    pub mac: external::MacAddr,
+    pub ip: IpAddr,
+}
+
+impl TryFrom<&tokio_postgres::Row> for NetworkInterface {
+    type Error = Error;
+
+    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
+        Ok(Self {
+            identity: IdentityMetadata::try_from(value)?,
+            vpc_id: sql_row_value(value, "vpc_id")?,
+            subnet_id: sql_row_value(value, "subnet_id")?,
+            mac: sql_row_value(value, "mac")?,
+            ip: sql_row_value(value, "ip")?,
+        })
+    }
+}

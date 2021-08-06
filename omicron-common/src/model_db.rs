@@ -1,44 +1,15 @@
 /*!
  * Facilities for mapping model Rust types to and from database types
  *
- * We'd prefer to put this in omicron-nexus, but the Rust orphan rules prevent
- * that.
- *
- * There are essentially two patterns used for database conversions:
- *
- * (1) For Rust types that map directly to database types, we impl
- *     tokio_postgres's [`tokio_postgres::types::ToSql`] and
- *     [`tokio_postgres::types::FromSql`] traits.  For the most part, these are
- *     newtypes in Rust that wrap a type for which there is already an impl for
- *     these traits and we delegate to those impls where possible.  For example,
- *     [`ByteCount`] is a numeric newtype containing a u64, which maps
- *     directly to a CockroachDB (PostgreSQL) `int`, which is essentially an
- *     `i64`.  The `ToSql` and `FromSql` impls for `ByteCount` delegate to
- *     the existing impls for `i64`.
- *
- * (2) For Rust types that require multiple database values (e.g., an
- *     [`Disk`], which represents an entire row from the Disk table, we impl
- *     `TryFrom<&tokio_postgres::Row>`.  The impl pulls multiple values out of
- *     the row, generally using the names of columns from the table.  We also
- *     impl `SqlSerialize`, which records key-value pairs that can be safely
- *     inserted into SQL "UPDATE" and "INSERT" statements.
- *
- * These often combine to form a hierarchy.  For example, to load an
- * [`Project`] from a row from the Project table:
- *
- * * We start with `Project::try_from(row: &tokio_postgres::Row)`.
- * * The main field of an `Project` is its `IdentityMetadata`, so
- *   `Project::try_from` invokes `IdentityMetadata::try_from(row)` with
- *   the same `row` argument.
- * * `IdentityMetadata` pulls out the fields that it knows about, including
- *   `id` and `name`.
- * * `name` is an [`Name`], which is a newtype that wraps a Rust `String`.
- *   This has a `FromSql` impl.
- *
- * The ToSql/FromSql, and TryFrom impls are in this file because the Rust orphan
- * rules prevent them from going in omicron_nexus.  We're not so restricted on
- * the SqlSerialize interface, and we don't want to have to pull in the other
- * facilities that those impls depend on, so those remain in omicron_nexus.
+ * For Rust types that map directly to database types, we impl
+ * tokio_postgres's [`tokio_postgres::types::ToSql`] and
+ * [`tokio_postgres::types::FromSql`] traits.  For the most part, these are
+ * newtypes in Rust that wrap a type for which there is already an impl for
+ * these traits and we delegate to those impls where possible.  For example,
+ * [`ByteCount`] is a numeric newtype containing a u64, which maps
+ * directly to a CockroachDB (PostgreSQL) `int`, which is essentially an
+ * `i64`.  The `ToSql` and `FromSql` impls for `ByteCount` delegate to
+ * the existing impls for `i64`.
  */
 /*
  * TODO-cleanup We could potentially derive these TryFrom impls.  Diesel and
@@ -49,21 +20,12 @@
  * TODO-coverage tests for these FromSql and ToSql implementations
  */
 
-use super::db::sql_row_value;
 use crate::api::external::ByteCount;
-use crate::api::external::Error;
 use crate::api::external::Generation;
-use crate::api::external::IdentityMetadata;
 use crate::api::external::InstanceCpuCount;
 use crate::api::external::MacAddr;
 use crate::api::external::Name;
-use crate::api::external::NetworkInterface;
-use crate::api::external::Vpc;
-use crate::api::external::VpcSubnet;
 use crate::api::external::{Ipv4Net, Ipv6Net};
-use crate::bail_unless;
-use chrono::DateTime;
-use chrono::Utc;
 use std::convert::TryFrom;
 
 /*
@@ -230,83 +192,6 @@ impl TryFrom<String> for MacAddr {
     }
 }
 impl_sql_wrapping!(MacAddr, String);
-
-/*
- * TryFrom impls used for more complex Rust types
- */
-
-/// Load an [`IdentityMetadata`] from a row of any table that contains the
-/// usual identity fields: "id", "name", "description, "time_created", and
-/// "time_modified".
-impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let time_deleted: Option<DateTime<Utc>> =
-            sql_row_value(value, "time_deleted")?;
-        /*
-         * We could support representing deleted objects, but we would want to
-         * think about how to do that.  For example, we might want to use
-         * separate types so that the control plane can't accidentally do things
-         * like attach a disk to a deleted Instance.  We haven't figured any of
-         * this out, and there's no need yet.
-         */
-        bail_unless!(
-            time_deleted.is_none(),
-            "model does not support objects that have been deleted"
-        );
-        Ok(IdentityMetadata {
-            id: sql_row_value(value, "id")?,
-            name: sql_row_value(value, "name")?,
-            description: sql_row_value(value, "description")?,
-            time_created: sql_row_value(value, "time_created")?,
-            time_modified: sql_row_value(value, "time_modified")?,
-        })
-    }
-}
-
-/// Load an [`Vpc`] from a row in the `Vpc` table.
-impl TryFrom<&tokio_postgres::Row> for Vpc {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            dns_name: sql_row_value(value, "dns_name")?,
-            vpc_subnets: vec![],
-        })
-    }
-}
-
-/// Load a [`VpcSubnet`] from a row in the `VpcSubnet` table.
-impl TryFrom<&tokio_postgres::Row> for VpcSubnet {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            ipv4_block: sql_row_value(value, "ipv4_block")?,
-            ipv6_block: sql_row_value(value, "ipv6_block")?,
-        })
-    }
-}
-
-/// Load a [`NetworkInterface`] from a row in the `NetworkInterface` table.
-impl TryFrom<&tokio_postgres::Row> for NetworkInterface {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            subnet_id: sql_row_value(value, "subnet_id")?,
-            mac: sql_row_value(value, "mac")?,
-            ip: sql_row_value(value, "ip")?,
-        })
-    }
-}
 
 #[cfg(test)]
 mod tests {

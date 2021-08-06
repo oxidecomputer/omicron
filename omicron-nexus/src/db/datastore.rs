@@ -467,7 +467,8 @@ impl DataStore {
             .await?;
 
         bail_unless!(
-            disk.runtime.disk_state.state() == &api::external::DiskState::Creating,
+            disk.runtime.disk_state.state()
+                == &api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             disk.runtime.disk_state
         );
@@ -550,7 +551,8 @@ impl DataStore {
 
         let mut values = SqlValueSet::new();
         values.set("time_deleted", &now);
-        db::types::DiskState::new(api::external::DiskState::Destroyed).sql_serialize(&mut values);
+        db::types::DiskState::new(api::external::DiskState::Destroyed)
+            .sql_serialize(&mut values);
 
         let mut cond_sql = SqlString::new();
         let disk_state_detached =
@@ -719,7 +721,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<api::external::Vpc> {
+    ) -> ListResult<db::types::Vpc> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -734,15 +736,11 @@ impl DataStore {
         vpc_id: &Uuid,
         project_id: &Uuid,
         params: &api::external::VpcCreateParams,
-    ) -> Result<api::external::Vpc, Error> {
+    ) -> Result<db::types::Vpc, Error> {
         let client = self.pool.acquire().await?;
-        let now = Utc::now();
         let mut values = SqlValueSet::new();
-        values.set("id", vpc_id);
-        values.set("time_created", &now);
-        values.set("time_modified", &now);
-        values.set("project_id", project_id);
-        params.sql_serialize(&mut values);
+        let vpc = db::types::Vpc::new(*vpc_id, *project_id, params.clone());
+        vpc.sql_serialize(&mut values);
 
         sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
             &client,
@@ -802,7 +800,7 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         vpc_name: &Name,
-    ) -> LookupResult<api::external::Vpc> {
+    ) -> LookupResult<db::types::Vpc> {
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Vpc>(
             &client,

@@ -5,7 +5,6 @@
  * ./sql.rs.
  */
 
-use omicron_common::api;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
@@ -158,7 +157,7 @@ impl Table for OximeterAssignment {
 /** Describes the "Vpc" table */
 pub struct Vpc;
 impl Table for Vpc {
-    type ModelType = api::external::Vpc;
+    type ModelType = db::types::Vpc;
     const TABLE_NAME: &'static str = "Vpc";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -179,7 +178,7 @@ impl ResourceTable for Vpc {
 /** Describes the "VpcSubnet" table */
 pub struct VpcSubnet;
 impl Table for VpcSubnet {
-    type ModelType = api::external::VpcSubnet;
+    type ModelType = db::types::VpcSubnet;
     const TABLE_NAME: &'static str = "VpcSubnet";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",
@@ -197,7 +196,7 @@ impl Table for VpcSubnet {
 /** Describes the "NetworkInterface" table */
 pub struct NetworkInterface;
 impl Table for NetworkInterface {
-    type ModelType = api::external::NetworkInterface;
+    type ModelType = db::types::NetworkInterface;
     const TABLE_NAME: &'static str = "NetworkInterface";
     const ALL_COLUMNS: &'static [&'static str] = &[
         "id",

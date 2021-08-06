@@ -302,8 +302,11 @@ impl Nexus {
     ) -> CreateResult<Project> {
         // Create a project.
         let project = db::types::Project::new(new_project);
-        let project: db::types::Project =
-            self.db_datastore.project_create(&project).await.map(|p| p.into())?;
+        let project: db::types::Project = self
+            .db_datastore
+            .project_create(&project)
+            .await
+            .map(|p| p.into())?;
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
         //
@@ -877,7 +880,9 @@ impl Nexus {
             })
         }
 
-        fn disk_attachment_error(disk: &db::types::Disk) -> CreateResult<DiskAttachment> {
+        fn disk_attachment_error(
+            disk: &db::types::Disk,
+        ) -> CreateResult<DiskAttachment> {
             let disk_status = match disk.runtime.disk_state.clone().into() {
                 DiskState::Destroyed => "disk is destroyed",
                 DiskState::Faulted => "disk is faulted",
@@ -1034,7 +1039,11 @@ impl Nexus {
          * reflect the new intermediate state.
          */
         let new_runtime = sa
-            .disk_ensure(disk.identity.id, disk.runtime.clone().into(), requested)
+            .disk_ensure(
+                disk.identity.id,
+                disk.runtime.clone().into(),
+                requested,
+            )
             .await?;
         self.db_datastore
             .disk_update_runtime(&disk.identity.id, &new_runtime.into())
@@ -1049,7 +1058,12 @@ impl Nexus {
     ) -> ListResult<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        self.db_datastore.project_list_vpcs(&project_id, pagparams).await
+        let db_stream =
+            self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
+        let api_stream = Box::pin(
+            db_stream.map(|result| result.map(|db_vpc| db_vpc.into())),
+        );
+        Ok(api_stream)
     }
 
     pub async fn project_create_vpc(
@@ -1064,7 +1078,7 @@ impl Nexus {
             .db_datastore
             .project_create_vpc(&id, &project_id, params)
             .await?;
-        Ok(vpc)
+        Ok(vpc.into())
     }
 
     pub async fn project_lookup_vpc(
@@ -1074,7 +1088,11 @@ impl Nexus {
     ) -> LookupResult<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await
+        Ok(self
+            .db_datastore
+            .vpc_fetch_by_name(&project_id, vpc_name)
+            .await?
+            .into())
     }
 
     pub async fn project_update_vpc(
@@ -1087,7 +1105,11 @@ impl Nexus {
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        self.db_datastore.project_update_vpc(&vpc.identity.id, params).await
+        Ok(self
+            .db_datastore
+            .project_update_vpc(&vpc.identity.id, params)
+            .await?
+            .into())
     }
 
     pub async fn project_delete_vpc(
@@ -1291,7 +1313,10 @@ impl Nexus {
     ) -> Result<(), Error> {
         let log = &self.log;
 
-        let result = self.db_datastore.disk_update_runtime(id, &new_state.clone().into()).await;
+        let result = self
+            .db_datastore
+            .disk_update_runtime(id, &new_state.clone().into())
+            .await;
 
         /* TODO-cleanup commonize with notify_instance_updated() */
         match result {
