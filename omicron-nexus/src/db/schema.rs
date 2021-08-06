@@ -15,7 +15,7 @@ use super::sql::ResourceTable;
 use super::sql::Table;
 use crate::db;
 
-// TODO: Now that db/types.rs is a thing, we could actually impl Table
+// TODO: Now that db/model.rs is a thing, we could actually impl Table
 // for all those real structs? Might help to reduce things a bit; the
 // schema does use them as ModelTypes anyway.
 
