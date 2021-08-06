@@ -14,9 +14,9 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::SledAgentTestInterfaces as _;
+use omicron_nexus::params;
+use omicron_nexus::views::Project;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use std::convert::TryFrom;
@@ -53,7 +53,7 @@ async fn test_disks() {
     let project: Project = objects_post(
         &client,
         "/projects",
-        ProjectCreateParams {
+        params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),

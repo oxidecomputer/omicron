@@ -3,11 +3,11 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
+use omicron_nexus::params;
+use omicron_nexus::views::Project;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
@@ -170,7 +170,7 @@ async fn create_project(
     objects_post(
         &client,
         "/projects",
-        ProjectCreateParams {
+        params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from(project_name).unwrap(),
                 description: "a pier".to_string(),
