@@ -1,3 +1,9 @@
+/*!
+ * Views are the types of API Responses. Mostly they will be straightforward
+ * transformations of models (which can use From), but some may be composites
+ * of more than one model and therefore require a special constructor.
+ */
+
 use crate::db;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::IdentityMetadata;
