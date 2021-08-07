@@ -1,0 +1,31 @@
+there are still issues with CRDB compatibility:
+https://github.com/cockroachdb/cockroach/issues/13787#issuecomment-748301955
+
+first install postgres first to fix -lpq linker error:
+
+  brew install postgresql
+  cargo install diesel_cli --no-default-features --features postgres
+
+add diesel to deps
+
+  diesel = { version = "1.4.4", features = ["postgres"] }
+
+run DB (imitate console API start script). in two separate terminals:
+
+  cargo run --bin=omicron-dev -- db-run --no-populate
+  cargo run --bin=omicron-dev -- db-populate --database-url postgresql://root@127.0.0.1:32221
+
+then run setup
+
+  export DATABASE_URL=postgresql://root@localhost:32221/omicron?sslmode=disable
+  diesel setup
+
+SQL changes for compatibility reasons:
+- replace contents of generated up.sql and down.sql with SELECT 1;
+- comment out DbMetadata table in dbinit.sql bc it has no primary key
+
+Then run:
+
+  diesel migration run
+
+This successfully generates src/schema.rs
