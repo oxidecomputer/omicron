@@ -15,21 +15,19 @@
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
-mod http_entrypoints_external;
-mod http_entrypoints_internal;
+pub mod external;
+mod internal;
 mod nexus;
-pub mod params;
 mod saga_interface;
 mod sagas;
-pub mod views;
 
 pub use config::Config;
 pub use context::ServerContext;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 
-use http_entrypoints_external::external_api;
-use http_entrypoints_internal::internal_api;
+use external::http_entrypoints::external_api;
+use internal::http_entrypoints::internal_api;
 
 use slog::Logger;
 use std::sync::Arc;

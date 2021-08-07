@@ -2,11 +2,11 @@
  * Handler functions (entrypoints) for external HTTP APIs
  */
 
-use super::ServerContext;
+use crate::context::ServerContext;
 use crate::db;
 
-use crate::params;
-use crate::views;
+use super::params;
+use super::views;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;

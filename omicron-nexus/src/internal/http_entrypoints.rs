@@ -1,7 +1,7 @@
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
-use super::ServerContext;
+use super::super::ServerContext;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;

@@ -3,7 +3,7 @@
  */
 
 use crate::db;
-use crate::params;
+use crate::external::params;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;

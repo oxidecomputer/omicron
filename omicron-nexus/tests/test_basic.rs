@@ -17,8 +17,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Sled;
-use omicron_nexus::params;
-use omicron_nexus::views::Project;
+use omicron_nexus::external::params;
+use omicron_nexus::external::views::Project;
 use std::convert::TryFrom;
 use uuid::Uuid;
 

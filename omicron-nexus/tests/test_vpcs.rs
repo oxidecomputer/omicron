@@ -6,8 +6,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
-use omicron_nexus::params;
-use omicron_nexus::views::Project;
+use omicron_nexus::external::params;
+use omicron_nexus::external::views::Project;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
