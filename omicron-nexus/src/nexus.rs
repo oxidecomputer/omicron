@@ -8,6 +8,7 @@ use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
+use diesel::{r2d2, PgConnection};
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -98,6 +99,8 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
+    dpool: Arc<r2d2::Pool<r2d2::ConnectionManager<PgConnection>>>,
+
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -136,6 +139,7 @@ impl Nexus {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
+        dpool: r2d2::Pool<r2d2::ConnectionManager<PgConnection>>,
         nexus_id: &Uuid,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
@@ -153,6 +157,7 @@ impl Nexus {
             )),
             sec_store,
         ));
+        let dpool = Arc::new(dpool);
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
@@ -164,6 +169,7 @@ impl Nexus {
                 time_modified: Utc::now(),
             },
             db_datastore,
+            dpool: Arc::clone(&dpool),
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
             oximeter_collectors: Mutex::new(BTreeMap::new()),
@@ -330,9 +336,14 @@ impl Nexus {
 
     pub async fn project_fetch(
         &self,
-        name: &Name,
-    ) -> LookupResult<db::model::Project> {
-        self.db_datastore.project_fetch(name).await
+        name_: &Name,
+    ) -> Result<db::model::Project2, diesel::result::Error> {
+        use db::diesel_schema::project::dsl::*;
+        use diesel::RunQueryDsl;
+        let conn = self.dpool.get().unwrap();
+        project
+            // .filter(project::name.eq(String::from(name_.as_str())))
+            .first::<db::model::Project2>(&*conn)
     }
 
     pub async fn projects_list_by_name(
@@ -380,7 +391,8 @@ impl Nexus {
         project_name: &Name,
         params: &DiskCreateParams,
     ) -> CreateResult<db::model::Disk> {
-        let project = self.project_fetch(project_name).await?;
+        // TODO-correctness change this back to ? after figuring out error situation
+        let project = self.project_fetch(project_name).await.unwrap();
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a
@@ -398,7 +410,7 @@ impl Nexus {
             .db_datastore
             .project_create_disk(
                 &disk_id,
-                &project.id(),
+                &project.id,
                 params,
                 &db::model::DiskRuntimeState {
                     disk_state: db::model::DiskState::new(DiskState::Creating),

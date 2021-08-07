@@ -1,5 +1,6 @@
 //! Structures stored to the database.
 
+use super::diesel_schema::project;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, InstanceCpuCount,
@@ -133,6 +134,35 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
             time_created: sql_row_value(value, "time_created")?,
             time_modified: sql_row_value(value, "time_modified")?,
         })
+    }
+}
+
+/// Describes a project within the database.
+#[derive(Queryable, Associations, Identifiable)]
+#[table_name = "project"]
+pub struct Project2 {
+    pub id: Uuid,
+    pub name: String,
+    // I'd be surprised if this works, but I didn't get the rest of the
+    // thing working well enough to get errors about this
+    // pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+}
+
+impl Into<external::Project> for Project2 {
+    fn into(self) -> external::Project {
+        external::Project {
+            identity: external::IdentityMetadata {
+                id: self.id,
+                name: external::Name::try_from(self.name).unwrap(),
+                description: self.description,
+                time_created: self.time_created,
+                time_modified: self.time_modified,
+            },
+        }
     }
 }
 

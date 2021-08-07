@@ -11,6 +11,7 @@ mod saga_types;
 mod sec_store;
 mod sql_operations;
 
+pub mod diesel_schema;
 pub mod model;
 pub mod schema;
 pub mod sql; /* public for examples only */
