@@ -19,14 +19,18 @@ async fn test_projects() {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
-    let project_name = "springfield-squidport";
-    let _: Project = create_project(&client, &project_name).await;
+    let p1_name = "springfield-squidport";
+    let p2_name = "cairo-airport";
+    create_project(&client, &p1_name).await;
+    create_project(&client, &p2_name).await;
 
-    let project_url = format!("/projects/{}", project_name);
+    let p1_url = format!("/projects/{}", p1_name);
+    let project: Project = object_get(&client, &p1_url).await;
+    assert_eq!(project.identity.name, p1_name);
 
-    let project: Project = object_get(&client, &project_url).await;
-    assert_eq!(project.identity.name, project_name);
-    assert_eq!(project.identity.description, "a pier");
+    let p2_url = format!("/projects/{}", p2_name);
+    let project: Project = object_get(&client, &p2_url).await;
+    assert_eq!(project.identity.name, p2_name);
 
     cptestctx.teardown().await;
 }

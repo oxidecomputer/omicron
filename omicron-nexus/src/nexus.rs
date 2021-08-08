@@ -339,10 +339,10 @@ impl Nexus {
         name_: &Name,
     ) -> Result<db::model::Project2, diesel::result::Error> {
         use db::diesel_schema::project::dsl::*;
-        use diesel::RunQueryDsl;
+        use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
         let conn = self.dpool.get().unwrap();
         project
-            // .filter(project::name.eq(String::from(name_.as_str())))
+            .filter(name.eq(name_.as_str()))
             .first::<db::model::Project2>(&*conn)
     }
 

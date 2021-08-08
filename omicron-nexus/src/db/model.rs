@@ -142,10 +142,10 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 #[table_name = "project"]
 pub struct Project2 {
     pub id: Uuid,
-    pub name: String,
-    // I'd be surprised if this works, but I didn't get the rest of the
-    // thing working well enough to get errors about this
+    // looks like all you have to do to make this work is implement
+    // Queryable on Name. in the meantime use String
     // pub name: external::Name,
+    pub name: String,
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
