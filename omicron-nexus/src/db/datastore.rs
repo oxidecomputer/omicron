@@ -84,20 +84,6 @@ impl DataStore {
             .await
     }
 
-    /// Fetch metadata for a project
-    pub async fn project_fetch(
-        &self,
-        project_name: &Name,
-    ) -> LookupResult<db::model::Project> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueName, Project>(
-            &client,
-            (),
-            project_name,
-        )
-        .await
-    }
-
     /// Delete a project
     /*
      * TODO-correctness This needs to check whether there are any resources that
