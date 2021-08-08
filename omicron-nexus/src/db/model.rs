@@ -142,8 +142,11 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 #[table_name = "project"]
 pub struct Project2 {
     pub id: Uuid,
-    // looks like all you have to do to make this work is implement
-    // Queryable on Name. in the meantime use String
+    // TODO this takes more than deriving Queryable on Name, you have to
+    // implement a special ToSql and FromSql on it. See
+    // https://kitsu.me/posts/2020_05_24_custom_types_in_diesel
+    // https://github.com/diesel-rs/diesel/blob/6e46d08d1/diesel_tests/tests/custom_types.rs#L97-L126
+    // in the meantime, use String
     // pub name: external::Name,
     pub name: String,
     pub description: String,

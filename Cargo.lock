@@ -1243,6 +1243,7 @@ dependencies = [
  "async-trait",
  "backoff",
  "chrono",
+ "diesel",
  "dropshot",
  "expectorate",
  "futures",

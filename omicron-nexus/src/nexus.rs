@@ -8,7 +8,7 @@ use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
-use diesel::{r2d2, PgConnection};
+use diesel::{r2d2, ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl};
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -337,13 +337,13 @@ impl Nexus {
     pub async fn project_fetch(
         &self,
         name_: &Name,
-    ) -> Result<db::model::Project2, diesel::result::Error> {
+    ) -> LookupResult<db::model::Project2> {
         use db::diesel_schema::project::dsl::*;
-        use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
         let conn = self.dpool.get().unwrap();
         project
             .filter(name.eq(name_.as_str()))
             .first::<db::model::Project2>(&*conn)
+            .map_err(|e| e.into())
     }
 
     pub async fn projects_list_by_name(
@@ -391,8 +391,7 @@ impl Nexus {
         project_name: &Name,
         params: &DiskCreateParams,
     ) -> CreateResult<db::model::Disk> {
-        // TODO-correctness change this back to ? after figuring out error situation
-        let project = self.project_fetch(project_name).await.unwrap();
+        let project = self.project_fetch(project_name).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a

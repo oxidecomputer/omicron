@@ -6,6 +6,7 @@
 
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
+use diesel::result::Error as DieselError;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
@@ -159,6 +160,19 @@ impl Error {
                     error_message_base, error_response
                 ),
             },
+        }
+    }
+}
+
+impl From<DieselError> for Error {
+    fn from(error: DieselError) -> Self {
+        match error {
+            // our not found wants by_id or by_name, which this error doesn't have
+            // DieselError::NotFound => Error::not_found_other(...),
+            DieselError::DatabaseError(kind, _info) => {
+                Error::unavail(format!("Database error: {:?}", kind).as_str())
+            }
+            _ => Error::internal_error("Unknown diesel error"),
         }
     }
 }
