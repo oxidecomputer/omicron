@@ -337,12 +337,12 @@ impl Nexus {
     pub async fn project_fetch(
         &self,
         name_: &Name,
-    ) -> LookupResult<db::model::Project2> {
+    ) -> LookupResult<db::model::DieselProject> {
         use db::diesel_schema::project::dsl::*;
         let conn = self.dpool.get().unwrap();
         project
             .filter(name.eq(name_.as_str()))
-            .first::<db::model::Project2>(&*conn)
+            .first::<db::model::DieselProject>(&*conn)
             .map_err(|e| e.into())
     }
 

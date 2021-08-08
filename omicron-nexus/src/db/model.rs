@@ -140,7 +140,7 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 /// Describes a project within the database.
 #[derive(Queryable, Associations, Identifiable)]
 #[table_name = "project"]
-pub struct Project2 {
+pub struct DieselProject {
     pub id: Uuid,
     // TODO this takes more than deriving Queryable on Name, you have to
     // implement a special ToSql and FromSql on it. See
@@ -155,7 +155,7 @@ pub struct Project2 {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl Into<external::Project> for Project2 {
+impl Into<external::Project> for DieselProject {
     fn into(self) -> external::Project {
         external::Project {
             identity: external::IdentityMetadata {
