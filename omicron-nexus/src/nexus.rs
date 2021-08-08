@@ -334,7 +334,7 @@ impl Nexus {
         Ok(project)
     }
 
-    pub async fn project_fetch(
+    pub fn project_fetch(
         &self,
         name_: &Name,
     ) -> LookupResult<db::model::DieselProject> {
@@ -391,7 +391,7 @@ impl Nexus {
         project_name: &Name,
         params: &DiskCreateParams,
     ) -> CreateResult<db::model::Disk> {
-        let project = self.project_fetch(project_name).await?;
+        let project = self.project_fetch(project_name)?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a

@@ -221,7 +221,7 @@ async fn projects_get_project(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project = nexus.project_fetch(&project_name).await?;
+    let project = nexus.project_fetch(&project_name)?;
     Ok(HttpResponseOk(project.into()))
 }
 
