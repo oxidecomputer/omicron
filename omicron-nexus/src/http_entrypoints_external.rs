@@ -163,21 +163,21 @@ async fn projects_get(
     let params = ScanByNameOrId::from_query(&query)?;
     let field = pagination_field_for_scan_params(params);
 
-    let project_stream = match field {
+    let projects = match field {
         PagField::Id => {
             let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-            nexus.projects_list_by_id(&page_selector).await?
+            nexus.projects_list_by_id(&page_selector)?
         }
 
         PagField::Name => {
             let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
-            nexus.projects_list_by_name(&page_selector).await?
+            nexus.projects_list_by_name(&page_selector)?
         }
     };
 
-    let view_list =
-        to_list::<db::model::Project, Project>(project_stream).await;
-    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
+    // TODO filter out non-ok things like to_list does
+    let projects = projects.into_iter().map(|p| p.into()).collect();
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
 }
 
 /**

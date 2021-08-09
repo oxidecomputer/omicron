@@ -43,6 +43,7 @@ pub type CreateResult<T> = Result<T, Error>;
 pub type DeleteResult = Result<(), Error>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, Error>;
+pub type ListResultVec<T> = Result<Vec<T>, Error>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<T, Error>;
 /** Result of an update operation for the specified type */

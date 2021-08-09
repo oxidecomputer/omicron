@@ -54,7 +54,6 @@ use super::sql::SqlString;
 use super::sql::SqlValueSet;
 use super::sql::Table;
 use super::sql_operations::sql_fetch_page_by;
-use super::sql_operations::sql_fetch_page_from_table;
 use super::sql_operations::sql_fetch_row_by;
 use super::sql_operations::sql_fetch_row_raw;
 use super::sql_operations::sql_insert;
@@ -123,34 +122,6 @@ impl DataStore {
         )
         .await?;
         sql_row_value(&row, "id")
-    }
-
-    /// List a page of projects by id
-    pub async fn projects_list_by_id(
-        &self,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<db::model::Project> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_from_table::<LookupByUniqueId, Project>(
-            &client,
-            (),
-            pagparams,
-        )
-        .await
-    }
-
-    /// List a page of projects by name
-    pub async fn projects_list_by_name(
-        &self,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Project> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<
-            LookupByUniqueName,
-            Project,
-            <Project as Table>::Model,
-        >(&client, (), pagparams, Project::ALL_COLUMNS)
-        .await
     }
 
     /// Updates a project by name (clobbering update -- no etag)

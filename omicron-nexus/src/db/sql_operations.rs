@@ -67,26 +67,6 @@ where
     R::Model::try_from(&row)
 }
 
-/// Fetch a page of rows from a table using the specified lookup
-pub async fn sql_fetch_page_from_table<'a, L, T>(
-    client: &'a tokio_postgres::Client,
-    scope_key: L::ScopeKey,
-    pagparams: &'a DataPageParams<'a, L::ItemKey>,
-) -> ListResult<T::Model>
-where
-    L: LookupKey<'a, T>,
-    L::ScopeKey: 'a,
-    T: Table,
-{
-    sql_fetch_page_by::<L, T, T::Model>(
-        client,
-        scope_key,
-        pagparams,
-        T::ALL_COLUMNS,
-    )
-    .await
-}
-
 /// Like `fetch_page_from_table`, but the caller can specify which columns
 /// to select and how to interpret the row
 pub async fn sql_fetch_page_by<'a, L, T, R>(

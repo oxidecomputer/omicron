@@ -26,6 +26,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ProjectCreateParams;
@@ -346,18 +347,36 @@ impl Nexus {
             .map_err(|e| e.into())
     }
 
-    pub async fn projects_list_by_name(
+    pub fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Project> {
-        self.db_datastore.projects_list_by_name(pagparams).await
+    ) -> ListResultVec<db::model::DieselProject> {
+        use db::diesel_schema::project::dsl::*;
+        let conn = self.dpool.get().unwrap();
+        // TODO these are incompatible arm types
+        // let order = match pagparams.direction {
+        //     PaginationOrder::Ascending => name.asc(),
+        //     PaginationOrder::Descending => name.desc(),
+        // };
+        project
+            .limit(pagparams.limit.get().into())
+            .order(name.asc())
+            .load::<db::model::DieselProject>(&*conn)
+            .map_err(|e| e.into())
     }
 
-    pub async fn projects_list_by_id(
+    pub fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<db::model::Project> {
-        self.db_datastore.projects_list_by_id(pagparams).await
+    ) -> ListResultVec<db::model::DieselProject> {
+        use db::diesel_schema::project::dsl::*;
+        let conn = self.dpool.get().unwrap();
+        // TODO figure out order here too
+        project
+            .limit(pagparams.limit.get().into())
+            .order(id.asc())
+            .load::<db::model::DieselProject>(&*conn)
+            .map_err(|e| e.into())
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {

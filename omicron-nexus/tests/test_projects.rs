@@ -5,6 +5,7 @@ use omicron_common::api::external::ProjectCreateParams;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
+use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 use dropshot::test_util::ClientTestContext;
 
@@ -31,6 +32,13 @@ async fn test_projects() {
     let p2_url = format!("/projects/{}", p2_name);
     let project: Project = object_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
+
+    let projects =
+        objects_list_page::<Project>(client, "/projects").await.items;
+    assert_eq!(projects.len(), 2);
+    // alphabetical order for now
+    assert_eq!(projects[0].identity.name, p2_name);
+    assert_eq!(projects[1].identity.name, p1_name);
 
     cptestctx.teardown().await;
 }
