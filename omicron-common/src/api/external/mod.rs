@@ -14,6 +14,10 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::backend::Backend;
+use diesel::sql_types;
+use diesel::deserialize::{self, FromSql};
+use diesel::serialize::{self, ToSql};
 pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
@@ -112,7 +116,35 @@ pub struct DataPageParams<'a, NameType> {
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
+// Diesel-specific derives:
+//
+// - Types which implement "ToSql" should implement "AsExpression".
+// - Types which implement "FromSql" should implement "FromSqlRow".
+#[derive(AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
 pub struct Name(String);
+
+// Serialize the "Name" object to SQL as TEXT.
+impl<DB> ToSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(&self, out: &mut serialize::Output<W, DB>) -> serialize::Result {
+       (&self.0 as &String).to_sql(out)
+    }
+}
+
+// Deserialize the "Name" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 /**
  * `Name::try_from(String)` is the primary method for constructing an Name

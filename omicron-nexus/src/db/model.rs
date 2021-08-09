@@ -142,13 +142,7 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 #[table_name = "project"]
 pub struct DieselProject {
     pub id: Uuid,
-    // TODO this takes more than deriving Queryable on Name, you have to
-    // implement a special ToSql and FromSql on it. See
-    // https://kitsu.me/posts/2020_05_24_custom_types_in_diesel
-    // https://github.com/diesel-rs/diesel/blob/6e46d08d1/diesel_tests/tests/custom_types.rs#L97-L126
-    // in the meantime, use String
-    // pub name: external::Name,
-    pub name: String,
+    pub name: external::Name,
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
@@ -160,7 +154,7 @@ impl Into<external::Project> for DieselProject {
         external::Project {
             identity: external::IdentityMetadata {
                 id: self.id,
-                name: external::Name::try_from(self.name).unwrap(),
+                name: self.name,
                 description: self.description,
                 time_created: self.time_created,
                 time_modified: self.time_modified,
