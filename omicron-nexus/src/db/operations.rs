@@ -33,24 +33,6 @@ pub async fn sql_query(
 }
 
 /**
- * Like [`sql_query()`], but produces an error unless exactly one row is
- * returned.
- */
-pub async fn sql_query_always_one(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<tokio_postgres::Row, DbError> {
-    sql_query(client, sql, params).await.and_then(|mut rows| match rows.len() {
-        1 => Ok(rows.pop().unwrap()),
-        nrows_found => Err(DbError::BadRowCount {
-            sql: sql.to_owned(),
-            nrows_found: u64::try_from(nrows_found).unwrap(),
-        }),
-    })
-}
-
-/**
  * Like [`sql_query()`], but produces an error based on the row count:
  *
  * * the result of `mkzerror()` if there are no rows returned.  This is

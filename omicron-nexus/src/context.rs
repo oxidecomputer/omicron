@@ -8,8 +8,6 @@ use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use diesel::{r2d2, PgConnection};
-
 /**
  * Shared state available to all API request handlers
  */
@@ -29,7 +27,6 @@ impl ServerContext {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        dpool: r2d2::Pool<r2d2::ConnectionManager<PgConnection>>,
         nexus_id: &Uuid,
     ) -> Arc<ServerContext> {
         Arc::new(ServerContext {
@@ -37,7 +34,6 @@ impl ServerContext {
                 rack_id,
                 log.new(o!("component" => "nexus")),
                 pool,
-                dpool,
                 nexus_id,
             ),
             log,

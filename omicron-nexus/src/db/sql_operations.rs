@@ -16,7 +16,6 @@ use std::num::NonZeroU32;
 
 use super::operations::sql_execute;
 use super::operations::sql_query;
-use super::operations::sql_query_always_one;
 use super::operations::sql_query_maybe_one;
 use super::sql;
 use super::sql::LookupKey;
@@ -498,57 +497,11 @@ fn sql_error_on_create(
     sql_error_generic(e)
 }
 
-/**
- * Insert a row into table `T` and return the resulting row
- *
- * This function expects any conflict error is on the name.  The caller should
- * provide this in `unique_value` and it will be returned with an
- * [`Error::ObjectAlreadyExists`] error.
- */
-pub async fn sql_insert_unique<R>(
-    client: &tokio_postgres::Client,
-    values: &SqlValueSet,
-    unique_value: &str,
-) -> Result<R::Model, Error>
-where
-    R: ResourceTable,
-{
-    let mut sql = SqlString::new();
-    let param_names = values
-        .values()
-        .iter()
-        .map(|value| sql.next_param(*value))
-        .collect::<Vec<String>>();
-    let column_names = values.names().iter().cloned().collect::<Vec<&str>>();
-
-    sql.push_str(
-        format!(
-            "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
-            R::TABLE_NAME,
-            column_names.join(", "),
-            param_names.join(", "),
-            R::ALL_COLUMNS.join(", "),
-        )
-        .as_str(),
-    );
-
-    let row =
-        sql_query_always_one(client, sql.sql_fragment(), sql.sql_params())
-            .await
-            .map_err(|e| {
-                sql_error_on_create(R::RESOURCE_TYPE, unique_value, e)
-            })?;
-
-    R::Model::try_from(&row)
-}
-
-///
 /// Insert a database record, not necessarily idempotently
 ///
 /// This is used when the caller wants to explicitly handle the case of a
 /// conflict or else expects that a conflict will never happen and wants to
 /// treat it as an unhandleable operational error.
-///
 pub async fn sql_insert<T>(
     client: &tokio_postgres::Client,
     values: &SqlValueSet,

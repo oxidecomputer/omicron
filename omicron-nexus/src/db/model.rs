@@ -144,9 +144,9 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 }
 
 /// Describes a project within the database.
-#[derive(Queryable, Associations, Identifiable)]
+#[derive(Queryable, Associations, Identifiable, Insertable)]
 #[table_name = "project"]
-pub struct DieselProject {
+pub struct Project {
     pub id: Uuid,
     pub name: external::Name,
     pub description: String,
@@ -155,7 +155,31 @@ pub struct DieselProject {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl Into<external::Project> for DieselProject {
+impl Project {
+    /// Creates a new database Project object.
+    pub fn new(params: external::ProjectCreateParams) -> Self {
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        Self {
+            id,
+            name: params.identity.name,
+            description: params.identity.description,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+}
+
+impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
         external::Project {
             identity: external::IdentityMetadata {
@@ -169,54 +193,36 @@ impl Into<external::Project> for DieselProject {
     }
 }
 
-/// Describes a project within the database.
-pub struct Project {
-    identity: IdentityMetadata,
-}
-
-impl Project {
-    /// Creates a new database Project object.
-    pub fn new(params: &external::ProjectCreateParams) -> Self {
-        let id = Uuid::new_v4();
-        Self { identity: IdentityMetadata::new(id, params.identity.clone()) }
-    }
-
-    pub fn name(&self) -> &str {
-        self.identity.name.as_str()
-    }
-
-    pub fn id(&self) -> &Uuid {
-        &self.identity.id
-    }
-}
-
-/// Conversion to the internal API type.
-impl Into<external::Project> for Project {
-    fn into(self) -> external::Project {
-        external::Project { identity: self.identity.into() }
-    }
-}
-
 /// Conversion from the internal API type.
 impl From<external::Project> for Project {
     fn from(project: external::Project) -> Self {
-        Self { identity: project.identity.into() }
+        Self {
+            id: project.identity.id,
+            name: project.identity.name,
+            description: project.identity.description,
+            time_created: project.identity.time_created,
+            time_modified: project.identity.time_modified,
+            time_deleted: None,
+        }
     }
 }
 
-/// Serialization to DB.
-impl SqlSerialize for Project {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-    }
+/// Describes a set of updates for the [`Project`] model.
+#[derive(AsChangeset)]
+#[table_name = "project"]
+pub struct ProjectUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>
 }
 
-/// Deserialization from DB.
-impl TryFrom<&tokio_postgres::Row> for Project {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Project { identity: IdentityMetadata::try_from(value)? })
+impl From<external::ProjectUpdateParams> for ProjectUpdate {
+    fn from(params: external::ProjectUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
     }
 }
 

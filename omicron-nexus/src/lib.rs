@@ -40,8 +40,6 @@ extern crate newtype_derive;
 #[macro_use]
 extern crate diesel;
 
-use diesel::r2d2;
-
 /**
  * Run the OpenAPI generator for the external API, which emits the OpenAPI spec
  * to stdout.
@@ -84,13 +82,8 @@ impl Server {
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
 
-        let manager = r2d2::ConnectionManager::<diesel::PgConnection>::new(
-            &config.database.url.url(),
-        );
-        let dpool = r2d2::Pool::new(manager).unwrap();
-
         let apictx =
-            ServerContext::new(rack_id, ctxlog, pool, dpool, &config.id);
+            ServerContext::new(rack_id, ctxlog, pool, &config.id);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

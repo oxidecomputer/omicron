@@ -8,7 +8,7 @@ use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
-use diesel::{r2d2, ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl};
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -100,8 +100,6 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
-    dpool: Arc<r2d2::Pool<r2d2::ConnectionManager<PgConnection>>>,
-
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -140,7 +138,6 @@ impl Nexus {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        dpool: r2d2::Pool<r2d2::ConnectionManager<PgConnection>>,
         nexus_id: &Uuid,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
@@ -158,7 +155,6 @@ impl Nexus {
             )),
             sec_store,
         ));
-        let dpool = Arc::new(dpool);
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
@@ -170,7 +166,6 @@ impl Nexus {
                 time_modified: Utc::now(),
             },
             db_datastore,
-            dpool: Arc::clone(&dpool),
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
             oximeter_collectors: Mutex::new(BTreeMap::new()),
@@ -305,9 +300,9 @@ impl Nexus {
         new_project: &ProjectCreateParams,
     ) -> CreateResult<db::model::Project> {
         // Create a project.
-        let db_project = db::model::Project::new(new_project);
-        let project: db::model::Project =
-            self.db_datastore.project_create(&db_project).await?;
+        let db_project = db::model::Project::new(new_project.clone());
+        let db_project = self.db_datastore.project_create(db_project).await?;
+
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
         //
@@ -319,7 +314,7 @@ impl Nexus {
             .db_datastore
             .project_create_vpc(
                 &id,
-                project.id(),
+                db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
                         name: Name::try_from("default").unwrap(),
@@ -332,27 +327,27 @@ impl Nexus {
             )
             .await?;
 
-        Ok(project)
+        Ok(db_project)
     }
 
     pub fn project_fetch(
         &self,
         name: &Name,
-    ) -> LookupResult<db::model::DieselProject> {
+    ) -> LookupResult<db::model::Project> {
         use db::diesel_schema::project::dsl;
-        let conn = self.dpool.get().unwrap();
+        let conn = self.db_datastore.acquire_sync_client();
         dsl::project
             .filter(dsl::name.eq(name))
-            .first::<db::model::DieselProject>(&*conn)
+            .first::<db::model::Project>(&*conn)
             .map_err(|e| e.into())
     }
 
     pub fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::DieselProject> {
+    ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
-        let conn = self.dpool.get().unwrap();
+        let conn = self.db_datastore.acquire_sync_client();
         let query =
             dsl::project.into_boxed().limit(pagparams.limit.get().into());
         let query = match pagparams.direction {
@@ -363,15 +358,15 @@ impl Nexus {
                 query.order(dsl::name.desc())
             }
         };
-        query.load::<db::model::DieselProject>(&*conn).map_err(|e| e.into())
+        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
     }
 
     pub fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::DieselProject> {
+    ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
-        let conn = self.dpool.get().unwrap();
+        let conn = self.db_datastore.acquire_sync_client();
         let query =
             dsl::project.into_boxed().limit(pagparams.limit.get().into());
         let query = match pagparams.direction {
@@ -382,7 +377,7 @@ impl Nexus {
                 query.order(dsl::name.desc())
             }
         };
-        query.load::<db::model::DieselProject>(&*conn).map_err(|e| e.into())
+        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
@@ -394,7 +389,7 @@ impl Nexus {
         name: &Name,
         new_params: &ProjectUpdateParams,
     ) -> UpdateResult<db::model::Project> {
-        self.db_datastore.project_update(name, new_params).await
+        self.db_datastore.project_update(name, &new_params).await
     }
 
     /*

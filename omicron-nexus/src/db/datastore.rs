@@ -19,7 +19,8 @@
  */
 
 use super::Pool;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, r2d2};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -35,19 +36,15 @@ use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
 use std::sync::Arc;
-use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 use super::operations::sql_execute_maybe_one;
-use super::operations::sql_query_maybe_one;
 use super::schema;
 use super::schema::Disk;
 use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
-use super::schema::LookupByUniqueName;
 use super::schema::LookupByUniqueNameInProject;
-use super::schema::Project;
 use super::schema::Vpc;
 use super::sql::SqlSerialize;
 use super::sql::SqlString;
@@ -55,9 +52,7 @@ use super::sql::SqlValueSet;
 use super::sql::Table;
 use super::sql_operations::sql_fetch_page_by;
 use super::sql_operations::sql_fetch_row_by;
-use super::sql_operations::sql_fetch_row_raw;
 use super::sql_operations::sql_insert;
-use super::sql_operations::sql_insert_unique;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
@@ -71,16 +66,21 @@ impl DataStore {
         DataStore { pool }
     }
 
+    pub fn acquire_sync_client(&self) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>> {
+        self.pool.acquire_sync()
+    }
+
     /// Create a project
     pub async fn project_create(
         &self,
-        new_project: &db::model::Project,
+        project: db::model::Project,
     ) -> CreateResult<db::model::Project> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        new_project.sql_serialize(&mut values);
-        sql_insert_unique::<Project>(&client, &values, &new_project.name())
-            .await
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
+        let project = diesel::insert_into(dsl::project)
+            .values(&project)
+            .get_result(&conn)?;
+        Ok(project)
     }
 
     /// Delete a project
@@ -89,23 +89,16 @@ impl DataStore {
      * depend on the Project (Disks, Instances).  We can do this with a
      * generation counter that gets bumped when these resources are created.
      */
-    pub async fn project_delete(&self, project_name: &Name) -> DeleteResult {
-        let client = self.pool.acquire().await?;
+    pub async fn project_delete(&self, name: &Name) -> DeleteResult {
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
         let now = Utc::now();
-        sql_execute_maybe_one(
-            &client,
-            format!(
-                "UPDATE {} SET time_deleted = $1 WHERE \
-                    time_deleted IS NULL AND name = $2 LIMIT 2 \
-                    RETURNING {}",
-                Project::TABLE_NAME,
-                Project::ALL_COLUMNS.join(", ")
-            )
-            .as_str(),
-            &[&now, &project_name],
-            || Error::not_found_by_name(ResourceType::Project, project_name),
-        )
-        .await
+        diesel::update(dsl::project)
+            .filter(dsl::name.eq(name))
+            .filter(dsl::time_deleted.eq::<Option<DateTime<Utc>>>(None))
+            .set(dsl::time_deleted.eq(now))
+            .execute(&conn)?;
+        Ok(())
     }
 
     /// Look up the id for a project based on its name
@@ -113,59 +106,40 @@ impl DataStore {
         &self,
         name: &Name,
     ) -> Result<Uuid, Error> {
-        let client = self.pool.acquire().await?;
-        let row = sql_fetch_row_raw::<LookupByUniqueName, Project>(
-            &client,
-            (),
-            name,
-            &["id"],
-        )
-        .await?;
-        sql_row_value(&row, "id")
+        use db::diesel_schema::project::dsl;
+        let client = self.pool.acquire_sync();
+
+        dsl::project
+            .filter(dsl::name.eq(name))
+            .filter(dsl::time_deleted.eq::<Option<DateTime<Utc>>>(None))
+            .select(dsl::id)
+            .get_result::<Uuid>(&client)
+            .map_err(|e| e.into())
+
     }
 
     /// Updates a project by name (clobbering update -- no etag)
     pub async fn project_update(
         &self,
-        project_name: &Name,
+        name: &Name,
         update_params: &api::external::ProjectUpdateParams,
     ) -> UpdateResult<db::model::Project> {
-        let client = self.pool.acquire().await?;
-        let now = Utc::now();
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
+        let updates: db::model::ProjectUpdate = update_params.clone().into();
 
-        let mut sql =
-            format!("UPDATE {} SET time_modified = $1 ", Project::TABLE_NAME);
-        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now];
-
-        if let Some(new_name) = &update_params.identity.name {
-            sql.push_str(&format!(", name = ${} ", params.len() + 1));
-            params.push(new_name);
-        }
-
-        if let Some(new_description) = &update_params.identity.description {
-            sql.push_str(&format!(", description = ${} ", params.len() + 1));
-            params.push(new_description);
-        }
-
-        sql.push_str(&format!(
-            " WHERE name = ${} AND time_deleted IS NULL LIMIT 2 RETURNING {}",
-            params.len() + 1,
-            Project::ALL_COLUMNS.join(", ")
-        ));
-        params.push(project_name);
-
-        let row = sql_query_maybe_one(&client, sql.as_str(), &params, || {
-            Error::not_found_by_name(ResourceType::Project, project_name)
-        })
-        .await?;
-        Ok(db::model::Project::try_from(&row)?)
+        diesel::update(dsl::project)
+            .filter(dsl::name.eq(name))
+            .filter(dsl::time_deleted.eq::<Option<chrono::DateTime<chrono::Utc>>>(None))
+            .set(&updates)
+            .get_result(&conn)
+            .map_err(|e| e.into())
     }
 
     /*
      * Instances
      */
 
-    ///
     /// Idempotently insert a database record for an Instance
     ///
     /// This is intended to be used by a saga action.  When we say this is
@@ -183,7 +157,6 @@ impl DataStore {
     /// In addition to the usual database errors (e.g., no connections
     /// available), this function can fail if there is already a different
     /// instance (having a different id) with the same name in the same project.
-    ///
     /*
      * TODO-design Given that this is really oriented towards the saga
      * interface, one wonders if it's even worth having an abstraction here, or

@@ -26,12 +26,19 @@
 
 use super::Config as DbConfig;
 use bb8_postgres::PostgresConnectionManager;
+use diesel::r2d2;
 use omicron_common::api::external::Error;
 use std::ops::Deref;
 
-#[derive(Debug)]
+// NOTE: This structure abstracts a connection pool.
+// It *currently* wraps both a BB8 (async) and R2D2 (sync)
+// connection to Postgres.
+//
+// Long-term, it would be ideal to migrate to a single
+// (probably async) connection.
 pub struct Pool {
     pool: bb8::Pool<PostgresConnectionManager<tokio_postgres::NoTls>>,
+    pool_sync: r2d2::Pool<r2d2::ConnectionManager<diesel::PgConnection>>,
 }
 
 pub struct Conn<'a> {
@@ -56,7 +63,17 @@ impl Pool {
             tokio_postgres::NoTls,
         );
         let pool = bb8::Builder::new().build_unchecked(mgr);
-        Pool { pool }
+
+
+        let manager = r2d2::ConnectionManager::<diesel::PgConnection>::new(
+            &db_config.url.url(),
+        );
+        let pool_sync = r2d2::Pool::new(manager).unwrap();
+        Pool { pool, pool_sync }
+    }
+
+    pub fn acquire_sync(&self) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>> {
+        self.pool_sync.get().unwrap()
     }
 
     pub async fn acquire(&self) -> Result<Conn<'_>, Error> {
