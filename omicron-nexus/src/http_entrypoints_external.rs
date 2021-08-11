@@ -166,12 +166,12 @@ async fn projects_get(
     let projects = match field {
         PagField::Id => {
             let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-            nexus.projects_list_by_id(&page_selector)?
+            nexus.projects_list_by_id(&page_selector).await?
         }
 
         PagField::Name => {
             let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
-            nexus.projects_list_by_name(&page_selector)?
+            nexus.projects_list_by_name(&page_selector).await?
         }
     };
 
@@ -221,7 +221,7 @@ async fn projects_get_project(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let project = nexus.project_fetch(&project_name)?;
+    let project = nexus.project_fetch(&project_name).await?;
     Ok(HttpResponseOk(project.into()))
 }
 

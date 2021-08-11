@@ -8,7 +8,6 @@ use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -330,54 +329,25 @@ impl Nexus {
         Ok(db_project)
     }
 
-    pub fn project_fetch(
+    pub async fn project_fetch(
         &self,
         name: &Name,
     ) -> LookupResult<db::model::Project> {
-        use db::diesel_schema::project::dsl;
-        let conn = self.db_datastore.acquire_sync_client();
-        dsl::project
-            .filter(dsl::name.eq(name))
-            .first::<db::model::Project>(&*conn)
-            .map_err(|e| e.into())
+        self.db_datastore.project_fetch(name).await
     }
 
-    pub fn projects_list_by_name(
+    pub async fn projects_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        use db::diesel_schema::project::dsl;
-        let conn = self.db_datastore.acquire_sync_client();
-        let query =
-            dsl::project.into_boxed().limit(pagparams.limit.get().into());
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                query.order(dsl::name.desc())
-            }
-        };
-        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
+        self.db_datastore.projects_list_by_name(pagparams).await
     }
 
-    pub fn projects_list_by_id(
+    pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        use db::diesel_schema::project::dsl;
-        let conn = self.db_datastore.acquire_sync_client();
-        let query =
-            dsl::project.into_boxed().limit(pagparams.limit.get().into());
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                query.order(dsl::name.desc())
-            }
-        };
-        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
+        self.db_datastore.projects_list_by_id(pagparams).await
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
@@ -411,7 +381,7 @@ impl Nexus {
         project_name: &Name,
         params: &DiskCreateParams,
     ) -> CreateResult<db::model::Disk> {
-        let project = self.project_fetch(project_name)?;
+        let project = self.project_fetch(project_name).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a

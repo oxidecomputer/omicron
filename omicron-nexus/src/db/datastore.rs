@@ -20,7 +20,7 @@
 
 use super::Pool;
 use chrono::{DateTime, Utc};
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, r2d2};
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -28,6 +28,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResult;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
@@ -66,10 +67,6 @@ impl DataStore {
         DataStore { pool }
     }
 
-    pub fn acquire_sync_client(&self) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>> {
-        self.pool.acquire_sync()
-    }
-
     /// Create a project
     pub async fn project_create(
         &self,
@@ -81,6 +78,19 @@ impl DataStore {
             .values(&project)
             .get_result(&conn)?;
         Ok(project)
+    }
+
+    /// Lookup a project by name.
+    pub async fn project_fetch(
+        &self,
+        name: &Name,
+    ) -> LookupResult<db::model::Project> {
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
+        dsl::project
+            .filter(dsl::name.eq(name))
+            .first::<db::model::Project>(&*conn)
+            .map_err(|e| e.into())
     }
 
     /// Delete a project
@@ -115,7 +125,44 @@ impl DataStore {
             .select(dsl::id)
             .get_result::<Uuid>(&client)
             .map_err(|e| e.into())
+    }
 
+    pub async fn projects_list_by_id(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Project> {
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
+        let query =
+            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                query.order(dsl::name.desc())
+            }
+        };
+        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
+    }
+
+    pub async fn projects_list_by_name(
+        &self,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Project> {
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_sync();
+        let query =
+            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                query.order(dsl::name.desc())
+            }
+        };
+        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
     }
 
     /// Updates a project by name (clobbering update -- no etag)
