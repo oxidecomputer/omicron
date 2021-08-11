@@ -49,6 +49,8 @@ impl Into<external::Sled> for Sled {
     }
 }
 
+// TODO: As Diesel needs to flatten things out, this structure
+// may become unused.
 #[derive(Clone, Debug)]
 pub struct IdentityMetadata {
     pub id: Uuid,
@@ -56,6 +58,7 @@ pub struct IdentityMetadata {
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl IdentityMetadata {
@@ -67,6 +70,7 @@ impl IdentityMetadata {
             description: params.description,
             time_created: now,
             time_modified: now,
+            time_deleted: None,
         }
     }
 }
@@ -91,6 +95,7 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             description: metadata.description,
             time_created: metadata.time_created,
             time_modified: metadata.time_modified,
+            time_deleted: None,
         }
     }
 }
@@ -133,6 +138,7 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
             description: sql_row_value(value, "description")?,
             time_created: sql_row_value(value, "time_created")?,
             time_modified: sql_row_value(value, "time_modified")?,
+            time_deleted: sql_row_value(value, "time_deleted")?,
         })
     }
 }

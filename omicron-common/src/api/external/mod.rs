@@ -15,9 +15,9 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
-use diesel::sql_types;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
+use diesel::sql_types;
 pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
@@ -130,8 +130,11 @@ where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(&self, out: &mut serialize::Output<W, DB>) -> serialize::Result {
-       (&self.0 as &String).to_sql(out)
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (&self.0 as &String).to_sql(out)
     }
 }
 
@@ -139,7 +142,7 @@ where
 impl<DB> FromSql<sql_types::Text, DB> for Name
 where
     DB: Backend,
-    String: FromSql<sql_types::Text, DB>
+    String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
         Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())

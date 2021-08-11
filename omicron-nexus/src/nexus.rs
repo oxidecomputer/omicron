@@ -351,32 +351,38 @@ impl Nexus {
         &self,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::DieselProject> {
-        use db::diesel_schema::project::dsl::*;
+        use db::diesel_schema::project::dsl;
         let conn = self.dpool.get().unwrap();
-        // TODO these are incompatible arm types
-        // let order = match pagparams.direction {
-        //     PaginationOrder::Ascending => name.asc(),
-        //     PaginationOrder::Descending => name.desc(),
-        // };
-        project
-            .limit(pagparams.limit.get().into())
-            .order(name.asc())
-            .load::<db::model::DieselProject>(&*conn)
-            .map_err(|e| e.into())
+        let query =
+            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                query.order(dsl::name.desc())
+            }
+        };
+        query.load::<db::model::DieselProject>(&*conn).map_err(|e| e.into())
     }
 
     pub fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::DieselProject> {
-        use db::diesel_schema::project::dsl::*;
+        use db::diesel_schema::project::dsl;
         let conn = self.dpool.get().unwrap();
-        // TODO figure out order here too
-        project
-            .limit(pagparams.limit.get().into())
-            .order(id.asc())
-            .load::<db::model::DieselProject>(&*conn)
-            .map_err(|e| e.into())
+        let query =
+            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                query.order(dsl::name.desc())
+            }
+        };
+        query.load::<db::model::DieselProject>(&*conn).map_err(|e| e.into())
     }
 
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
@@ -1195,6 +1201,7 @@ impl Nexus {
                         description: String::from(""),
                         time_created: Utc::now(),
                         time_modified: Utc::now(),
+                        time_deleted: None,
                     },
                     service_address: sa.service_address,
                 })
@@ -1221,6 +1228,7 @@ impl Nexus {
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
+                time_deleted: None,
             },
             service_address: sa.service_address,
         })
