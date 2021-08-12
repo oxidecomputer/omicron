@@ -169,8 +169,6 @@ impl Table for NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::Disk;
-    use super::Instance;
-    use super::Project;
     use super::Saga;
     use super::SagaNodeEvent;
     use super::Table;
@@ -196,9 +194,7 @@ mod test {
             .await
             .expect("failed to connect to test database");
 
-        check_table_schema::<Project>(&client).await;
         check_table_schema::<Disk>(&client).await;
-        check_table_schema::<Instance>(&client).await;
         check_table_schema::<Saga>(&client).await;
         check_table_schema::<SagaNodeEvent>(&client).await;
         check_table_schema::<Oximeter>(&client).await;
