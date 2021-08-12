@@ -42,7 +42,6 @@ use uuid::Uuid;
 use super::operations::sql_execute_maybe_one;
 use super::schema;
 use super::schema::Disk;
-use super::schema::Instance;
 use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueNameInProject;
@@ -177,7 +176,10 @@ impl DataStore {
 
         diesel::update(dsl::project)
             .filter(dsl::name.eq(name))
-            .filter(dsl::time_deleted.eq::<Option<chrono::DateTime<chrono::Utc>>>(None))
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
             .set(&updates)
             .get_result(&conn)
             .map_err(|e| e.into())
@@ -217,38 +219,31 @@ impl DataStore {
         params: &api::external::InstanceCreateParams,
         runtime_initial: &db::model::InstanceRuntimeState,
     ) -> CreateResult<db::model::Instance> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
+        use db::diesel_schema::instance::dsl;
+        let client = self.pool.acquire_sync();
+
         let instance = db::model::Instance::new(
             *instance_id,
             *project_id,
             params,
             runtime_initial.clone(),
         );
-        instance.sql_serialize(&mut values);
-        let instance = sql_insert_unique_idempotent_and_fetch::<
-            Instance,
-            LookupByUniqueId,
-        >(
-            &client,
-            &values,
-            params.identity.name.as_str(),
-            "id",
-            (),
-            instance_id,
-        )
-        .await?;
+        let instance: db::model::Instance = diesel::insert_into(dsl::instance)
+            .values(&instance)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result(&client)?;
 
         bail_unless!(
-            instance.runtime.run_state.state()
+            instance.instance_state.state()
                 == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.runtime.run_state
+            instance.instance_state
         );
         bail_unless!(
-            instance.runtime.gen == runtime_initial.gen,
+            instance.state_generation == runtime_initial.gen,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.runtime.gen
+            instance.state_generation
         );
         Ok(instance)
     }
@@ -257,23 +252,45 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Instance> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<
-            LookupByUniqueNameInProject,
-            Instance,
-            <Instance as Table>::Model,
-        >(&client, (project_id,), pagparams, Instance::ALL_COLUMNS)
-        .await
+    ) -> ListResultVec<db::model::Instance> {
+        use db::diesel_schema::instance::dsl;
+        let conn = self.pool.acquire_sync();
+
+        let query = dsl::instance
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
+            .filter(dsl::project_id.eq(project_id))
+            .into_boxed();
+
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                query.order(dsl::name.desc())
+            }
+        };
+
+        query.load::<db::model::Instance>(&*conn).map_err(|e| e.into())
     }
 
     pub async fn instance_fetch(
         &self,
         instance_id: &Uuid,
     ) -> LookupResult<db::model::Instance> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueId, Instance>(&client, (), instance_id)
-            .await
+        use db::diesel_schema::instance::dsl;
+        let conn = self.pool.acquire_sync();
+
+        dsl::instance
+            .filter(dsl::id.eq(instance_id))
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
+            .get_result(&conn)
+            .map_err(|e| e.into())
     }
 
     pub async fn instance_fetch_by_name(
@@ -281,13 +298,18 @@ impl DataStore {
         project_id: &Uuid,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueNameInProject, Instance>(
-            &client,
-            (project_id,),
-            instance_name,
-        )
-        .await
+        use db::diesel_schema::instance::dsl;
+        let conn = self.pool.acquire_sync();
+
+        dsl::instance
+            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::name.eq(instance_name))
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
+            .get_result(&conn)
+            .map_err(|e| e.into())
     }
 
     /*
@@ -304,28 +326,20 @@ impl DataStore {
         instance_id: &Uuid,
         new_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<bool, Error> {
-        let client = self.pool.acquire().await?;
+        use db::diesel_schema::instance::dsl;
+        let conn = self.pool.acquire_sync();
 
-        let mut values = SqlValueSet::new();
-        new_runtime.sql_serialize(&mut values);
-
-        let mut cond_sql = SqlString::new();
-        let param = cond_sql.next_param(&new_runtime.gen);
-        cond_sql.push_str(&format!("state_generation < {}", param));
-
-        let update = sql_update_precond::<Instance, LookupByUniqueId>(
-            &client,
-            (),
-            instance_id,
-            &["state_generation"],
-            &values,
-            cond_sql,
-        )
-        .await?;
-        let row = &update.found_state;
-        let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        bail_unless!(found_id == *instance_id);
-        Ok(update.updated)
+        let instance = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(instance_id))
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
+            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .set(new_runtime)
+            .get_result::<db::model::Instance>(&conn)?;
+        bail_unless!(instance.id == *instance_id); // TODO: is this necessary?
+        Ok(true)
     }
 
     pub async fn project_delete_instance(
@@ -341,49 +355,30 @@ impl DataStore {
          * (e.g., disk attachments).  If that changes, we'll want to check for
          * such dependencies here.
          */
-        let client = self.pool.acquire().await?;
+        use db::diesel_schema::instance::dsl;
+        let conn = self.pool.acquire_sync();
         let now = Utc::now();
 
-        let mut values = SqlValueSet::new();
-        db::model::InstanceState::new(api::external::InstanceState::Destroyed)
-            .sql_serialize(&mut values);
-        values.set("time_deleted", &now);
+        let destroyed = db::model::InstanceState::new(
+            api::external::InstanceState::Destroyed,
+        );
+        let stopped = db::model::InstanceState::new(
+            api::external::InstanceState::Stopped,
+        );
+        let failed =
+            db::model::InstanceState::new(api::external::InstanceState::Failed);
 
-        let mut cond_sql = SqlString::new();
-
-        let stopped = api::external::InstanceState::Stopped.to_string();
-        let p1 = cond_sql.next_param(&stopped);
-        let failed = api::external::InstanceState::Failed.to_string();
-        let p2 = cond_sql.next_param(&failed);
-        cond_sql.push_str(&format!("instance_state in ({}, {})", p1, p2));
-
-        let update = sql_update_precond::<Instance, LookupByUniqueId>(
-            &client,
-            (),
-            instance_id,
-            &["instance_state", "time_deleted"],
-            &values,
-            cond_sql,
-        )
-        .await?;
-
-        let row = &update.found_state;
-        let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        let variant: &str = sql_row_value(&row, "found_instance_state")?;
-        let instance_state = api::external::InstanceState::try_from(variant)
-            .map_err(|e| Error::internal_error(&e))?;
-        bail_unless!(found_id == *instance_id);
-
-        if update.updated {
-            Ok(())
-        } else {
-            Err(Error::InvalidRequest {
-                message: format!(
-                    "instance cannot be deleted in state \"{}\"",
-                    instance_state
-                ),
-            })
-        }
+        let instance = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(instance_id))
+            .filter(
+                dsl::time_deleted
+                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+            )
+            .filter(dsl::instance_state.eq_any(vec![stopped, failed]))
+            .set((dsl::instance_state.eq(destroyed), dsl::time_deleted.eq(now)))
+            .get_result::<db::model::Instance>(&conn)?;
+        bail_unless!(instance.id == *instance_id);
+        Ok(())
     }
 
     /*

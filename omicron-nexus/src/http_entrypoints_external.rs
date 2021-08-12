@@ -398,15 +398,16 @@ async fn project_instances_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let instance_stream = nexus
+    let instances = nexus
         .project_list_instances(
             &project_name,
             &data_page_params_for(&rqctx, &query)?,
         )
-        .await?;
-    let view_list =
-        to_list::<db::model::Instance, Instance>(instance_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+        .await?
+        .into_iter()
+        .map(|i| i.into())
+        .collect();
+    Ok(HttpResponseOk(ScanByName::results_page(&query, instances)?))
 }
 
 /**

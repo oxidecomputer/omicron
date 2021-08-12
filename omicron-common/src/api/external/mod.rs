@@ -314,8 +314,42 @@ impl Name {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i64::from(self).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        ByteCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
         ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
@@ -408,8 +442,35 @@ impl From<&ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
+    AsExpression,
+    FromSqlRow,
 )]
+#[sql_type = "sql_types::BigInt"]
 pub struct Generation(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        Generation::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl Generation {
     pub fn new() -> Generation {
         Generation(1)
@@ -696,8 +757,41 @@ impl InstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct InstanceCpuCount(pub u16);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        InstanceCpuCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;

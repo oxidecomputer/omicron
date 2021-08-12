@@ -82,8 +82,7 @@ impl Server {
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
 
-        let apictx =
-            ServerContext::new(rack_id, ctxlog, pool, &config.id);
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config.id);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

@@ -504,7 +504,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Instance> {
+    ) -> ListResultVec<db::model::Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_instances(&project_id, pagparams).await
@@ -601,7 +601,7 @@ impl Nexus {
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
-        self.db_datastore.project_delete_instance(&instance.identity.id).await
+        self.db_datastore.project_delete_instance(&instance.id).await
     }
 
     pub async fn project_lookup_instance(
@@ -671,8 +671,8 @@ impl Nexus {
         &self,
         instance: &db::model::Instance,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let said = &instance.runtime.sled_uuid;
-        self.sled_client(&said).await
+        let sa_id = &instance.active_server_id;
+        self.sled_client(&sa_id).await
     }
 
     /**
@@ -699,7 +699,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -708,7 +708,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.identity.id).await
+        self.db_datastore.instance_fetch(&instance.id).await
     }
 
     /**
@@ -722,7 +722,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -731,7 +731,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.identity.id).await
+        self.db_datastore.instance_fetch(&instance.id).await
     }
 
     /**
@@ -745,7 +745,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime.clone().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -754,7 +754,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.identity.id).await
+        self.db_datastore.instance_fetch(&instance.id).await
     }
 
     /**
@@ -774,15 +774,11 @@ impl Nexus {
          * beat us to it.
          */
         let new_runtime = sa
-            .instance_ensure(
-                instance.identity.id,
-                instance.runtime.clone().into(),
-                requested,
-            )
+            .instance_ensure(instance.id, instance.runtime().into(), requested)
             .await?;
 
         self.db_datastore
-            .instance_update_runtime(&instance.identity.id, &new_runtime.into())
+            .instance_update_runtime(&instance.id, &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -798,9 +794,7 @@ impl Nexus {
     ) -> ListResult<db::model::DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
-        self.db_datastore
-            .instance_list_disks(&instance.identity.id, pagparams)
-            .await
+        self.db_datastore.instance_list_disks(&instance.id, pagparams).await
     }
 
     /**
@@ -818,9 +812,9 @@ impl Nexus {
         if let Some(instance_id) =
             disk.runtime.disk_state.attached_instance_id()
         {
-            if instance_id == &instance.identity.id {
+            if instance_id == &instance.id {
                 return Ok(DiskAttachment {
-                    instance_id: instance.identity.id,
+                    instance_id: instance.id,
                     disk_name: disk.identity.name.clone(),
                     disk_id: disk.identity.id,
                     disk_state: disk.runtime.disk_state.clone().into(),
@@ -850,13 +844,13 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.identity.id;
+        let instance_id = &instance.id;
 
         fn disk_attachment_for(
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
-            let instance_id = &instance.identity.id;
+            let instance_id = &instance.id;
             assert_eq!(
                 instance_id,
                 disk.runtime.disk_state.attached_instance_id().unwrap()
@@ -966,7 +960,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.identity.id;
+        let instance_id = &instance.id;
 
         match &disk.runtime.disk_state.clone().into() {
             /*

@@ -19,33 +19,6 @@ use crate::db;
 // for all those real structs? Might help to reduce things a bit; the
 // schema does use them as Models anyway.
 
-/** Describes the "Instance" table */
-pub struct Instance;
-impl Table for Instance {
-    type Model = db::model::Instance;
-    const TABLE_NAME: &'static str = "Instance";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_modified",
-        "time_deleted",
-        "project_id",
-        "instance_state",
-        "time_state_updated",
-        "state_generation",
-        "active_server_id",
-        "ncpus",
-        "memory",
-        "hostname",
-    ];
-}
-
-impl ResourceTable for Instance {
-    const RESOURCE_TYPE: ResourceType = ResourceType::Instance;
-}
-
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {

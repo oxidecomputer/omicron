@@ -64,7 +64,6 @@ impl Pool {
         );
         let pool = bb8::Builder::new().build_unchecked(mgr);
 
-
         let manager = r2d2::ConnectionManager::<diesel::PgConnection>::new(
             &db_config.url.url(),
         );
@@ -72,7 +71,10 @@ impl Pool {
         Pool { pool, pool_sync }
     }
 
-    pub fn acquire_sync(&self) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>> {
+    pub fn acquire_sync(
+        &self,
+    ) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>>
+    {
         self.pool_sync.get().unwrap()
     }
 

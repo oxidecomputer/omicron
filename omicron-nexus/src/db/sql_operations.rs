@@ -533,7 +533,6 @@ where
         .map_err(sql_error_generic)
 }
 
-///
 /// Idempotently insert a database record.  This is intended for cases where the
 /// record may conflict with an existing record with the same id, which should
 /// be ignored, or with an existing record with the same name, which should
@@ -553,7 +552,6 @@ where
 /// In the event of a conflict on name, `unique_value` should contain the name
 /// that the caller is trying to insert.  This is provided in the returned
 /// [`Error::ObjectAlreadyExists`] error.
-///
 pub async fn sql_insert_unique_idempotent<'a, R>(
     client: &'a tokio_postgres::Client,
     values: &'a SqlValueSet,

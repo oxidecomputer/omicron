@@ -28,7 +28,7 @@ table! {
         instance_state -> Text,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
-        active_server_id -> Nullable<Uuid>,
+        active_server_id -> Uuid,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
