@@ -236,7 +236,7 @@ pub struct DbConfig {
 }
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
-struct OximeterAgent {
+pub struct OximeterAgent {
     /// The collector ID for this agent
     pub id: Uuid,
     log: Logger,
@@ -432,7 +432,7 @@ impl Oximeter {
 }
 
 // Build the HTTP API internal to the control plane
-fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
+pub fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
     let mut api = ApiDescription::new();
     api.register(producers_post)
         .expect("Could not register producers_post API handler");
