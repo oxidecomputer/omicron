@@ -228,11 +228,12 @@ impl DataStore {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_sync();
         let updates: db::model::ProjectUpdate = update_params.clone().into();
+        let now = Utc::now();
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name))
-            .set(&updates)
+            .set((&updates, dsl::time_modified.eq(now)))
             .get_result(&conn)
             .map_err(|e| {
                 Error::from_diesel(
