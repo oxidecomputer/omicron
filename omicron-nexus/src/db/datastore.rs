@@ -19,7 +19,7 @@
  */
 
 use super::Pool;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -30,6 +30,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -73,10 +74,16 @@ impl DataStore {
     ) -> CreateResult<db::model::Project> {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_sync();
-        let project = diesel::insert_into(dsl::project)
+        diesel::insert_into(dsl::project)
             .values(&project)
-            .get_result(&conn)?;
-        Ok(project)
+            .get_result(&conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Project,
+                    project.name.as_str(),
+                )
+            })
     }
 
     /// Lookup a project by name.
@@ -87,9 +94,16 @@ impl DataStore {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_sync();
         dsl::project
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name))
             .first::<db::model::Project>(&*conn)
-            .map_err(|e| e.into())
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
     }
 
     /// Delete a project
@@ -103,10 +117,17 @@ impl DataStore {
         let conn = self.pool.acquire_sync();
         let now = Utc::now();
         diesel::update(dsl::project)
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name))
-            .filter(dsl::time_deleted.eq::<Option<DateTime<Utc>>>(None))
             .set(dsl::time_deleted.eq(now))
-            .execute(&conn)?;
+            .get_result::<db::model::Project>(&conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })?;
         Ok(())
     }
 
@@ -119,11 +140,17 @@ impl DataStore {
         let client = self.pool.acquire_sync();
 
         dsl::project
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name))
-            .filter(dsl::time_deleted.eq::<Option<DateTime<Utc>>>(None))
             .select(dsl::id)
             .get_result::<Uuid>(&client)
-            .map_err(|e| e.into())
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
     }
 
     pub async fn projects_list_by_id(
@@ -132,17 +159,31 @@ impl DataStore {
     ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_sync();
-        let query =
-            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let mut query = dsl::project
+            .filter(dsl::time_deleted.is_null())
+            .limit(pagparams.limit.get().into())
+            .into_boxed();
         let query = match pagparams.direction {
             dropshot::PaginationOrder::Ascending => {
-                query.order(dsl::name.asc())
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::id.gt(marker));
+                }
+                query.order(dsl::id.asc())
             }
             dropshot::PaginationOrder::Descending => {
-                query.order(dsl::name.desc())
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::id.lt(marker));
+                }
+                query.order(dsl::id.desc())
             }
         };
-        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
+        query.load::<db::model::Project>(&*conn).map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::Project,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
     }
 
     pub async fn projects_list_by_name(
@@ -151,17 +192,31 @@ impl DataStore {
     ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_sync();
-        let query =
-            dsl::project.into_boxed().limit(pagparams.limit.get().into());
+        let mut query = dsl::project
+            .filter(dsl::time_deleted.is_null())
+            .limit(pagparams.limit.get().into())
+            .into_boxed();
         let query = match pagparams.direction {
             dropshot::PaginationOrder::Ascending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.gt(marker));
+                }
                 query.order(dsl::name.asc())
             }
             dropshot::PaginationOrder::Descending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.lt(marker));
+                }
                 query.order(dsl::name.desc())
             }
         };
-        query.load::<db::model::Project>(&*conn).map_err(|e| e.into())
+        query.load::<db::model::Project>(&*conn).map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::Project,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
     }
 
     /// Updates a project by name (clobbering update -- no etag)
@@ -175,14 +230,17 @@ impl DataStore {
         let updates: db::model::ProjectUpdate = update_params.clone().into();
 
         diesel::update(dsl::project)
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name))
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
             .set(&updates)
             .get_result(&conn)
-            .map_err(|e| e.into())
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
     }
 
     /*
@@ -232,7 +290,14 @@ impl DataStore {
             .values(&instance)
             .on_conflict(dsl::id)
             .do_nothing()
-            .get_result(&client)?;
+            .get_result(&client)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Instance,
+                    instance.name.as_str(),
+                )
+            })?;
 
         bail_unless!(
             instance.instance_state.state()
@@ -256,24 +321,33 @@ impl DataStore {
         use db::diesel_schema::instance::dsl;
         let conn = self.pool.acquire_sync();
 
-        let query = dsl::instance
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
+        let mut query = dsl::instance
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
+            .limit(pagparams.limit.get().into())
             .into_boxed();
-
         let query = match pagparams.direction {
             dropshot::PaginationOrder::Ascending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.gt(marker));
+                }
                 query.order(dsl::name.asc())
             }
             dropshot::PaginationOrder::Descending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.lt(marker));
+                }
                 query.order(dsl::name.desc())
             }
         };
 
-        query.load::<db::model::Instance>(&*conn).map_err(|e| e.into())
+        query.load::<db::model::Instance>(&*conn).map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::Instance,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
     }
 
     pub async fn instance_fetch(
@@ -284,13 +358,16 @@ impl DataStore {
         let conn = self.pool.acquire_sync();
 
         dsl::instance
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
             .get_result(&conn)
-            .map_err(|e| e.into())
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Instance,
+                    LookupType::ById(*instance_id),
+                )
+            })
     }
 
     pub async fn instance_fetch_by_name(
@@ -302,14 +379,17 @@ impl DataStore {
         let conn = self.pool.acquire_sync();
 
         dsl::instance
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
             .filter(dsl::name.eq(instance_name))
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
             .get_result(&conn)
-            .map_err(|e| e.into())
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Instance,
+                    LookupType::ByName(instance_name.as_str().to_owned()),
+                )
+            })
     }
 
     /*
@@ -330,14 +410,19 @@ impl DataStore {
         let conn = self.pool.acquire_sync();
 
         let instance = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            // XXX Shouldn't this be "lt" instead of "le"?
+            .filter(dsl::state_generation.le(new_runtime.gen))
             .set(new_runtime)
-            .get_result::<db::model::Instance>(&conn)?;
+            .get_result::<db::model::Instance>(&conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Instance,
+                    LookupType::ById(*instance_id),
+                )
+            })?;
         bail_unless!(instance.id == *instance_id); // TODO: is this necessary?
         Ok(true)
     }
@@ -369,14 +454,18 @@ impl DataStore {
             db::model::InstanceState::new(api::external::InstanceState::Failed);
 
         let instance = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(
-                dsl::time_deleted
-                    .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-            )
             .filter(dsl::instance_state.eq_any(vec![stopped, failed]))
             .set((dsl::instance_state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .get_result::<db::model::Instance>(&conn)?;
+            .get_result::<db::model::Instance>(&conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Instance,
+                    LookupType::ById(*instance_id),
+                )
+            })?;
         bail_unless!(instance.id == *instance_id);
         Ok(())
     }

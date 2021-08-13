@@ -148,7 +148,7 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
 }
 
 /// Describes a project within the database.
-#[derive(Queryable, Identifiable, Insertable)]
+#[derive(Queryable, Identifiable, Insertable, Debug)]
 #[table_name = "project"]
 pub struct Project {
     pub id: Uuid,

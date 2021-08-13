@@ -185,9 +185,7 @@ where
     }
 }
 
-///
 /// Describes a successful result of [`sql_update_precond`]
-///
 pub struct UpdatePrecond {
     /// Information about the requested row.  This includes a number of columns
     /// "found_$c" and "updated_$c" where "$c" is a column from the table.
