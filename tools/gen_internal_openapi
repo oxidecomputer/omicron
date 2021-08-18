@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o xtrace
+
+DIR=${DIR:-internal_specs}
+
+cd "$(dirname "$0")/.."
+mkdir -p "$DIR"
+
+cargo run --bin=nexus -- omicron-nexus/examples/config.toml --openapi-internal > "$DIR/nexus.json"
+
+cargo run --bin=sled-agent -- open-api > "$DIR/sled-agent.json"
+
+cargo run --bin=bootstrap-agent -- open-api > "$DIR/bootstrap-agent.json"
+
+cargo run --bin=oximeter -- oximeter/oximeter/examples/config.toml --openapi > "$DIR/oximeter.json"
