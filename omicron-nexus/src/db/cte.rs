@@ -51,9 +51,6 @@ pub struct UpdateAndQueryStatement<T, K, U, V> {
 impl<T, K, U, V> QueryId for UpdateAndQueryStatement<T, K, U, V> {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
-    fn query_id() -> Option<core::any::TypeId> {
-        None
-    }
 }
 
 /// Result of [`UpdateAndQueryStatement`].
@@ -65,19 +62,19 @@ pub enum UpdateAndQueryResult {
     NotUpdatedButExists,
 }
 
+// Representation of Primary Key in Rust.
 type PrimaryKey<T> = <T as diesel::Table>::PrimaryKey;
+// Representation of Primary Key in SQL.
 type SerializedPrimaryKey<T> = <PrimaryKey<T> as diesel::Expression>::SqlType;
 
 impl<T, K, U, V> UpdateAndQueryStatement<T, K, U, V>
 where
-    // Necessary bounds to compare primary keys and ensure that they're
-    // queryable:
+    // Bounds to compare primary keys and ensure that they're queryable:
     K: PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg>,
     // Bounds which ensure an impl of LoadQuery exists:
     Pg: sql_types::HasSqlType<SerializedPrimaryKey<T>>,
     <Self as AsQuery>::Query: QueryFragment<Pg>,
-    // To actually implement QueryFragment, T must be a Table with a non-null
-    // primary key:
+    // Bound to implement QueryFragment:
     T: Table,
     SerializedPrimaryKey<T>: sql_types::NotNull,
 {
@@ -91,9 +88,7 @@ where
         self,
         conn: &PgConnection,
     ) -> Result<UpdateAndQueryResult, diesel::result::Error> {
-        let results = self.load::<(Option<K>, Option<K>)>(conn)?;
-        let (id0, id1) =
-            results.get(0).ok_or(diesel::result::Error::NotFound)?;
+        let (id0, id1) = self.get_result::<(Option<K>, Option<K>)>(conn)?;
         if id0 == id1 {
             Ok(UpdateAndQueryResult::Updated)
         } else {
@@ -147,7 +142,6 @@ where
     UpdateStatement<T, U, V>: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
-        out.unsafe_to_cache_prepared();
         out.push_sql("WITH found AS (");
         let subquery = T::table().find(self.key);
         subquery.walk_ast(out.reborrow())?;
