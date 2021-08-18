@@ -57,7 +57,7 @@ use super::sql_operations::sql_insert;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
-use crate::db::cte::{UpdateAndQueryResult, UpdateCte};
+use crate::db::update_and_check::{UpdateAndQueryResult, UpdateAndCheck};
 
 pub struct DataStore {
     pool: Arc<Pool>,

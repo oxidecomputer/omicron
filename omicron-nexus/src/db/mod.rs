@@ -3,7 +3,6 @@
  */
 
 mod config;
-mod cte;
 mod datastore;
 mod operations;
 mod pool;
@@ -11,6 +10,7 @@ mod saga_recovery;
 mod saga_types;
 mod sec_store;
 mod sql_operations;
+mod update_and_check;
 
 pub mod diesel_schema;
 pub mod model;

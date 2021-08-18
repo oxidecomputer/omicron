@@ -9,11 +9,11 @@ use diesel::sql_types;
 /// callers to distinguish between "not found", "found but not updated", and
 /// "updated".
 ///
-/// T: Table on which the UpdateCte should be applied.
+/// T: Table on which the UpdateAndCheck should be applied.
 /// K: Primary Key type.
 /// U: Where clause of the update statement.
 /// V: Changeset to be applied to the update statement.
-pub trait UpdateCte<T, K, U, V> {
+pub trait UpdateAndCheck<T, K, U, V> {
     /// Nests the existing update statement in a CTE which
     /// identifies if the row exists (by ID), even if the row
     /// cannot be successfully updated.
@@ -26,14 +26,14 @@ pub trait UpdateCte<T, K, U, V> {
 // - V: Changeset to be applied (default = SetNotCalled)
 // - Ret: Returning clause (default = NoReturningClause)
 //
-// As currently implemented, we only define "UpdateCte" for
+// As currently implemented, we only define "UpdateAndCheck" for
 // UpdateStatements using the default "Ret" value. This means
-// the UpdateCte methods can only be invoked for update statements
+// the UpdateAndCheck methods can only be invoked for update statements
 // to which a "returning" clause has not yet been added.
 //
 // This allows our implementation of the CTE to overwrite
 // the return behavior of the SQL statement.
-impl<T, K, U, V> UpdateCte<T, K, U, V> for UpdateStatement<T, U, V> {
+impl<T, K, U, V> UpdateAndCheck<T, K, U, V> for UpdateStatement<T, U, V> {
     fn check_if_exists(self, key: K) -> UpdateAndQueryStatement<T, K, U, V> {
         UpdateAndQueryStatement { update_statement: self, key }
     }
