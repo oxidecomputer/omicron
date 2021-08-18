@@ -3,6 +3,7 @@
  */
 
 mod config;
+mod cte;
 mod datastore;
 mod operations;
 mod pool;

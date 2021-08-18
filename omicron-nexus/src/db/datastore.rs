@@ -57,6 +57,7 @@ use super::sql_operations::sql_insert;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
+use crate::db::cte::{UpdateAndQueryResult, UpdateCte};
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -409,13 +410,17 @@ impl DataStore {
         use db::diesel_schema::instance::dsl;
         let conn = self.pool.acquire_sync();
 
-        let instance = diesel::update(dsl::instance)
+        let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            // XXX Shouldn't this be "lt" instead of "le"?
-            .filter(dsl::state_generation.le(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime)
-            .get_result::<db::model::Instance>(&conn)
+            .check_if_exists(*instance_id)
+            .execute_and_check(&conn)
+            .map(|r| match r {
+                UpdateAndQueryResult::Updated => true,
+                UpdateAndQueryResult::NotUpdatedButExists => false,
+            })
             .map_err(|e| {
                 Error::from_diesel(
                     e,
@@ -423,8 +428,8 @@ impl DataStore {
                     LookupType::ById(*instance_id),
                 )
             })?;
-        bail_unless!(instance.id == *instance_id); // TODO: is this necessary?
-        Ok(true)
+
+        Ok(updated)
     }
 
     pub async fn project_delete_instance(
