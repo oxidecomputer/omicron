@@ -65,24 +65,21 @@ pub enum UpdateAndQueryResult {
     NotUpdatedButExists,
 }
 
+type PrimaryKey<T> = <T as diesel::Table>::PrimaryKey;
+type SerializedPrimaryKey<T> = <PrimaryKey<T> as diesel::Expression>::SqlType;
+
 impl<T, K, U, V> UpdateAndQueryStatement<T, K, U, V>
 where
     // Necessary bounds to compare primary keys and ensure that they're
     // queryable:
-    K: PartialEq
-        + diesel::Queryable<
-            <<T as diesel::Table>::PrimaryKey as diesel::Expression>::SqlType,
-            diesel::pg::Pg,
-        >,
+    K: PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg>,
     // Bounds which ensure an impl of LoadQuery exists:
-    Pg: sql_types::HasSqlType<
-        <<T as Table>::PrimaryKey as Expression>::SqlType,
-    >,
+    Pg: sql_types::HasSqlType<SerializedPrimaryKey<T>>,
     <Self as AsQuery>::Query: QueryFragment<Pg>,
     // To actually implement QueryFragment, T must be a Table with a non-null
     // primary key:
     T: Table,
-    <<T as Table>::PrimaryKey as Expression>::SqlType: sql_types::NotNull,
+    SerializedPrimaryKey<T>: sql_types::NotNull,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -108,11 +105,11 @@ where
 impl<T, K, U, V> Query for UpdateAndQueryStatement<T, K, U, V>
 where
     T: Table,
-    <<T as Table>::PrimaryKey as Expression>::SqlType: sql_types::NotNull,
+    SerializedPrimaryKey<T>: sql_types::NotNull,
 {
     type SqlType = (
-        sql_types::Nullable<<<T as Table>::PrimaryKey as Expression>::SqlType>,
-        sql_types::Nullable<<<T as Table>::PrimaryKey as Expression>::SqlType>,
+        sql_types::Nullable<SerializedPrimaryKey<T>>,
+        sql_types::Nullable<SerializedPrimaryKey<T>>,
     );
 }
 
