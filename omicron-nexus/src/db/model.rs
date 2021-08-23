@@ -584,6 +584,9 @@ impl TryFrom<&tokio_postgres::Row> for Disk {
 
 #[derive(AsChangeset, Clone, Debug)]
 #[table_name = "disk"]
+// When "attach_instance_id" is set to None, we'd like to
+// clear it from the DB, rather than ignore the update.
+#[changeset_options(treat_none_as_null = "true")]
 pub struct DiskRuntimeState {
     /// runtime state of the Disk
     pub disk_state: String,

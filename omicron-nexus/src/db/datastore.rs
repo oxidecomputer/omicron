@@ -528,22 +528,6 @@ impl DataStore {
                     LookupType::Other("Listing All".to_string()),
                 )
             })
-
-/*
-    ) -> ListResult<db::model::DiskAttachment> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<
-            LookupByAttachedInstance,
-            Disk,
-            db::model::DiskAttachment,
-        >(
-            &client,
-            (instance_id,),
-            pagparams,
-            &["id", "name", "disk_state", "attach_instance_id"],
-        )
-        .await
-*/
     }
 
     pub async fn project_create_disk(
@@ -574,32 +558,6 @@ impl DataStore {
                     disk.name.as_str(),
                 )
             })?;
-
-        /*
-        /*
-         * See project_create_instance() for a discussion of how this function
-         * works.  The pattern here is nearly identical.
-         */
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        let disk = db::model::Disk::new(
-            *disk_id,
-            *project_id,
-            params.clone(),
-            runtime_initial.clone(),
-        );
-        disk.sql_serialize(&mut values);
-        let disk =
-            sql_insert_unique_idempotent_and_fetch::<Disk, LookupByUniqueId>(
-                &client,
-                &mut values,
-                params.identity.name.as_str(),
-                "id",
-                (),
-                disk_id,
-            )
-            .await?;
-        */
 
         let runtime = disk.runtime();
         bail_unless!(
@@ -651,16 +609,6 @@ impl DataStore {
                 LookupType::Other("Listing All".to_string()),
             )
         })
-
-        /*
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<
-            LookupByUniqueNameInProject,
-            Disk,
-            <Disk as Table>::Model,
-        >(&client, (project_id,), pagparams, Disk::ALL_COLUMNS)
-        .await
-        */
     }
 
     pub async fn disk_update_runtime(
@@ -691,30 +639,6 @@ impl DataStore {
             })?;
 
         Ok(updated)
-        /*
-        let client = self.pool.acquire().await?;
-
-        let mut values = SqlValueSet::new();
-        new_runtime.sql_serialize(&mut values);
-
-        let mut cond_sql = SqlString::new();
-        let param = cond_sql.next_param(&new_runtime.gen);
-        cond_sql.push_str(&format!("state_generation < {}", param));
-
-        let update = sql_update_precond::<Disk, LookupByUniqueId>(
-            &client,
-            (),
-            disk_id,
-            &["state_generation"],
-            &values,
-            cond_sql,
-        )
-        .await?;
-        let row = &update.found_state;
-        let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        bail_unless!(found_id == *disk_id);
-        Ok(update.updated)
-        */
     }
 
     pub async fn disk_fetch(
@@ -735,11 +659,6 @@ impl DataStore {
                     LookupType::ById(*disk_id),
                 )
             })
-
-        /*
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
-        */
     }
 
     pub async fn disk_fetch_by_name(
@@ -762,15 +681,6 @@ impl DataStore {
                     LookupType::ByName(disk_name.as_str().to_owned()),
                 )
             })
-        /*
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
-            &client,
-            (project_id,),
-            disk_name,
-        )
-        .await
-        */
     }
 
     pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
