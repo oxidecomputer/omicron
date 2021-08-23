@@ -19,6 +19,7 @@ use crate::db;
 // for all those real structs? Might help to reduce things a bit; the
 // schema does use them as Models anyway.
 
+/*
 /** Describes the "Disk" table */
 pub struct Disk;
 impl Table for Disk {
@@ -44,6 +45,7 @@ impl Table for Disk {
 impl ResourceTable for Disk {
     const RESOURCE_TYPE: ResourceType = ResourceType::Disk;
 }
+*/
 
 /** Describes the "Saga" table */
 pub struct Saga;
@@ -168,7 +170,6 @@ impl Table for NetworkInterface {
 
 #[cfg(test)]
 mod test {
-    use super::Disk;
     use super::Saga;
     use super::SagaNodeEvent;
     use super::Table;
@@ -194,7 +195,6 @@ mod test {
             .await
             .expect("failed to connect to test database");
 
-        check_table_schema::<Disk>(&client).await;
         check_table_schema::<Saga>(&client).await;
         check_table_schema::<SagaNodeEvent>(&client).await;
         check_table_schema::<Oximeter>(&client).await;

@@ -8,9 +8,9 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         disk_state -> Text,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
         attach_instance_id -> Nullable<Uuid>,
+        state_generation -> Int8,
+        time_state_updated -> Timestamptz,
         size_bytes -> Int8,
         origin_snapshot -> Nullable<Uuid>,
     }

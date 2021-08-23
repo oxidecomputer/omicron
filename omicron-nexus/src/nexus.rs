@@ -19,7 +19,6 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
@@ -370,7 +369,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Disk> {
+    ) -> ListResultVec<db::model::Disk> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         self.db_datastore.project_list_disks(&project_id, pagparams).await
@@ -401,11 +400,7 @@ impl Nexus {
                 &disk_id,
                 &project.id,
                 params,
-                &db::model::DiskRuntimeState {
-                    disk_state: db::model::DiskState::new(DiskState::Creating),
-                    gen: Generation::new(),
-                    time_updated: Utc::now(),
-                },
+                &db::model::DiskRuntimeState::new(),
             )
             .await?;
 
@@ -423,11 +418,7 @@ impl Nexus {
         self.db_datastore
             .disk_update_runtime(
                 &disk_id,
-                &db::model::DiskRuntimeState {
-                    disk_state: db::model::DiskState::new(DiskState::Detached),
-                    gen: disk_created.runtime.gen.next(),
-                    time_updated: Utc::now(),
-                },
+                &disk_created.runtime().detach(),
             )
             .await?;
 
@@ -450,9 +441,10 @@ impl Nexus {
         disk_name: &Name,
     ) -> DeleteResult {
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        bail_unless!(disk.runtime.disk_state.state() != &DiskState::Destroyed);
+        let runtime = disk.runtime();
+        bail_unless!(runtime.state().state() != &DiskState::Destroyed);
 
-        if disk.runtime.disk_state.is_attached() {
+        if runtime.state().is_attached() {
             return Err(Error::InvalidRequest {
                 message: String::from("disk is attached"),
             });
@@ -476,7 +468,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.identity.id).await
+        self.db_datastore.project_delete_disk(&disk.id).await
     }
 
     /*
@@ -791,7 +783,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::DiskAttachment> {
+    ) -> ListResultVec<db::model::DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         self.db_datastore.instance_list_disks(&instance.id, pagparams).await
@@ -809,15 +801,13 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        if let Some(instance_id) =
-            disk.runtime.disk_state.attached_instance_id()
-        {
-            if instance_id == &instance.id {
+        if let Some(instance_id) = disk.attach_instance_id {
+            if instance_id == instance.id {
                 return Ok(DiskAttachment {
                     instance_id: instance.id,
-                    disk_name: disk.identity.name.clone(),
-                    disk_id: disk.identity.id,
-                    disk_state: disk.runtime.disk_state.clone().into(),
+                    disk_name: disk.name.clone(),
+                    disk_id: disk.id,
+                    disk_state: disk.state().clone().into(),
                 });
             }
         }
@@ -850,23 +840,22 @@ impl Nexus {
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
-            let instance_id = &instance.id;
             assert_eq!(
-                instance_id,
-                disk.runtime.disk_state.attached_instance_id().unwrap()
+                instance.id,
+                disk.attach_instance_id.unwrap()
             );
             Ok(DiskAttachment {
-                instance_id: *instance_id,
-                disk_id: disk.identity.id,
-                disk_name: disk.identity.name.clone(),
-                disk_state: disk.runtime.disk_state.clone().into(),
+                instance_id: instance.id,
+                disk_id: disk.id,
+                disk_name: disk.name.clone(),
+                disk_state: disk.runtime().state().into(),
             })
         }
 
         fn disk_attachment_error(
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
-            let disk_status = match disk.runtime.disk_state.clone().into() {
+            let disk_status = match disk.runtime().state().into() {
                 DiskState::Destroyed => "disk is destroyed",
                 DiskState::Faulted => "disk is faulted",
                 DiskState::Creating => "disk is detached",
@@ -890,13 +879,13 @@ impl Nexus {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                disk.identity.name.as_str(),
+                disk.name.as_str(),
                 disk_status
             );
             Err(Error::InvalidRequest { message })
         }
 
-        match &disk.runtime.disk_state.clone().into() {
+        match &disk.state().into() {
             /*
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
@@ -944,7 +933,7 @@ impl Nexus {
             DiskStateRequested::Attached(*instance_id),
         )
         .await?;
-        let disk = self.db_datastore.disk_fetch(&disk.identity.id).await?;
+        let disk = self.db_datastore.disk_fetch(&disk.id).await?;
         disk_attachment_for(&instance, &disk)
     }
 
@@ -962,7 +951,7 @@ impl Nexus {
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
         let instance_id = &instance.id;
 
-        match &disk.runtime.disk_state.clone().into() {
+        match &disk.state().into() {
             /*
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
@@ -1023,13 +1012,13 @@ impl Nexus {
          */
         let new_runtime = sa
             .disk_ensure(
-                disk.identity.id,
-                disk.runtime.clone().into(),
+                disk.id,
+                disk.runtime().into(),
                 requested,
             )
             .await?;
         self.db_datastore
-            .disk_update_runtime(&disk.identity.id, &new_runtime.into())
+            .disk_update_runtime(&disk.id, &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -1412,9 +1401,8 @@ impl TestInterfaces for Nexus {
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
         let disk = self.db_datastore.disk_fetch(id).await?;
-        let instance_id =
-            disk.runtime.disk_state.attached_instance_id().unwrap();
-        let instance = self.db_datastore.instance_fetch(instance_id).await?;
+        let instance_id = disk.runtime().attach_instance_id.unwrap();
+        let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
     }
 }

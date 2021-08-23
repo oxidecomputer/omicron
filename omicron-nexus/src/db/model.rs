@@ -1,6 +1,6 @@
 //! Structures stored to the database.
 
-use super::diesel_schema::{instance, project};
+use super::diesel_schema::{disk, instance, project};
 use chrono::{DateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -442,19 +442,40 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "disk"]
 pub struct Disk {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
+    // IdentityMetadata
+
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     /// id for the project containing this Disk
     pub project_id: Uuid,
+
+    // DiskRuntimeState
+
+    /// runtime state of the Disk
+    pub disk_state: String,
+    pub attach_instance_id: Option<Uuid>,
+    /// generation number for this state
+    #[column_name = "state_generation"]
+    pub gen: Generation,
+    /// timestamp for this information
+    #[column_name = "time_state_updated"]
+    pub time_updated: DateTime<Utc>,
+
+    /// size of the Disk
+    #[column_name = "size_bytes"]
+    pub size: ByteCount,
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)
+    #[column_name = "origin_snapshot"]
     pub create_snapshot_id: Option<Uuid>,
-    /// size of the Disk
-    pub size: ByteCount,
-    /// runtime state of the Disk
-    pub runtime: DiskRuntimeState,
 }
 
 impl Disk {
@@ -464,12 +485,56 @@ impl Disk {
         params: external::DiskCreateParams,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
+        let identity = IdentityMetadata::new(disk_id, params.identity);
         Self {
-            identity: IdentityMetadata::new(disk_id, params.identity),
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
             project_id,
-            create_snapshot_id: params.snapshot_id,
+
+            disk_state: runtime_initial.disk_state,
+            attach_instance_id: runtime_initial.attach_instance_id,
+            gen: runtime_initial.gen,
+            time_updated: runtime_initial.time_updated,
+
             size: params.size,
-            runtime: runtime_initial,
+            create_snapshot_id: params.snapshot_id,
+        }
+    }
+
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
+    }
+
+    pub fn state(&self) -> DiskState {
+        // TODO: If we could store disk state in-line, we could avoid the
+        // unwrap. Would prefer to parse it as such.
+        //
+        // TODO: also impl'd for DiskRuntimeState
+        DiskState::new(
+            external::DiskState::try_from(
+                (self.disk_state.as_str(), self.attach_instance_id)
+            ).unwrap()
+        )
+    }
+
+    pub fn runtime(&self) -> DiskRuntimeState {
+        DiskRuntimeState {
+            disk_state: self.disk_state.clone(),
+            attach_instance_id: self.attach_instance_id,
+            gen: self.gen,
+            time_updated: self.time_updated,
         }
     }
 }
@@ -477,18 +542,19 @@ impl Disk {
 /// Conversion to the external API type.
 impl Into<external::Disk> for Disk {
     fn into(self) -> external::Disk {
-        let device_path = format!("/mnt/{}", self.identity.name.as_str());
+        let device_path = format!("/mnt/{}", self.name.as_str());
         external::Disk {
-            identity: self.identity.clone().into(),
+            identity: self.identity().into(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             size: self.size,
-            state: self.runtime.disk_state.into(),
+            state: self.state().into(),
             device_path,
         }
     }
 }
 
+/*
 /// Serialization to the DB.
 impl SqlSerialize for Disk {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
@@ -514,22 +580,58 @@ impl TryFrom<&tokio_postgres::Row> for Disk {
         })
     }
 }
+*/
 
-#[derive(Clone, Debug)]
+#[derive(AsChangeset, Clone, Debug)]
+#[table_name = "disk"]
 pub struct DiskRuntimeState {
     /// runtime state of the Disk
-    pub disk_state: DiskState,
+    pub disk_state: String,
+    pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
+    #[column_name = "state_generation"]
     pub gen: Generation,
     /// timestamp for this information
+    #[column_name = "time_state_updated"]
     pub time_updated: DateTime<Utc>,
+}
+
+impl DiskRuntimeState {
+    pub fn new() -> Self {
+        Self {
+            disk_state: external::DiskState::Creating.label().to_string(),
+            attach_instance_id: None,
+            gen: Generation::new(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn detach(self) -> Self {
+        Self {
+            disk_state: external::DiskState::Detached.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn state(&self) -> DiskState {
+        // TODO: If we could store disk state in-line, we could avoid the
+        // unwrap. Would prefer to parse it as such.
+        DiskState::new(
+            external::DiskState::try_from(
+                (self.disk_state.as_str(), self.attach_instance_id)
+            ).unwrap()
+        )
+    }
 }
 
 /// Conversion from the internal API type.
 impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn from(runtime: internal::nexus::DiskRuntimeState) -> Self {
         Self {
-            disk_state: runtime.disk_state.into(),
+            disk_state: runtime.disk_state.label().to_string(),
+            attach_instance_id: runtime.disk_state.attached_instance_id().map(|id| *id),
             gen: runtime.gen,
             time_updated: runtime.time_updated,
         }
@@ -540,13 +642,14 @@ impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
 impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn into(self) -> internal::nexus::DiskRuntimeState {
         internal::nexus::DiskRuntimeState {
-            disk_state: self.disk_state.into(),
+            disk_state: self.state().into(),
             gen: self.gen,
             time_updated: self.time_updated,
         }
     }
 }
 
+/*
 /// Serialization to the DB.
 impl SqlSerialize for DiskRuntimeState {
     fn sql_serialize(&self, output: &mut SqlValueSet) {
@@ -568,8 +671,11 @@ impl TryFrom<&tokio_postgres::Row> for DiskRuntimeState {
         })
     }
 }
+*/
 
-#[derive(Clone, Debug)]
+// TODO: What to do with this type???
+
+#[derive(Clone, Debug, AsExpression)]
 pub struct DiskState(external::DiskState);
 
 impl DiskState {

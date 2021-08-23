@@ -36,14 +36,11 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_common::db::sql_row_value;
-use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::operations::sql_execute_maybe_one;
 use super::schema;
-use super::schema::Disk;
-use super::schema::LookupByAttachedInstance;
 use super::schema::LookupByUniqueId;
 use super::schema::LookupByUniqueNameInProject;
 use super::schema::Vpc;
@@ -486,6 +483,53 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::DiskAttachment> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let mut query = dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_instance_id.eq(instance_id))
+            .limit(pagparams.limit.get().into())
+            .into_boxed();
+
+        // TODO: Can we make the pagparams stuff generic w.r.t. instance v disk?
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.gt(marker));
+                }
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.lt(marker));
+                }
+                query.order(dsl::name.desc())
+            }
+        };
+
+        query.load::<db::model::Disk>(&*conn)
+            .map(|disks| {
+                disks.into_iter().map(|disk| {
+                    // TODO: Maybe make an "attachment()" helper for disks?
+                    db::model::DiskAttachment {
+                        instance_id: disk.attach_instance_id.unwrap(),
+                        disk_id: disk.id,
+                        disk_name: disk.name.clone(),
+                        disk_state: disk.state(),
+                    }
+                }).collect()
+            })
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+
+/*
     ) -> ListResult<db::model::DiskAttachment> {
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
@@ -499,6 +543,7 @@ impl DataStore {
             &["id", "name", "disk_state", "attach_instance_id"],
         )
         .await
+*/
     }
 
     pub async fn project_create_disk(
@@ -508,6 +553,29 @@ impl DataStore {
         params: &api::external::DiskCreateParams,
         runtime_initial: &db::model::DiskRuntimeState,
     ) -> CreateResult<db::model::Disk> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let disk = db::model::Disk::new(
+            *disk_id,
+            *project_id,
+            params.clone(),
+            runtime_initial.clone(),
+        );
+        let disk: db::model::Disk = diesel::insert_into(dsl::disk)
+            .values(&disk)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result(&*conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Disk,
+                    disk.name.as_str(),
+                )
+            })?;
+
+        /*
         /*
          * See project_create_instance() for a discussion of how this function
          * works.  The pattern here is nearly identical.
@@ -531,17 +599,19 @@ impl DataStore {
                 disk_id,
             )
             .await?;
+        */
 
+        let runtime = disk.runtime();
         bail_unless!(
-            disk.runtime.disk_state.state()
+            runtime.state().state()
                 == &api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
-            disk.runtime.disk_state
+            runtime.disk_state
         );
         bail_unless!(
-            disk.runtime.gen == runtime_initial.gen,
+            runtime.gen == runtime_initial.gen,
             "newly-created Disk has unexpected generation: {:?}",
-            disk.runtime.gen
+            runtime.gen
         );
         Ok(disk)
     }
@@ -550,7 +620,39 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Disk> {
+    ) -> ListResultVec<db::model::Disk> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let mut query = dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(project_id))
+            .limit(pagparams.limit.get().into())
+            .into_boxed();
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.gt(marker));
+                }
+                query.order(dsl::name.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::name.lt(marker));
+                }
+                query.order(dsl::name.desc())
+            }
+        };
+
+        query.load::<db::model::Disk>(&*conn).map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::Disk,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
+
+        /*
         let client = self.pool.acquire().await?;
         sql_fetch_page_by::<
             LookupByUniqueNameInProject,
@@ -558,6 +660,7 @@ impl DataStore {
             <Disk as Table>::Model,
         >(&client, (project_id,), pagparams, Disk::ALL_COLUMNS)
         .await
+        */
     }
 
     pub async fn disk_update_runtime(
@@ -565,6 +668,30 @@ impl DataStore {
         disk_id: &Uuid,
         new_runtime: &db::model::DiskRuntimeState,
     ) -> Result<bool, Error> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let updated = diesel::update(dsl::disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .set(new_runtime)
+            .check_if_exists(*disk_id)
+            .execute_and_check(&conn)
+            .map(|r| match r {
+                UpdateAndQueryResult::Updated => true,
+                UpdateAndQueryResult::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::ById(*disk_id),
+                )
+            })?;
+
+        Ok(updated)
+        /*
         let client = self.pool.acquire().await?;
 
         let mut values = SqlValueSet::new();
@@ -587,14 +714,32 @@ impl DataStore {
         let found_id: Uuid = sql_row_value(&row, "found_id")?;
         bail_unless!(found_id == *disk_id);
         Ok(update.updated)
+        */
     }
 
     pub async fn disk_fetch(
         &self,
         disk_id: &Uuid,
     ) -> LookupResult<db::model::Disk> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .get_result(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::ById(*disk_id),
+                )
+            })
+
+        /*
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueId, Disk>(&client, (), disk_id).await
+        */
     }
 
     pub async fn disk_fetch_by_name(
@@ -602,6 +747,22 @@ impl DataStore {
         project_id: &Uuid,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::name.eq(disk_name))
+            .get_result(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::ByName(disk_name.as_str().to_owned()),
+                )
+            })
+        /*
         let client = self.pool.acquire().await?;
         sql_fetch_row_by::<LookupByUniqueNameInProject, Disk>(
             &client,
@@ -609,9 +770,50 @@ impl DataStore {
             disk_name,
         )
         .await
+        */
     }
 
     pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+        use db::diesel_schema::disk::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+        let now = Utc::now();
+
+        let destroyed = api::external::DiskState::Destroyed.label();
+        let detached = api::external::DiskState::Detached.label();
+        let faulted = api::external::DiskState::Faulted.label();
+
+        let updated = diesel::update(dsl::disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
+            .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
+            .check_if_exists(*disk_id)
+            .execute_and_check(&*conn)
+            .map(|r| match r {
+                UpdateAndQueryResult::Updated => true,
+                UpdateAndQueryResult::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::ById(*disk_id),
+                )
+            })?;
+
+        if updated {
+            Ok(())
+        } else {
+            // TODO(smklein): Update CTE to get the existing row
+            // so we can return it in this error message
+            Err(Error::InvalidRequest {
+                message: format!(
+                    "disk cannot be deleted in current state",
+                ),
+            })
+        }
+
+        /*
         let client = self.pool.acquire().await?;
         let now = Utc::now();
 
@@ -664,6 +866,7 @@ impl DataStore {
                 ),
             })
         }
+        */
     }
 
     // Create a record for a new Oximeter instance
