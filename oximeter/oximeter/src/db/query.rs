@@ -1,52 +1,12 @@
 //! Functions for querying the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
-use std::net::IpAddr;
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::db::model::DATABASE_NAME;
 use crate::types::{FieldValue, MeasurementType};
 use crate::Error;
-
-impl FieldValue {
-    // Format the value for use as a value in a query to the database, e.g., `... WHERE
-    // (field_value = {})`.
-    pub(crate) fn as_db_str(&self) -> String {
-        match self {
-            FieldValue::Bool(ref inner) => {
-                format!("{}", if *inner { 1 } else { 0 })
-            }
-            FieldValue::I64(ref inner) => format!("{}", inner),
-            FieldValue::IpAddr(ref inner) => {
-                let addr = match inner {
-                    IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
-                    IpAddr::V6(ref v6) => *v6,
-                };
-                format!("'{}'", addr)
-            }
-            FieldValue::String(ref inner) => format!("'{}'", inner),
-            FieldValue::Uuid(ref inner) => format!("'{}'", inner),
-        }
-    }
-}
-
-impl MeasurementType {
-    pub(crate) fn as_db_str(&self) -> &str {
-        match self {
-            MeasurementType::Bool => "bool",
-            MeasurementType::I64 => "i64",
-            MeasurementType::F64 => "f64",
-            MeasurementType::String => "string",
-            MeasurementType::Bytes => "bytes",
-            MeasurementType::CumulativeI64 => "cumulativei64",
-            MeasurementType::CumulativeF64 => "cumulativef64",
-            MeasurementType::HistogramI64 => "histogrami64",
-            MeasurementType::HistogramF64 => "histogramf64",
-        }
-    }
-}
 
 /// Object used to filter timestamps, specifying a start and/or end time.
 ///
@@ -93,20 +53,24 @@ impl TimeFilter {
         }
     }
 
-    /// Construct a `TimeFilter` from the start and end timestamps.
+    /// Construct a `TimeFilter` which selects timestamps between `after` and `before`.
     ///
     /// If both `before` and `after` are `None`, then `None` is returned. Otherwise, a variant of
     /// `TimeFilter` is constructed and returned.
     pub fn from_timestamps(
         after: Option<DateTime<Utc>>,
         before: Option<DateTime<Utc>>,
-    ) -> Option<Self> {
+    ) -> Result<Option<Self>, Error> {
         match (after, before) {
-            (None, None) => None,
-            (Some(after), None) => Some(TimeFilter::After(after)),
-            (None, Some(before)) => Some(TimeFilter::Before(before)),
+            (None, None) => Ok(None),
+            (Some(after), None) => Ok(Some(TimeFilter::After(after))),
+            (None, Some(before)) => Ok(Some(TimeFilter::Before(before))),
             (Some(after), Some(before)) => {
-                Some(TimeFilter::Between(after, before))
+                if after < before {
+                    Ok(Some(TimeFilter::Between(after, before)))
+                } else {
+                    Err(Error::QueryError(String::from("Invalid timestamps, end must be strictly later than start")))
+                }
             }
         }
     }
@@ -312,7 +276,7 @@ impl TimeseriesFilter {
             {query}\n\
             ){timestamp_filter} FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
-            data_type = measurement_type.as_db_str(),
+            data_type = measurement_type.db_type_name(),
             query = indent(&query, 4),
             timestamp_filter = timestamp_filter,
         )
@@ -371,6 +335,9 @@ mod tests {
             f.as_where_fragment(),
             "timestamp >= '2021-01-01 01:01:01.123456' AND timestamp <= '2021-01-02 01:01:01.123456'"
         );
+
+        assert!(TimeFilter::from_timestamps(Some(start), Some(end)).is_ok());
+        assert!(TimeFilter::from_timestamps(Some(end), Some(start)).is_err());
     }
 
     #[test]

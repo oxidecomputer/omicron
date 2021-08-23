@@ -46,18 +46,6 @@ impl Client {
         // as that would indicate a serious problem. This should probably trigger an obvious error,
         // rather than silently succeeding.
         out.init_db().await?;
-
-        // TODO-completeness: This is the only time we actually _get_ the schema from the DB. We
-        // insert new schema into the member data structures when we accept new samples, but never
-        // check the DB itself again. In other words, this implicitly assumes a unique connection
-        // to the DB -- that _this_ client instance sees any new schema before the database does.
-        // This is fine if there _is_ a single writing client, as in the case of a single oximeter
-        // server instance as the sole ingress point for new samples. But we've made the
-        // `insert_samples` method public to support testing, which means it's possible to have
-        // multiple writing clients.
-        //
-        // In any case, we may need to add calls to `get_schema` somewhere inside `insert_samples`,
-        // hopefully without many requests out to the database.
         out.get_schema().await?;
         Ok(out)
     }
@@ -86,12 +74,7 @@ impl Client {
         let mut rows = BTreeMap::new();
         let mut new_schema = Vec::new();
 
-        let mut verify_time = std::time::Duration::new(0, 0);
-        let mut unroll_field_time = std::time::Duration::new(0, 0);
-        let mut unroll_measurement_time = std::time::Duration::new(0, 0);
-
         for sample in samples.iter() {
-            let start = std::time::Instant::now();
             match self.verify_sample_schema(sample) {
                 Err(_) => {
                     // Skip the sample, but otherwise do nothing. The error is logged in the above
@@ -105,9 +88,7 @@ impl Client {
                     }
                 }
             }
-            verify_time += std::time::Instant::now() - start;
 
-            let start = std::time::Instant::now();
             if !seen_timeseries.contains(sample.timeseries_key.as_str()) {
                 for (table_name, table_rows) in model::unroll_field_rows(sample)
                 {
@@ -116,12 +97,9 @@ impl Client {
                         .extend(table_rows);
                 }
             }
-            unroll_field_time += std::time::Instant::now() - start;
 
-            let start = std::time::Instant::now();
             let (table_name, measurement_row) =
                 model::unroll_measurement_row(sample);
-            unroll_measurement_time += std::time::Instant::now() - start;
 
             rows.entry(table_name)
                 .or_insert_with(Vec::new)
@@ -129,14 +107,6 @@ impl Client {
 
             seen_timeseries.insert(sample.timeseries_key.as_str());
         }
-
-        debug!(
-            self.log,
-            "duration of sample unrolling operations";
-            "verify" => ?verify_time,
-            "unroll-field" => ?unroll_field_time,
-            "unroll-measurement" => ?unroll_measurement_time,
-        );
 
         // Insert the new schema into the database
         //
@@ -148,6 +118,9 @@ impl Client {
         // ClickHouse server. But once we start replicating data, the window within which the race
         // can occur is much larger, since it includes the time it takes ClickHouse to replicate
         // data between nodes.
+        //
+        // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
+        // receive a sample with a new schema, and both would then try to insert that schema.
         if !new_schema.is_empty() {
             debug!(
                 self.log,
@@ -234,7 +207,7 @@ impl Client {
                 query::FieldFilter::new(&field_name, &field_filters)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let time_filter = query::TimeFilter::from_timestamps(after, before);
+        let time_filter = query::TimeFilter::from_timestamps(after, before)?;
         let filter = query::TimeseriesFilter {
             timeseries_name: timeseries_name.to_string(),
             filters,

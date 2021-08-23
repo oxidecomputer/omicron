@@ -1,8 +1,6 @@
 //! Tool for developing against the Oximeter timeseries database, populating data and querying.
 // Copyright 2021 Oxide Computer Company
 
-use std::net::SocketAddr;
-
 use anyhow::{bail, Context};
 use chrono::{DateTime, Duration, Utc};
 use oximeter::{
@@ -11,6 +9,7 @@ use oximeter::{
     Metric, Target,
 };
 use slog::{debug, info, o, Drain, Level, Logger};
+use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
 

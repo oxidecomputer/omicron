@@ -53,6 +53,12 @@ impl From<DbBool> for bool {
     }
 }
 
+impl From<DbBool> for Measurement {
+    fn from(b: DbBool) -> Measurement {
+        Measurement::from(bool::from(b))
+    }
+}
+
 /// The source, target or metric, from which a field is derived.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum FieldSource {
@@ -538,123 +544,59 @@ pub(crate) struct DbTimeseriesHistogramSample<'a, T> {
     pub counts: Vec<u64>,
 }
 
+fn parse_timeseries_scalar_sample<'a, T>(
+    line: &'a str,
+) -> (String, DateTime<Utc>, Measurement)
+where
+    T: Deserialize<'a> + Into<Measurement>,
+{
+    let sample =
+        serde_json::from_str::<DbTimeseriesScalarSample<'a, T>>(line).unwrap();
+    (sample.timeseries_key.to_string(), sample.timestamp, sample.value.into())
+}
+
+fn parse_timeseries_histogram_sample<'a, T>(
+    line: &'a str,
+) -> (String, DateTime<Utc>, Measurement)
+where
+    T: Into<Measurement> + histogram::HistogramSupport,
+    Measurement: From<histogram::Histogram<T>>,
+{
+    let sample =
+        serde_json::from_str::<DbTimeseriesHistogramSample<'a, T>>(line)
+            .unwrap();
+    (
+        sample.timeseries_key.to_string(),
+        sample.timestamp,
+        histogram::Histogram::from_arrays(sample.bins, sample.counts)
+            .unwrap()
+            .into(),
+    )
+}
+
 // Parse a line of JSON from the database resulting from `as_select_query`, into a single sample of
 // the expected type. Also returns the timeseries key from the line.
 pub(crate) fn parse_timeseries_sample(
     line: &str,
     measurement_type: MeasurementType,
 ) -> Result<(String, TimeseriesSample), Error> {
-    // TODO-cleanup: This is a pretty verbose way to dispatch parsing on the type. Most things are
-    // the same -- is there a better way to do this?
     let (key, timestamp, measurement) = match measurement_type {
-        MeasurementType::Bool => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesScalarSample<'_, DbBool>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(bool::from(sample.value)),
-            )
-        }
-        MeasurementType::I64 => {
-            let sample =
-                serde_json::from_str::<DbTimeseriesScalarSample<'_, i64>>(line)
-                    .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
-        }
-        MeasurementType::F64 => {
-            let sample =
-                serde_json::from_str::<DbTimeseriesScalarSample<'_, f64>>(line)
-                    .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
-        }
-        MeasurementType::String => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesScalarSample<'_, &str>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
-        }
-        MeasurementType::Bytes => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesScalarSample<'_, Bytes>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
-        }
+        MeasurementType::Bool => parse_timeseries_scalar_sample::<DbBool>(line),
+        MeasurementType::I64 => parse_timeseries_scalar_sample::<i64>(line),
+        MeasurementType::F64 => parse_timeseries_scalar_sample::<f64>(line),
+        MeasurementType::String => parse_timeseries_scalar_sample::<&str>(line),
+        MeasurementType::Bytes => parse_timeseries_scalar_sample::<Bytes>(line),
         MeasurementType::CumulativeI64 => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesScalarSample<'_, Cumulative<i64>>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
+            parse_timeseries_scalar_sample::<Cumulative<i64>>(line)
         }
         MeasurementType::CumulativeF64 => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesScalarSample<'_, Cumulative<f64>>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(sample.value),
-            )
+            parse_timeseries_scalar_sample::<Cumulative<f64>>(line)
         }
         MeasurementType::HistogramI64 => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesHistogramSample<'_, i64>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(
-                    histogram::Histogram::from_arrays(
-                        sample.bins,
-                        sample.counts,
-                    )
-                    .unwrap(),
-                ),
-            )
+            parse_timeseries_histogram_sample::<i64>(line)
         }
         MeasurementType::HistogramF64 => {
-            let sample = serde_json::from_str::<
-                DbTimeseriesHistogramSample<'_, f64>,
-            >(line)
-            .unwrap();
-            (
-                sample.timeseries_key.to_string(),
-                sample.timestamp,
-                Measurement::from(
-                    histogram::Histogram::from_arrays(
-                        sample.bins,
-                        sample.counts,
-                    )
-                    .unwrap(),
-                ),
-            )
+            parse_timeseries_histogram_sample::<f64>(line)
         }
     };
     Ok((key, TimeseriesSample { timestamp, measurement }))

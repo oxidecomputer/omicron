@@ -83,6 +83,25 @@ impl FieldValue {
             }
         }
     }
+
+    // Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
+    pub(crate) fn as_db_str(&self) -> String {
+        match self {
+            FieldValue::Bool(ref inner) => {
+                format!("{}", if *inner { 1 } else { 0 })
+            }
+            FieldValue::I64(ref inner) => format!("{}", inner),
+            FieldValue::IpAddr(ref inner) => {
+                let addr = match inner {
+                    IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
+                    IpAddr::V6(ref v6) => *v6,
+                };
+                format!("'{}'", addr)
+            }
+            FieldValue::String(ref inner) => format!("'{}'", inner),
+            FieldValue::Uuid(ref inner) => format!("'{}'", inner),
+        }
+    }
 }
 
 impl fmt::Display for FieldValue {
@@ -196,6 +215,24 @@ pub enum MeasurementType {
     CumulativeF64,
     HistogramI64,
     HistogramF64,
+}
+
+impl MeasurementType {
+    // Return the name of the type as it's referred to in the timeseries database. This is used
+    // internally to build the table containing samples of the corresponding measurement type.
+    pub(crate) fn db_type_name(&self) -> &str {
+        match self {
+            MeasurementType::Bool => "bool",
+            MeasurementType::I64 => "i64",
+            MeasurementType::F64 => "f64",
+            MeasurementType::String => "string",
+            MeasurementType::Bytes => "bytes",
+            MeasurementType::CumulativeI64 => "cumulativei64",
+            MeasurementType::CumulativeF64 => "cumulativef64",
+            MeasurementType::HistogramI64 => "histogrami64",
+            MeasurementType::HistogramF64 => "histogramf64",
+        }
+    }
 }
 
 /// A measurement is a single sampled data point from a metric.
@@ -563,10 +600,9 @@ impl Sample {
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
-
     use bytes::Bytes;
     use chrono::Utc;
+    use std::net::IpAddr;
     use uuid::Uuid;
 
     use super::histogram::Histogram;
