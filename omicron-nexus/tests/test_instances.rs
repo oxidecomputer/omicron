@@ -33,7 +33,7 @@ use common::test_setup;
 #[macro_use]
 extern crate slog;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_instances() {
     let cptestctx = test_setup("test_instances").await;
     let client = &cptestctx.external_client;

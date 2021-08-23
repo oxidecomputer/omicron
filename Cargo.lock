@@ -97,6 +97,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb8-diesel"
+version = "0.2.0"
+source = "git+https://github.com/smklein/bb8-diesel?branch=repolish#7c10a14e4d4f1c821787942325a7213bfb966e0b"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "diesel",
+ "tokio",
+]
+
+[[package]]
 name = "bb8-postgres"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1286,6 +1297,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bb8",
+ "bb8-diesel",
  "bb8-postgres",
  "bytes",
  "chrono",

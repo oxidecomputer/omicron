@@ -25,8 +25,9 @@
  */
 
 use super::Config as DbConfig;
+use bb8_diesel::DieselConnectionManager;
 use bb8_postgres::PostgresConnectionManager;
-use diesel::r2d2;
+use diesel::PgConnection;
 use omicron_common::api::external::Error;
 use std::ops::Deref;
 
@@ -38,7 +39,7 @@ use std::ops::Deref;
 // (probably async) connection.
 pub struct Pool {
     pool: bb8::Pool<PostgresConnectionManager<tokio_postgres::NoTls>>,
-    pool_sync: r2d2::Pool<r2d2::ConnectionManager<diesel::PgConnection>>,
+    pool_diesel: bb8::Pool<DieselConnectionManager<diesel::PgConnection>>,
 }
 
 pub struct Conn<'a> {
@@ -64,18 +65,24 @@ impl Pool {
         );
         let pool = bb8::Builder::new().build_unchecked(mgr);
 
-        let manager = r2d2::ConnectionManager::<diesel::PgConnection>::new(
-            &db_config.url.url(),
-        );
-        let pool_sync = r2d2::Pool::new(manager).unwrap();
-        Pool { pool, pool_sync }
+        let manager =
+            DieselConnectionManager::<PgConnection>::new(&db_config.url.url());
+        let pool_diesel = bb8::Builder::new().build_unchecked(manager);
+        Pool { pool, pool_diesel }
     }
 
-    pub fn acquire_sync(
+    pub async fn acquire_diesel(
         &self,
-    ) -> r2d2::PooledConnection<r2d2::ConnectionManager<diesel::PgConnection>>
-    {
-        self.pool_sync.get().unwrap()
+    ) -> Result<
+        bb8::PooledConnection<'_, DieselConnectionManager<PgConnection>>,
+        Error,
+    > {
+        self.pool_diesel.get().await.map_err(|e| Error::ServiceUnavailable {
+            message: format!(
+                "failed to acquire database connection: {}",
+                e.to_string()
+            ),
+        })
     }
 
     pub async fn acquire(&self) -> Result<Conn<'_>, Error> {

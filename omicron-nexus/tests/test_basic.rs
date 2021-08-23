@@ -30,7 +30,7 @@ use common::test_setup;
 #[macro_use]
 extern crate slog;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_basic_failures() {
     let testctx = test_setup("basic_failures").await;
     let client = &testctx.external_client;
@@ -165,7 +165,7 @@ async fn test_basic_failures() {
     testctx.teardown().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_projects() {
     let testctx = test_setup("test_projects").await;
     let client = &testctx.external_client;
@@ -450,7 +450,7 @@ async fn test_projects() {
     testctx.teardown().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_projects_list() {
     let testctx = test_setup("test_projects_list").await;
     let client = &testctx.external_client;
@@ -579,7 +579,7 @@ async fn test_projects_list() {
     testctx.teardown().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_sleds_list() {
     let testctx = test_setup("test_sleds_list").await;
     let client = &testctx.external_client;
