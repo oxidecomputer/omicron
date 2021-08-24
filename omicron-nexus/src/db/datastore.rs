@@ -20,18 +20,13 @@
 
 use super::Pool;
 use chrono::Utc;
-use diesel::helper_types::{Filter, IntoBoxed, Limit};
 use diesel::expression::{AsExpression, NonAggregate};
-use diesel::expression::helper_types::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_builder::QueryFragment;
-use diesel::pg::types::sql_types::Uuid as SqlUuid;
-use diesel::prelude::*;
 use diesel::pg::Pg;
 use diesel::query_builder::*;
 use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use diesel::query_builder::AsQuery;
-use diesel::query_dsl::methods::BoxedDsl;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -104,32 +99,28 @@ pub fn paginated<'a, T, E, M>(table: T, column: E, pagparams: &DataPageParams<'a
 where
     T: diesel::Table + AsQuery,
     T::Query: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<'static, T>>,
-    E: 'a + ExpressionMethods + Sized + diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg>,
+    E: 'a + ExpressionMethods + Sized + diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg> + Copy,
     E::SqlType: diesel::sql_types::SingleValue,
-    &'a M: AsExpression<E::SqlType>, // + diesel::expression::Expression<SqlType = E::SqlType>,
+    &'a M: AsExpression<E::SqlType>,
     <&'a M as AsExpression<<E as diesel::Expression>::SqlType>>::Expression: diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg>,
 {
-    let query = table
+    let mut query = table
         .into_boxed()
         .limit(pagparams.limit.get().into());
-    let query = query.filter(column.gt(pagparams.marker.unwrap()));
-    /*
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some(marker) = pagparams.marker {
-                query = query.filter(dsl::id.gt(marker));
+                query = query.filter(column.gt(marker));
             }
-            query.order(dsl::id.asc())
+            query.order(column.asc())
         }
         dropshot::PaginationOrder::Descending => {
             if let Some(marker) = pagparams.marker {
-                query = query.filter(dsl::id.lt(marker));
+                query = query.filter(column.lt(marker));
             }
-            query.order(dsl::id.desc())
+            query.order(column.desc())
         }
     }
-    */
-    query
 }
 
 /*
