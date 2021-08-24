@@ -1,4 +1,5 @@
 use diesel::associations::HasTable;
+use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
@@ -55,7 +56,14 @@ impl<T, K, U, V> QueryId for UpdateAndQueryStatement<T, K, U, V> {
 
 /// Result of [`UpdateAndQueryStatement`].
 #[derive(Copy, Clone, PartialEq, Debug)]
-pub enum UpdateAndQueryResult {
+pub struct UpdateAndQueryResult<Q> {
+    pub status: UpdateStatus,
+    pub found: Q,
+}
+
+/// Status of [`UpdateAndQueryResult`].
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum UpdateStatus {
     /// The row exists and was updated.
     Updated,
     /// The row exists, but was not updated.
@@ -73,10 +81,12 @@ where
     K: PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg>,
     // Bounds which ensure an impl of LoadQuery exists:
     Pg: sql_types::HasSqlType<SerializedPrimaryKey<T>>,
+    Pg: sql_types::HasSqlType<T::SqlType>,
     <Self as AsQuery>::Query: QueryFragment<Pg>,
     // Bound to implement QueryFragment:
     T: Table,
     SerializedPrimaryKey<T>: sql_types::NotNull,
+    T::SqlType: sql_types::NotNull,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -84,16 +94,22 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub fn execute_and_check(
+    pub fn execute_and_check<Q>(
         self,
         conn: &PgConnection,
-    ) -> Result<UpdateAndQueryResult, diesel::result::Error> {
-        let (id0, id1) = self.get_result::<(Option<K>, Option<K>)>(conn)?;
-        if id0 == id1 {
-            Ok(UpdateAndQueryResult::Updated)
+    ) -> Result<UpdateAndQueryResult<Q>, diesel::result::Error>
+    where
+        Q: Queryable<T::SqlType, diesel::pg::Pg> + std::fmt::Debug,
+    {
+        let (id0, id1, found) =
+            self.get_result::<(Option<K>, Option<K>, Q)>(conn)?;
+        let status = if id0 == id1 {
+            UpdateStatus::Updated
         } else {
-            Ok(UpdateAndQueryResult::NotUpdatedButExists)
-        }
+            UpdateStatus::NotUpdatedButExists
+        };
+
+        Ok(UpdateAndQueryResult { status, found })
     }
 }
 
@@ -101,10 +117,12 @@ impl<T, K, U, V> Query for UpdateAndQueryStatement<T, K, U, V>
 where
     T: Table,
     SerializedPrimaryKey<T>: sql_types::NotNull,
+    T::SqlType: sql_types::NotNull,
 {
     type SqlType = (
         sql_types::Nullable<SerializedPrimaryKey<T>>,
         sql_types::Nullable<SerializedPrimaryKey<T>>,
+        T::SqlType,
     );
 }
 
@@ -121,14 +139,15 @@ where
 /// // WITH found   AS (SELECT <primary key> FROM T WHERE <primary key = value>)
 /// //      updated AS (UPDATE T SET <constraints> RETURNING *)
 /// // SELECT
-/// //        found.<primary key> AS found_<primary_key>,
-/// //        updated.<primary key> AS updated_<primary_key>
+/// //      found.<primary key>
+/// //      updated.<primary key>
+/// //      found.*
 /// // FROM
-/// //        found
+/// //      found
 /// // LEFT JOIN
-/// //        updated
+/// //      updated
 /// // ON
-/// //        found.<primary_key> = updated.<primary_key>;
+/// //      found.<primary_key> = updated.<primary_key>;
 /// ```
 impl<T, K, U, V> QueryFragment<Pg> for UpdateAndQueryStatement<T, K, U, V>
 where
@@ -137,8 +156,8 @@ where
         + diesel::query_dsl::methods::FindDsl<K>
         + Copy,
     K: Copy,
-    <T as diesel::query_dsl::methods::FindDsl<K>>::Output: QueryFragment<Pg>,
-    <T as Table>::PrimaryKey: diesel::Column,
+    Find<T, K>: QueryFragment<Pg>,
+    PrimaryKey<T>: diesel::Column,
     UpdateStatement<T, U, V>: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
@@ -158,6 +177,14 @@ where
         out.push_identifier(name)?;
         out.push_sql(", updated.");
         out.push_identifier(name)?;
+        // TODO: I'd prefer to list all columns explicitly. But how?
+        // The types exist within Table::AllColumns, and each one
+        // has a name as "<C as Column>::Name".
+        // But Table::AllColumns is a tuple, which makes iteration
+        // a pain.
+        //
+        // TODO: Technically, we're repeating the PK here.
+        out.push_sql(", found.*");
 
         out.push_sql(" FROM found LEFT JOIN updated ON");
         out.push_sql(" found.");

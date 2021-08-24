@@ -231,7 +231,7 @@ impl From<external::ProjectUpdateParams> for ProjectUpdate {
 }
 
 /// An Instance (VM).
-#[derive(Queryable, Identifiable, Insertable)]
+#[derive(Queryable, Identifiable, Insertable, Debug)]
 #[table_name = "instance"]
 pub struct Instance {
     pub id: Uuid,

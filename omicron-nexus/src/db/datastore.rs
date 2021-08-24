@@ -54,8 +54,8 @@ use super::sql_operations::sql_insert;
 use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
-use crate::db::update_and_check::{UpdateAndCheck, UpdateAndQueryResult};
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -160,7 +160,8 @@ impl DataStore {
         let conn = self.pool.acquire_diesel().await?;
         paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load::<db::model::Project>(&*conn).map_err(|e| {
+            .load::<db::model::Project>(&*conn)
+            .map_err(|e| {
                 Error::from_diesel(
                     e,
                     ResourceType::Project,
@@ -177,7 +178,8 @@ impl DataStore {
         let conn = self.pool.acquire_diesel().await?;
         paginated(dsl::project, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load::<db::model::Project>(&*conn).map_err(|e| {
+            .load::<db::model::Project>(&*conn)
+            .map_err(|e| {
                 Error::from_diesel(
                     e,
                     ResourceType::Project,
@@ -291,7 +293,8 @@ impl DataStore {
         paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
-            .load::<db::model::Instance>(&*conn).map_err(|e| {
+            .load::<db::model::Instance>(&*conn)
+            .map_err(|e| {
                 Error::from_diesel(
                     e,
                     ResourceType::Instance,
@@ -365,10 +368,10 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime)
             .check_if_exists(*instance_id)
-            .execute_and_check(&conn)
-            .map(|r| match r {
-                UpdateAndQueryResult::Updated => true,
-                UpdateAndQueryResult::NotUpdatedButExists => false,
+            .execute_and_check::<db::model::Instance>(&conn)
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
                 Error::from_diesel(
@@ -407,7 +410,7 @@ impl DataStore {
         let failed =
             db::model::InstanceState::new(api::external::InstanceState::Failed);
 
-        let instance = diesel::update(dsl::instance)
+        diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
             .filter(dsl::instance_state.eq_any(vec![stopped, failed]))
@@ -420,7 +423,6 @@ impl DataStore {
                     LookupType::ById(*instance_id),
                 )
             })?;
-        bail_unless!(instance.id == *instance_id);
         Ok(())
     }
 
@@ -520,7 +522,8 @@ impl DataStore {
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
-            .load::<db::model::Disk>(&*conn).map_err(|e| {
+            .load::<db::model::Disk>(&*conn)
+            .map_err(|e| {
                 Error::from_diesel(
                     e,
                     ResourceType::Disk,
@@ -543,10 +546,10 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime)
             .check_if_exists(*disk_id)
-            .execute_and_check(&conn)
-            .map(|r| match r {
-                UpdateAndQueryResult::Updated => true,
-                UpdateAndQueryResult::NotUpdatedButExists => false,
+            .execute_and_check::<db::model::Disk>(&conn)
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
                 Error::from_diesel(
@@ -610,17 +613,13 @@ impl DataStore {
         let detached = api::external::DiskState::Detached.label();
         let faulted = api::external::DiskState::Faulted.label();
 
-        let updated = diesel::update(dsl::disk)
+        let result = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists(*disk_id)
-            .execute_and_check(&*conn)
-            .map(|r| match r {
-                UpdateAndQueryResult::Updated => true,
-                UpdateAndQueryResult::NotUpdatedButExists => false,
-            })
+            .execute_and_check::<db::model::Disk>(&conn)
             .map_err(|e| {
                 Error::from_diesel(
                     e,
@@ -629,70 +628,15 @@ impl DataStore {
                 )
             })?;
 
-        if updated {
-            Ok(())
-        } else {
-            // TODO(smklein): Update CTE to get the existing row
-            // so we can return it in this error message
-            Err(Error::InvalidRequest {
-                message: "disk cannot be deleted in current state".to_string(),
-            })
-        }
-
-        /*
-        let client = self.pool.acquire().await?;
-        let now = Utc::now();
-
-        let mut values = SqlValueSet::new();
-        values.set("time_deleted", &now);
-        db::model::DiskState::new(api::external::DiskState::Destroyed)
-            .sql_serialize(&mut values);
-
-        let mut cond_sql = SqlString::new();
-        let disk_state_detached =
-            api::external::DiskState::Detached.to_string();
-        let p1 = cond_sql.next_param(&disk_state_detached);
-        let disk_state_faulted = api::external::DiskState::Faulted.to_string();
-        let p2 = cond_sql.next_param(&disk_state_faulted);
-        cond_sql.push_str(&format!("disk_state in ({}, {})", p1, p2));
-
-        let update = sql_update_precond::<Disk, LookupByUniqueId>(
-            &client,
-            (),
-            disk_id,
-            &["disk_state", "attach_instance_id", "time_deleted"],
-            &values,
-            cond_sql,
-        )
-        .await?;
-
-        let row = &update.found_state;
-        let found_id: Uuid = sql_row_value(&row, "found_id")?;
-        bail_unless!(found_id == *disk_id);
-
-        // TODO-cleanup It would be nice to use
-        // api::external::DiskState::try_from(&tokio_postgres::Row), but the column names
-        // are different here.
-        let disk_state_str: &str = sql_row_value(&row, "found_disk_state")?;
-        let attach_instance_id: Option<Uuid> =
-            sql_row_value(&row, "found_attach_instance_id")?;
-        let found_disk_state = api::external::DiskState::try_from((
-            disk_state_str,
-            attach_instance_id,
-        ))
-        .map_err(|e| Error::internal_error(&e))?;
-
-        if update.updated {
-            Ok(())
-        } else {
-            Err(Error::InvalidRequest {
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
                 message: format!(
                     "disk cannot be deleted in state \"{}\"",
-                    found_disk_state
+                    result.found.disk_state
                 ),
-            })
+            }),
         }
-        */
     }
 
     // Create a record for a new Oximeter instance
