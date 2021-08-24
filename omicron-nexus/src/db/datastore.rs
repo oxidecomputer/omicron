@@ -20,13 +20,7 @@
 
 use super::Pool;
 use chrono::Utc;
-use diesel::expression::{AsExpression, NonAggregate};
-use diesel::query_dsl::methods as query_methods;
-use diesel::query_builder::QueryFragment;
-use diesel::pg::Pg;
-use diesel::query_builder::*;
 use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
-use diesel::query_builder::AsQuery;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -61,107 +55,7 @@ use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateAndQueryResult};
-
-// TODO: The api would be better impl'd as a trait, but it might
-// be easier to get rev 1 working with a function.
-//
-// TODO: Maybe move this thing to a different file?
-
-
-/*
-trait Paginate<'a> {
-    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> BoxedQuery<'a>;
-}
-
-#[must_use = "Queries must be executed"]
-struct Paginated<P> {
-    query: P,
-}
-
-impl<P> AsQuery for Paginated<P>
-where
-    P: Query,
-{
-    type SqlType = P::SqlType;
-    type Query = P;
-
-    fn as_query(self) -> Self::Query {
-        self.query
-    }
-}
-
-impl<P> RunQueryDsl<PgConnection> for Paginated<P> {}
-*/
-
-type BoxedQuery<'a, T> = BoxedSelectStatement<'a, <T as AsQuery>::SqlType, T, Pg>;
-
-pub fn paginated<'a, T, E, M>(table: T, column: E, pagparams: &DataPageParams<'a, M>) -> BoxedQuery<'a, T>
-where
-    T: diesel::Table + AsQuery,
-    T::Query: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<'static, T>>,
-    E: 'a + ExpressionMethods + Sized + diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg> + Copy,
-    E::SqlType: diesel::sql_types::SingleValue,
-    &'a M: AsExpression<E::SqlType>,
-    <&'a M as AsExpression<<E as diesel::Expression>::SqlType>>::Expression: diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg>,
-{
-    let mut query = table
-        .into_boxed()
-        .limit(pagparams.limit.get().into());
-    match pagparams.direction {
-        dropshot::PaginationOrder::Ascending => {
-            if let Some(marker) = pagparams.marker {
-                query = query.filter(column.gt(marker));
-            }
-            query.order(column.asc())
-        }
-        dropshot::PaginationOrder::Descending => {
-            if let Some(marker) = pagparams.marker {
-                query = query.filter(column.lt(marker));
-            }
-            query.order(column.desc())
-        }
-    }
-}
-
-/*
-impl<'a, T> Paginate<'a> for T
-where
-    // We start with an input query that may be boxed.
-    T: diesel::Table + AsQuery + QueryDsl,
-    T::Query: query_methods::BoxedDsl<'a, Pg>,
-    // Once boxed, we should be able to apply a limit.
-
-{
-    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> BoxedQuery<'static>
-    {
-        use db::diesel_schema::project::dsl;
-        let mut query = self
-            .limit(pagparams.limit.get().into())
-            .filter(dsl::id.gt(pagparams.marker.unwrap()))
-            .into_boxed();
-        query
-
-
-            /*
-        match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::id.gt(marker));
-                }
-                query.order(dsl::id.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::id.lt(marker));
-                }
-                query.order(dsl::id.desc())
-            }
-        }
-            */
-
-    }
-}
-*/
+use crate::db::pagination::paginated;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -258,55 +152,21 @@ impl DataStore {
             })
     }
 
-    // TODO: deleteme
-    pub async fn projects_idk_call_paginate_for_me(
-        &self,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Project> {
-        use db::diesel_schema::project::dsl;
-        let conn = self.pool.acquire_diesel().await?;
-        let query = paginated(dsl::project, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null());
-        query.load::<db::model::Project>(&*conn).map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::Project,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
-    }
-
     pub async fn projects_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_diesel().await?;
-        let mut query = dsl::project
+        paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .limit(pagparams.limit.get().into())
-            .into_boxed();
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::id.gt(marker));
-                }
-                query.order(dsl::id.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::id.lt(marker));
-                }
-                query.order(dsl::id.desc())
-            }
-        };
-        query.load::<db::model::Project>(&*conn).map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::Project,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
+            .load::<db::model::Project>(&*conn).map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     pub async fn projects_list_by_name(
@@ -315,31 +175,15 @@ impl DataStore {
     ) -> ListResultVec<db::model::Project> {
         use db::diesel_schema::project::dsl;
         let conn = self.pool.acquire_diesel().await?;
-        let mut query = dsl::project
+        paginated(dsl::project, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .limit(pagparams.limit.get().into())
-            .into_boxed();
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.gt(marker));
-                }
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.lt(marker));
-                }
-                query.order(dsl::name.desc())
-            }
-        };
-        query.load::<db::model::Project>(&*conn).map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::Project,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
+            .load::<db::model::Project>(&*conn).map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Project,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     /// Updates a project by name (clobbering update -- no etag)
@@ -444,33 +288,16 @@ impl DataStore {
         use db::diesel_schema::instance::dsl;
         let conn = self.pool.acquire_diesel().await?;
 
-        let mut query = dsl::instance
+        paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
-            .limit(pagparams.limit.get().into())
-            .into_boxed();
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.gt(marker));
-                }
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.lt(marker));
-                }
-                query.order(dsl::name.desc())
-            }
-        };
-
-        query.load::<db::model::Instance>(&*conn).map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::Instance,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
+            .load::<db::model::Instance>(&*conn).map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Instance,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     pub async fn instance_fetch(
@@ -612,39 +439,23 @@ impl DataStore {
         use db::diesel_schema::disk::dsl;
         let conn = self.pool.acquire_diesel().await?;
 
-        let mut query = dsl::disk
+        paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::attach_instance_id.eq(instance_id))
-            .limit(pagparams.limit.get().into())
-            .into_boxed();
-
-        // TODO: Can we make the pagparams stuff generic w.r.t. instance v disk?
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.gt(marker));
-                }
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.lt(marker));
-                }
-                query.order(dsl::name.desc())
-            }
-        };
-
-        query.load::<db::model::Disk>(&*conn)
+            .load::<db::model::Disk>(&*conn)
             .map(|disks| {
-                disks.into_iter().map(|disk| {
-                    // TODO: Maybe make an "attachment()" helper for disks?
-                    db::model::DiskAttachment {
-                        instance_id: disk.attach_instance_id.unwrap(),
-                        disk_id: disk.id,
-                        disk_name: disk.name.clone(),
-                        disk_state: disk.state(),
-                    }
-                }).collect()
+                disks
+                    .into_iter()
+                    .map(|disk| {
+                        // TODO: Maybe make an "attachment()" helper for disks?
+                        db::model::DiskAttachment {
+                            instance_id: disk.attach_instance_id.unwrap(),
+                            disk_id: disk.id,
+                            disk_name: disk.name.clone(),
+                            disk_state: disk.state(),
+                        }
+                    })
+                    .collect()
             })
             .map_err(|e| {
                 Error::from_diesel(
@@ -686,8 +497,7 @@ impl DataStore {
 
         let runtime = disk.runtime();
         bail_unless!(
-            runtime.state().state()
-                == &api::external::DiskState::Creating,
+            runtime.state().state() == &api::external::DiskState::Creating,
             "newly-created Disk has unexpected state: {:?}",
             runtime.disk_state
         );
@@ -707,33 +517,16 @@ impl DataStore {
         use db::diesel_schema::disk::dsl;
         let conn = self.pool.acquire_diesel().await?;
 
-        let mut query = dsl::disk
+        paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(project_id))
-            .limit(pagparams.limit.get().into())
-            .into_boxed();
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.gt(marker));
-                }
-                query.order(dsl::name.asc())
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some(marker) = pagparams.marker {
-                    query = query.filter(dsl::name.lt(marker));
-                }
-                query.order(dsl::name.desc())
-            }
-        };
-
-        query.load::<db::model::Disk>(&*conn).map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::Disk,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
+            .load::<db::model::Disk>(&*conn).map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Disk,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     pub async fn disk_update_runtime(
@@ -842,9 +635,7 @@ impl DataStore {
             // TODO(smklein): Update CTE to get the existing row
             // so we can return it in this error message
             Err(Error::InvalidRequest {
-                message: format!(
-                    "disk cannot be deleted in current state",
-                ),
+                message: "disk cannot be deleted in current state".to_string(),
             })
         }
 

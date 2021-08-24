@@ -416,10 +416,7 @@ impl Nexus {
          * to "Created".
          */
         self.db_datastore
-            .disk_update_runtime(
-                &disk_id,
-                &disk_created.runtime().detach(),
-            )
+            .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
             .await?;
 
         Ok(disk_created)
@@ -807,7 +804,7 @@ impl Nexus {
                     instance_id: instance.id,
                     disk_name: disk.name.clone(),
                     disk_id: disk.id,
-                    disk_state: disk.state().clone().into(),
+                    disk_state: disk.state().into(),
                 });
             }
         }
@@ -840,10 +837,7 @@ impl Nexus {
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
-            assert_eq!(
-                instance.id,
-                disk.attach_instance_id.unwrap()
-            );
+            assert_eq!(instance.id, disk.attach_instance_id.unwrap());
             Ok(DiskAttachment {
                 instance_id: instance.id,
                 disk_id: disk.id,
@@ -1010,13 +1004,8 @@ impl Nexus {
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime = sa
-            .disk_ensure(
-                disk.id,
-                disk.runtime().into(),
-                requested,
-            )
-            .await?;
+        let new_runtime =
+            sa.disk_ensure(disk.id, disk.runtime().into(), requested).await?;
         self.db_datastore
             .disk_update_runtime(&disk.id, &new_runtime.into())
             .await

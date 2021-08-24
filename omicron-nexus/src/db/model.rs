@@ -446,7 +446,6 @@ where
 #[table_name = "disk"]
 pub struct Disk {
     // IdentityMetadata
-
     pub id: Uuid,
     pub name: external::Name,
     pub description: String,
@@ -458,7 +457,6 @@ pub struct Disk {
     pub project_id: Uuid,
 
     // DiskRuntimeState
-
     /// runtime state of the Disk
     pub disk_state: String,
     pub attach_instance_id: Option<Uuid>,
@@ -523,9 +521,11 @@ impl Disk {
         //
         // TODO: also impl'd for DiskRuntimeState
         DiskState::new(
-            external::DiskState::try_from(
-                (self.disk_state.as_str(), self.attach_instance_id)
-            ).unwrap()
+            external::DiskState::try_from((
+                self.disk_state.as_str(),
+                self.attach_instance_id,
+            ))
+            .unwrap(),
         )
     }
 
@@ -622,9 +622,11 @@ impl DiskRuntimeState {
         // TODO: If we could store disk state in-line, we could avoid the
         // unwrap. Would prefer to parse it as such.
         DiskState::new(
-            external::DiskState::try_from(
-                (self.disk_state.as_str(), self.attach_instance_id)
-            ).unwrap()
+            external::DiskState::try_from((
+                self.disk_state.as_str(),
+                self.attach_instance_id,
+            ))
+            .unwrap(),
         )
     }
 }
@@ -634,7 +636,10 @@ impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn from(runtime: internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: runtime.disk_state.label().to_string(),
-            attach_instance_id: runtime.disk_state.attached_instance_id().map(|id| *id),
+            attach_instance_id: runtime
+                .disk_state
+                .attached_instance_id()
+                .map(|id| *id),
             gen: runtime.gen,
             time_updated: runtime.time_updated,
         }
