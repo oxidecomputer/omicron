@@ -20,7 +20,17 @@
 
 use super::Pool;
 use chrono::Utc;
+use diesel::helper_types::{Filter, IntoBoxed, Limit};
+use diesel::expression::{AsExpression, NonAggregate};
+use diesel::expression::helper_types::*;
+use diesel::query_dsl::methods as query_methods;
+use diesel::query_builder::QueryFragment;
+use diesel::pg::types::sql_types::Uuid as SqlUuid;
+use diesel::prelude::*;
+use diesel::pg::Pg;
+use diesel::query_builder::*;
 use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel::query_builder::AsQuery;
 use diesel::query_dsl::methods::BoxedDsl;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -62,48 +72,48 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateAndQueryResult};
 //
 // TODO: Maybe move this thing to a different file?
 
-type BoxedOutput<'a, Q, DB> = <Q as BoxedDsl<'a, DB>>::Output;
-type LimitOutput<Q> = <Q as diesel::query_dsl::methods::LimitDsl>::Output;
 
-trait Paginatable<'a, Q, DB>
-where
-    DB: diesel::backend::Backend,
-    Q: BoxedDsl<'a, DB>,
-    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
-{
-    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> LimitOutput<BoxedOutput<'a, Q, DB>>;
+/*
+trait Paginate<'a> {
+    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> BoxedQuery<'a>;
 }
 
-impl<'a, Q, DB> Paginatable<'a, Q, DB> for Q
-where
-    DB: diesel::backend::Backend,
-    Q: QueryDsl + BoxedDsl<'a, DB>,
-    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
-{
-    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> LimitOutput<BoxedOutput<'a, Q, DB>>
-    {
-        let mut query = self
-            .into_boxed()
-            .limit(pagparams.limit.get().into());
-        query
+#[must_use = "Queries must be executed"]
+struct Paginated<P> {
+    query: P,
+}
 
+impl<P> AsQuery for Paginated<P>
+where
+    P: Query,
+{
+    type SqlType = P::SqlType;
+    type Query = P;
+
+    fn as_query(self) -> Self::Query {
+        self.query
     }
 }
 
-fn paginate<'a, Q, DB>(
-    query: Q,
-    pagparams: &DataPageParams<'_, Uuid>
-) -> LimitOutput<BoxedOutput<'a, Q, DB>>
+impl<P> RunQueryDsl<PgConnection> for Paginated<P> {}
+*/
+
+type BoxedQuery<'a, T> = BoxedSelectStatement<'a, <T as AsQuery>::SqlType, T, Pg>;
+
+pub fn paginated<'a, T, E, M>(table: T, column: E, pagparams: &DataPageParams<'a, M>) -> BoxedQuery<'a, T>
 where
-    DB: diesel::backend::Backend,
-    Q: QueryDsl + BoxedDsl<'a, DB>,
-    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
+    T: diesel::Table + AsQuery,
+    T::Query: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<'static, T>>,
+    E: 'a + ExpressionMethods + Sized + diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg>,
+    E::SqlType: diesel::sql_types::SingleValue,
+    &'a M: AsExpression<E::SqlType>, // + diesel::expression::Expression<SqlType = E::SqlType>,
+    <&'a M as AsExpression<<E as diesel::Expression>::SqlType>>::Expression: diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg>,
 {
-    let mut query = query
+    let query = table
         .into_boxed()
         .limit(pagparams.limit.get().into());
-    query
-/*
+    let query = query.filter(column.gt(pagparams.marker.unwrap()));
+    /*
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some(marker) = pagparams.marker {
@@ -118,8 +128,49 @@ where
             query.order(dsl::id.desc())
         }
     }
-*/
+    */
+    query
 }
+
+/*
+impl<'a, T> Paginate<'a> for T
+where
+    // We start with an input query that may be boxed.
+    T: diesel::Table + AsQuery + QueryDsl,
+    T::Query: query_methods::BoxedDsl<'a, Pg>,
+    // Once boxed, we should be able to apply a limit.
+
+{
+    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> BoxedQuery<'static>
+    {
+        use db::diesel_schema::project::dsl;
+        let mut query = self
+            .limit(pagparams.limit.get().into())
+            .filter(dsl::id.gt(pagparams.marker.unwrap()))
+            .into_boxed();
+        query
+
+
+            /*
+        match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::id.gt(marker));
+                }
+                query.order(dsl::id.asc())
+            }
+            dropshot::PaginationOrder::Descending => {
+                if let Some(marker) = pagparams.marker {
+                    query = query.filter(dsl::id.lt(marker));
+                }
+                query.order(dsl::id.desc())
+            }
+        }
+            */
+
+    }
+}
+*/
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -214,6 +265,24 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+    }
+
+    // TODO: deleteme
+    pub async fn projects_idk_call_paginate_for_me(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Project> {
+        use db::diesel_schema::project::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+        let query = paginated(dsl::project, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null());
+        query.load::<db::model::Project>(&*conn).map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::Project,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
     }
 
     pub async fn projects_list_by_id(
