@@ -21,6 +21,7 @@
 use super::Pool;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel::query_dsl::methods::BoxedDsl;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -55,6 +56,70 @@ use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateAndQueryResult};
+
+// TODO: The api would be better impl'd as a trait, but it might
+// be easier to get rev 1 working with a function.
+//
+// TODO: Maybe move this thing to a different file?
+
+type BoxedOutput<'a, Q, DB> = <Q as BoxedDsl<'a, DB>>::Output;
+type LimitOutput<Q> = <Q as diesel::query_dsl::methods::LimitDsl>::Output;
+
+trait Paginatable<'a, Q, DB>
+where
+    DB: diesel::backend::Backend,
+    Q: BoxedDsl<'a, DB>,
+    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
+{
+    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> LimitOutput<BoxedOutput<'a, Q, DB>>;
+}
+
+impl<'a, Q, DB> Paginatable<'a, Q, DB> for Q
+where
+    DB: diesel::backend::Backend,
+    Q: QueryDsl + BoxedDsl<'a, DB>,
+    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
+{
+    fn paginate(self, pagparams: &DataPageParams<'_, Uuid>) -> LimitOutput<BoxedOutput<'a, Q, DB>>
+    {
+        let mut query = self
+            .into_boxed()
+            .limit(pagparams.limit.get().into());
+        query
+
+    }
+}
+
+fn paginate<'a, Q, DB>(
+    query: Q,
+    pagparams: &DataPageParams<'_, Uuid>
+) -> LimitOutput<BoxedOutput<'a, Q, DB>>
+where
+    DB: diesel::backend::Backend,
+    Q: QueryDsl + BoxedDsl<'a, DB>,
+    BoxedOutput<'a, Q, DB>: QueryDsl + diesel::query_dsl::methods::LimitDsl,
+{
+    let mut query = query
+        .into_boxed()
+        .limit(pagparams.limit.get().into());
+    query
+/*
+    match pagparams.direction {
+        dropshot::PaginationOrder::Ascending => {
+            if let Some(marker) = pagparams.marker {
+                query = query.filter(dsl::id.gt(marker));
+            }
+            query.order(dsl::id.asc())
+        }
+        dropshot::PaginationOrder::Descending => {
+            if let Some(marker) = pagparams.marker {
+                query = query.filter(dsl::id.lt(marker));
+            }
+            query.order(dsl::id.desc())
+        }
+    }
+*/
+}
 
 pub struct DataStore {
     pool: Arc<Pool>,
