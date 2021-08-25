@@ -56,18 +56,29 @@ However, once these have been provided, the codebase should be buildable with `c
 
 **Prerequisites:**
 
-1. CockroachDB v20.2.5.
-
+. CockroachDB v20.2.5.
++
 The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
 On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
 Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
 
-2. ClickHouse >= v21.7.1.
-
+. ClickHouse >= v21.7.1.
++
 The test suite expects a running instance of the ClickHouse database server.
 The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `clickhouse/clickhouse`) to your PATH.
 You may also install ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
-
++
+. Additional software requirements:
++
+On an illumos based machine (Helios, OmniOS), make sure your packages are up to date, and you have the `brand/sparse` package:
++
+[source,text]
+----
+pkg install brand/sparse
+pkg install pkg:/package/pkg
+pkg update
+----
+ 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
@@ -141,6 +152,8 @@ Note that as the output indicates, this cluster will be available to anybody tha
 
 2. Start the ClickHouse database server:
 +
+Note that this expects the directory `/opt/oxide` to exist and be writable by the user running the database.
++
 [source,text]
 ----
 $ cargo run --bin omicron-dev -- ch-run
@@ -163,7 +176,7 @@ listening: http://127.0.0.1:12220
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent -- run $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
@@ -176,7 +189,15 @@ This repo includes a Dockerfile that builds an image containing the Nexus and sl
 
 == Quick demo
 
-There's a small demo tool called `./tools/oxapi_demo` that provides a slightly friendlier interface than `curl`, with the same output format.  Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
+There's a small demo tool called `./tools/oxapi_demo` that provides a slightly friendlier interface than `curl`, with the same output format.  To use the demo, the `node` and `json` programs should be installed and available in the users PATH:
+
+[source,text]
+----
+pkg install node-12
+npm i -g json
+----
+
+Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
 
 [source,text]
 ----
