@@ -48,40 +48,6 @@ impl Table for SagaNodeEvent {
     const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
-/** Describes the "Oximeter" table */
-pub struct Oximeter;
-impl Table for Oximeter {
-    type Model = db::model::OximeterInfo;
-    const TABLE_NAME: &'static str = "Oximeter";
-    const ALL_COLUMNS: &'static [&'static str] =
-        &["id", "time_created", "time_modified", "ip", "port"];
-}
-
-/** Describes the "MetricProducer" table */
-pub struct MetricProducer;
-impl Table for MetricProducer {
-    type Model = db::model::ProducerEndpoint;
-    const TABLE_NAME: &'static str = "MetricProducer";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "time_created",
-        "time_modified",
-        "ip",
-        "port",
-        "interval",
-        "route",
-    ];
-}
-
-/** Describes the "OximeterAssignment" table */
-pub struct OximeterAssignment;
-impl Table for OximeterAssignment {
-    type Model = db::model::OximeterAssignment;
-    const TABLE_NAME: &'static str = "OximeterAssignment";
-    const ALL_COLUMNS: &'static [&'static str] =
-        &["oximeter_id", "producer_id", "time_created"];
-}
-
 /** Describes the "Vpc" table */
 pub struct Vpc;
 impl Table for Vpc {
@@ -145,7 +111,6 @@ mod test {
     use super::Saga;
     use super::SagaNodeEvent;
     use super::Table;
-    use super::{MetricProducer, Oximeter, OximeterAssignment};
     use super::{NetworkInterface, Vpc, VpcSubnet};
     use omicron_common::dev;
     use std::collections::BTreeSet;
@@ -169,9 +134,6 @@ mod test {
 
         check_table_schema::<Saga>(&client).await;
         check_table_schema::<SagaNodeEvent>(&client).await;
-        check_table_schema::<Oximeter>(&client).await;
-        check_table_schema::<MetricProducer>(&client).await;
-        check_table_schema::<OximeterAssignment>(&client).await;
         check_table_schema::<Vpc>(&client).await;
         check_table_schema::<VpcSubnet>(&client).await;
         check_table_schema::<NetworkInterface>(&client).await;

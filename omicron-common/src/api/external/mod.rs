@@ -533,6 +533,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    Oximeter,
 }
 
 impl Display for ResourceType {
@@ -549,6 +550,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::Oximeter => "oximeter",
             }
         )
     }

@@ -9,10 +9,11 @@ async-trait = "0.1.51"
 bb8 = "0.7.1"
 bb8-postgres = "0.7.0"
 bb8-diesel = { git = "https://github.com/smklein/bb8-diesel", branch = "repolish" }
-diesel = { version = "1.4.6", features = ["postgres", "r2d2", "chrono", "uuidv07"] }
+diesel = { version = "1.4.6", features = ["postgres", "r2d2", "chrono", "uuidv07", "network-address"] }
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
+ipnetwork = "0.18"
 lazy_static = "1.4.0"
 libc = "0.2.98"
 newtype_derive = "0.1.6"

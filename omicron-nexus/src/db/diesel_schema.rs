@@ -43,7 +43,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        route -> Nullable<Text>,
+        base_route -> Nullable<Text>,
     }
 }
 

@@ -232,7 +232,7 @@ CREATE TABLE omicron.public.MetricProducer (
     port INT4 NOT NULL,
     interval FLOAT NOT NULL,
     /* TODO: Is this length appropriate? */
-    route STRING(512)
+    base_route STRING(512)
 );
 
 /*

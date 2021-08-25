@@ -448,15 +448,8 @@ impl DataStore {
             .map(|disks| {
                 disks
                     .into_iter()
-                    .map(|disk| {
-                        // TODO: Maybe make an "attachment()" helper for disks?
-                        db::model::DiskAttachment {
-                            instance_id: disk.attach_instance_id.unwrap(),
-                            disk_id: disk.id,
-                            disk_name: disk.name.clone(),
-                            disk_state: disk.state(),
-                        }
-                    })
+                    // Unwrap safety: filtered by instance_id in query.
+                    .map(|disk| disk.attachment().unwrap())
                     .collect()
             })
             .map_err(|e| {
@@ -644,10 +637,20 @@ impl DataStore {
         &self,
         info: &db::model::OximeterInfo,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        info.sql_serialize(&mut values);
-        sql_insert::<schema::Oximeter>(&client, &values).await
+        use db::diesel_schema::oximeter::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        diesel::insert_into(dsl::oximeter)
+            .values(info)
+            .execute(&*conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Oximeter,
+                    "Oximeter Info",
+                )
+            })?;
+        Ok(())
     }
 
     // Create a record for a new producer endpoint
@@ -655,10 +658,20 @@ impl DataStore {
         &self,
         producer: &db::model::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        producer.sql_serialize(&mut values);
-        sql_insert::<schema::MetricProducer>(&client, &values).await
+        use db::diesel_schema::metricproducer::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        diesel::insert_into(dsl::metricproducer)
+            .values(producer)
+            .execute(&*conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Oximeter,
+                    "Producer Endpoint",
+                )
+            })?;
+        Ok(())
     }
 
     // Create a record of an assignment of a producer to a collector
@@ -667,13 +680,21 @@ impl DataStore {
         oximeter_id: Uuid,
         producer_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let now = Utc::now();
-        let mut values = SqlValueSet::new();
-        values.set("time_created", &now);
-        let reg = db::model::OximeterAssignment { oximeter_id, producer_id };
-        reg.sql_serialize(&mut values);
-        sql_insert::<schema::OximeterAssignment>(&client, &values).await
+        use db::diesel_schema::oximeterassignment::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let assignment = db::model::OximeterAssignment::new(oximeter_id, producer_id);
+        diesel::insert_into(dsl::oximeterassignment)
+            .values(assignment)
+            .execute(&*conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Oximeter,
+                    "Oximeter Assignment",
+                )
+            })?;
+        Ok(())
     }
 
     /*

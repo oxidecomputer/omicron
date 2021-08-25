@@ -1,6 +1,6 @@
 //! Structures stored to the database.
 
-use super::diesel_schema::{disk, instance, project};
+use super::diesel_schema::{disk, instance, project, metricproducer, oximeter, oximeterassignment};
 use chrono::{DateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -13,7 +13,6 @@ use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
 use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
 use uuid::Uuid;
 
 use super::sql::SqlSerialize;
@@ -537,6 +536,21 @@ impl Disk {
             time_updated: self.time_updated,
         }
     }
+
+    pub fn attachment(&self) -> Option<external::DiskAttachment> {
+        if let Some(instance_id) = self.attach_instance_id {
+            Some(
+                external::DiskAttachment {
+                    instance_id,
+                    disk_id: self.id,
+                    disk_name: self.name.clone(),
+                    disk_state: self.state().into(),
+                }
+            )
+        } else {
+            None
+        }
+    }
 }
 
 /// Conversion to the external API type.
@@ -553,34 +567,6 @@ impl Into<external::Disk> for Disk {
         }
     }
 }
-
-/*
-/// Serialization to the DB.
-impl SqlSerialize for Disk {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("project_id", &self.project_id);
-        self.runtime.sql_serialize(output);
-        output.set("size_bytes", &self.size);
-        output.set("origin_snapshot", &self.create_snapshot_id);
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for Disk {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Disk {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
-            size: sql_row_value(value, "size_bytes")?,
-            runtime: DiskRuntimeState::try_from(value)?,
-        })
-    }
-}
-*/
 
 #[derive(AsChangeset, Clone, Debug)]
 #[table_name = "disk"]
@@ -657,30 +643,6 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     }
 }
 
-/*
-/// Serialization to the DB.
-impl SqlSerialize for DiskRuntimeState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.disk_state.sql_serialize(output);
-        output.set("state_generation", &self.gen);
-        output.set("time_state_updated", &self.time_updated);
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for DiskRuntimeState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskRuntimeState {
-            disk_state: DiskState::try_from(value)?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
-    }
-}
-*/
-
 // TODO: What to do with this type???
 
 #[derive(Clone, Debug, AsExpression)]
@@ -717,72 +679,20 @@ impl Into<external::DiskState> for DiskState {
     }
 }
 
-/// Serialization to the DB.
-impl SqlSerialize for DiskState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        let attach_id = &self.0.attached_instance_id().map(|id| *id);
-        output.set("attach_instance_id", attach_id);
-        output.set("disk_state", &self.0.label());
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for DiskState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let disk_state_str: &str = sql_row_value(value, "disk_state")?;
-        let instance_uuid: Option<Uuid> =
-            sql_row_value(value, "attach_instance_id")?;
-        Ok(DiskState(
-            external::DiskState::try_from((disk_state_str, instance_uuid))
-                .map_err(|e| Error::internal_error(&e))?,
-        ))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: external::Name,
-    pub disk_state: DiskState,
-}
-
-impl Into<external::DiskAttachment> for DiskAttachment {
-    fn into(self) -> external::DiskAttachment {
-        external::DiskAttachment {
-            instance_id: self.instance_id,
-            disk_id: self.disk_id,
-            disk_name: self.disk_name,
-            disk_state: self.disk_state.into(),
-        }
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for DiskAttachment {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskAttachment {
-            instance_id: sql_row_value(value, "attach_instance_id")?,
-            disk_id: sql_row_value(value, "id")?,
-            disk_name: sql_row_value(value, "name")?,
-            disk_state: DiskState::try_from(value)?,
-        })
-    }
-}
+pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Debug, Clone)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[table_name = "metricproducer"]
 pub struct ProducerEndpoint {
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
-    pub address: SocketAddr,
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
+    pub interval: f64,
     pub base_route: String,
-    pub interval: Duration,
 }
 
 impl ProducerEndpoint {
@@ -792,9 +702,10 @@ impl ProducerEndpoint {
             id: endpoint.id,
             time_created: now,
             time_modified: now,
-            address: endpoint.address,
+            ip: endpoint.address.ip().into(),
+            port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),
-            interval: endpoint.interval,
+            interval: endpoint.interval.as_secs_f64(),
         }
     }
 
@@ -804,114 +715,50 @@ impl ProducerEndpoint {
     }
 }
 
-impl SqlSerialize for ProducerEndpoint {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.id);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-        output.set("ip", &self.address.ip());
-        output.set("port", &i32::from(self.address.port()));
-        output.set("interval", &self.interval.as_secs_f64());
-        output.set("route", &self.base_route);
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let id: Uuid = sql_row_value(value, "id")?;
-        let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> =
-            sql_row_value(value, "time_modified")?;
-        let ip: IpAddr = sql_row_value(value, "ip")?;
-        let port: i32 = sql_row_value(value, "port")?;
-        let address = SocketAddr::new(ip, port as _);
-        let base_route: String = sql_row_value(value, "route")?;
-        let interval =
-            Duration::from_secs_f64(sql_row_value(value, "interval")?);
-        Ok(Self {
-            id,
-            time_created,
-            time_modified,
-            address,
-            base_route,
-            interval,
-        })
-    }
-}
-
 /// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone, Copy)]
+#[table_name = "oximeter"]
 pub struct OximeterInfo {
     /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
+    pub id: Uuid,
     /// When this resource was created.
     pub time_created: DateTime<Utc>,
     /// When this resource was last modified.
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
 }
 
 impl OximeterInfo {
     pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
-            collector_id: info.collector_id,
+            id: info.collector_id,
             time_created: now,
             time_modified: now,
-            address: info.address,
+            ip: info.address.ip().into(),
+            port: info.address.port().into(),
         }
     }
 }
 
-impl SqlSerialize for OximeterInfo {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.collector_id);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-        output.set("ip", &self.address.ip());
-        output.set("port", &i32::from(self.address.port()));
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let collector_id: Uuid = sql_row_value(value, "id")?;
-        let ip: IpAddr = sql_row_value(value, "ip")?;
-        let port: i32 = sql_row_value(value, "port")?;
-        let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> =
-            sql_row_value(value, "time_modified")?;
-        let address = SocketAddr::new(ip, port as _);
-        Ok(Self { collector_id, time_created, time_modified, address })
-    }
-}
-
 /// An assignment of an Oximeter instance to a metric producer for collection.
-#[derive(Debug, Clone, Copy)]
+#[derive(Queryable, Insertable, Debug, Clone, Copy)]
+#[table_name = "oximeterassignment"]
 pub struct OximeterAssignment {
     pub oximeter_id: Uuid,
     pub producer_id: Uuid,
+    pub time_created: DateTime<Utc>,
 }
 
-impl SqlSerialize for OximeterAssignment {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("oximeter_id", &self.oximeter_id);
-        output.set("producer_id", &self.producer_id);
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let oximeter_id: Uuid = sql_row_value(value, "oximeter_id")?;
-        let producer_id: Uuid = sql_row_value(value, "producer_id")?;
-        Ok(Self { oximeter_id, producer_id })
+impl OximeterAssignment {
+    pub fn new(oximeter_id: Uuid, producer_id: Uuid) -> Self {
+        Self {
+            oximeter_id,
+            producer_id,
+            time_created: Utc::now(),
+        }
     }
 }
 
