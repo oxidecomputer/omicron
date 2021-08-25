@@ -1016,15 +1016,17 @@ impl Nexus {
         &self,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<Vpc> {
+    ) -> ListResultVec<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        let db_stream =
-            self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
-        let api_stream = Box::pin(
-            db_stream.map(|result| result.map(|db_vpc| db_vpc.into())),
-        );
-        Ok(api_stream)
+        let vpcs = self
+            .db_datastore
+            .project_list_vpcs(&project_id, pagparams)
+            .await?
+            .into_iter()
+            .map(|vpc| vpc.into())
+            .collect::<Vec<Vpc>>();
+        Ok(vpcs)
     }
 
     pub async fn project_create_vpc(
@@ -1066,10 +1068,7 @@ impl Nexus {
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self
-            .db_datastore
-            .project_update_vpc(&vpc.identity.id, params)
-            .await?)
+        Ok(self.db_datastore.project_update_vpc(&vpc.id, params).await?)
     }
 
     pub async fn project_delete_vpc(

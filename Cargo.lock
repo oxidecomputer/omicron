@@ -367,6 +367,8 @@ dependencies = [
  "byteorder",
  "chrono",
  "diesel_derives",
+ "ipnetwork",
+ "libc",
  "pq-sys",
  "r2d2",
  "uuid",
@@ -959,6 +961,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipnetwork"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4088d739b183546b239688ddbc79891831df421773df95e236daf7867866d355"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,6 +1318,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "ipnetwork",
  "lazy_static",
  "libc",
  "newtype_derive",
@@ -2413,7 +2425,6 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#8da3eda3bd3fd5d077872c687bb2de1a8b326982"
 dependencies = [
  "anyhow",
  "async-trait",

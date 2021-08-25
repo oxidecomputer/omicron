@@ -1,6 +1,9 @@
 //! Structures stored to the database.
 
-use super::diesel_schema::{disk, instance, project, metricproducer, oximeter, oximeterassignment};
+use super::diesel_schema::{
+    disk, instance, metricproducer, networkinterface, oximeter,
+    oximeterassignment, project, vpc, vpcsubnet,
+};
 use chrono::{DateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -12,7 +15,7 @@ use omicron_common::api::external::{
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 use super::sql::SqlSerialize;
@@ -539,14 +542,12 @@ impl Disk {
 
     pub fn attachment(&self) -> Option<external::DiskAttachment> {
         if let Some(instance_id) = self.attach_instance_id {
-            Some(
-                external::DiskAttachment {
-                    instance_id,
-                    disk_id: self.id,
-                    disk_name: self.name.clone(),
-                    disk_state: self.state().into(),
-                }
-            )
+            Some(external::DiskAttachment {
+                instance_id,
+                disk_id: self.id,
+                disk_name: self.name.clone(),
+                disk_state: self.state().into(),
+            })
         } else {
             None
         }
@@ -754,17 +755,20 @@ pub struct OximeterAssignment {
 
 impl OximeterAssignment {
     pub fn new(oximeter_id: Uuid, producer_id: Uuid) -> Self {
-        Self {
-            oximeter_id,
-            producer_id,
-            time_created: Utc::now(),
-        }
+        Self { oximeter_id, producer_id, time_created: Utc::now() }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "vpc"]
 pub struct Vpc {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub project_id: Uuid,
     pub dns_name: external::Name,
 }
@@ -775,10 +779,28 @@ impl Vpc {
         project_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
+        let identity = IdentityMetadata::new(vpc_id, params.identity);
         Self {
-            identity: IdentityMetadata::new(vpc_id, params.identity),
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
             project_id,
             dns_name: params.dns_name,
+        }
+    }
+
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
         }
     }
 }
@@ -786,7 +808,7 @@ impl Vpc {
 impl Into<external::Vpc> for Vpc {
     fn into(self) -> external::Vpc {
         external::Vpc {
-            identity: self.identity.into(),
+            identity: self.identity().into(),
             project_id: self.project_id,
             dns_name: self.dns_name,
             // VPC subnets are accessed through a separate row lookup.
@@ -795,66 +817,82 @@ impl Into<external::Vpc> for Vpc {
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for Vpc {
-    type Error = Error;
+#[derive(AsChangeset)]
+#[table_name = "vpc"]
+pub struct VpcUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub dns_name: Option<external::Name>,
+}
 
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            dns_name: sql_row_value(value, "dns_name")?,
-        })
+impl From<external::VpcUpdateParams> for VpcUpdate {
+    fn from(params: external::VpcUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            dns_name: params.dns_name,
+        }
     }
 }
 
-impl SqlSerialize for Vpc {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("project_id", &self.project_id);
-        output.set("dns_name", &self.dns_name);
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "vpcsubnet"]
 pub struct VpcSubnet {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<external::Ipv4Net>,
-    pub ipv6_block: Option<external::Ipv6Net>,
+    pub ipv4_block: Option<ipnetwork::IpNetwork>,
+    pub ipv6_block: Option<ipnetwork::IpNetwork>,
 }
 
-impl TryFrom<&tokio_postgres::Row> for VpcSubnet {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            ipv4_block: sql_row_value(value, "ipv4_block")?,
-            ipv6_block: sql_row_value(value, "ipv6_block")?,
-        })
+impl VpcSubnet {
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "networkinterface"]
 pub struct NetworkInterface {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
-    pub mac: external::MacAddr,
-    pub ip: IpAddr,
+    // TODO: Parse as str, keep MacAddr type?
+    // This would be possible with ToSql/FromSql for a new type.
+    //    pub mac: external::MacAddr,
+    pub mac: String,
+    pub ip: ipnetwork::IpNetwork,
 }
 
-impl TryFrom<&tokio_postgres::Row> for NetworkInterface {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            subnet_id: sql_row_value(value, "subnet_id")?,
-            mac: sql_row_value(value, "mac")?,
-            ip: sql_row_value(value, "ip")?,
-        })
+impl NetworkInterface {
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
     }
 }

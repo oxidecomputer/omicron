@@ -7,7 +7,6 @@
 
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 use super::sql::LookupKey;
@@ -48,70 +47,11 @@ impl Table for SagaNodeEvent {
     const LIVE_CONDITIONS: &'static str = "TRUE";
 }
 
-/** Describes the "Vpc" table */
-pub struct Vpc;
-impl Table for Vpc {
-    type Model = db::model::Vpc;
-    const TABLE_NAME: &'static str = "Vpc";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_modified",
-        "time_deleted",
-        "project_id",
-        "dns_name",
-    ];
-}
-
-impl ResourceTable for Vpc {
-    const RESOURCE_TYPE: ResourceType = ResourceType::Vpc;
-}
-
-/** Describes the "VpcSubnet" table */
-pub struct VpcSubnet;
-impl Table for VpcSubnet {
-    type Model = db::model::VpcSubnet;
-    const TABLE_NAME: &'static str = "VpcSubnet";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_modified",
-        "time_deleted",
-        "vpc_id",
-        "ipv4_block",
-        "ipv6_block",
-    ];
-}
-
-/** Describes the "NetworkInterface" table */
-pub struct NetworkInterface;
-impl Table for NetworkInterface {
-    type Model = db::model::NetworkInterface;
-    const TABLE_NAME: &'static str = "NetworkInterface";
-    const ALL_COLUMNS: &'static [&'static str] = &[
-        "id",
-        "name",
-        "description",
-        "time_created",
-        "time_modified",
-        "time_deleted",
-        "vpc_id",
-        "subnet_id",
-        "mac",
-        "ip",
-    ];
-}
-
 #[cfg(test)]
 mod test {
     use super::Saga;
     use super::SagaNodeEvent;
     use super::Table;
-    use super::{NetworkInterface, Vpc, VpcSubnet};
     use omicron_common::dev;
     use std::collections::BTreeSet;
     use tokio_postgres::types::ToSql;
@@ -134,9 +74,6 @@ mod test {
 
         check_table_schema::<Saga>(&client).await;
         check_table_schema::<SagaNodeEvent>(&client).await;
-        check_table_schema::<Vpc>(&client).await;
-        check_table_schema::<VpcSubnet>(&client).await;
-        check_table_schema::<NetworkInterface>(&client).await;
 
         database.cleanup().await.expect("failed to clean up database");
         logctx.cleanup_successful();

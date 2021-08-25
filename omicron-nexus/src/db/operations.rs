@@ -77,31 +77,3 @@ pub async fn sql_execute(
         .await
         .map_err(|e| DbError::SqlError { sql: sql.to_owned(), source: e })
 }
-
-/**
- * Like [`sql_execute()`], but produces an error based on the row count:
- *
- * * the result of `mkzerror()` if there are no rows returned.  This is
- *   expected to be a suitable [`Error::ObjectNotFound`] error.
- * * a generic InternalError if more than one row is returned.  This is
- *   expected to be impossible for this query.  Otherwise, the caller should use
- *   [`sql_query()`].
- */
-/* TODO-debugging can we include the SQL in the Error */
-pub async fn sql_execute_maybe_one(
-    client: &tokio_postgres::Client,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-    mkzerror: impl Fn() -> Error,
-) -> Result<(), Error> {
-    sql_execute(client, sql, params).await.map_err(sql_error_generic).and_then(
-        |nrows| match nrows {
-            1 => Ok(()),
-            0 => Err(mkzerror()),
-            nrows_found => Err(sql_error_generic(DbError::BadRowCount {
-                sql: sql.to_owned(),
-                nrows_found,
-            })),
-        },
-    )
-}

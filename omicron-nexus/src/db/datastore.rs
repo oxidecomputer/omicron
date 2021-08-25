@@ -27,7 +27,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -39,19 +38,11 @@ use omicron_common::db::sql_row_value;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::operations::sql_execute_maybe_one;
 use super::schema;
-use super::schema::LookupByUniqueId;
-use super::schema::LookupByUniqueNameInProject;
-use super::schema::Vpc;
 use super::sql::SqlSerialize;
 use super::sql::SqlString;
 use super::sql::SqlValueSet;
-use super::sql::Table;
-use super::sql_operations::sql_fetch_page_by;
-use super::sql_operations::sql_fetch_row_by;
 use super::sql_operations::sql_insert;
-use super::sql_operations::sql_insert_unique_idempotent_and_fetch;
 use super::sql_operations::sql_update_precond;
 use crate::db;
 use crate::db::pagination::paginated;
@@ -683,7 +674,8 @@ impl DataStore {
         use db::diesel_schema::oximeterassignment::dsl;
         let conn = self.pool.acquire_diesel().await?;
 
-        let assignment = db::model::OximeterAssignment::new(oximeter_id, producer_id);
+        let assignment =
+            db::model::OximeterAssignment::new(oximeter_id, producer_id);
         diesel::insert_into(dsl::oximeterassignment)
             .values(assignment)
             .execute(&*conn)
@@ -781,14 +773,21 @@ impl DataStore {
         &self,
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResult<db::model::Vpc> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_page_by::<
-            LookupByUniqueNameInProject,
-            Vpc,
-            <Vpc as Table>::Model,
-        >(&client, (project_id,), pagparams, Vpc::ALL_COLUMNS)
-        .await
+    ) -> ListResultVec<db::model::Vpc> {
+        use db::diesel_schema::vpc::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        paginated(dsl::vpc, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(project_id))
+            .load::<db::model::Vpc>(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     pub async fn project_create_vpc(
@@ -797,20 +796,23 @@ impl DataStore {
         project_id: &Uuid,
         params: &api::external::VpcCreateParams,
     ) -> Result<db::model::Vpc, Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
-        vpc.sql_serialize(&mut values);
+        use db::diesel_schema::vpc::dsl;
+        let conn = self.pool.acquire_diesel().await?;
 
-        sql_insert_unique_idempotent_and_fetch::<Vpc, LookupByUniqueId>(
-            &client,
-            &values,
-            params.identity.name.as_str(),
-            "id",
-            (),
-            &vpc_id,
-        )
-        .await
+        let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
+        let vpc: db::model::Vpc = diesel::insert_into(dsl::vpc)
+            .values(&vpc)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result(&*conn)
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Vpc,
+                    vpc.name.as_str(),
+                )
+            })?;
+        Ok(vpc)
     }
 
     pub async fn project_update_vpc(
@@ -818,41 +820,22 @@ impl DataStore {
         vpc_id: &Uuid,
         params: &api::external::VpcUpdateParams,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let now = Utc::now();
+        use db::diesel_schema::vpc::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+        let updates: db::model::VpcUpdate = params.clone().into();
 
-        let mut values = SqlValueSet::new();
-        values.set("time_modified", &now);
-
-        if let Some(new_name) = &params.identity.name {
-            values.set("name", new_name);
-        }
-
-        if let Some(new_description) = &params.identity.description {
-            values.set("description", new_description);
-        }
-
-        if let Some(dns_name) = &params.dns_name {
-            values.set("dns_name", dns_name);
-        }
-
-        // dummy condition because sql_update_precond breaks otherwise
-        // TODO-cleanup: write sql_update that takes no preconditions?
-        let mut cond_sql = SqlString::new();
-        cond_sql.push_str("true");
-
-        sql_update_precond::<Vpc, LookupByUniqueId>(
-            &client,
-            (),
-            vpc_id,
-            &[],
-            &values,
-            cond_sql,
-        )
-        .await?;
-
-        // TODO-correctness figure out how to get sql_update_precond to return
-        // the whole row
+        diesel::update(dsl::vpc)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vpc_id))
+            .set(&updates)
+            .execute(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
         Ok(())
     }
 
@@ -861,29 +844,40 @@ impl DataStore {
         project_id: &Uuid,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let client = self.pool.acquire().await?;
-        sql_fetch_row_by::<LookupByUniqueNameInProject, Vpc>(
-            &client,
-            (project_id,),
-            vpc_name,
-        )
-        .await
+        use db::diesel_schema::vpc::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        dsl::vpc
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::name.eq(vpc_name))
+            .get_result(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ByName(vpc_name.as_str().to_owned()),
+                )
+            })
     }
 
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
-        let client = self.pool.acquire().await?;
+        use db::diesel_schema::vpc::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
         let now = Utc::now();
-        sql_execute_maybe_one(
-            &client,
-            format!(
-                "UPDATE {} SET time_deleted = $1 WHERE \
-                    time_deleted IS NULL AND id = $2",
-                Vpc::TABLE_NAME,
-            )
-            .as_str(),
-            &[&now, &vpc_id],
-            || Error::not_found_by_id(ResourceType::Vpc, vpc_id),
-        )
-        .await
+        diesel::update(dsl::vpc)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vpc_id))
+            .set(dsl::time_deleted.eq(now))
+            .get_result::<db::model::Vpc>(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
     }
 }

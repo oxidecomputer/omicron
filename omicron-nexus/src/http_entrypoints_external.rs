@@ -577,10 +577,7 @@ async fn instance_disks_get(
     };
     let disks = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
-        .await?
-        .into_iter()
-        .map(|d| d.into())
-        .collect();
+        .await?;
     Ok(HttpResponseOk(disks))
 }
 
@@ -684,14 +681,13 @@ async fn project_vpcs_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let vpc_stream = nexus
+    let vpcs = nexus
         .project_list_vpcs(
             &project_name,
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_list(vpc_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
 }
 
 /**
