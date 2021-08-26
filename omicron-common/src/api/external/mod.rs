@@ -977,10 +977,6 @@ impl From<steno::SagaView> for Saga {
     }
 }
 
-/*
- * TODO-robustness This type is unnecessarily loosey-goosey.  For example, see
- * the use of Options in the "Done" variant.
- */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "state")]
