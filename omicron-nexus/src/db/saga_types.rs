@@ -10,11 +10,13 @@
  * conversions.
  */
 
-use crate::db;
+use super::diesel_schema::{saga, saganodeevent};
+use diesel::backend::Backend;
+use diesel::deserialize::{self, FromSql};
+use diesel::serialize::{self, ToSql};
+use diesel::sql_types;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
-use omicron_common::db::sql_row_value;
-use omicron_common::impl_sql_wrapping;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::SagaId;
@@ -26,9 +28,37 @@ use uuid::Uuid;
  * For us, these will generally be Nexus instances, and the SEC id will match
  * the Nexus id.
  */
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub struct SecId(Uuid);
-impl_sql_wrapping!(SecId, Uuid);
+#[derive(
+    AsExpression, FromSqlRow, Clone, Copy, Eq, Ord, PartialEq, PartialOrd,
+)]
+#[sql_type = "sql_types::Uuid"]
+pub struct SecId(pub Uuid);
+
+impl<DB> ToSql<sql_types::Uuid, DB> for SecId
+where
+    DB: Backend,
+    Uuid: ToSql<sql_types::Uuid, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (&self.0 as &Uuid).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Uuid, DB> for SecId
+where
+    DB: Backend,
+    Uuid: FromSql<sql_types::Uuid, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        let id = Uuid::from_sql(bytes)?;
+        Ok(SecId(id))
+    }
+}
+
+// impl_sql_wrapping!(SecId, Uuid);
 
 // TODO-cleanup figure out how to use custom_derive here?
 NewtypeDebug! { () pub struct SecId(Uuid); }
@@ -44,6 +74,8 @@ impl From<&SecId> for Uuid {
 /**
  * Represents a row in the "Saga" table
  */
+#[derive(Queryable, Insertable, Clone, Debug)]
+#[table_name = "saga"]
 pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
@@ -56,68 +88,53 @@ pub struct Saga {
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
-impl TryFrom<&tokio_postgres::Row> for Saga {
-    type Error = Error;
-
-    fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let saga_state_str: String = sql_row_value(row, "saga_state")?;
-        let saga_state = steno::SagaCachedState::try_from(
-            saga_state_str.as_str(),
-        )
-        .map_err(|e| {
-            Error::internal_error(&format!(
-                "failed to parse saga state {:?}: {:#}",
-                saga_state_str, e
-            ))
-        })?;
-        Ok(Saga {
-            id: SagaId(sql_row_value::<_, Uuid>(row, "id")?),
-            creator: sql_row_value(row, "creator")?,
-            template_name: sql_row_value(row, "template_name")?,
-            time_created: sql_row_value(row, "time_created")?,
-            saga_params: sql_row_value(row, "saga_params")?,
-            saga_state: saga_state,
-            current_sec: sql_row_value(row, "current_sec")?,
-            adopt_generation: sql_row_value(row, "adopt_generation")?,
-            adopt_time: sql_row_value(row, "adopt_time")?,
-        })
-    }
-}
-
-impl db::sql::SqlSerialize for Saga {
-    fn sql_serialize(&self, output: &mut db::SqlValueSet) {
-        output.set("id", &self.id.0);
-        output.set("creator", &self.creator);
-        output.set("template_name", &self.template_name);
-        output.set("time_created", &self.time_created);
-        output.set("saga_params", &self.saga_params);
-        output.set("saga_state", &self.saga_state.to_string());
-        output.set("current_sec", &self.current_sec);
-        output.set("adopt_generation", &self.adopt_generation);
-        output.set("adopt_time", &self.adopt_time);
-    }
-}
-
-/**
- * Represents a row in the "SagaNodeEvent" table
- */
-#[derive(Clone, Debug)]
+// TODO: Make this one aligned with DB
+// TODO: Make another struct representing the "parsed" thing
+// TODO: do the same with other struct with parsed types
+/// Represents a row in the "SagaNodeEvent" table
+#[derive(Queryable, Insertable, Clone, Debug)]
+#[table_name = "saganodeevent"]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,
     pub node_id: steno::SagaNodeId,
-    pub event_type: steno::SagaNodeEventType,
+    pub event_type: String,
+    pub data: Option<serde_json::Value>,
     pub event_time: chrono::DateTime<chrono::Utc>,
     pub creator: SecId,
 }
 
-impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
+impl SagaNodeEvent {
+    pub fn new(event: steno::SagaNodeEvent, creator: SecId) -> Self {
+        let data = match event.event_type {
+            steno::SagaNodeEventType::Succeeded(ref data) => {
+                Some((**data).clone())
+            }
+            steno::SagaNodeEventType::Failed(ref err) => {
+                // It's hard to imagine how this serialize step could fail.  If
+                // we're worried that it could, we could instead store the
+                // serialized value directly in the `SagaNodeEvent`.  We'd be
+                // forced to construct it in a context where failure could be
+                // handled.
+                Some(serde_json::to_value(err).unwrap())
+            }
+            _ => None,
+        };
+
+        Self {
+            saga_id: event.saga_id,
+            node_id: event.node_id,
+            event_type: event.event_type.label().to_string(),
+            data,
+            event_time: chrono::Utc::now(),
+            creator,
+        }
+    }
+}
+
+impl TryFrom<SagaNodeEvent> for steno::SagaNodeEvent {
     type Error = Error;
-
-    fn try_from(row: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let event_data: Option<serde_json::Value> = sql_row_value(row, "data")?;
-        let event_name: String = sql_row_value(row, "event_type")?;
-
-        let event_type = match (event_name.as_str(), event_data) {
+    fn try_from(ours: SagaNodeEvent) -> Result<Self, Self::Error> {
+        let event_type = match (ours.event_type.as_str(), ours.data) {
             ("started", None) => steno::SagaNodeEventType::Started,
             ("succeeded", Some(d)) => {
                 steno::SagaNodeEventType::Succeeded(Arc::new(d))
@@ -143,58 +160,10 @@ impl TryFrom<&tokio_postgres::Row> for SagaNodeEvent {
             }
         };
 
-        let node_id_i64: i64 = sql_row_value(row, "node_id")?;
-        let node_id_u32 = u32::try_from(node_id_i64)
-            .map_err(|_| Error::internal_error("node id out of range"))?;
-        let node_id = steno::SagaNodeId::from(node_id_u32);
-
-        Ok(SagaNodeEvent {
-            saga_id: SagaId(sql_row_value::<_, Uuid>(row, "saga_id")?),
-            node_id,
-            event_type,
-            event_time: sql_row_value(row, "event_time")?,
-            creator: sql_row_value(row, "creator")?,
-        })
-    }
-}
-
-impl db::sql::SqlSerialize for SagaNodeEvent {
-    fn sql_serialize(&self, output: &mut db::SqlValueSet) {
-        let (event_name, event_data) = match self.event_type {
-            steno::SagaNodeEventType::Started => ("started", None),
-            steno::SagaNodeEventType::Succeeded(ref d) => {
-                ("succeeded", Some((**d).clone()))
-            }
-            steno::SagaNodeEventType::Failed(ref d) => {
-                /*
-                 * It's hard to imagine how this serialize step could fail.  If
-                 * we're worried that it could, we could instead store the
-                 * serialized value directly in the `SagaNodeEvent`.  We'd be
-                 * forced to construct it in a context where failure could be
-                 * handled.
-                 */
-                let json = serde_json::to_value(d).unwrap();
-                ("failed", Some(json))
-            }
-            steno::SagaNodeEventType::UndoStarted => ("undo_started", None),
-            steno::SagaNodeEventType::UndoFinished => ("undo_finished", None),
-        };
-
-        output.set("saga_id", &Uuid::from(self.saga_id));
-        output.set("node_id", &i64::from(u32::from(self.node_id)));
-        output.set("event_type", &event_name);
-        output.set("data", &event_data);
-        output.set("event_time", &self.event_time);
-        output.set("creator", &self.creator);
-    }
-}
-
-impl From<&SagaNodeEvent> for steno::SagaNodeEvent {
-    fn from(ours: &SagaNodeEvent) -> Self {
-        steno::SagaNodeEvent {
+        Ok(steno::SagaNodeEvent {
             saga_id: ours.saga_id,
             node_id: ours.node_id,
-            event_type: ours.event_type.clone(),
-        }
+            event_type,
+        })
     }
 }

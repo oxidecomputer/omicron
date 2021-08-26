@@ -172,13 +172,13 @@ CREATE TABLE omicron.public.Disk (
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
     disk_state STRING(15) NOT NULL,
-    time_state_updated TIMESTAMPTZ NOT NULL,
-    state_generation INT NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
      * one Instance at a time.
      */
     attach_instance_id UUID,
+    state_generation INT NOT NULL,
+    time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
@@ -361,7 +361,7 @@ CREATE TABLE omicron.public.Saga (
      * - number of adoptions?
      */
     saga_state STRING(31) NOT NULL, /* see SagaState above */
-    current_sec UUID NOT NULL,
+    current_sec UUID,
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
 );

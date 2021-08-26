@@ -99,7 +99,7 @@ table! {
         time_created -> Timestamptz,
         saga_params -> Jsonb,
         saga_state -> Text,
-        current_sec -> Uuid,
+        current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
     }

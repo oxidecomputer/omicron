@@ -3,14 +3,15 @@
  */
 
 use crate::db;
-use crate::db::schema;
-use crate::db::sql::Table;
-use crate::db::sql_operations::sql_paginate;
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 use steno::SagaTemplateGeneric;
@@ -128,20 +129,24 @@ async fn list_unfinished_sagas(
      * step, not recovering all the individual sagas.
      */
     trace!(&log, "listing sagas");
-    let client = pool.acquire().await?;
+    use db::diesel_schema::saga::dsl;
+    let conn = pool.acquire_diesel().await?;
 
-    let mut sql = db::sql::SqlString::new();
-    let saga_state_done = steno::SagaCachedState::Done.to_string();
-    let p1 = sql.next_param(&saga_state_done);
-    let p2 = sql.next_param(sec_id);
-    sql.push_str(&format!("saga_state != {} AND current_sec = {}", p1, p2));
-
-    sql_paginate::<
-        schema::LookupGenericByUniqueId,
-        schema::Saga,
-        <schema::Saga as Table>::Model,
-    >(&client, (), schema::Saga::ALL_COLUMNS, sql)
-    .await
+    // TODO: ... do we want this to be paginated? Why?
+    // The old impl used pagination, but then proceeded to read everything
+    // anyway?
+    // (we could that too with a synthetic pagparams + loop, I guess?)
+    dsl::saga
+        .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
+        .filter(dsl::current_sec.eq(sec_id))
+        .load(&*conn)
+        .map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::SagaDbg,
+                LookupType::ById(sec_id.0),
+            )
+        })
 }
 
 /**
@@ -215,24 +220,26 @@ pub async fn load_saga_log(
     pool: &db::Pool,
     saga: &db::saga_types::Saga,
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
-    let client = pool.acquire().await?;
-    let mut extra_sql = db::sql::SqlString::new();
-    extra_sql.push_str("TRUE");
+    use db::diesel_schema::saganodeevent::dsl;
+    let conn = pool.acquire_diesel().await?;
 
-    let log_records = sql_paginate::<
-        schema::LookupSagaNodeEvent,
-        schema::SagaNodeEvent,
-        <schema::SagaNodeEvent as Table>::Model,
-    >(
-        &client,
-        (&saga.id.0,),
-        schema::SagaNodeEvent::ALL_COLUMNS,
-        extra_sql,
-    )
-    .await?;
+    // TODO: Again, should this be paginated?
+    // We proceed to read everything anyway.
+    let log_records: Vec<steno::SagaNodeEvent> = dsl::saganodeevent
+        .filter(dsl::saga_id.eq(saga.id))
+        // Load DB SagaNodeEvent type from the database.
+        .load::<db::saga_types::SagaNodeEvent>(&*conn)
+        .map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::SagaDbg,
+                LookupType::ById(saga.id.0),
+            )
+        })?
+        .into_iter()
+        // Parse the DB type into the steno type.
+        .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
+        .collect::<Result<_, Error>>()?;
 
-    Ok(log_records
-        .iter()
-        .map(steno::SagaNodeEvent::from)
-        .collect::<Vec<steno::SagaNodeEvent>>())
+    Ok(log_records)
 }

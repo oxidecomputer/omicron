@@ -69,7 +69,8 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.steno]
 git = "https://github.com/oxidecomputer/steno"
-branch = "main"
+# TODO: Go back to main after this is merged?
+branch = "diesel"
 
 [dependencies.tokio]
 version = "1.10"

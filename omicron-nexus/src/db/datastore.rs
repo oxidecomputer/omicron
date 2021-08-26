@@ -34,16 +34,9 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
-use omicron_common::db::sql_row_value;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::schema;
-use super::sql::SqlSerialize;
-use super::sql::SqlString;
-use super::sql::SqlValueSet;
-use super::sql_operations::sql_insert;
-use super::sql_operations::sql_update_precond;
 use crate::db;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
@@ -697,22 +690,41 @@ impl DataStore {
         &self,
         saga: &db::saga_types::Saga,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        saga.sql_serialize(&mut values);
-        sql_insert::<schema::Saga>(&client, &values).await
+        use db::diesel_schema::saga::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        diesel::insert_into(dsl::saga).values(saga).execute(&*conn).map_err(
+            |e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::SagaDbg,
+                    &saga.template_name,
+                )
+            },
+        )?;
+        Ok(())
     }
 
     pub async fn saga_create_event(
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        event.sql_serialize(&mut values);
+        use db::diesel_schema::saganodeevent::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
-        sql_insert::<schema::SagaNodeEvent>(&client, &values).await
+        diesel::insert_into(dsl::saganodeevent)
+            .values(event)
+            .execute(&*conn)
+            .map_err(|e| {
+            Error::from_diesel_create(
+                e,
+                ResourceType::SagaDbg,
+                event.event_type.as_str(),
+            )
+        })?;
+        Ok(())
     }
 
     pub async fn saga_update_state(
@@ -722,51 +734,41 @@ impl DataStore {
         current_sec: db::saga_types::SecId,
         current_adopt_generation: Generation,
     ) -> Result<(), Error> {
-        let client = self.pool.acquire().await?;
-        let mut values = SqlValueSet::new();
-        values.set("saga_state", &new_state.to_string());
-        let mut precond_sql = SqlString::new();
-        let p1 = precond_sql.next_param(&current_sec);
-        let p2 = precond_sql.next_param(&current_adopt_generation);
-        precond_sql.push_str(&format!(
-            "current_sec = {} AND adopt_generation = {}",
-            p1, p2
-        ));
-        let update = sql_update_precond::<
-            schema::Saga,
-            schema::LookupGenericByUniqueId,
-        >(
-            &client,
-            (),
-            &saga_id.0,
-            &["current_sec", "adopt_generation", "saga_state"],
-            &values,
-            precond_sql,
-        )
-        .await?;
-        let row = &update.found_state;
-        let found_sec: Option<&str> = sql_row_value(row, "found_current_sec")
-            .unwrap_or(Some("(unknown)"));
-        let found_gen =
-            sql_row_value::<_, Generation>(row, "found_adopt_generation")
-                .map(|i| i.to_string())
-                .unwrap_or_else(|_| "(unknown)".to_owned());
-        let found_saga_state =
-            sql_row_value::<_, String>(row, "found_saga_state")
-                .unwrap_or_else(|_| "(unknown)".to_owned());
-        bail_unless!(update.updated,
-            "failed to update saga {:?} with state {:?}: preconditions not met: \
-            expected current_sec = {:?}, adopt_generation = {:?}, \
-            but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}", 
-            saga_id,
-            new_state,
-            current_sec,
-            current_adopt_generation,
-            found_sec,
-            found_gen,
-            found_saga_state,
-        );
-        Ok(())
+        use db::diesel_schema::saga::dsl;
+        let conn = self.pool.acquire_diesel().await?;
+
+        let result = diesel::update(dsl::saga)
+            .filter(dsl::id.eq(saga_id))
+            .filter(dsl::current_sec.eq(current_sec))
+            .filter(dsl::adopt_generation.eq(current_adopt_generation))
+            .set(dsl::saga_state.eq(new_state.to_string()))
+            .check_if_exists(saga_id)
+            .execute_and_check::<db::saga_types::Saga>(&*conn)
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(saga_id.0),
+                )
+            })?;
+
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
+                message: format!(
+                    "failed to update saga {:?} with state {:?}: preconditions not met: \
+                    expected current_sec = {:?}, adopt_generation = {:?}, \
+                    but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}",
+                    saga_id,
+                    new_state,
+                    current_sec,
+                    current_adopt_generation,
+                    result.found.current_sec,
+                    result.found.adopt_generation,
+                    result.found.saga_state,
+                )
+            }),
+        }
     }
 
     pub async fn project_list_vpcs(

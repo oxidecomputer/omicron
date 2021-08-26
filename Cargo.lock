@@ -371,6 +371,7 @@ dependencies = [
  "libc",
  "pq-sys",
  "r2d2",
+ "serde_json",
  "uuid",
 ]
 
@@ -2425,11 +2426,12 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#8da3eda3bd3fd5d077872c687bb2de1a8b326982"
+source = "git+https://github.com/oxidecomputer/steno?branch=diesel#1052216d8fa390e5ed1f4ff179205f8d3688def5"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "diesel",
  "futures",
  "newtype_derive",
  "petgraph",

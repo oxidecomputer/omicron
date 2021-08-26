@@ -18,9 +18,6 @@ use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-use super::sql::SqlSerialize;
-use super::sql::SqlValueSet;
-
 // TODO: Break up types into multiple files
 
 // NOTE: This object is not currently stored in the database.
@@ -103,20 +100,6 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             time_modified: metadata.time_modified,
             time_deleted: None,
         }
-    }
-}
-
-/// Serialization to DB.
-impl SqlSerialize for IdentityMetadata {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.id);
-        output.set("name", &self.name);
-        output.set("description", &self.description);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-
-        // TODO: Is this right? When should this be set?
-        output.set("time_deleted", &(None as Option<DateTime<Utc>>));
     }
 }
 
