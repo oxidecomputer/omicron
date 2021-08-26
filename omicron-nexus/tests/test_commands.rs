@@ -114,23 +114,8 @@ fn test_nexus_openapi() {
     assert_eq!(spec.openapi, "3.0.3");
     assert_eq!(spec.info.title, "Oxide Region API");
     assert_eq!(spec.info.version, "0.0.1");
-
-    /*
-     * Spot check a couple of items.
-     */
     assert!(spec.paths.len() > 0);
     assert!(spec.paths.get("/projects").is_some());
 
-    /*
-     * Check for lint errors.
-     */
-    let errors = openapi_lint::validate(&spec);
-    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
-
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
     assert_contents("tests/output/nexus-openapi.json", &stdout_text);
 }
