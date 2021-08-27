@@ -67,6 +67,7 @@ Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/inst
 The test suite expects a running instance of the ClickHouse database server.
 The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `clickhouse/clickhouse`) to your PATH.
 You may also install ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
+See <<_configuring_clickhouse>> for details on ClickHouse's setup and configuration files.
 +
 . Additional software requirements:
 +
@@ -86,7 +87,7 @@ You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** usin
 To **run Omicron** you need to run four programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
-* a ClickHouse server. You may use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
+* a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
@@ -151,8 +152,6 @@ omicron-dev: populated database
 Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
 
 2. Start the ClickHouse database server:
-+
-Note that this expects the directory `/opt/oxide` to exist and be writable by the user running the database.
 +
 [source,text]
 ----
@@ -542,3 +541,29 @@ See also `log.if_exists`.
 |If `log.mode` is `"file"`, this property specifies what to do if the destination log file already exists.  Valid values include `"append"` (which appends to the existing file), `"truncate"` (which truncates the existing file and then uses it as though it had just been created), and `"fail"` (which causes the server to exit immediately with an error).
 
 |===
+
+=== Configuring ClickHouse
+
+The ClickHouse binary uses several sources for its configuration. The binary expects an XML
+config file, usually named `config.xml` to be available, or one may be specified with the
+`-C` command-line flag. The binary also includes a minimal configuration _embedded_ within
+it, which will be used if no configuration file is given or present in the current directory.
+The server also accepts command-line flags for overriding the values of the configuration
+parameters.
+
+The packages downloaded by `ci_download_clickhouse` include a `config.xml` file with them.
+You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
+manually, you can start the server with:
+
+[source,text]
+$ /path/to/clickhouse server --config-file /path/to/config.xml
+
+The configuration file contains a large number of parameters, but most of them are described
+with comments in the included `config.xml`, or you may learn more about them
+https://clickhouse.tech/docs/en/operations/server-configuration-parameters/settings/[here]
+and https://clickhouse.tech/docs/en/operations/settings/[here]. Parameters may be updated
+in the `config.xml`, and the server will automatically reload them. You may also specify
+many of them on the command-line with:
+
+[source,text]
+$ /path/to/clickhouse server --config-file /path/to/config.xml -- --param_name param_value ...
