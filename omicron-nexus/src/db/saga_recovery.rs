@@ -2,8 +2,9 @@
  * Handles recovery of sagas
  */
 
+use bb8_diesel::AsyncRunQueryDsl;
 use crate::db;
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -130,7 +131,6 @@ async fn list_unfinished_sagas(
      */
     trace!(&log, "listing sagas");
     use db::diesel_schema::saga::dsl;
-    let conn = pool.acquire_diesel().await?;
 
     // TODO: ... do we want this to be paginated? Why?
     // The old impl used pagination, but then proceeded to read everything
@@ -138,8 +138,9 @@ async fn list_unfinished_sagas(
     // (we could that too with a synthetic pagparams + loop, I guess?)
     dsl::saga
         .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
-        .filter(dsl::current_sec.eq(sec_id))
-        .load(&*conn)
+        .filter(dsl::current_sec.eq(*sec_id))
+        .load_async(pool.pool())
+        .await
         .map_err(|e| {
             Error::from_diesel(
                 e,
@@ -221,14 +222,14 @@ pub async fn load_saga_log(
     saga: &db::saga_types::Saga,
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
     use db::diesel_schema::saganodeevent::dsl;
-    let conn = pool.acquire_diesel().await?;
 
     // TODO: Again, should this be paginated?
     // We proceed to read everything anyway.
     let log_records: Vec<steno::SagaNodeEvent> = dsl::saganodeevent
         .filter(dsl::saga_id.eq(saga.id))
         // Load DB SagaNodeEvent type from the database.
-        .load::<db::saga_types::SagaNodeEvent>(&*conn)
+        .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
+        .await
         .map_err(|e| {
             Error::from_diesel(
                 e,

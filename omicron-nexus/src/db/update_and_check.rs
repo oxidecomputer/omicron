@@ -1,3 +1,4 @@
+use bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -78,15 +79,17 @@ type SerializedPrimaryKey<T> = <PrimaryKey<T> as diesel::Expression>::SqlType;
 impl<T, K, U, V> UpdateAndQueryStatement<T, K, U, V>
 where
     // Bounds to compare primary keys and ensure that they're queryable:
-    K: PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg>,
+    K: 'static + PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg> + Send,
     // Bounds which ensure an impl of LoadQuery exists:
     Pg: sql_types::HasSqlType<SerializedPrimaryKey<T>>,
     Pg: sql_types::HasSqlType<T::SqlType>,
     <Self as AsQuery>::Query: QueryFragment<Pg>,
     // Bound to implement QueryFragment:
-    T: Table,
+    T: 'static + Table + Send,
     SerializedPrimaryKey<T>: sql_types::NotNull,
     T::SqlType: sql_types::NotNull,
+    U: 'static + Send,
+    V: 'static + Send,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -94,15 +97,15 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub fn execute_and_check<Q>(
+    pub async fn execute_and_check<Q>(
         self,
-        conn: &PgConnection,
+        pool: &bb8::Pool<DieselConnectionManager<diesel::PgConnection>>
     ) -> Result<UpdateAndQueryResult<Q>, diesel::result::Error>
     where
-        Q: Queryable<T::SqlType, diesel::pg::Pg> + std::fmt::Debug,
+        Q: Queryable<T::SqlType, diesel::pg::Pg> + std::fmt::Debug + Send + 'static,
     {
         let (id0, id1, found) =
-            self.get_result::<(Option<K>, Option<K>, Q)>(conn)?;
+            self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
         let status = if id0 == id1 {
             UpdateStatus::Updated
         } else {
@@ -153,8 +156,7 @@ impl<T, K, U, V> QueryFragment<Pg> for UpdateAndQueryStatement<T, K, U, V>
 where
     T: HasTable<Table = T>
         + Table
-        + diesel::query_dsl::methods::FindDsl<K>
-        + Copy,
+        + diesel::query_dsl::methods::FindDsl<K>,
     K: Copy,
     Find<T, K>: QueryFragment<Pg>,
     PrimaryKey<T>: diesel::Column,

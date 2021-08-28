@@ -26,10 +26,8 @@
 
 use super::Config as DbConfig;
 use bb8_diesel::DieselConnectionManager;
-use bb8_postgres::PostgresConnectionManager;
 use diesel::PgConnection;
 use omicron_common::api::external::Error;
-use std::ops::Deref;
 
 // NOTE: This structure abstracts a connection pool.
 // It *currently* wraps both a BB8 (async) and R2D2 (sync)
@@ -38,37 +36,19 @@ use std::ops::Deref;
 // Long-term, it would be ideal to migrate to a single
 // (probably async) connection.
 pub struct Pool {
-    pool: bb8::Pool<PostgresConnectionManager<tokio_postgres::NoTls>>,
     pool_diesel: bb8::Pool<DieselConnectionManager<diesel::PgConnection>>,
-}
-
-pub struct Conn<'a> {
-    conn: bb8::PooledConnection<
-        'a,
-        PostgresConnectionManager<tokio_postgres::NoTls>,
-    >,
-}
-
-impl<'a> Deref for Conn<'a> {
-    type Target = tokio_postgres::Client;
-
-    fn deref(&self) -> &Self::Target {
-        self.conn.deref()
-    }
 }
 
 impl Pool {
     pub fn new(db_config: &DbConfig) -> Self {
-        let mgr = bb8_postgres::PostgresConnectionManager::new(
-            (*db_config.url).clone(),
-            tokio_postgres::NoTls,
-        );
-        let pool = bb8::Builder::new().build_unchecked(mgr);
-
         let manager =
             DieselConnectionManager::<PgConnection>::new(&db_config.url.url());
         let pool_diesel = bb8::Builder::new().build_unchecked(manager);
-        Pool { pool, pool_diesel }
+        Pool { pool_diesel }
+    }
+
+    pub fn pool(&self) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
+        &self.pool_diesel
     }
 
     pub async fn acquire_diesel(
@@ -82,25 +62,6 @@ impl Pool {
                 "failed to acquire database connection: {}",
                 e.to_string()
             ),
-        })
-    }
-
-    pub async fn acquire(&self) -> Result<Conn<'_>, Error> {
-        /*
-         * TODO-design It would be better to provide more detailed error
-         * information here so that we could monitor various kinds of failures.
-         * It would also be nice if callers could provide parameters for, e.g.,
-         * how long to wait for a connection here.  Really, it would be nice if
-         * they could create their own handles to the connection pool with
-         * parameters like this.  It could also have its own logger.
-         */
-        self.pool.get().await.map(|conn| Conn { conn }).map_err(|e| {
-            Error::ServiceUnavailable {
-                message: format!(
-                    "failed to acquire database connection: {}",
-                    e.to_string()
-                ),
-            }
         })
     }
 }
