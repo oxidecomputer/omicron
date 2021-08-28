@@ -14,7 +14,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::backend::Backend;
+use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
@@ -144,7 +144,7 @@ where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
     }
 }
@@ -345,7 +345,7 @@ where
     DB: Backend,
     i64: FromSql<sql_types::BigInt, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         ByteCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
     }
 }
@@ -466,7 +466,7 @@ where
     DB: Backend,
     i64: FromSql<sql_types::BigInt, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         Generation::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
     }
 }
@@ -790,7 +790,7 @@ where
     DB: Backend,
     i64: FromSql<sql_types::BigInt, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         InstanceCpuCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
     }
 }

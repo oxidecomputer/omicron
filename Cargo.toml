@@ -30,7 +30,7 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-#[patch."https://github.com/oxidecomputer/steno"]
-#steno = { path = "../steno" }
+[patch."https://github.com/oxidecomputer/steno"]
+steno = { path = "../steno" }
 [patch.crates-io]
 diesel = { path = "../../diesel/diesel" }

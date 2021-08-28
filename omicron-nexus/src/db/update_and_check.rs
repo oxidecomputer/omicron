@@ -4,8 +4,9 @@ use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
+use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
-use diesel::sql_types;
+use diesel::sql_types::Nullable;
 
 /// Wrapper around [`diesel::update`] for a Table, which allows
 /// callers to distinguish between "not found", "found but not updated", and
@@ -78,16 +79,8 @@ type SerializedPrimaryKey<T> = <PrimaryKey<T> as diesel::Expression>::SqlType;
 
 impl<T, K, U, V> UpdateAndQueryStatement<T, K, U, V>
 where
-    // Bounds to compare primary keys and ensure that they're queryable:
-    K: 'static + PartialEq + diesel::Queryable<SerializedPrimaryKey<T>, diesel::pg::Pg> + Send,
-    // Bounds which ensure an impl of LoadQuery exists:
-    Pg: sql_types::HasSqlType<SerializedPrimaryKey<T>>,
-    Pg: sql_types::HasSqlType<T::SqlType>,
-    <Self as AsQuery>::Query: QueryFragment<Pg>,
-    // Bound to implement QueryFragment:
+    K: 'static + PartialEq + Send,
     T: 'static + Table + Send,
-    SerializedPrimaryKey<T>: sql_types::NotNull,
-    T::SqlType: sql_types::NotNull,
     U: 'static + Send,
     V: 'static + Send,
 {
@@ -99,10 +92,11 @@ where
     /// - Error (row doesn't exist, or other diesel error)
     pub async fn execute_and_check<Q>(
         self,
-        pool: &bb8::Pool<DieselConnectionManager<diesel::PgConnection>>
+        pool: &bb8::Pool<DieselConnectionManager<PgConnection>>
     ) -> Result<UpdateAndQueryResult<Q>, diesel::result::Error>
     where
-        Q: Queryable<T::SqlType, diesel::pg::Pg> + std::fmt::Debug + Send + 'static,
+        Q: Queryable<T::SqlType, Pg> + std::fmt::Debug + Send + 'static,
+        Self: LoadQuery<PgConnection, (Option<K>, Option<K>, Q)>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
@@ -119,12 +113,10 @@ where
 impl<T, K, U, V> Query for UpdateAndQueryStatement<T, K, U, V>
 where
     T: Table,
-    SerializedPrimaryKey<T>: sql_types::NotNull,
-    T::SqlType: sql_types::NotNull,
 {
     type SqlType = (
-        sql_types::Nullable<SerializedPrimaryKey<T>>,
-        sql_types::Nullable<SerializedPrimaryKey<T>>,
+        Nullable<SerializedPrimaryKey<T>>,
+        Nullable<SerializedPrimaryKey<T>>,
         T::SqlType,
     );
 }

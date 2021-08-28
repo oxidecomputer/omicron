@@ -5,7 +5,7 @@ use super::diesel_schema::{
     oximeterassignment, project, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
-use diesel::backend::Backend;
+use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
@@ -419,7 +419,7 @@ where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         let s = String::from_sql(bytes)?;
         let state = external::InstanceState::try_from(s.as_str())?;
         Ok(InstanceState::new(state))

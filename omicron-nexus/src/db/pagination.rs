@@ -1,15 +1,22 @@
 //! Interface for paginating database queries.
 
-use diesel::expression::{AsExpression, NonAggregate};
+use diesel::AppearsOnTable;
+use diesel::Column;
+use diesel::expression::AsExpression;
+use diesel::dsl::{Lt, Gt, Desc, Asc};
 use diesel::pg::Pg;
 use diesel::query_builder::AsQuery;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::*;
+use diesel::query_builder::BoxedSelectStatement;
 use diesel::query_dsl::methods as query_methods;
 use diesel::{ExpressionMethods, QueryDsl};
+use diesel::sql_types::SqlType;
 use omicron_common::api::external::DataPageParams;
 
-type BoxedQuery<T> = BoxedSelectStatement<'static, <T as AsQuery>::SqlType, T, Pg>;
+// Shorthand alias for "the SQL type of the whole table".
+type TableSqlType<T> = <T as AsQuery>::SqlType;
+
+// Shorthand alias for the type made from "table.into_boxed()".
+type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<'a, T, C, M>(
@@ -18,27 +25,24 @@ pub fn paginated<'a, T, C, M>(
     pagparams: &DataPageParams<'a, M>,
 ) -> BoxedQuery<T>
 where
-    // T must be a Table.
+    // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    // It should be possible to create a BoxedQuery from the table.
-    T::Query:
-        query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
+    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
     // C is a column which appears in T.
     C: 'static
+        + Column
         + Copy
         + ExpressionMethods
-        + diesel::AppearsOnTable<T>
-        // NonAggregate required to be passed to gt/lt.
-        + NonAggregate
-        // QueryFragment required become ordered.
-        + QueryFragment<Pg>
-        + Send,
-    // Required to appear in the RHS of an expression method (gt/lt).
-    M: Clone + AsExpression<C::SqlType> + Send,
-    // Required to filter the query by "column.{gt,lt}(marker)".
-    <M as AsExpression<C::SqlType>>::Expression:
-        'static + diesel::AppearsOnTable<T> + NonAggregate + QueryFragment<Pg> + Send,
-    <T as diesel::query_builder::AsQuery>::SqlType: Send,
+        + AppearsOnTable<T>,
+    // Required to compare the column with the marker type.
+    C::SqlType: SqlType,
+    M: Clone + AsExpression<C::SqlType>,
+    // Defines the methods which can be called on "query", and tells
+    // the compiler we're gonna output a BoxedQuery each time.
+    BoxedQuery<T>: query_methods::OrderDsl<Desc<C>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::OrderDsl<Asc<C>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::FilterDsl<Gt<C, M>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::FilterDsl<Lt<C, M>, Output = BoxedQuery<T>>,
 {
     let mut query = table.into_boxed().limit(pagparams.limit.get().into());
     let marker = pagparams.marker.map(|m| m.clone());

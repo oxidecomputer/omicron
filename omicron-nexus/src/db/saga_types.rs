@@ -11,7 +11,7 @@
  */
 
 use super::diesel_schema::{saga, saganodeevent};
-use diesel::backend::Backend;
+use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
@@ -52,7 +52,7 @@ where
     DB: Backend,
     Uuid: FromSql<sql_types::Uuid, DB>,
 {
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         let id = Uuid::from_sql(bytes)?;
         Ok(SecId(id))
     }
