@@ -47,7 +47,9 @@ impl Pool {
         Pool { pool_diesel }
     }
 
-    pub fn pool(&self) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
+    pub fn pool(
+        &self,
+    ) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
         &self.pool_diesel
     }
 

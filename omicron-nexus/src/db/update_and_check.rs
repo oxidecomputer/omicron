@@ -92,7 +92,7 @@ where
     /// - Error (row doesn't exist, or other diesel error)
     pub async fn execute_and_check<Q>(
         self,
-        pool: &bb8::Pool<DieselConnectionManager<PgConnection>>
+        pool: &bb8::Pool<DieselConnectionManager<PgConnection>>,
     ) -> Result<UpdateAndQueryResult<Q>, diesel::result::Error>
     where
         Q: Queryable<T::SqlType, Pg> + std::fmt::Debug + Send + 'static,
@@ -146,9 +146,7 @@ where
 /// ```
 impl<T, K, U, V> QueryFragment<Pg> for UpdateAndQueryStatement<T, K, U, V>
 where
-    T: HasTable<Table = T>
-        + Table
-        + diesel::query_dsl::methods::FindDsl<K>,
+    T: HasTable<Table = T> + Table + diesel::query_dsl::methods::FindDsl<K>,
     K: Copy,
     Find<T, K>: QueryFragment<Pg>,
     PrimaryKey<T>: diesel::Column,

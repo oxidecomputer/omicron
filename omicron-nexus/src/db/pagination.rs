@@ -1,15 +1,15 @@
 //! Interface for paginating database queries.
 
-use diesel::AppearsOnTable;
-use diesel::Column;
+use diesel::dsl::{Asc, Desc, Gt, Lt};
 use diesel::expression::AsExpression;
-use diesel::dsl::{Lt, Gt, Desc, Asc};
 use diesel::pg::Pg;
 use diesel::query_builder::AsQuery;
 use diesel::query_builder::BoxedSelectStatement;
 use diesel::query_dsl::methods as query_methods;
-use diesel::{ExpressionMethods, QueryDsl};
 use diesel::sql_types::SqlType;
+use diesel::AppearsOnTable;
+use diesel::Column;
+use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::DataPageParams;
 
 // Shorthand alias for "the SQL type of the whole table".
@@ -29,11 +29,7 @@ where
     T: diesel::Table,
     T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
     // C is a column which appears in T.
-    C: 'static
-        + Column
-        + Copy
-        + ExpressionMethods
-        + AppearsOnTable<T>,
+    C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     // Required to compare the column with the marker type.
     C::SqlType: SqlType,
     M: Clone + AsExpression<C::SqlType>,

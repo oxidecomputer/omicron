@@ -471,11 +471,7 @@ impl DataStore {
             .get_result_async(self.pool.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
-                    e,
-                    ResourceType::Disk,
-                    name.as_str(),
-                )
+                Error::from_diesel_create(e, ResourceType::Disk, name.as_str())
             })?;
 
         let runtime = disk.runtime();
@@ -701,15 +697,9 @@ impl DataStore {
             .values(saga.clone())
             .execute_async(self.pool.pool())
             .await
-            .map_err(
-                |e| {
-                    Error::from_diesel_create(
-                        e,
-                        ResourceType::SagaDbg,
-                        &name,
-                    )
-                },
-            )?;
+            .map_err(|e| {
+                Error::from_diesel_create(e, ResourceType::SagaDbg, &name)
+            })?;
         Ok(())
     }
 
@@ -817,11 +807,7 @@ impl DataStore {
             .get_result_async(self.pool.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
-                    e,
-                    ResourceType::Vpc,
-                    name.as_str(),
-                )
+                Error::from_diesel_create(e, ResourceType::Vpc, name.as_str())
             })?;
         Ok(vpc)
     }

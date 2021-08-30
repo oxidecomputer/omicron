@@ -2,8 +2,8 @@
  * Handles recovery of sagas
  */
 
-use async_bb8_diesel::AsyncRunQueryDsl;
 use crate::db;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
