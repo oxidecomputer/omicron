@@ -145,7 +145,7 @@ async fn list_unfinished_sagas(
             Error::from_diesel(
                 e,
                 ResourceType::SagaDbg,
-                LookupType::ById(sec_id.0.into()),
+                LookupType::ById(sec_id.0),
             )
         })
 }
