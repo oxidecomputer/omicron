@@ -21,7 +21,7 @@ use common::test_setup;
 
 extern crate slog;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_vpcs() {
     let cptestctx = test_setup("test_vpcs").await;
     let client = &cptestctx.external_client;

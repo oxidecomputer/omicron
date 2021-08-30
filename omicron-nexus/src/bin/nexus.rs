@@ -43,7 +43,7 @@ struct Args {
     config_file_path: PathBuf,
 }
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main]
 async fn main() {
     if let Err(cmd_error) = do_run().await {
         fatal(cmd_error);

@@ -40,7 +40,7 @@ extern crate slog;
  * TODO-cleanup the mess of URLs used here and in test_instances.rs ought to
  * come from common code.
  */
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_disks() {
     let cptestctx = test_setup("test_disks").await;
     let client = &cptestctx.external_client;

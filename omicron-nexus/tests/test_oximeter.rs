@@ -4,7 +4,7 @@ mod common;
 
 use uuid::Uuid;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_oximeter_database_records() {
     let context = common::test_setup("test_oximeter_database_records").await;
     let db = &context.database;

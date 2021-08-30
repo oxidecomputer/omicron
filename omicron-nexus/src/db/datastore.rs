@@ -19,7 +19,7 @@
  */
 
 use super::Pool;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api;
@@ -51,6 +51,10 @@ impl DataStore {
         DataStore { pool }
     }
 
+    fn pool(&self) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
+        self.pool.pool()
+    }
+
     /// Create a project
     pub async fn project_create(
         &self,
@@ -61,7 +65,7 @@ impl DataStore {
         let name = project.name.clone();
         diesel::insert_into(dsl::project)
             .values(project)
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -81,7 +85,7 @@ impl DataStore {
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
-            .first_async::<db::model::Project>(self.pool.pool())
+            .first_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -105,7 +109,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<db::model::Project>(self.pool.pool())
+            .get_result_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -127,7 +131,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(dsl::id)
-            .get_result_async::<Uuid>(self.pool.pool())
+            .get_result_async::<Uuid>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -145,7 +149,7 @@ impl DataStore {
         use db::diesel_schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Project>(self.pool.pool())
+            .load_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -163,7 +167,7 @@ impl DataStore {
         use db::diesel_schema::project::dsl;
         paginated(dsl::project, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Project>(self.pool.pool())
+            .load_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -187,7 +191,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -245,7 +249,7 @@ impl DataStore {
             .values(instance)
             .on_conflict(dsl::id)
             .do_nothing()
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -279,7 +283,7 @@ impl DataStore {
         paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .load_async::<db::model::Instance>(self.pool.pool())
+            .load_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -299,7 +303,7 @@ impl DataStore {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -321,7 +325,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(instance_name.clone()))
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -354,7 +358,7 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists(*instance_id)
-            .execute_and_check::<db::model::Instance>(self.pool.pool())
+            .execute_and_check::<db::model::Instance>(self.pool())
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -385,23 +389,21 @@ impl DataStore {
          * such dependencies here.
          */
         use db::diesel_schema::instance::dsl;
+        use db::model::InstanceState as DbInstanceState;
+        use api::external::InstanceState as ApiInstanceState;
+
         let now = Utc::now();
 
-        let destroyed = db::model::InstanceState::new(
-            api::external::InstanceState::Destroyed,
-        );
-        let stopped = db::model::InstanceState::new(
-            api::external::InstanceState::Stopped,
-        );
-        let failed =
-            db::model::InstanceState::new(api::external::InstanceState::Failed);
+        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
+        let failed = DbInstanceState::new(ApiInstanceState::Failed);
 
         diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::instance_state.eq_any(vec![stopped, failed]))
             .set((dsl::instance_state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .get_result_async::<db::model::Instance>(self.pool.pool())
+            .get_result_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -430,7 +432,7 @@ impl DataStore {
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::attach_instance_id.eq(*instance_id))
-            .load_async::<db::model::Disk>(self.pool.pool())
+            .load_async::<db::model::Disk>(self.pool())
             .await
             .map(|disks| {
                 disks
@@ -468,7 +470,7 @@ impl DataStore {
             .values(disk)
             .on_conflict(dsl::id)
             .do_nothing()
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(e, ResourceType::Disk, name.as_str())
@@ -498,7 +500,7 @@ impl DataStore {
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .load_async::<db::model::Disk>(self.pool.pool())
+            .load_async::<db::model::Disk>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -522,7 +524,7 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists(*disk_id)
-            .execute_and_check::<db::model::Disk>(self.pool.pool())
+            .execute_and_check::<db::model::Disk>(self.pool())
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -548,7 +550,7 @@ impl DataStore {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*disk_id))
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -570,7 +572,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(disk_name.clone()))
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -595,7 +597,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists(*disk_id)
-            .execute_and_check::<db::model::Disk>(self.pool.pool())
+            .execute_and_check::<db::model::Disk>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -625,7 +627,7 @@ impl DataStore {
 
         diesel::insert_into(dsl::oximeter)
             .values(*info)
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -646,7 +648,7 @@ impl DataStore {
 
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -670,7 +672,7 @@ impl DataStore {
             db::model::OximeterAssignment::new(oximeter_id, producer_id);
         diesel::insert_into(dsl::oximeterassignment)
             .values(assignment)
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -695,7 +697,7 @@ impl DataStore {
         let name = saga.template_name.clone();
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(e, ResourceType::SagaDbg, &name)
@@ -713,7 +715,7 @@ impl DataStore {
         // owning this saga.
         diesel::insert_into(dsl::saganodeevent)
             .values(event.clone())
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(
@@ -741,7 +743,7 @@ impl DataStore {
             .filter(dsl::adopt_generation.eq(current_adopt_generation))
             .set(dsl::saga_state.eq(new_state.to_string()))
             .check_if_exists(saga_id)
-            .execute_and_check::<db::saga_types::Saga>(self.pool.pool())
+            .execute_and_check::<db::saga_types::Saga>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -780,7 +782,7 @@ impl DataStore {
         paginated(dsl::vpc, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .load_async::<db::model::Vpc>(self.pool.pool())
+            .load_async::<db::model::Vpc>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -805,7 +807,7 @@ impl DataStore {
             .values(vpc)
             .on_conflict(dsl::id)
             .do_nothing()
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel_create(e, ResourceType::Vpc, name.as_str())
@@ -825,7 +827,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(updates)
-            .execute_async(self.pool.pool())
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -848,7 +850,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(vpc_name.clone()))
-            .get_result_async(self.pool.pool())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -867,7 +869,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<db::model::Vpc>(self.pool.pool())
+            .get_result_async::<db::model::Vpc>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(

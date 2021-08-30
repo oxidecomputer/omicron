@@ -417,15 +417,15 @@ CREATE TABLE omicron.public.SagaNodeEvent (
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */
 
--- CREATE TABLE omicron.public.DbMetadata (
---     name  STRING(63) NOT NULL,
---     value STRING(1023) NOT NULL
--- );
+CREATE TABLE omicron.public.DbMetadata (
+    name  STRING(63) NOT NULL,
+    value STRING(1023) NOT NULL
+);
 
--- INSERT INTO omicron.public.DbMetadata (
---     name,
---     value
--- ) VALUES (
---     'schema_version',
---     '1.0.0'
--- );
+INSERT INTO omicron.public.DbMetadata (
+    name,
+    value
+) VALUES (
+    'schema_version',
+    '1.0.0'
+);
