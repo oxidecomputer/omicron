@@ -50,12 +50,12 @@ impl steno::SecStore for CockroachDbSecStore {
 
         let now = chrono::Utc::now();
         let saga_record = db::saga_types::Saga {
-            id: create_params.id,
+            id: create_params.id.into(),
             creator: self.sec_id,
             template_name: create_params.template_name,
             time_created: now,
             saga_params: create_params.saga_params,
-            saga_state: create_params.state,
+            saga_state: create_params.state.into(),
             current_sec: Some(self.sec_id),
             adopt_generation: Generation::new(),
             adopt_time: now,

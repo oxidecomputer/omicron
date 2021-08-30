@@ -98,7 +98,7 @@ where
              * before we go back to one that's failed.
              */
             /* TODO-debug want visibility into "abandoned" sagas */
-            let saga_id = saga.id;
+            let saga_id: steno::SagaId = saga.id.into();
             if let Err(error) =
                 recover_saga(&log, &uctx, &pool, &sec_client, templates, saga)
                     .await
@@ -166,30 +166,30 @@ async fn recover_saga<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
-    let saga_id = saga.id;
+    let saga_id: steno::SagaId = saga.id.into();
     let template_name = saga.template_name.as_str();
     trace!(log, "recovering saga: start";
-        "saga_id" => saga.id.to_string(),
+        "saga_id" => saga_id.to_string(),
         "template_name" => template_name,
     );
     let template = templates.get(template_name).ok_or_else(|| {
         Error::internal_error(&format!(
             "saga {} uses unknown template {:?}",
-            saga.id, template_name,
+            saga_id, template_name,
         ))
     })?;
     trace!(log, "recovering saga: found template";
-        "saga_id" => ?saga.id,
+        "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let log_events = load_saga_log(pool, &saga).await?;
     trace!(log, "recovering saga: loaded log";
-        "saga_id" => ?saga.id,
+        "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let _ = sec_client
         .saga_resume(
-            saga.id,
+            saga_id,
             Arc::clone(uctx),
             Arc::clone(template),
             saga.template_name,
@@ -210,7 +210,7 @@ where
     sec_client.saga_start(saga_id).await.map_err(|error| {
         Error::internal_error(&format!("failed to start saga: {:#}", error))
     })?;
-    info!(log, "recovering saga: done"; "saga_id" => ?saga.id);
+    info!(log, "recovering saga: done"; "saga_id" => ?saga_id);
     Ok(())
 }
 
@@ -234,7 +234,7 @@ pub async fn load_saga_log(
             Error::from_diesel(
                 e,
                 ResourceType::SagaDbg,
-                LookupType::ById(saga.id.0),
+                LookupType::ById(saga.id.0.0),
             )
         })?
         .into_iter()

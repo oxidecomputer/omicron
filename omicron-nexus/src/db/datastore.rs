@@ -734,6 +734,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::diesel_schema::saga::dsl;
 
+        let saga_id: db::saga_types::SagaId = saga_id.into();
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
@@ -746,7 +747,7 @@ impl DataStore {
                 Error::from_diesel(
                     e,
                     ResourceType::SagaDbg,
-                    LookupType::ById(saga_id.0),
+                    LookupType::ById(saga_id.0.0),
                 )
             })?;
 
