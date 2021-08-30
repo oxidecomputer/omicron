@@ -75,6 +75,10 @@ subprocess = "0.2.7"
 version = "0.1.0"
 path = "../oximeter/oximeter"
 
+[dev-dependencies.openapi-lint]
+git = "https://github.com/oxidecomputer/openapi-lint"
+branch = "main"
+
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

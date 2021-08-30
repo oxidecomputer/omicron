@@ -916,6 +916,7 @@ pub struct Disk {
     JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
+#[serde(tag = "state", content = "instance")]
 pub enum DiskState {
     /** Disk is being initialized */
     Creating,
@@ -1108,20 +1109,24 @@ impl From<steno::SagaView> for Saga {
     }
 }
 
-/*
- * TODO-robustness This type is unnecessarily loosey-goosey.  For example, see
- * the use of Options in the "Done" variant.
- */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "state")]
 pub enum SagaState {
     Running,
-    #[serde(rename_all = "camelCase")]
-    Done {
-        failed: bool,
-        error_node_name: Option<String>,
-        error_info: Option<steno::ActionError>,
-    },
+    Succeeded,
+    Failed { error_node_name: String, error_info: SagaErrorInfo },
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "error")]
+pub enum SagaErrorInfo {
+    ActionFailed { source_error: serde_json::Value },
+    DeserializeFailed { message: String },
+    InjectedError,
+    SerializeFailed { message: String },
+    SubsagaCreateFailed { message: String },
 }
 
 impl From<steno::SagaStateView> for SagaState {
@@ -1129,16 +1134,31 @@ impl From<steno::SagaStateView> for SagaState {
         match st {
             steno::SagaStateView::Ready { .. } => SagaState::Running,
             steno::SagaStateView::Running { .. } => SagaState::Running,
-            steno::SagaStateView::Done { result, .. } => match result.kind {
-                Ok(_) => SagaState::Done {
-                    failed: false,
-                    error_node_name: None,
-                    error_info: None,
-                },
-                Err(e) => SagaState::Done {
-                    failed: true,
-                    error_node_name: Some(e.error_node_name),
-                    error_info: Some(e.error_source),
+            steno::SagaStateView::Done {
+                result: steno::SagaResult { kind: Ok(_), .. },
+                ..
+            } => SagaState::Succeeded,
+            steno::SagaStateView::Done {
+                result: steno::SagaResult { kind: Err(e), .. },
+                ..
+            } => SagaState::Failed {
+                error_node_name: e.error_node_name,
+                error_info: match e.error_source {
+                    steno::ActionError::ActionFailed { source_error } => {
+                        SagaErrorInfo::ActionFailed { source_error }
+                    }
+                    steno::ActionError::DeserializeFailed { message } => {
+                        SagaErrorInfo::DeserializeFailed { message }
+                    }
+                    steno::ActionError::InjectedError => {
+                        SagaErrorInfo::InjectedError
+                    }
+                    steno::ActionError::SerializeFailed { message } => {
+                        SagaErrorInfo::SerializeFailed { message }
+                    }
+                    steno::ActionError::SubsagaCreateFailed { message } => {
+                        SagaErrorInfo::SubsagaCreateFailed { message }
+                    }
                 },
             },
         }

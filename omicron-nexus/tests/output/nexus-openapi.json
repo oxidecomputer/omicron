@@ -1224,99 +1224,6 @@
   },
   "components": {
     "schemas": {
-      "ActionError": {
-        "description": "An error produced by a saga action\n\nOn failure, actions always return an `ActionError`.  This type can represent a failure from Steno itself or a failure produced by the consumer (e.g., an action whose body fails for some reason).  The various specific errors are documented below.\n\nYou can use your own error type with [`ActionError`].  As long as it meets the requirements of [`ActionData`], you can wrap your error in an [`ActionError::ActionFailed`] variant using [`ActionError::action_failed()`]. Given an [`ActionError::ActionFailed`] variant, you can get your specific type back out again using [`ActionError::convert()`].\n\nNote that the conversion back to your specific error type can fail!  This looks like a downcast, but it's not.  `ActionError`s are typically recorded in the saga log and interpreted later, possibly after a crash and recovery. Whether there was an intervening crash or not, the conversion here deserializes the error from the log into your custom error type.  This won't work if your error type is incompatible with the one that was used to serialize the error in the first place.\n\n# Example\n\n```rust use serde::Deserialize; use serde::Serialize; use steno::ActionError;\n\n#[derive(Debug, Deserialize, Serialize)] struct MyError { message: String }\n\nfn my_func_that_fails() -> Result<(), ActionError> { Err(ActionError::action_failed(MyError { message: \"boom!\".to_owned() })) }\n\nfn handle_error(error: ActionError) { match error.convert::<MyError>() { Ok(my_error) => { eprintln!(\"my action failed because: {}\", my_error.message); } Err(other_error) => { eprintln!( \"my action failed because the framework had a problem: {}\", other_error.to_string() ); } } } ```",
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": [
-              "InjectedError"
-            ]
-          },
-          {
-            "description": "Action failed due to a consumer-specific error",
-            "type": "object",
-            "properties": {
-              "ActionFailed": {
-                "type": "object",
-                "properties": {
-                  "source_error": {}
-                },
-                "required": [
-                  "source_error"
-                ]
-              }
-            },
-            "required": [
-              "ActionFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to deserialize the saga parameters, an action's successful result, or an action's error.",
-            "type": "object",
-            "properties": {
-              "DeserializeFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "DeserializeFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to serialize the saga parameters, an action's successful result, or an action's error.",
-            "type": "object",
-            "properties": {
-              "SerializeFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "SerializeFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to create the requested subsaga",
-            "type": "object",
-            "properties": {
-              "SubsagaCreateFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "SubsagaCreateFailed"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
@@ -1454,55 +1361,124 @@
         "description": "State of a Disk (primarily: attached or not)",
         "anyOf": [
           {
-            "type": "string",
-            "enum": [
-              "creating",
-              "detached",
-              "destroyed",
-              "faulted"
+            "description": "Disk is being initialized",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "creating"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready but detached from any Instance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
             ]
           },
           {
             "description": "Disk is being attached to the given Instance",
             "type": "object",
             "properties": {
-              "attaching": {
+              "instance": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attaching"
+                ]
               }
             },
             "required": [
-              "attaching"
-            ],
-            "additionalProperties": false
+              "instance",
+              "state"
+            ]
           },
           {
             "description": "Disk is attached to the given Instance",
             "type": "object",
             "properties": {
-              "attached": {
+              "instance": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attached"
+                ]
               }
             },
             "required": [
-              "attached"
-            ],
-            "additionalProperties": false
+              "instance",
+              "state"
+            ]
           },
           {
             "description": "Disk is being detached from the given Instance",
             "type": "object",
             "properties": {
-              "detaching": {
+              "instance": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detaching"
+                ]
               }
             },
             "required": [
-              "detaching"
-            ],
-            "additionalProperties": false
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk has been destroyed",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "destroyed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is unavailable",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "faulted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
           }
         ]
       },
@@ -1825,6 +1801,94 @@
           "state"
         ]
       },
+      "SagaErrorInfo": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "actionFailed"
+                ]
+              },
+              "source_error": {}
+            },
+            "required": [
+              "error",
+              "source_error"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "deserializeFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "injectedError"
+                ]
+              }
+            },
+            "required": [
+              "error"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "serializeFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "subsagaCreateFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          }
+        ]
+      },
       "SagaResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -1848,36 +1912,54 @@
       "SagaState": {
         "anyOf": [
           {
-            "type": "string",
-            "enum": [
-              "running"
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "done": {
-                "type": "object",
-                "properties": {
-                  "errorInfo": {
-                    "$ref": "#/components/schemas/ActionError"
-                  },
-                  "errorNodeName": {
-                    "type": "string"
-                  },
-                  "failed": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
+              "state": {
+                "type": "string",
+                "enum": [
+                  "succeeded"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error_info": {
+                "$ref": "#/components/schemas/SagaErrorInfo"
+              },
+              "error_node_name": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
                   "failed"
                 ]
               }
             },
             "required": [
-              "done"
-            ],
-            "additionalProperties": false
+              "error_info",
+              "error_node_name",
+              "state"
+            ]
           }
         ]
       },

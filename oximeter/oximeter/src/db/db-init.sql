@@ -97,55 +97,50 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_bool
     timeseries_name String,
     timeseries_key String,
     field_name String,
-    field_value UInt8,
-    timestamp DateTime64(6, 'UTC')
+    field_value UInt8
 )
-ENGINE = MergeTree()
-ORDER BY (field_name, field_value, timestamp);
+ENGINE = ReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 (
     timeseries_name String,
     timeseries_key String,
     field_name String,
-    field_value Int64,
-    timestamp DateTime64(6, 'UTC')
+    field_value Int64
 )
-ENGINE = MergeTree()
-ORDER BY (field_value, timestamp);
+ENGINE = ReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 (
     timeseries_name String,
     timeseries_key String,
     field_name String,
-    field_value IPv6,
-    timestamp DateTime64(6, 'UTC')
+    field_value IPv6
 )
-ENGINE = MergeTree()
-ORDER BY (field_name, field_value, timestamp);
+ENGINE = ReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_string
 (
     timeseries_name String,
     timeseries_key String,
     field_name String,
-    field_value String,
-    timestamp DateTime64(6, 'UTC')
+    field_value String
 )
-ENGINE = MergeTree()
-ORDER BY (field_name, field_value, timestamp);
+ENGINE = ReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 (
     timeseries_name String,
     timeseries_key String,
     field_name String,
-    field_value UUID,
-    timestamp DateTime64(6, 'UTC')
+    field_value UUID
 )
-ENGINE = MergeTree()
-ORDER BY (field_name, field_value, timestamp);
+ENGINE = ReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
 CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
 (

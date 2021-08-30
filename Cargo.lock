@@ -1311,6 +1311,7 @@ dependencies = [
  "newtype_derive",
  "omicron-common",
  "omicron-sled-agent",
+ "openapi-lint",
  "openapiv3",
  "oximeter",
  "schemars",
@@ -1376,6 +1377,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
+name = "openapi-lint"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#cbf584bac7a0eefae46ffc4a0f75bd3c680775f4"
+dependencies = [
+ "indexmap",
+ "openapiv3",
+]
+
+[[package]]
 name = "openapiv3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1424,6 +1434,7 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "chrono",
  "dropshot",
@@ -1436,6 +1447,8 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
+ "slog-term",
  "structopt",
  "thiserror",
  "tokio",
