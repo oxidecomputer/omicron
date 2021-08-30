@@ -747,7 +747,7 @@ impl DataStore {
                 Error::from_diesel(
                     e,
                     ResourceType::SagaDbg,
-                    LookupType::ById(saga_id.0.0),
+                    LookupType::ById(saga_id.0.into()),
                 )
             })?;
 

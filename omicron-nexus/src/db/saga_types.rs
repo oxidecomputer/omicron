@@ -68,35 +68,18 @@ impl From<&SecId> for Uuid {
     }
 }
 
-
 /// Newtype wrapper around [`steno::SagaId`] which implements
 /// Diesel traits.
 ///
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression,
-    Copy,
-    Clone,
-    Debug,
-    FromSqlRow,
-    PartialEq,
-    PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
 )]
 #[sql_type = "sql_types::Uuid"]
 pub struct SagaId(pub steno::SagaId);
 
-impl From<steno::SagaId> for SagaId {
-    fn from(id: steno::SagaId) -> Self {
-        SagaId(id)
-    }
-}
-
-impl From<SagaId> for steno::SagaId {
-    fn from(id: SagaId) -> Self {
-        id.0
-    }
-}
+NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
 
 impl<DB> ToSql<sql_types::Uuid, DB> for SagaId
 where
@@ -128,28 +111,12 @@ where
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression,
-    Copy,
-    Clone,
-    Debug,
-    FromSqlRow,
-    PartialEq,
-    PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
 )]
 #[sql_type = "sql_types::BigInt"]
 pub struct SagaNodeId(pub steno::SagaNodeId);
 
-impl From<steno::SagaNodeId> for SagaNodeId {
-    fn from(id: steno::SagaNodeId) -> Self {
-        SagaNodeId(id)
-    }
-}
-
-impl From<SagaNodeId> for steno::SagaNodeId {
-    fn from(id: SagaNodeId) -> Self {
-        id.0
-    }
-}
+NewtypeFrom! { () pub struct SagaNodeId(steno::SagaNodeId); }
 
 impl<DB> ToSql<sql_types::BigInt, DB> for SagaNodeId
 where
@@ -161,7 +128,7 @@ where
         out: &mut serialize::Output<'_, W, DB>,
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
-        (u32::from(steno::SagaNodeId::from(self.0)) as i64).to_sql(out)
+        (u32::from(self.0) as i64).to_sql(out)
     }
 }
 
@@ -181,28 +148,11 @@ where
 ///
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
-#[derive(
-    AsExpression,
-    FromSqlRow,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-)]
+#[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
 #[sql_type = "sql_types::Text"]
 pub struct SagaCachedState(pub steno::SagaCachedState);
 
-impl From<steno::SagaCachedState> for SagaCachedState {
-    fn from(state: steno::SagaCachedState) -> Self {
-        SagaCachedState(state)
-    }
-}
-
-impl From<SagaCachedState> for steno::SagaCachedState {
-    fn from(state: SagaCachedState) -> Self {
-        state.0
-    }
-}
+NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
 
 impl<DB> ToSql<sql_types::Text, DB> for SagaCachedState
 where

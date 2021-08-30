@@ -19,10 +19,10 @@ type TableSqlType<T> = <T as AsQuery>::SqlType;
 type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
-pub fn paginated<'a, T, C, M>(
+pub fn paginated<T, C, M>(
     table: T,
     column: C,
-    pagparams: &DataPageParams<'a, M>,
+    pagparams: &DataPageParams<'_, M>,
 ) -> BoxedQuery<T>
 where
     // T is a table which can create a BoxedQuery.
