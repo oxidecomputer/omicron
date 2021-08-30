@@ -25,7 +25,7 @@
  */
 
 use super::Config as DbConfig;
-use bb8_diesel::DieselConnectionManager;
+use async_bb8_diesel::DieselConnectionManager;
 use diesel::PgConnection;
 use omicron_common::api::external::Error;
 

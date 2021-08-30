@@ -6,8 +6,8 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.51"
-# diesel = { version = "1.4.7", features = ["postgres", "r2d2", "chrono", "uuidv07"] }
-diesel = { path = "../../../diesel/diesel", features = ["postgres", "r2d2", "chrono", "uuid"] }
+# Tracking pending 2.0 version.
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "uuid"] }
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
@@ -70,7 +70,7 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.steno]
 git = "https://github.com/oxidecomputer/steno"
-# TODO: Go back to main after this is merged?
+# TODO: Switch back to main
 branch = "diesel"
 
 [dependencies.tokio]

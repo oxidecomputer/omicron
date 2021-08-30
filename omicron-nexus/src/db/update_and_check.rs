@@ -1,4 +1,4 @@
-use bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
+use async_bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;

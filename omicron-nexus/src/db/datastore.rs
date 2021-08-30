@@ -19,7 +19,7 @@
  */
 
 use super::Pool;
-use bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api;
