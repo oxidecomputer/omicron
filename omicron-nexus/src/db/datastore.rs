@@ -62,7 +62,7 @@ impl DataStore {
     ) -> CreateResult<db::model::Project> {
         use db::diesel_schema::project::dsl;
 
-        let name = project.name.clone();
+        let name = project.name().to_string();
         diesel::insert_into(dsl::project)
             .values(project)
             .get_result_async(self.pool())
@@ -260,10 +260,10 @@ impl DataStore {
             })?;
 
         bail_unless!(
-            instance.instance_state.state()
+            instance.state.state()
                 == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.instance_state
+            instance.state
         );
         bail_unless!(
             instance.state_generation == runtime_initial.gen,
@@ -401,8 +401,8 @@ impl DataStore {
         diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
-            .filter(dsl::instance_state.eq_any(vec![stopped, failed]))
-            .set((dsl::instance_state.eq(destroyed), dsl::time_deleted.eq(now)))
+            .filter(dsl::state.eq_any(vec![stopped, failed]))
+            .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
             .get_result_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {

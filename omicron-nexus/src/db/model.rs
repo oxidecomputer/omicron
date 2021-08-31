@@ -148,14 +148,14 @@ impl Project {
     /// Creates a new database Project object.
     pub fn new(params: external::ProjectCreateParams) -> Self {
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let identity = IdentityMetadata::new(id, params.identity);
         Self {
-            id,
-            name: params.identity.name,
-            description: params.identity.description,
-            time_created: now,
-            time_modified: now,
-            time_deleted: None,
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
         }
     }
 
@@ -230,9 +230,10 @@ pub struct Instance {
     pub project_id: Uuid,
 
     /// runtime state of the Instance
-    pub instance_state: InstanceState,
+    pub state: InstanceState,
 
     /// timestamp for this information
+    // TODO: Is this redundant with "time_modified"?
     pub time_state_updated: DateTime<Utc>,
 
     /// generation number for this state
@@ -273,8 +274,7 @@ impl Instance {
 
             project_id,
 
-            // TODO: Align these names pls
-            instance_state: runtime.run_state,
+            state: runtime.state,
             time_state_updated: runtime.time_updated,
             state_generation: runtime.gen,
             active_server_id: runtime.sled_uuid,
@@ -284,12 +284,6 @@ impl Instance {
             hostname: params.hostname.clone(),
         }
     }
-
-    // TODO: Here and for InstanceRuntimeState - if we are flattening
-    // the versions stored in the DB, do we *need* the intermediate "model"
-    // objects?
-    //
-    // Theoretically we could just jump straight to the view.
 
     // TODO: We could definitely derive this.
     // We could actually derive any "into subset" struct with
@@ -307,7 +301,7 @@ impl Instance {
 
     pub fn runtime(&self) -> InstanceRuntimeState {
         InstanceRuntimeState {
-            run_state: self.instance_state,
+            state: self.state,
             sled_uuid: self.active_server_id,
             gen: self.state_generation,
             time_updated: self.time_state_updated,
@@ -337,8 +331,8 @@ impl Into<external::Instance> for Instance {
 #[table_name = "instance"]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
-    #[column_name = "instance_state"]
-    pub run_state: InstanceState,
+    #[column_name = "state"]
+    pub state: InstanceState,
     /// which sled is running this Instance
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
@@ -355,7 +349,7 @@ pub struct InstanceRuntimeState {
 impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> external::InstanceRuntimeState {
         external::InstanceRuntimeState {
-            run_state: *self.run_state.state(),
+            run_state: *self.state.state(),
             time_run_state_updated: self.time_updated,
         }
     }
@@ -365,7 +359,7 @@ impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
 impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn from(state: internal::nexus::InstanceRuntimeState) -> Self {
         Self {
-            run_state: InstanceState::new(state.run_state),
+            state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
             gen: state.gen,
             time_updated: state.time_updated,
@@ -377,7 +371,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
 impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> internal::nexus::InstanceRuntimeState {
         internal::sled_agent::InstanceRuntimeState {
-            run_state: *self.run_state.state(),
+            run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             gen: self.gen,
             time_updated: self.time_updated,

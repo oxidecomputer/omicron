@@ -398,7 +398,7 @@ impl Nexus {
             .db_datastore
             .project_create_disk(
                 &disk_id,
-                &project.id,
+                project.id(),
                 params,
                 &db::model::DiskRuntimeState::new(),
             )

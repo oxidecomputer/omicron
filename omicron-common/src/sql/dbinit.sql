@@ -108,8 +108,8 @@ CREATE TABLE omicron.public.Instance (
      * table?
      */
     /* Runtime state */
-    -- instance_state omicron.public.InstanceState NOT NULL, // TODO see above
-    instance_state TEXT NOT NULL,
+    -- state omicron.public.InstanceState NOT NULL, // TODO see above
+    state TEXT NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*

@@ -25,7 +25,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
-        instance_state -> Text,
+        state -> Text,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
