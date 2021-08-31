@@ -517,9 +517,9 @@ impl Disk {
         }
     }
 
-    pub fn attachment(&self) -> Option<external::DiskAttachment> {
+    pub fn attachment(&self) -> Option<DiskAttachment> {
         if let Some(instance_id) = self.attach_instance_id {
-            Some(external::DiskAttachment {
+            Some(DiskAttachment {
                 instance_id,
                 disk_id: self.id,
                 disk_name: self.name.clone(),
@@ -657,6 +657,10 @@ impl Into<external::DiskState> for DiskState {
     }
 }
 
+/// Type which describes the attachment status of a disk.
+///
+/// This happens to be the same as the type in the external API,
+/// but it is not required to be.
 pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect

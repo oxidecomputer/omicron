@@ -1,3 +1,7 @@
+//! Describes the Diesel database schema.
+//!
+//! NOTE: Should be kept up-to-date with dbinit.sql.
+
 table! {
     disk (id) {
         id -> Uuid,
