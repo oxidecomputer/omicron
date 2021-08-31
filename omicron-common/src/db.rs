@@ -57,7 +57,7 @@ impl DbError {
     }
 }
 
-/** Given an arbitrary [`DbError`], produce an [`Error`] for the problem. */
+/** Given an arbitrary [`DbError`], produce an [`enum@Error`] for the problem. */
 /*
  * This could potentially be an `impl From<DbError> for Error`.  However,
  * there are multiple different ways to do this transformation, depending on

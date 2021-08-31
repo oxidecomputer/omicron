@@ -51,7 +51,9 @@ impl DataStore {
         DataStore { pool }
     }
 
-    fn pool(&self) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
+    fn pool(
+        &self,
+    ) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
         self.pool.pool()
     }
 
@@ -260,8 +262,7 @@ impl DataStore {
             })?;
 
         bail_unless!(
-            instance.state.state()
-                == &api::external::InstanceState::Creating,
+            instance.state.state() == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.state
         );
@@ -388,9 +389,9 @@ impl DataStore {
          * (e.g., disk attachments).  If that changes, we'll want to check for
          * such dependencies here.
          */
+        use api::external::InstanceState as ApiInstanceState;
         use db::diesel_schema::instance::dsl;
         use db::model::InstanceState as DbInstanceState;
-        use api::external::InstanceState as ApiInstanceState;
 
         let now = Utc::now();
 
