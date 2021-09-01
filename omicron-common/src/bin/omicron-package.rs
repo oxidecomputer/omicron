@@ -189,6 +189,25 @@ fn parse<P: AsRef<Path>>(path: P) -> Result<Config, ParseError> {
     Ok(cfg)
 }
 
+fn runpath_fix<P: AsRef<Path>>(binary: P) -> Result<()> {
+    let binary = binary.as_ref();
+
+    println!("Fixing runpath in {:?}", binary);
+
+    let cmd = Command::new("/usr/bin/elfedit")
+        .env_clear()
+        .arg("-e")
+        .arg("dyn:rpath /usr/gcc/10/lib/amd64:/opt/ooce/pgsql-13/lib/amd64")
+        .arg(&binary)
+        .output()?;
+
+    if !cmd.status.success() {
+        bail!("elfedit failure: {}", String::from_utf8_lossy(&cmd.stderr));
+    }
+
+    Ok(())
+}
+
 async fn do_package(
     config: &Config,
     output_directory: &Path,
@@ -223,6 +242,10 @@ async fn do_package(
         // TODO: We could add compression here, if we'd like?
         let mut archive = Builder::new(file);
         archive.mode(tar::HeaderMode::Deterministic);
+
+        // XXX Work around missing runpath for PostgreSQL
+        #[cfg(target_os = "illumos")]
+        runpath_fix(package.binary_path(release))?;
 
         // Add binary
         archive
