@@ -6,7 +6,9 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.51"
-futures = "0.3.15"
+# Tracking pending 2.0 version.
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "uuid"] }
+futures = "0.3.17"
 http = "0.2.0"
 hyper = "0.14"
 libc = "0.2.98"
