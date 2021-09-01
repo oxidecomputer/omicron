@@ -30,6 +30,12 @@ pub struct PostgresConfigWithUrl {
     config: tokio_postgres::config::Config,
 }
 
+impl PostgresConfigWithUrl {
+    pub fn url(&self) -> String {
+        self.url_raw.clone()
+    }
+}
+
 impl FromStr for PostgresConfigWithUrl {
     type Err = tokio_postgres::Error;
 

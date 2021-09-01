@@ -50,12 +50,12 @@ impl steno::SecStore for CockroachDbSecStore {
 
         let now = chrono::Utc::now();
         let saga_record = db::saga_types::Saga {
-            id: create_params.id,
+            id: create_params.id.into(),
             creator: self.sec_id,
             template_name: create_params.template_name,
             time_created: now,
             saga_params: create_params.saga_params,
-            saga_state: create_params.state,
+            saga_state: create_params.state.into(),
             current_sec: Some(self.sec_id),
             adopt_generation: Generation::new(),
             adopt_time: now,
@@ -73,13 +73,7 @@ impl steno::SecStore for CockroachDbSecStore {
             "node_id" => ?event.node_id,
             "event_type" => ?event.event_type,
         );
-        let our_event = db::saga_types::SagaNodeEvent {
-            saga_id: event.saga_id,
-            node_id: event.node_id,
-            event_type: event.event_type,
-            creator: self.sec_id,
-            event_time: chrono::Utc::now(),
-        };
+        let our_event = db::saga_types::SagaNodeEvent::new(event, self.sec_id);
 
         /*
          * TODO-robustness This should be wrapped with a retry loop rather than

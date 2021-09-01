@@ -163,7 +163,7 @@ async fn projects_get(
     let params = ScanByNameOrId::from_query(&query)?;
     let field = pagination_field_for_scan_params(params);
 
-    let project_stream = match field {
+    let projects = match field {
         PagField::Id => {
             let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
             nexus.projects_list_by_id(&page_selector).await?
@@ -173,11 +173,11 @@ async fn projects_get(
             let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
             nexus.projects_list_by_name(&page_selector).await?
         }
-    };
-
-    let view_list =
-        to_list::<db::model::Project, Project>(project_stream).await;
-    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, view_list)?))
+    }
+    .into_iter()
+    .map(|p| p.into())
+    .collect();
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
 }
 
 /**
@@ -293,15 +293,16 @@ async fn project_disks_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let disk_stream = nexus
+    let disks = nexus
         .project_list_disks(
             project_name,
             &data_page_params_for(&rqctx, &query)?,
         )
-        .await?;
-
-    let disk_list = to_list::<db::model::Disk, Disk>(disk_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, disk_list)?))
+        .await?
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
+    Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
 }
 
 /**
@@ -398,15 +399,16 @@ async fn project_instances_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let instance_stream = nexus
+    let instances = nexus
         .project_list_instances(
             &project_name,
             &data_page_params_for(&rqctx, &query)?,
         )
-        .await?;
-    let view_list =
-        to_list::<db::model::Instance, Instance>(instance_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+        .await?
+        .into_iter()
+        .map(|i| i.into())
+        .collect();
+    Ok(HttpResponseOk(ScanByName::results_page(&query, instances)?))
 }
 
 /**
@@ -573,12 +575,10 @@ async fn instance_disks_get(
         direction: PaginationOrder::Ascending,
         limit: NonZeroU32::new(std::u32::MAX).unwrap(),
     };
-    let disk_list = nexus
+    let disks = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
         .await?;
-    let view_list =
-        to_list::<db::model::DiskAttachment, DiskAttachment>(disk_list).await;
-    Ok(HttpResponseOk(view_list))
+    Ok(HttpResponseOk(disks))
 }
 
 /**
@@ -681,14 +681,13 @@ async fn project_vpcs_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_name = &path.project_name;
-    let vpc_stream = nexus
+    let vpcs = nexus
         .project_list_vpcs(
             &project_name,
             &data_page_params_for(&rqctx, &query)?,
         )
         .await?;
-    let view_list = to_list(vpc_stream).await;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, view_list)?))
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
 }
 
 /**

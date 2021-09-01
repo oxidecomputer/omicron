@@ -148,7 +148,7 @@ async fn sic_create_instance_record(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(instance.runtime.into())
+    Ok(instance.runtime().into())
 }
 
 async fn sic_instance_ensure(

@@ -14,6 +14,10 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::backend::{Backend, RawValue};
+use diesel::deserialize::{self, FromSql};
+use diesel::serialize::{self, ToSql};
+use diesel::sql_types;
 pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
@@ -43,6 +47,8 @@ pub type CreateResult<T> = Result<T, Error>;
 pub type DeleteResult = Result<(), Error>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, Error>;
+/** Result of a list operation that returns a vector */
+pub type ListResultVec<T> = Result<Vec<T>, Error>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<T, Error>;
 /** Result of an update operation for the specified type */
@@ -111,7 +117,38 @@ pub struct DataPageParams<'a, NameType> {
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
+// Diesel-specific derives:
+//
+// - Types which implement "ToSql" should implement "AsExpression".
+// - Types which implement "FromSql" should implement "FromSqlRow".
+#[derive(AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
 pub struct Name(String);
+
+// Serialize the "Name" object to SQL as TEXT.
+impl<DB> ToSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (&self.0 as &String).to_sql(out)
+    }
+}
+
+// Deserialize the "Name" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 /**
  * `Name::try_from(String)` is the primary method for constructing an Name
@@ -278,8 +315,42 @@ impl Name {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i64::from(self).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        ByteCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
         ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
@@ -372,8 +443,35 @@ impl From<&ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
+    AsExpression,
+    FromSqlRow,
 )]
+#[sql_type = "sql_types::BigInt"]
 pub struct Generation(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Generation::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl Generation {
     pub fn new() -> Generation {
         Generation(1)
@@ -436,6 +534,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    Oximeter,
 }
 
 impl Display for ResourceType {
@@ -452,6 +551,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::Oximeter => "oximeter",
             }
         )
     }
@@ -660,8 +760,41 @@ impl InstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct InstanceCpuCount(pub u16);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        InstanceCpuCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;
@@ -1207,10 +1340,42 @@ pub struct VpcSubnet {
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
-// this crate does not implement `JsonSchema`, nor the the SQL conversion traits `FromSql` and
-// `ToSql`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+// this crate does not implement `JsonSchema`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl<DB> ToSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        MacAddr::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl std::ops::Deref for MacAddr {
     type Target = macaddr::MacAddr6;

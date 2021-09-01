@@ -1,18 +1,22 @@
 //! Structures stored to the database.
 
+use super::diesel_schema::{
+    disk, instance, metricproducer, networkinterface, oximeter,
+    oximeterassignment, project, vpc, vpcsubnet,
+};
 use chrono::{DateTime, Utc};
+use diesel::backend::{Backend, RawValue};
+use diesel::deserialize::{self, FromSql};
+use diesel::serialize::{self, ToSql};
+use diesel::sql_types;
 use omicron_common::api::external::{
     self, ByteCount, Error, Generation, InstanceCpuCount,
 };
 use omicron_common::api::internal;
 use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
-use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
+use std::net::SocketAddr;
 use uuid::Uuid;
-
-use super::sql::SqlSerialize;
-use super::sql::SqlValueSet;
 
 // TODO: Break up types into multiple files
 
@@ -48,6 +52,8 @@ impl Into<external::Sled> for Sled {
     }
 }
 
+// TODO: As Diesel needs to flatten things out, this structure
+// may become unused.
 #[derive(Clone, Debug)]
 pub struct IdentityMetadata {
     pub id: Uuid,
@@ -55,6 +61,7 @@ pub struct IdentityMetadata {
     pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl IdentityMetadata {
@@ -66,6 +73,7 @@ impl IdentityMetadata {
             description: params.description,
             time_created: now,
             time_modified: now,
+            time_deleted: None,
         }
     }
 }
@@ -90,21 +98,8 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             description: metadata.description,
             time_created: metadata.time_created,
             time_modified: metadata.time_modified,
+            time_deleted: None,
         }
-    }
-}
-
-/// Serialization to DB.
-impl SqlSerialize for IdentityMetadata {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.id);
-        output.set("name", &self.name);
-        output.set("description", &self.description);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-
-        // TODO: Is this right? When should this be set?
-        output.set("time_deleted", &(None as Option<DateTime<Utc>>));
     }
 }
 
@@ -132,77 +127,128 @@ impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
             description: sql_row_value(value, "description")?,
             time_created: sql_row_value(value, "time_created")?,
             time_modified: sql_row_value(value, "time_modified")?,
+            time_deleted: sql_row_value(value, "time_deleted")?,
         })
     }
 }
 
 /// Describes a project within the database.
+#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[table_name = "project"]
 pub struct Project {
-    identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(params: &external::ProjectCreateParams) -> Self {
+    pub fn new(params: external::ProjectCreateParams) -> Self {
         let id = Uuid::new_v4();
-        Self { identity: IdentityMetadata::new(id, params.identity.clone()) }
+        let identity = IdentityMetadata::new(id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+        }
     }
 
     pub fn name(&self) -> &str {
-        self.identity.name.as_str()
+        self.name.as_str()
     }
 
     pub fn id(&self) -> &Uuid {
-        &self.identity.id
+        &self.id
     }
 }
 
-/// Conversion to the internal API type.
 impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
-        external::Project { identity: self.identity.into() }
+        external::Project {
+            identity: external::IdentityMetadata {
+                id: self.id,
+                name: self.name,
+                description: self.description,
+                time_created: self.time_created,
+                time_modified: self.time_modified,
+            },
+        }
     }
 }
 
 /// Conversion from the internal API type.
 impl From<external::Project> for Project {
     fn from(project: external::Project) -> Self {
-        Self { identity: project.identity.into() }
+        Self {
+            id: project.identity.id,
+            name: project.identity.name,
+            description: project.identity.description,
+            time_created: project.identity.time_created,
+            time_modified: project.identity.time_modified,
+            time_deleted: None,
+        }
     }
 }
 
-/// Serialization to DB.
-impl SqlSerialize for Project {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-    }
+/// Describes a set of updates for the [`Project`] model.
+#[derive(AsChangeset)]
+#[table_name = "project"]
+pub struct ProjectUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
 }
 
-/// Deserialization from DB.
-impl TryFrom<&tokio_postgres::Row> for Project {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Project { identity: IdentityMetadata::try_from(value)? })
+impl From<external::ProjectUpdateParams> for ProjectUpdate {
+    fn from(params: external::ProjectUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
     }
 }
 
 /// An Instance (VM).
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[table_name = "instance"]
 pub struct Instance {
-    /// common identifying metadata
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 
     /// id for the project containing this Instance
     pub project_id: Uuid,
 
-    /// state owned by the data plane
-    pub runtime: InstanceRuntimeState,
+    /// runtime state of the Instance
+    pub state: InstanceState,
+
+    /// timestamp for this information
+    // TODO: Is this redundant with "time_modified"?
+    pub time_state_updated: DateTime<Utc>,
+
+    /// generation number for this state
+    pub state_generation: Generation,
+
+    /// which sled is running this Instance
+    pub active_server_id: Uuid,
+
     // TODO-completeness: add disks, network, tags, metrics
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
+
     /// memory allocated for this Instance
     pub memory: ByteCount,
+
     /// RFC1035-compliant hostname for the Instance.
     // TODO-cleanup different type?
     pub hostname: String,
@@ -215,16 +261,50 @@ impl Instance {
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
     ) -> Self {
+        let identity =
+            IdentityMetadata::new(instance_id, params.identity.clone());
+
         Self {
-            identity: IdentityMetadata::new(
-                instance_id,
-                params.identity.clone(),
-            ),
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
             project_id,
+
+            state: runtime.state,
+            time_state_updated: runtime.time_updated,
+            state_generation: runtime.gen,
+            active_server_id: runtime.sled_uuid,
+
             ncpus: params.ncpus,
             memory: params.memory,
             hostname: params.hostname.clone(),
-            runtime,
+        }
+    }
+
+    // TODO: We could definitely derive this.
+    // We could actually derive any "into subset" struct with
+    // identically named fields.
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
+    }
+
+    pub fn runtime(&self) -> InstanceRuntimeState {
+        InstanceRuntimeState {
+            state: self.state,
+            sled_uuid: self.active_server_id,
+            gen: self.state_generation,
+            time_updated: self.time_state_updated,
         }
     }
 }
@@ -233,41 +313,13 @@ impl Instance {
 impl Into<external::Instance> for Instance {
     fn into(self) -> external::Instance {
         external::Instance {
-            identity: self.identity.clone().into(),
+            identity: self.identity().into(),
             project_id: self.project_id,
             ncpus: self.ncpus,
             memory: self.memory,
             hostname: self.hostname.clone(),
-            runtime: self.runtime.into(),
+            runtime: self.runtime().into(),
         }
-    }
-}
-
-/// Serialization to DB.
-impl SqlSerialize for Instance {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("project_id", &self.project_id);
-        self.runtime.sql_serialize(output);
-        output.set("ncpus", &self.ncpus);
-        output.set("memory", &self.memory);
-        output.set("hostname", &self.hostname);
-    }
-}
-
-/// Deserialization from DB.
-impl TryFrom<&tokio_postgres::Row> for Instance {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Instance {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            ncpus: sql_row_value(value, "ncpus")?,
-            memory: sql_row_value(value, "memory")?,
-            hostname: sql_row_value(value, "hostname")?,
-            runtime: InstanceRuntimeState::try_from(value)?,
-        })
     }
 }
 
@@ -275,15 +327,21 @@ impl TryFrom<&tokio_postgres::Row> for Instance {
 /// metadata
 ///
 /// This state is owned by the sled agent running that Instance.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsChangeset)]
+#[table_name = "instance"]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
-    pub run_state: InstanceState,
+    #[column_name = "state"]
+    pub state: InstanceState,
     /// which sled is running this Instance
+    // TODO: should this be optional?
+    #[column_name = "active_server_id"]
     pub sled_uuid: Uuid,
     /// generation number for this state
+    #[column_name = "state_generation"]
     pub gen: Generation,
     /// timestamp for this information
+    #[column_name = "time_state_updated"]
     pub time_updated: DateTime<Utc>,
 }
 
@@ -291,7 +349,7 @@ pub struct InstanceRuntimeState {
 impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> external::InstanceRuntimeState {
         external::InstanceRuntimeState {
-            run_state: self.run_state.0,
+            run_state: *self.state.state(),
             time_run_state_updated: self.time_updated,
         }
     }
@@ -301,7 +359,7 @@ impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
 impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn from(state: internal::nexus::InstanceRuntimeState) -> Self {
         Self {
-            run_state: InstanceState(state.run_state),
+            state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
             gen: state.gen,
             time_updated: state.time_updated,
@@ -313,7 +371,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
 impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> internal::nexus::InstanceRuntimeState {
         internal::sled_agent::InstanceRuntimeState {
-            run_state: self.run_state.0,
+            run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             gen: self.gen,
             time_updated: self.time_updated,
@@ -321,33 +379,10 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     }
 }
 
-/// Serialization to the database.
-impl SqlSerialize for InstanceRuntimeState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.run_state.sql_serialize(output);
-        output.set("active_server_id", &self.sled_uuid);
-        output.set("state_generation", &self.gen);
-        output.set("time_state_updated", &self.time_updated);
-    }
-}
-
-/// Deserialization from the database.
-impl TryFrom<&tokio_postgres::Row> for InstanceRuntimeState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(InstanceRuntimeState {
-            run_state: InstanceState::try_from(value)?,
-            sled_uuid: sql_row_value(value, "active_server_id")?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
-    }
-}
-
 /// A wrapper around the external "InstanceState" object,
 /// which may be stored to disk.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
 pub struct InstanceState(external::InstanceState);
 
 impl InstanceState {
@@ -360,40 +395,64 @@ impl InstanceState {
     }
 }
 
-/// Serialization to the database.
-impl SqlSerialize for InstanceState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("instance_state", &self.0.label());
+impl<DB> ToSql<sql_types::Text, DB> for InstanceState
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (&self.0.label().to_string() as &String).to_sql(out)
     }
 }
 
-/// Deserialization from the database.
-impl TryFrom<&tokio_postgres::Row> for InstanceState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let variant: &str = sql_row_value(value, "instance_state")?;
-        Ok(InstanceState(
-            external::InstanceState::try_from(variant)
-                .map_err(|err| Error::InternalError { message: err })?,
-        ))
+impl<DB> FromSql<sql_types::Text, DB> for InstanceState
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let s = String::from_sql(bytes)?;
+        let state = external::InstanceState::try_from(s.as_str())?;
+        Ok(InstanceState::new(state))
     }
 }
 
 /// A Disk (network block device).
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "disk"]
 pub struct Disk {
-    /// common identifying metadata.
-    pub identity: IdentityMetadata,
+    // IdentityMetadata
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     /// id for the project containing this Disk
     pub project_id: Uuid,
+
+    // DiskRuntimeState
+    /// runtime state of the Disk
+    pub disk_state: String,
+    pub attach_instance_id: Option<Uuid>,
+    /// generation number for this state
+    #[column_name = "state_generation"]
+    pub gen: Generation,
+    /// timestamp for this information
+    #[column_name = "time_state_updated"]
+    pub time_updated: DateTime<Utc>,
+
+    /// size of the Disk
+    #[column_name = "size_bytes"]
+    pub size: ByteCount,
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)
+    #[column_name = "origin_snapshot"]
     pub create_snapshot_id: Option<Uuid>,
-    /// size of the Disk
-    pub size: ByteCount,
-    /// runtime state of the Disk
-    pub runtime: DiskRuntimeState,
 }
 
 impl Disk {
@@ -403,12 +462,71 @@ impl Disk {
         params: external::DiskCreateParams,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
+        let identity = IdentityMetadata::new(disk_id, params.identity);
         Self {
-            identity: IdentityMetadata::new(disk_id, params.identity),
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
             project_id,
-            create_snapshot_id: params.snapshot_id,
+
+            disk_state: runtime_initial.disk_state,
+            attach_instance_id: runtime_initial.attach_instance_id,
+            gen: runtime_initial.gen,
+            time_updated: runtime_initial.time_updated,
+
             size: params.size,
-            runtime: runtime_initial,
+            create_snapshot_id: params.snapshot_id,
+        }
+    }
+
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
+    }
+
+    pub fn state(&self) -> DiskState {
+        // TODO: If we could store disk state in-line, we could avoid the
+        // unwrap. Would prefer to parse it as such.
+        //
+        // TODO: also impl'd for DiskRuntimeState
+        DiskState::new(
+            external::DiskState::try_from((
+                self.disk_state.as_str(),
+                self.attach_instance_id,
+            ))
+            .unwrap(),
+        )
+    }
+
+    pub fn runtime(&self) -> DiskRuntimeState {
+        DiskRuntimeState {
+            disk_state: self.disk_state.clone(),
+            attach_instance_id: self.attach_instance_id,
+            gen: self.gen,
+            time_updated: self.time_updated,
+        }
+    }
+
+    pub fn attachment(&self) -> Option<DiskAttachment> {
+        if let Some(instance_id) = self.attach_instance_id {
+            Some(DiskAttachment {
+                instance_id,
+                disk_id: self.id,
+                disk_name: self.name.clone(),
+                disk_state: self.state().into(),
+            })
+        } else {
+            None
         }
     }
 }
@@ -416,59 +534,76 @@ impl Disk {
 /// Conversion to the external API type.
 impl Into<external::Disk> for Disk {
     fn into(self) -> external::Disk {
-        let device_path = format!("/mnt/{}", self.identity.name.as_str());
+        let device_path = format!("/mnt/{}", self.name.as_str());
         external::Disk {
-            identity: self.identity.clone().into(),
+            identity: self.identity().into(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             size: self.size,
-            state: self.runtime.disk_state.into(),
+            state: self.state().into(),
             device_path,
         }
     }
 }
 
-/// Serialization to the DB.
-impl SqlSerialize for Disk {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("project_id", &self.project_id);
-        self.runtime.sql_serialize(output);
-        output.set("size_bytes", &self.size);
-        output.set("origin_snapshot", &self.create_snapshot_id);
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for Disk {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Disk {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            create_snapshot_id: sql_row_value(value, "origin_snapshot")?,
-            size: sql_row_value(value, "size_bytes")?,
-            runtime: DiskRuntimeState::try_from(value)?,
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(AsChangeset, Clone, Debug)]
+#[table_name = "disk"]
+// When "attach_instance_id" is set to None, we'd like to
+// clear it from the DB, rather than ignore the update.
+#[changeset_options(treat_none_as_null = "true")]
 pub struct DiskRuntimeState {
     /// runtime state of the Disk
-    pub disk_state: DiskState,
+    pub disk_state: String,
+    pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
+    #[column_name = "state_generation"]
     pub gen: Generation,
     /// timestamp for this information
+    #[column_name = "time_state_updated"]
     pub time_updated: DateTime<Utc>,
+}
+
+impl DiskRuntimeState {
+    pub fn new() -> Self {
+        Self {
+            disk_state: external::DiskState::Creating.label().to_string(),
+            attach_instance_id: None,
+            gen: Generation::new(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn detach(self) -> Self {
+        Self {
+            disk_state: external::DiskState::Detached.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn state(&self) -> DiskState {
+        // TODO: If we could store disk state in-line, we could avoid the
+        // unwrap. Would prefer to parse it as such.
+        DiskState::new(
+            external::DiskState::try_from((
+                self.disk_state.as_str(),
+                self.attach_instance_id,
+            ))
+            .unwrap(),
+        )
+    }
 }
 
 /// Conversion from the internal API type.
 impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn from(runtime: internal::nexus::DiskRuntimeState) -> Self {
         Self {
-            disk_state: runtime.disk_state.into(),
+            disk_state: runtime.disk_state.label().to_string(),
+            attach_instance_id: runtime
+                .disk_state
+                .attached_instance_id()
+                .map(|id| *id),
             gen: runtime.gen,
             time_updated: runtime.time_updated,
         }
@@ -479,36 +614,14 @@ impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
 impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn into(self) -> internal::nexus::DiskRuntimeState {
         internal::nexus::DiskRuntimeState {
-            disk_state: self.disk_state.into(),
+            disk_state: self.state().into(),
             gen: self.gen,
             time_updated: self.time_updated,
         }
     }
 }
 
-/// Serialization to the DB.
-impl SqlSerialize for DiskRuntimeState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.disk_state.sql_serialize(output);
-        output.set("state_generation", &self.gen);
-        output.set("time_state_updated", &self.time_updated);
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for DiskRuntimeState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskRuntimeState {
-            disk_state: DiskState::try_from(value)?,
-            gen: sql_row_value(value, "state_generation")?,
-            time_updated: sql_row_value(value, "time_state_updated")?,
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsExpression)]
 pub struct DiskState(external::DiskState);
 
 impl DiskState {
@@ -542,72 +655,24 @@ impl Into<external::DiskState> for DiskState {
     }
 }
 
-/// Serialization to the DB.
-impl SqlSerialize for DiskState {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        let attach_id = &self.0.attached_instance_id().map(|id| *id);
-        output.set("attach_instance_id", attach_id);
-        output.set("disk_state", &self.0.label());
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for DiskState {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let disk_state_str: &str = sql_row_value(value, "disk_state")?;
-        let instance_uuid: Option<Uuid> =
-            sql_row_value(value, "attach_instance_id")?;
-        Ok(DiskState(
-            external::DiskState::try_from((disk_state_str, instance_uuid))
-                .map_err(|e| Error::internal_error(&e))?,
-        ))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: external::Name,
-    pub disk_state: DiskState,
-}
-
-impl Into<external::DiskAttachment> for DiskAttachment {
-    fn into(self) -> external::DiskAttachment {
-        external::DiskAttachment {
-            instance_id: self.instance_id,
-            disk_id: self.disk_id,
-            disk_name: self.disk_name,
-            disk_state: self.disk_state.into(),
-        }
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for DiskAttachment {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(DiskAttachment {
-            instance_id: sql_row_value(value, "attach_instance_id")?,
-            disk_id: sql_row_value(value, "id")?,
-            disk_name: sql_row_value(value, "name")?,
-            disk_state: DiskState::try_from(value)?,
-        })
-    }
-}
+/// Type which describes the attachment status of a disk.
+///
+/// This happens to be the same as the type in the external API,
+/// but it is not required to be.
+pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Debug, Clone)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[table_name = "metricproducer"]
 pub struct ProducerEndpoint {
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
-    pub address: SocketAddr,
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
+    pub interval: f64,
     pub base_route: String,
-    pub interval: Duration,
 }
 
 impl ProducerEndpoint {
@@ -617,9 +682,10 @@ impl ProducerEndpoint {
             id: endpoint.id,
             time_created: now,
             time_modified: now,
-            address: endpoint.address,
+            ip: endpoint.address.ip().into(),
+            port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),
-            interval: endpoint.interval,
+            interval: endpoint.interval.as_secs_f64(),
         }
     }
 
@@ -629,120 +695,59 @@ impl ProducerEndpoint {
     }
 }
 
-impl SqlSerialize for ProducerEndpoint {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.id);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-        output.set("ip", &self.address.ip());
-        output.set("port", &i32::from(self.address.port()));
-        output.set("interval", &self.interval.as_secs_f64());
-        output.set("route", &self.base_route);
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for ProducerEndpoint {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let id: Uuid = sql_row_value(value, "id")?;
-        let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> =
-            sql_row_value(value, "time_modified")?;
-        let ip: IpAddr = sql_row_value(value, "ip")?;
-        let port: i32 = sql_row_value(value, "port")?;
-        let address = SocketAddr::new(ip, port as _);
-        let base_route: String = sql_row_value(value, "route")?;
-        let interval =
-            Duration::from_secs_f64(sql_row_value(value, "interval")?);
-        Ok(Self {
-            id,
-            time_created,
-            time_modified,
-            address,
-            base_route,
-            interval,
-        })
-    }
-}
-
 /// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone, Copy)]
+#[table_name = "oximeter"]
 pub struct OximeterInfo {
     /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
+    pub id: Uuid,
     /// When this resource was created.
     pub time_created: DateTime<Utc>,
     /// When this resource was last modified.
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
 }
 
 impl OximeterInfo {
     pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
-            collector_id: info.collector_id,
+            id: info.collector_id,
             time_created: now,
             time_modified: now,
-            address: info.address,
+            ip: info.address.ip().into(),
+            port: info.address.port().into(),
         }
     }
 }
 
-impl SqlSerialize for OximeterInfo {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("id", &self.collector_id);
-        output.set("time_created", &self.time_created);
-        output.set("time_modified", &self.time_modified);
-        output.set("ip", &self.address.ip());
-        output.set("port", &i32::from(self.address.port()));
-    }
-}
-
-impl TryFrom<&tokio_postgres::Row> for OximeterInfo {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let collector_id: Uuid = sql_row_value(value, "id")?;
-        let ip: IpAddr = sql_row_value(value, "ip")?;
-        let port: i32 = sql_row_value(value, "port")?;
-        let time_created: DateTime<Utc> = sql_row_value(value, "time_created")?;
-        let time_modified: DateTime<Utc> =
-            sql_row_value(value, "time_modified")?;
-        let address = SocketAddr::new(ip, port as _);
-        Ok(Self { collector_id, time_created, time_modified, address })
-    }
-}
-
 /// An assignment of an Oximeter instance to a metric producer for collection.
-#[derive(Debug, Clone, Copy)]
+#[derive(Queryable, Insertable, Debug, Clone, Copy)]
+#[table_name = "oximeterassignment"]
 pub struct OximeterAssignment {
     pub oximeter_id: Uuid,
     pub producer_id: Uuid,
+    pub time_created: DateTime<Utc>,
 }
 
-impl SqlSerialize for OximeterAssignment {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        output.set("oximeter_id", &self.oximeter_id);
-        output.set("producer_id", &self.producer_id);
+impl OximeterAssignment {
+    pub fn new(oximeter_id: Uuid, producer_id: Uuid) -> Self {
+        Self { oximeter_id, producer_id, time_created: Utc::now() }
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for OximeterAssignment {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let oximeter_id: Uuid = sql_row_value(value, "oximeter_id")?;
-        let producer_id: Uuid = sql_row_value(value, "producer_id")?;
-        Ok(Self { oximeter_id, producer_id })
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "vpc"]
 pub struct Vpc {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub project_id: Uuid,
     pub dns_name: external::Name,
 }
@@ -753,10 +758,28 @@ impl Vpc {
         project_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
+        let identity = IdentityMetadata::new(vpc_id, params.identity);
         Self {
-            identity: IdentityMetadata::new(vpc_id, params.identity),
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
             project_id,
             dns_name: params.dns_name,
+        }
+    }
+
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
         }
     }
 }
@@ -764,7 +787,7 @@ impl Vpc {
 impl Into<external::Vpc> for Vpc {
     fn into(self) -> external::Vpc {
         external::Vpc {
-            identity: self.identity.into(),
+            identity: self.identity().into(),
             project_id: self.project_id,
             dns_name: self.dns_name,
             // VPC subnets are accessed through a separate row lookup.
@@ -773,66 +796,79 @@ impl Into<external::Vpc> for Vpc {
     }
 }
 
-impl TryFrom<&tokio_postgres::Row> for Vpc {
-    type Error = Error;
+#[derive(AsChangeset)]
+#[table_name = "vpc"]
+pub struct VpcUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub dns_name: Option<external::Name>,
+}
 
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            project_id: sql_row_value(value, "project_id")?,
-            dns_name: sql_row_value(value, "dns_name")?,
-        })
+impl From<external::VpcUpdateParams> for VpcUpdate {
+    fn from(params: external::VpcUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            dns_name: params.dns_name,
+        }
     }
 }
 
-impl SqlSerialize for Vpc {
-    fn sql_serialize(&self, output: &mut SqlValueSet) {
-        self.identity.sql_serialize(output);
-        output.set("project_id", &self.project_id);
-        output.set("dns_name", &self.dns_name);
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "vpcsubnet"]
 pub struct VpcSubnet {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<external::Ipv4Net>,
-    pub ipv6_block: Option<external::Ipv6Net>,
+    pub ipv4_block: Option<ipnetwork::IpNetwork>,
+    pub ipv6_block: Option<ipnetwork::IpNetwork>,
 }
 
-impl TryFrom<&tokio_postgres::Row> for VpcSubnet {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            ipv4_block: sql_row_value(value, "ipv4_block")?,
-            ipv6_block: sql_row_value(value, "ipv6_block")?,
-        })
+impl VpcSubnet {
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "networkinterface"]
 pub struct NetworkInterface {
-    pub identity: IdentityMetadata,
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: external::MacAddr,
-    pub ip: IpAddr,
+    pub ip: ipnetwork::IpNetwork,
 }
 
-impl TryFrom<&tokio_postgres::Row> for NetworkInterface {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity: IdentityMetadata::try_from(value)?,
-            vpc_id: sql_row_value(value, "vpc_id")?,
-            subnet_id: sql_row_value(value, "subnet_id")?,
-            mac: sql_row_value(value, "mac")?,
-            ip: sql_row_value(value, "ip")?,
-        })
+impl NetworkInterface {
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
     }
 }
