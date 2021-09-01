@@ -56,6 +56,22 @@ However, once these have been provided, the codebase should be buildable with `c
 
 **Prerequisites:**
 
+. Postgres
+
+Postgres is required to link against libpq for access to the database.
+
+(See https://github.com/oxidecomputer/omicron/issues/213 ; we may be able to remove this dependency long-term)
+
+Linux: `sudo apt-get install libpq-dev`
+Mac: `brew install postgresql`
+Helios: `pkg install library/postgresql-13`
+
+Additionally, to help all runtime commands find this library, we recommend the following:
+[source,text]
+----
+export LD_LIBRARY_PATH="$(pg_config --libdir)"
+----
+
 . CockroachDB v20.2.5.
 +
 The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
