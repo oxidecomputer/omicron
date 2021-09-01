@@ -27,43 +27,26 @@
 use super::Config as DbConfig;
 use async_bb8_diesel::DieselConnectionManager;
 use diesel::PgConnection;
-use omicron_common::api::external::Error;
 
-// NOTE: This structure abstracts a connection pool.
-// It *currently* wraps both a BB8 (async) and R2D2 (sync)
-// connection to Postgres.
-//
-// Long-term, it would be ideal to migrate to a single
-// (probably async) connection.
+/// Wrapper around a database connection pool.
+///
+/// Expected to be used as the primary interface to the database.
 pub struct Pool {
-    pool_diesel: bb8::Pool<DieselConnectionManager<diesel::PgConnection>>,
+    pool: bb8::Pool<DieselConnectionManager<diesel::PgConnection>>,
 }
 
 impl Pool {
     pub fn new(db_config: &DbConfig) -> Self {
         let manager =
             DieselConnectionManager::<PgConnection>::new(&db_config.url.url());
-        let pool_diesel = bb8::Builder::new().build_unchecked(manager);
-        Pool { pool_diesel }
+        let pool = bb8::Builder::new().build_unchecked(manager);
+        Pool { pool }
     }
 
+    /// Returns a reference to the underlying pool.
     pub fn pool(
         &self,
     ) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
-        &self.pool_diesel
-    }
-
-    pub async fn acquire_diesel(
-        &self,
-    ) -> Result<
-        bb8::PooledConnection<'_, DieselConnectionManager<PgConnection>>,
-        Error,
-    > {
-        self.pool_diesel.get().await.map_err(|e| Error::ServiceUnavailable {
-            message: format!(
-                "failed to acquire database connection: {}",
-                e.to_string()
-            ),
-        })
+        &self.pool
     }
 }
