@@ -1,0 +1,195 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Crucible Agent",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/crucible/0/regions": {
+      "get": {
+        "operationId": "region_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Region",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Region"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "region_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Region"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crucible/0/regions/{id}": {
+      "get": {
+        "operationId": "region_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RegionId"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Region"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "region_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RegionId"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateRegion": {
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "extent_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "extent_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/RegionId"
+          },
+          "volume_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "extent_count",
+          "extent_size",
+          "id",
+          "volume_id"
+        ]
+      },
+      "Region": {
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "extent_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "extent_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/RegionId"
+          },
+          "port_number": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "volume_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "extent_count",
+          "extent_size",
+          "id",
+          "port_number",
+          "state",
+          "volume_id"
+        ]
+      },
+      "RegionId": {
+        "type": "string"
+      },
+      "State": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "created",
+          "tombstoned",
+          "destroyed",
+          "failed"
+        ]
+      }
+    }
+  }
+}

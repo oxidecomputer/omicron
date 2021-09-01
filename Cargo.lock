@@ -290,6 +290,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-agent-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+]
+
+[[package]]
 name = "crypto-mac"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1299,6 +1309,7 @@ dependencies = [
  "bb8",
  "bytes",
  "chrono",
+ "crucible-agent-client",
  "diesel",
  "dropshot",
  "expectorate",
