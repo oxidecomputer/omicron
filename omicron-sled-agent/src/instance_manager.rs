@@ -198,7 +198,9 @@ mod test {
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
-    use omicron_common::api::external::{Generation, InstanceState};
+    use omicron_common::api::external::{
+        ByteCount, Generation, InstanceCpuCount, InstanceState,
+    };
     use omicron_common::api::internal::{
         nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
@@ -221,6 +223,9 @@ mod test {
         InstanceRuntimeState {
             run_state: InstanceState::Creating,
             sled_uuid: Uuid::new_v4(),
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_mebibytes_u32(512),
+            hostname: "myvm".to_string(),
             gen: Generation::new(),
             time_updated: Utc::now(),
         }

@@ -281,12 +281,14 @@ impl Instance {
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: "Test instance".to_string(),
+                name: initial_runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
-                memory: 256,
-                vcpus: 2,
+                memory: initial_runtime.memory.to_bytes(),
+                // TODO: we should probably make propolis aligned with
+                // InstanceCpuCount here, to avoid any casting...
+                vcpus: initial_runtime.ncpus.0 as u8,
             },
             state: InstanceStates::new(initial_runtime),
             nexus_client,
@@ -477,7 +479,9 @@ mod test {
         RequestContext, TypedBody,
     };
     use futures::future::FutureExt;
-    use omicron_common::api::external::{Generation, InstanceState};
+    use omicron_common::api::external::{
+        ByteCount, Generation, InstanceCpuCount, InstanceState,
+    };
     use omicron_common::api::internal::{
         nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
@@ -808,6 +812,9 @@ mod test {
         InstanceRuntimeState {
             run_state: InstanceState::Creating,
             sled_uuid: Uuid::new_v4(),
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_mebibytes_u32(512),
+            hostname: "myvm".to_string(),
             gen: Generation::new(),
             time_updated: Utc::now(),
         }

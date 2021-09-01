@@ -1,6 +1,8 @@
 //! APIs exposed by Nexus.
 
-use crate::api::external::{DiskState, Generation, InstanceState};
+use crate::api::external::{
+    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState,
+};
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,6 +32,13 @@ pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     /// which sled is running this Instance
     pub sled_uuid: Uuid,
+    /// number of CPUs allocated for this Instance
+    pub ncpus: InstanceCpuCount,
+    /// memory allocated for this Instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the Instance.
+    // TODO-cleanup different type?
+    pub hostname: String,
     /// generation number for this state
     pub gen: Generation,
     /// timestamp for this information

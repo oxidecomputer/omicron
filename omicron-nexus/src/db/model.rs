@@ -303,6 +303,9 @@ impl Instance {
         InstanceRuntimeState {
             state: self.state,
             sled_uuid: self.active_server_id,
+            ncpus: self.ncpus,
+            memory: self.memory,
+            hostname: self.hostname.clone(),
             gen: self.state_generation,
             time_updated: self.time_state_updated,
         }
@@ -337,6 +340,12 @@ pub struct InstanceRuntimeState {
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
     pub sled_uuid: Uuid,
+    #[column_name = "ncpus"]
+    pub ncpus: InstanceCpuCount,
+    #[column_name = "memory"]
+    pub memory: ByteCount,
+    #[column_name = "hostname"]
+    pub hostname: String,
     /// generation number for this state
     #[column_name = "state_generation"]
     pub gen: Generation,
@@ -361,6 +370,9 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         Self {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
+            ncpus: state.ncpus,
+            memory: state.memory,
+            hostname: state.hostname,
             gen: state.gen,
             time_updated: state.time_updated,
         }
@@ -373,6 +385,9 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         internal::sled_agent::InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
+            ncpus: self.ncpus,
+            memory: self.memory,
+            hostname: self.hostname,
             gen: self.gen,
             time_updated: self.time_updated,
         }

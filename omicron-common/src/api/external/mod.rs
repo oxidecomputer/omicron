@@ -846,7 +846,7 @@ pub struct Instance {
 
     /** number of CPUs allocated for this Instance */
     pub ncpus: InstanceCpuCount,
-    /** memory, in gigabytes, allocated for this Instance */
+    /** memory allocated for this Instance */
     pub memory: ByteCount,
     /** RFC1035-compliant hostname for the Instance. */
     pub hostname: String, /* TODO-cleanup different type? */

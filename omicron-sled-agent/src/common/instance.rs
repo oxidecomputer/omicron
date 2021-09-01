@@ -143,12 +143,9 @@ impl InstanceStates {
         next: InstanceState,
         desired: Option<InstanceStateRequested>,
     ) {
-        self.current = InstanceRuntimeState {
-            run_state: next,
-            sled_uuid: self.current.sled_uuid,
-            gen: self.current.gen.next(),
-            time_updated: Utc::now(),
-        };
+        self.current.run_state = next;
+        self.current.gen = self.current.gen.next();
+        self.current.time_updated = Utc::now();
         self.desired = desired
             .map(|run_state| InstanceRuntimeStateRequested { run_state });
     }
@@ -261,7 +258,9 @@ impl InstanceStates {
 mod test {
     use super::{Action, InstanceStates};
     use chrono::Utc;
-    use omicron_common::api::external::{Generation, InstanceState as State};
+    use omicron_common::api::external::{
+        ByteCount, Generation, InstanceCpuCount, InstanceState as State,
+    };
     use omicron_common::api::internal::{
         nexus::InstanceRuntimeState,
         sled_agent::InstanceStateRequested as Requested,
@@ -272,6 +271,9 @@ mod test {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_mebibytes_u32(512),
+            hostname: "myvm".to_string(),
             gen: Generation::new(),
             time_updated: Utc::now(),
         })
