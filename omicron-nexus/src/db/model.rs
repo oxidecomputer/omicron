@@ -621,8 +621,6 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     }
 }
 
-// TODO: What to do with this type???
-
 #[derive(Clone, Debug, AsExpression)]
 pub struct DiskState(external::DiskState);
 
@@ -858,10 +856,7 @@ pub struct NetworkInterface {
 
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
-    // TODO: Parse as str, keep MacAddr type?
-    // This would be possible with ToSql/FromSql for a new type.
-    //    pub mac: external::MacAddr,
-    pub mac: String,
+    pub mac: external::MacAddr,
     pub ip: ipnetwork::IpNetwork,
 }
 

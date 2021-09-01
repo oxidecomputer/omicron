@@ -1340,10 +1340,42 @@ pub struct VpcSubnet {
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
-// this crate does not implement `JsonSchema`, nor the the SQL conversion traits `FromSql` and
-// `ToSql`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+// this crate does not implement `JsonSchema`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl<DB> ToSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        MacAddr::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl std::ops::Deref for MacAddr {
     type Target = macaddr::MacAddr6;
