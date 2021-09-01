@@ -4,7 +4,7 @@ use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::{
     dladm::{PhysicalLink, VNIC_PREFIX},
-    zone::ZONE_PREFIX
+    zone::ZONE_PREFIX,
 };
 use crate::instance_manager::{IdAllocator, InstanceTicket};
 use futures::lock::Mutex;
@@ -151,31 +151,25 @@ struct Vnic {
 impl Vnic {
     // Creates a new NIC, intended for usage by the guest.
     fn new_guest(
-       allocator: &IdAllocator,
-       physical_dl: &PhysicalLink,
-       mac: Option<MacAddr>
+        allocator: &IdAllocator,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
         let name = guest_vnic_name(allocator.next());
         Dladm::create_vnic(physical_dl, &name, mac)?;
-        Ok(Vnic {
-            name,
-            deleted: false,
-        })
+        Ok(Vnic { name, deleted: false })
     }
 
     // Creates a new NIC, intended for allowing Propolis to communicate
     // with the control plane.
     fn new_control(
-       allocator: &IdAllocator,
-       physical_dl: &PhysicalLink,
-       mac: Option<MacAddr>
+        allocator: &IdAllocator,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
         let name = vnic_name(allocator.next());
         Dladm::create_vnic(physical_dl, &name, mac)?;
-        Ok(Vnic {
-            name,
-            deleted: false,
-        })
+        Ok(Vnic { name, deleted: false })
     }
 
     // Deletes a NIC (if it has not already been deleted).
@@ -256,12 +250,15 @@ impl InstanceInner {
 
     async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
-        let nics = self.requested_nics.iter().enumerate().map(|(i, _)| {
-            propolis_client::api::NetworkInterfaceRequest {
+        let nics = self
+            .requested_nics
+            .iter()
+            .enumerate()
+            .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
                 name: guest_nics[i].name.clone(),
                 slot: propolis_client::api::Slot(i as u8),
-            }
-        }).collect();
+            })
+            .collect();
 
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
@@ -400,7 +397,8 @@ impl Instance {
         // Instead, we just use a per-agent incrementing number. We do the same
         // for the guest-accessible NICs too.
         let physical_dl = Dladm::find_physical()?;
-        let control_nic = Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
+        let control_nic =
+            Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
 
         // Instantiate all guest-requested VNICs.
         //
@@ -409,15 +407,25 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
-        let guest_nics = inner.requested_nics.clone().into_iter().map(|nic| {
-            Vnic::new_guest(&inner.nic_id_allocator, &physical_dl, Some(nic.mac))
-        }).collect::<Result<Vec<_>, Error>>()?;
+        let guest_nics = inner
+            .requested_nics
+            .clone()
+            .into_iter()
+            .map(|nic| {
+                Vnic::new_guest(
+                    &inner.nic_id_allocator,
+                    &physical_dl,
+                    Some(nic.mac),
+                )
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = zone_name(inner.id());
 
-        let nics_to_put_in_zone: Vec<String> = guest_nics.iter()
+        let nics_to_put_in_zone: Vec<String> = guest_nics
+            .iter()
             .map(|nic| nic.name.clone())
             .chain(std::iter::once(control_nic.name.clone()))
             .collect();
@@ -437,7 +445,8 @@ impl Instance {
             .await?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
-        let ip = Zones::create_address(&zname, &interface_name(&control_nic.name))?;
+        let ip =
+            Zones::create_address(&zname, &interface_name(&control_nic.name))?;
         info!(inner.log, "Created address {} for zone: {}", ip, zname);
 
         // Run Propolis in the Zone.
@@ -482,8 +491,10 @@ impl Instance {
             }));
 
         // Store the VNICs while the instance is running.
-        inner.allocated_nics =
-            guest_nics.into_iter().chain(std::iter::once(control_nic)).collect();
+        inner.allocated_nics = guest_nics
+            .into_iter()
+            .chain(std::iter::once(control_nic))
+            .collect();
 
         Ok(())
     }

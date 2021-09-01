@@ -1,8 +1,7 @@
 //! Sled agent implementation
 
 use omicron_common::api::{
-    external::Error,
-    internal::nexus::DiskRuntimeState,
+    external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceHardware,

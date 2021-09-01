@@ -41,9 +41,7 @@ pub struct IdAllocator {
 
 impl IdAllocator {
     pub fn new() -> Self {
-        Self {
-            value: Arc::new(AtomicU64::new(0)),
-        }
+        Self { value: Arc::new(AtomicU64::new(0)) }
     }
 
     pub fn next(&self) -> u64 {

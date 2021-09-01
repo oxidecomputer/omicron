@@ -36,6 +36,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-bb8-diesel"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=0a6d535#0a6d535f8ac21b407879e6d7dc5214186a187e08"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "diesel",
+ "tokio",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -85,27 +96,15 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "bb8"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dae93eccab998c4b8703e3a6bbaa1714c38e445ebacb4bede25d0408521e293c"
+checksum = "2e9f4fa9768efd269499d8fba693260cfc670891cf6de3adc935588447a77cc8"
 dependencies = [
  "async-trait",
  "futures-channel",
  "futures-util",
  "parking_lot",
  "tokio",
-]
-
-[[package]]
-name = "bb8-postgres"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61fdf56d52b2cca401d2380407e5c35d3d25d3560224ecf74d6e4ca13e51239b"
-dependencies = [
- "async-trait",
- "bb8",
- "tokio",
- "tokio-postgres",
 ]
 
 [[package]]
@@ -340,6 +339,34 @@ name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "diesel"
+version = "2.0.0"
+source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "chrono",
+ "diesel_derives",
+ "ipnetwork",
+ "itoa",
+ "libc",
+ "pq-sys",
+ "r2d2",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "diesel_derives"
+version = "2.0.0"
+source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -922,6 +949,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipnetwork"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4088d739b183546b239688ddbc79891831df421773df95e236daf7867866d355"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1217,6 +1253,7 @@ dependencies = [
  "async-trait",
  "backoff",
  "chrono",
+ "diesel",
  "dropshot",
  "expectorate",
  "futures",
@@ -1257,22 +1294,25 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-bb8-diesel",
  "async-trait",
  "bb8",
- "bb8-postgres",
  "bytes",
  "chrono",
+ "diesel",
  "dropshot",
  "expectorate",
  "futures",
  "http",
  "hyper",
+ "ipnetwork",
  "lazy_static",
  "libc",
  "macaddr",
  "newtype_derive",
  "omicron-common",
  "omicron-sled-agent",
+ "openapi-lint",
  "openapiv3",
  "oximeter",
  "schemars",
@@ -1338,6 +1378,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
+name = "openapi-lint"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#cbf584bac7a0eefae46ffc4a0f75bd3c680775f4"
+dependencies = [
+ "indexmap",
+ "openapiv3",
+]
+
+[[package]]
 name = "openapiv3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1386,6 +1435,7 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "chrono",
  "dropshot",
@@ -1398,6 +1448,8 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
+ "slog-term",
  "structopt",
  "thiserror",
  "tokio",
@@ -1602,6 +1654,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 
 [[package]]
+name = "pq-sys"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ac25eee5a0582f45a67e837e350d784e7003bd29a5f460796772061ca49ffda"
+dependencies = [
+ "vcpkg",
+]
+
+[[package]]
 name = "predicates"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1746,6 +1807,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "r2d2"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "545c5bc2b880973c9c10e4067418407a0ccaa3091781d1671d46eb35107cb26f"
+dependencies = [
+ "log",
+ "parking_lot",
+ "scheduled-thread-pool",
 ]
 
 [[package]]
@@ -1963,6 +2035,15 @@ checksum = "8f05ba609c234e60bee0d547fe94a4c7e9da733d1c962cf6e59efa4cd9c8bc75"
 dependencies = [
  "lazy_static",
  "winapi",
+]
+
+[[package]]
+name = "scheduled-thread-pool"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6f74fd1204073fa02d5d5d68bec8021be4c38690b61264b2fdb48083d0e7d7"
+dependencies = [
+ "parking_lot",
 ]
 
 [[package]]
@@ -2548,9 +2629,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.8.1"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c8b05dc14c75ea83d63dd391100353789f5f24b8b3866542a5e85c8be8e985"
+checksum = "01cf844b23c6131f624accf65ce0e4e9956a8bb329400ea5bcc26ae3a5c20b0b"
 dependencies = [
  "autocfg",
  "bytes",
@@ -2697,9 +2778,9 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "trybuild"
-version = "1.0.42"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1768998d9a3b179411618e377dbb134c58a88cda284b0aa71c42c40660127d46"
+checksum = "eb73edd97c8d9ffa8140971f07307f0994ae95138ee9cc0fba0369c953f0963a"
 dependencies = [
  "glob",
  "lazy_static",

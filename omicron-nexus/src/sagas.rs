@@ -150,28 +150,26 @@ async fn sic_create_instance_record(
             &instance_id?,
             &params.project_id,
             &params.create_params,
-            &runtime,
+            &runtime.into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(InstanceHardware {
-        runtime: instance.runtime,
+        runtime: instance.runtime().into(),
         // TODO TODO TODO: Avoid hard-coding!
-        nics: vec![
-            external::NetworkInterface {
-                identity: external::IdentityMetadata {
-                    id: Uuid::new_v4(),
-                    name: external::Name::try_from("my-nic".to_string()).unwrap(),
-                    description: "Look a VNIC".to_string(),
-                    time_created: Utc::now(),
-                    time_modified: Utc::now(),
-                },
-                vpc_id: Uuid::new_v4(),
-                subnet_id: Uuid::new_v4(),
-                mac: external::MacAddr(macaddr::MacAddr6::new(2, 8, 20, 1, 6, 24)),
-                ip: std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 8)),
-            }
-        ],
+        nics: vec![external::NetworkInterface {
+            identity: external::IdentityMetadata {
+                id: Uuid::new_v4(),
+                name: external::Name::try_from("my-nic".to_string()).unwrap(),
+                description: "Look a VNIC".to_string(),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
+            vpc_id: Uuid::new_v4(),
+            subnet_id: Uuid::new_v4(),
+            mac: external::MacAddr(macaddr::MacAddr6::new(2, 8, 20, 1, 6, 24)),
+            ip: std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 8)),
+        }],
     })
 }
 
@@ -206,7 +204,7 @@ async fn sic_instance_ensure(
 
     osagactx
         .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime_state)
+        .instance_update_runtime(&instance_id, &new_runtime_state.into())
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)

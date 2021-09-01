@@ -108,8 +108,8 @@ CREATE TABLE omicron.public.Instance (
      * table?
      */
     /* Runtime state */
-    -- instance_state omicron.public.InstanceState NOT NULL, // TODO see above
-    instance_state TEXT NOT NULL,
+    -- state omicron.public.InstanceState NOT NULL, // TODO see above
+    state TEXT NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -172,13 +172,13 @@ CREATE TABLE omicron.public.Disk (
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
     disk_state STRING(15) NOT NULL,
-    time_state_updated TIMESTAMPTZ NOT NULL,
-    state_generation INT NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
      * one Instance at a time.
      */
     attach_instance_id UUID,
+    state_generation INT NOT NULL,
+    time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
@@ -232,7 +232,7 @@ CREATE TABLE omicron.public.MetricProducer (
     port INT4 NOT NULL,
     interval FLOAT NOT NULL,
     /* TODO: Is this length appropriate? */
-    route STRING(512)
+    base_route STRING(512)
 );
 
 /*
@@ -249,6 +249,7 @@ CREATE TABLE omicron.public.OximeterAssignment (
  * VPCs and networking primitives
  */
 
+
 CREATE TABLE omicron.public.Vpc (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -258,7 +259,8 @@ CREATE TABLE omicron.public.Vpc (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    project_id UUID NOT NULL
+    project_id UUID NOT NULL,
+    dns_name STRING(63) NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Vpc (
@@ -359,7 +361,7 @@ CREATE TABLE omicron.public.Saga (
      * - number of adoptions?
      */
     saga_state STRING(31) NOT NULL, /* see SagaState above */
-    current_sec UUID NOT NULL,
+    current_sec UUID,
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
 );

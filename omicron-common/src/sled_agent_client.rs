@@ -60,11 +60,8 @@ impl Client {
     ) -> Result<InstanceRuntimeState, Error> {
         let path = format!("/instances/{}", instance_id);
         let body = Body::from(
-            serde_json::to_string(&InstanceEnsureBody {
-                initial,
-                target,
-            })
-            .unwrap(),
+            serde_json::to_string(&InstanceEnsureBody { initial, target })
+                .unwrap(),
         );
         let mut response =
             self.client.request(Method::PUT, path.as_str(), body).await?;

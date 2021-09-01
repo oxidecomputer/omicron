@@ -14,6 +14,10 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::backend::{Backend, RawValue};
+use diesel::deserialize::{self, FromSql};
+use diesel::serialize::{self, ToSql};
+use diesel::sql_types;
 pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
@@ -43,6 +47,8 @@ pub type CreateResult<T> = Result<T, Error>;
 pub type DeleteResult = Result<(), Error>;
 /** Result of a list operation that returns an ObjectStream */
 pub type ListResult<T> = Result<ObjectStream<T>, Error>;
+/** Result of a list operation that returns a vector */
+pub type ListResultVec<T> = Result<Vec<T>, Error>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<T, Error>;
 /** Result of an update operation for the specified type */
@@ -111,7 +117,38 @@ pub struct DataPageParams<'a, NameType> {
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
+// Diesel-specific derives:
+//
+// - Types which implement "ToSql" should implement "AsExpression".
+// - Types which implement "FromSql" should implement "FromSqlRow".
+#[derive(AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
 pub struct Name(String);
+
+// Serialize the "Name" object to SQL as TEXT.
+impl<DB> ToSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (&self.0 as &String).to_sql(out)
+    }
+}
+
+// Deserialize the "Name" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for Name
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 /**
  * `Name::try_from(String)` is the primary method for constructing an Name
@@ -278,8 +315,42 @@ impl Name {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i64::from(self).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for ByteCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        ByteCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
         ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
@@ -372,8 +443,35 @@ impl From<&ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
+    AsExpression,
+    FromSqlRow,
 )]
+#[sql_type = "sql_types::BigInt"]
 pub struct Generation(u64);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for Generation
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Generation::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
+
 impl Generation {
     pub fn new() -> Generation {
         Generation(1)
@@ -436,6 +534,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    Oximeter,
 }
 
 impl Display for ResourceType {
@@ -452,6 +551,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::Oximeter => "oximeter",
             }
         )
     }
@@ -459,7 +559,7 @@ impl Display for ResourceType {
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
-    U: From<T>,
+    T: Into<U>,
 {
     object_stream
         .filter(|maybe_object| ready(maybe_object.is_ok()))
@@ -523,19 +623,13 @@ pub struct IdentityMetadataUpdateParams {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectView {
+pub struct Project {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
      * intent in RFD 4?
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-impl From<crate::api::internal::nexus::Project> for ProjectView {
-    fn from(project: crate::api::internal::nexus::Project) -> Self {
-        ProjectView { identity: project.identity }
-    }
 }
 
 /**
@@ -666,8 +760,41 @@ impl InstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::BigInt"]
 pub struct InstanceCpuCount(pub u16);
+
+impl<DB> ToSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: ToSql<sql_types::BigInt, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        (self.0 as i64).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::BigInt, DB> for InstanceCpuCount
+where
+    DB: Backend,
+    i64: FromSql<sql_types::BigInt, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        InstanceCpuCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;
@@ -688,16 +815,16 @@ impl From<&InstanceCpuCount> for i64 {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InstanceRuntimeStateView {
+pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
 }
 
 impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeStateView
+    for InstanceRuntimeState
 {
     fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeStateView {
+        InstanceRuntimeState {
             run_state: state.run_state,
             time_run_state_updated: state.time_updated,
         }
@@ -709,7 +836,7 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct InstanceView {
+pub struct Instance {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -725,20 +852,7 @@ pub struct InstanceView {
     pub hostname: String, /* TODO-cleanup different type? */
 
     #[serde(flatten)]
-    pub runtime: InstanceRuntimeStateView,
-}
-
-impl From<crate::api::internal::nexus::Instance> for InstanceView {
-    fn from(instance: crate::api::internal::nexus::Instance) -> Self {
-        InstanceView {
-            identity: instance.identity.clone(),
-            project_id: instance.project_id,
-            ncpus: instance.runtime.ncpus,
-            memory: instance.runtime.memory,
-            hostname: instance.runtime.hostname.clone(),
-            runtime: instance.runtime.into(),
-        }
-    }
+    pub runtime: InstanceRuntimeState,
 }
 
 /**
@@ -778,7 +892,7 @@ pub struct InstanceUpdateParams {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DiskView {
+pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
@@ -786,24 +900,6 @@ pub struct DiskView {
     pub size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
-}
-
-impl From<crate::api::internal::nexus::Disk> for DiskView {
-    fn from(disk: crate::api::internal::nexus::Disk) -> Self {
-        /*
-         * TODO-correctness: can the name always be used as a path like this
-         * or might it need to be sanitized?
-         */
-        let device_path = format!("/mnt/{}", disk.identity.name.as_str());
-        DiskView {
-            identity: disk.identity.clone(),
-            project_id: disk.project_id,
-            snapshot_id: disk.create_snapshot_id,
-            size: disk.size,
-            state: disk.runtime.disk_state,
-            device_path,
-        }
-    }
 }
 
 /**
@@ -821,6 +917,7 @@ impl From<crate::api::internal::nexus::Disk> for DiskView {
     JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
+#[serde(tag = "state", content = "instance")]
 pub enum DiskState {
     /** Disk is being initialized */
     Creating,
@@ -944,14 +1041,8 @@ pub struct DiskAttachment {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RackView {
+pub struct Rack {
     pub identity: IdentityMetadata,
-}
-
-impl From<crate::api::internal::nexus::Rack> for RackView {
-    fn from(rack: crate::api::internal::nexus::Rack) -> Self {
-        RackView { identity: rack.identity }
-    }
 }
 
 /*
@@ -963,19 +1054,10 @@ impl From<crate::api::internal::nexus::Rack> for RackView {
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SledView {
+pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub service_address: SocketAddr,
-}
-
-impl From<crate::api::internal::nexus::Sled> for SledView {
-    fn from(sled: crate::api::internal::nexus::Sled) -> Self {
-        SledView {
-            identity: sled.identity.clone(),
-            service_address: sled.service_address,
-        }
-    }
 }
 
 /*
@@ -986,9 +1068,9 @@ impl From<crate::api::internal::nexus::Sled> for SledView {
  * users.
  */
 #[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
-pub struct SagaView {
+pub struct Saga {
     pub id: Uuid,
-    pub state: SagaStateView,
+    pub state: SagaState,
     /*
      * TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
      * want to paginate these objects.  http_pagination.rs provides a bunch of
@@ -1011,13 +1093,13 @@ pub struct SagaView {
     pub identity: IdentityMetadata,
 }
 
-impl From<steno::SagaView> for SagaView {
+impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        SagaView {
+        Saga {
             id: Uuid::from(s.id),
-            state: SagaStateView::from(s.state),
+            state: SagaState::from(s.state),
             identity: IdentityMetadata {
-                /* TODO-cleanup See the note in SagaView above. */
+                /* TODO-cleanup See the note in Saga above. */
                 id: Uuid::from(s.id),
                 name: Name::try_from(format!("saga-{}", s.id)).unwrap(),
                 description: format!("saga {}", s.id),
@@ -1028,37 +1110,56 @@ impl From<steno::SagaView> for SagaView {
     }
 }
 
-/*
- * TODO-robustness This type is unnecessarily loosey-goosey.  For example, see
- * the use of Options in the "Done" variant.
- */
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SagaStateView {
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "state")]
+pub enum SagaState {
     Running,
-    #[serde(rename_all = "camelCase")]
-    Done {
-        failed: bool,
-        error_node_name: Option<String>,
-        error_info: Option<steno::ActionError>,
-    },
+    Succeeded,
+    Failed { error_node_name: String, error_info: SagaErrorInfo },
 }
 
-impl From<steno::SagaStateView> for SagaStateView {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "error")]
+pub enum SagaErrorInfo {
+    ActionFailed { source_error: serde_json::Value },
+    DeserializeFailed { message: String },
+    InjectedError,
+    SerializeFailed { message: String },
+    SubsagaCreateFailed { message: String },
+}
+
+impl From<steno::SagaStateView> for SagaState {
     fn from(st: steno::SagaStateView) -> Self {
         match st {
-            steno::SagaStateView::Ready { .. } => SagaStateView::Running,
-            steno::SagaStateView::Running { .. } => SagaStateView::Running,
-            steno::SagaStateView::Done { result, .. } => match result.kind {
-                Ok(_) => SagaStateView::Done {
-                    failed: false,
-                    error_node_name: None,
-                    error_info: None,
-                },
-                Err(e) => SagaStateView::Done {
-                    failed: true,
-                    error_node_name: Some(e.error_node_name),
-                    error_info: Some(e.error_source),
+            steno::SagaStateView::Ready { .. } => SagaState::Running,
+            steno::SagaStateView::Running { .. } => SagaState::Running,
+            steno::SagaStateView::Done {
+                result: steno::SagaResult { kind: Ok(_), .. },
+                ..
+            } => SagaState::Succeeded,
+            steno::SagaStateView::Done {
+                result: steno::SagaResult { kind: Err(e), .. },
+                ..
+            } => SagaState::Failed {
+                error_node_name: e.error_node_name,
+                error_info: match e.error_source {
+                    steno::ActionError::ActionFailed { source_error } => {
+                        SagaErrorInfo::ActionFailed { source_error }
+                    }
+                    steno::ActionError::DeserializeFailed { message } => {
+                        SagaErrorInfo::DeserializeFailed { message }
+                    }
+                    steno::ActionError::InjectedError => {
+                        SagaErrorInfo::InjectedError
+                    }
+                    steno::ActionError::SerializeFailed { message } => {
+                        SagaErrorInfo::SerializeFailed { message }
+                    }
+                    steno::ActionError::SubsagaCreateFailed { message } => {
+                        SagaErrorInfo::SubsagaCreateFailed { message }
+                    }
                 },
             },
         }
@@ -1073,6 +1174,13 @@ pub struct Vpc {
 
     /** id for the project containing this VPC */
     pub project_id: Uuid,
+
+    // TODO-design should this be optional?
+    /** The name used for the VPC in DNS. */
+    pub dns_name: Name,
+
+    // TODO-correctness does the model include this? do we always return these?
+    pub vpc_subnets: Vec<VpcSubnet>,
 }
 
 /**
@@ -1083,6 +1191,7 @@ pub struct Vpc {
 pub struct VpcCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    pub dns_name: Name,
 }
 
 /**
@@ -1093,6 +1202,7 @@ pub struct VpcCreateParams {
 pub struct VpcUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    pub dns_name: Option<Name>,
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
@@ -1205,7 +1315,7 @@ impl JsonSchema for Ipv6Net {
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
-#[derive(Clone, Debug)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
@@ -1230,10 +1340,42 @@ pub struct VpcSubnet {
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
-// this crate does not implement `JsonSchema`, nor the the SQL conversion traits `FromSql` and
-// `ToSql`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+// this crate does not implement `JsonSchema`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl<DB> ToSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for MacAddr
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        MacAddr::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
+    }
+}
 
 impl std::ops::Deref for MacAddr {
     type Target = macaddr::MacAddr6;

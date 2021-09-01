@@ -353,9 +353,9 @@ mod tests {
         let m = Met { good: false, id: 2, value: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
+        assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(
-            sample.timeseries_name(),
+            sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
         assert_eq!(sample.measurement, Measurement::I64(0));

@@ -40,7 +40,11 @@ impl Dladm {
     }
 
     /// Creates a new VNIC atop a physical device.
-    pub fn create_vnic(physical: &PhysicalLink, vnic_name: &str, mac: Option<MacAddr>) -> Result<(), Error> {
+    pub fn create_vnic(
+        physical: &PhysicalLink,
+        vnic_name: &str,
+        mac: Option<MacAddr>,
+    ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
             DLADM.to_string(),
@@ -56,8 +60,7 @@ impl Dladm {
         }
 
         args.push(vnic_name.to_string());
-        let cmd =
-            command.args(&args);
+        let cmd = command.args(&args);
         execute(cmd)?;
         Ok(())
     }
