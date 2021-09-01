@@ -173,10 +173,10 @@ async fn projects_get(
             let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
             nexus.projects_list_by_name(&page_selector).await?
         }
-    };
-
-    // TODO filter out non-ok things like to_list does
-    let projects = projects.into_iter().map(|p| p.into()).collect();
+    }
+    .into_iter()
+    .map(|p| p.into())
+    .collect();
     Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
 }
 

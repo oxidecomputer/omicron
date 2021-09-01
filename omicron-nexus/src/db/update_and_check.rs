@@ -1,3 +1,5 @@
+//! CTE implementation for "UPDATE with extended return status".
+
 use async_bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;

@@ -179,9 +179,7 @@ where
     }
 }
 
-/**
- * Represents a row in the "Saga" table
- */
+/// Represents a row in the "Saga" table
 #[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "saga"]
 pub struct Saga {
@@ -196,9 +194,6 @@ pub struct Saga {
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
-// TODO: Make this one aligned with DB
-// TODO: Make another struct representing the "parsed" thing
-// TODO: do the same with other struct with parsed types
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "saganodeevent"]
