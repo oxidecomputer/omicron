@@ -11,7 +11,7 @@ diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", feature
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
-libc = "0.2.98"
+libc = "0.2.101"
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b6da043d" }
 postgres-protocol = "0.6.1"
 rayon = "1.5"
