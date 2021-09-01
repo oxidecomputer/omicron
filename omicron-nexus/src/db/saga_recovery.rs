@@ -132,10 +132,15 @@ async fn list_unfinished_sagas(
     trace!(&log, "listing sagas");
     use db::diesel_schema::saga::dsl;
 
-    // TODO: ... do we want this to be paginated? Why?
-    // The old impl used pagination, but then proceeded to read everything
-    // anyway?
-    // (we could that too with a synthetic pagparams + loop, I guess?)
+    // TODO(diesel-conversion): Do we want this to be paginated?
+    // In the pre-diesel era, this method read all relevant rows from
+    // the database - as we do here - but did so in chunks of 100 at a time,
+    // looping until all rows were loaded.
+    //
+    // It's not clear to me why this happened, as it wasn't a memory-saving
+    // measure - ultimately all rows were stored in a Vec as the return value.
+    //
+    // TODO: See load-saga-log below; a similar call was made there.
     dsl::saga
         .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
         .filter(dsl::current_sec.eq(*sec_id))
@@ -223,11 +228,10 @@ pub async fn load_saga_log(
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
     use db::diesel_schema::saganodeevent::dsl;
 
-    // TODO: Again, should this be paginated?
-    // We proceed to read everything anyway.
+    // TODO(diesel-conversion): See the note above in list_unfinished_sagas
+    // regarding pagination.
     let log_records: Vec<steno::SagaNodeEvent> = dsl::saganodeevent
         .filter(dsl::saga_id.eq(saga.id))
-        // Load DB SagaNodeEvent type from the database.
         .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
         .await
         .map_err(|e| {
@@ -238,7 +242,6 @@ pub async fn load_saga_log(
             )
         })?
         .into_iter()
-        // Parse the DB type into the steno type.
         .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
         .collect::<Result<_, Error>>()?;
 
