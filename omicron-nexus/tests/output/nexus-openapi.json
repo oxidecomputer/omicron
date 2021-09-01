@@ -50,7 +50,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackViewResultsPage"
+                  "$ref": "#/components/schemas/RackResultsPage"
                 }
               }
             }
@@ -82,7 +82,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackView"
+                  "$ref": "#/components/schemas/Rack"
                 }
               }
             }
@@ -130,7 +130,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledViewResultsPage"
+                  "$ref": "#/components/schemas/SledResultsPage"
                 }
               }
             }
@@ -162,7 +162,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledView"
+                  "$ref": "#/components/schemas/Sled"
                 }
               }
             }
@@ -210,7 +210,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectViewResultsPage"
+                  "$ref": "#/components/schemas/ProjectResultsPage"
                 }
               }
             }
@@ -237,7 +237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -266,7 +266,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -303,7 +303,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectView"
+                  "$ref": "#/components/schemas/Project"
                 }
               }
             }
@@ -380,7 +380,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskViewResultsPage"
+                  "$ref": "#/components/schemas/DiskResultsPage"
                 }
               }
             }
@@ -418,7 +418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -456,7 +456,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskView"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -542,7 +542,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceViewResultsPage"
+                  "$ref": "#/components/schemas/InstanceResultsPage"
                 }
               }
             }
@@ -580,7 +580,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -618,7 +618,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -857,7 +857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -895,7 +895,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -933,7 +933,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceView"
+                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -1182,7 +1182,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaViewResultsPage"
+                  "$ref": "#/components/schemas/SagaResultsPage"
                 }
               }
             }
@@ -1213,7 +1213,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SagaView"
+                  "$ref": "#/components/schemas/Saga"
                 }
               }
             }
@@ -1224,213 +1224,13 @@
   },
   "components": {
     "schemas": {
-      "ActionError": {
-        "description": "An error produced by a saga action\n\nOn failure, actions always return an `ActionError`.  This type can represent a failure from Steno itself or a failure produced by the consumer (e.g., an action whose body fails for some reason).  The various specific errors are documented below.\n\nYou can use your own error type with [`ActionError`].  As long as it meets the requirements of [`ActionData`], you can wrap your error in an [`ActionError::ActionFailed`] variant using [`ActionError::action_failed()`]. Given an [`ActionError::ActionFailed`] variant, you can get your specific type back out again using [`ActionError::convert()`].\n\nNote that the conversion back to your specific error type can fail!  This looks like a downcast, but it's not.  `ActionError`s are typically recorded in the saga log and interpreted later, possibly after a crash and recovery. Whether there was an intervening crash or not, the conversion here deserializes the error from the log into your custom error type.  This won't work if your error type is incompatible with the one that was used to serialize the error in the first place.\n\n# Example\n\n```rust use serde::Deserialize; use serde::Serialize; use steno::ActionError;\n\n#[derive(Debug, Deserialize, Serialize)] struct MyError { message: String }\n\nfn my_func_that_fails() -> Result<(), ActionError> { Err(ActionError::action_failed(MyError { message: \"boom!\".to_owned() })) }\n\nfn handle_error(error: ActionError) { match error.convert::<MyError>() { Ok(my_error) => { eprintln!(\"my action failed because: {}\", my_error.message); } Err(other_error) => { eprintln!( \"my action failed because the framework had a problem: {}\", other_error.to_string() ); } } } ```",
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": [
-              "InjectedError"
-            ]
-          },
-          {
-            "description": "Action failed due to a consumer-specific error",
-            "type": "object",
-            "properties": {
-              "ActionFailed": {
-                "type": "object",
-                "properties": {
-                  "source_error": {}
-                },
-                "required": [
-                  "source_error"
-                ]
-              }
-            },
-            "required": [
-              "ActionFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to deserialize the saga parameters, an action's successful result, or an action's error.",
-            "type": "object",
-            "properties": {
-              "DeserializeFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "DeserializeFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to serialize the saga parameters, an action's successful result, or an action's error.",
-            "type": "object",
-            "properties": {
-              "SerializeFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "SerializeFailed"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "The framework failed to create the requested subsaga",
-            "type": "object",
-            "properties": {
-              "SubsagaCreateFailed": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            },
-            "required": [
-              "SubsagaCreateFailed"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
       },
-      "DiskAttachment": {
-        "description": "Describes a Disk's attachment to an Instance",
-        "type": "object",
-        "properties": {
-          "diskId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "diskName": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "diskState": {
-            "$ref": "#/components/schemas/DiskState"
-          },
-          "instanceId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "diskId",
-          "diskName",
-          "diskState",
-          "instanceId"
-        ]
-      },
-      "DiskCreateParams": {
-        "description": "Create-time parameters for an [`Disk`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "size": {
-            "$ref": "#/components/schemas/ByteCount"
-          },
-          "snapshotId": {
-            "description": "id for snapshot from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "description",
-          "name",
-          "size"
-        ]
-      },
-      "DiskState": {
-        "description": "State of a Disk (primarily: attached or not)",
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": [
-              "creating",
-              "detached",
-              "destroyed",
-              "faulted"
-            ]
-          },
-          {
-            "description": "Disk is being attached to the given Instance",
-            "type": "object",
-            "properties": {
-              "attaching": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "attaching"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "Disk is attached to the given Instance",
-            "type": "object",
-            "properties": {
-              "attached": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "attached"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "Disk is being detached from the given Instance",
-            "type": "object",
-            "properties": {
-              "detaching": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "detaching"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "DiskView": {
+      "Disk": {
         "description": "Client view of an [`Disk`]",
         "type": "object",
         "properties": {
@@ -1486,7 +1286,58 @@
           "timeModified"
         ]
       },
-      "DiskViewResultsPage": {
+      "DiskAttachment": {
+        "description": "Describes a Disk's attachment to an Instance",
+        "type": "object",
+        "properties": {
+          "diskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "diskName": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "diskState": {
+            "$ref": "#/components/schemas/DiskState"
+          },
+          "instanceId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "diskId",
+          "diskName",
+          "diskState",
+          "instanceId"
+        ]
+      },
+      "DiskCreateParams": {
+        "description": "Create-time parameters for an [`Disk`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "snapshotId": {
+            "description": "id for snapshot from which the Disk should be created, if any",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "size"
+        ]
+      },
+      "DiskResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1494,7 +1345,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DiskView"
+              "$ref": "#/components/schemas/Disk"
             }
           },
           "next_page": {
@@ -1504,6 +1355,131 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "DiskState": {
+        "description": "State of a Disk (primarily: attached or not)",
+        "anyOf": [
+          {
+            "description": "Disk is being initialized",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "creating"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready but detached from any Instance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attached"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being detached from the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk has been destroyed",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "destroyed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is unavailable",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "faulted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
         ]
       },
       "IdentityMetadata": {
@@ -1541,56 +1517,7 @@
           "timeModified"
         ]
       },
-      "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
-      },
-      "InstanceCreateParams": {
-        "description": "Create-time parameters for an [`Instance`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "hostname": {
-            "type": "string"
-          },
-          "memory": {
-            "$ref": "#/components/schemas/ByteCount"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
-          }
-        },
-        "required": [
-          "description",
-          "hostname",
-          "memory",
-          "name",
-          "ncpus"
-        ]
-      },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "repairing",
-          "failed",
-          "destroyed"
-        ]
-      },
-      "InstanceView": {
+      "Instance": {
         "description": "Client view of an [`Instance`]",
         "type": "object",
         "properties": {
@@ -1653,7 +1580,41 @@
           "timeRunStateUpdated"
         ]
       },
-      "InstanceViewResultsPage": {
+      "InstanceCpuCount": {
+        "description": "The number of CPUs in an Instance",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
+      "InstanceCreateParams": {
+        "description": "Create-time parameters for an [`Instance`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          }
+        },
+        "required": [
+          "description",
+          "hostname",
+          "memory",
+          "name",
+          "ncpus"
+        ]
+      },
+      "InstanceResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1661,7 +1622,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/InstanceView"
+              "$ref": "#/components/schemas/Instance"
             }
           },
           "next_page": {
@@ -1673,6 +1634,35 @@
           "items"
         ]
       },
+      "InstanceState": {
+        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "type": "string",
+        "enum": [
+          "creating",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "rebooting",
+          "repairing",
+          "failed",
+          "destroyed"
+        ]
+      },
+      "Ipv4Net": {
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$",
+        "maxLength": 18
+      },
+      "Ipv6Net": {
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(fd|FD)00:((([0-8a-fA-F]{1,4}\\:){6}[0-8a-fA-F]{1,4})|(([0-8a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
+        "maxLength": 43
+      },
       "Name": {
         "title": "A name used in the API",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
@@ -1680,35 +1670,7 @@
         "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
         "maxLength": 63
       },
-      "ProjectCreateParams": {
-        "description": "Create-time parameters for an [`Project`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "ProjectUpdateParams": {
-        "description": "Updateable properties of an [`Project`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        }
-      },
-      "ProjectView": {
+      "Project": {
         "description": "Client view of an [`Project`]",
         "type": "object",
         "properties": {
@@ -1743,7 +1705,23 @@
           "timeModified"
         ]
       },
-      "ProjectViewResultsPage": {
+      "ProjectCreateParams": {
+        "description": "Create-time parameters for an [`Project`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "ProjectResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1751,7 +1729,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectView"
+              "$ref": "#/components/schemas/Project"
             }
           },
           "next_page": {
@@ -1763,7 +1741,19 @@
           "items"
         ]
       },
-      "RackView": {
+      "ProjectUpdateParams": {
+        "description": "Updateable properties of an [`Project`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        }
+      },
+      "Rack": {
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
@@ -1775,7 +1765,7 @@
           "identity"
         ]
       },
-      "RackViewResultsPage": {
+      "RackResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1783,7 +1773,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RackView"
+              "$ref": "#/components/schemas/Rack"
             }
           },
           "next_page": {
@@ -1795,43 +1785,7 @@
           "items"
         ]
       },
-      "SagaStateView": {
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": [
-              "running"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "done": {
-                "type": "object",
-                "properties": {
-                  "errorInfo": {
-                    "$ref": "#/components/schemas/ActionError"
-                  },
-                  "errorNodeName": {
-                    "type": "string"
-                  },
-                  "failed": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "done"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "SagaView": {
+      "Saga": {
         "type": "object",
         "properties": {
           "id": {
@@ -1839,7 +1793,7 @@
             "format": "uuid"
           },
           "state": {
-            "$ref": "#/components/schemas/SagaStateView"
+            "$ref": "#/components/schemas/SagaState"
           }
         },
         "required": [
@@ -1847,7 +1801,95 @@
           "state"
         ]
       },
-      "SagaViewResultsPage": {
+      "SagaErrorInfo": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "actionFailed"
+                ]
+              },
+              "source_error": {}
+            },
+            "required": [
+              "error",
+              "source_error"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "deserializeFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "injectedError"
+                ]
+              }
+            },
+            "required": [
+              "error"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "serializeFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "subsagaCreateFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "message"
+            ]
+          }
+        ]
+      },
+      "SagaResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1855,7 +1897,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SagaView"
+              "$ref": "#/components/schemas/Saga"
             }
           },
           "next_page": {
@@ -1867,7 +1909,61 @@
           "items"
         ]
       },
-      "SledView": {
+      "SagaState": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "succeeded"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error_info": {
+                "$ref": "#/components/schemas/SagaErrorInfo"
+              },
+              "error_node_name": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "error_info",
+              "error_node_name",
+              "state"
+            ]
+          }
+        ]
+      },
+      "Sled": {
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
@@ -1906,7 +2002,7 @@
           "timeModified"
         ]
       },
-      "SledViewResultsPage": {
+      "SledResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -1914,7 +2010,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SledView"
+              "$ref": "#/components/schemas/Sled"
             }
           },
           "next_page": {
@@ -1933,6 +2029,9 @@
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
+          },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -1956,15 +2055,23 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vpcSubnets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcSubnet"
+            }
           }
         },
         "required": [
           "description",
+          "dnsName",
           "id",
           "name",
           "projectId",
           "timeCreated",
-          "timeModified"
+          "timeModified",
+          "vpcSubnets"
         ]
       },
       "VpcCreateParams": {
@@ -1974,12 +2081,16 @@
           "description": {
             "type": "string"
           },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
           "description",
+          "dnsName",
           "name"
         ]
       },
@@ -2003,12 +2114,39 @@
           "items"
         ]
       },
+      "VpcSubnet": {
+        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/IdentityMetadata"
+          },
+          "ipv4_block": {
+            "$ref": "#/components/schemas/Ipv4Net"
+          },
+          "ipv6_block": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the subnet belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "identity",
+          "vpc_id"
+        ]
+      },
       "VpcUpdateParams": {
         "description": "Updateable properties of a [`Vpc`]",
         "type": "object",
         "properties": {
           "description": {
             "type": "string"
+          },
+          "dnsName": {
+            "$ref": "#/components/schemas/Name"
           },
           "name": {
             "$ref": "#/components/schemas/Name"

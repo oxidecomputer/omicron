@@ -48,6 +48,7 @@ pub enum FieldValue {
 }
 
 impl FieldValue {
+    /// Return the type associated with this field
     pub fn field_type(&self) -> FieldType {
         match self {
             FieldValue::String(_) => FieldType::String,
@@ -55,6 +56,50 @@ impl FieldValue {
             FieldValue::IpAddr(_) => FieldType::IpAddr,
             FieldValue::Uuid(_) => FieldType::Uuid,
             FieldValue::Bool(_) => FieldType::Bool,
+        }
+    }
+
+    /// Parse a field from a string, assuming it is of a certain type. An Err is returned if the
+    /// value cannot be parsed as that type.
+    pub fn parse_as_type(
+        s: &str,
+        field_type: FieldType,
+    ) -> Result<Self, Error> {
+        let make_err =
+            || Error::ParseError(s.to_string(), field_type.to_string());
+        match field_type {
+            FieldType::String => Ok(FieldValue::String(s.to_string())),
+            FieldType::I64 => {
+                Ok(FieldValue::I64(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::IpAddr => {
+                Ok(FieldValue::IpAddr(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::Uuid => {
+                Ok(FieldValue::Uuid(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::Bool => {
+                Ok(FieldValue::Bool(s.parse().map_err(|_| make_err())?))
+            }
+        }
+    }
+
+    // Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
+    pub(crate) fn as_db_str(&self) -> String {
+        match self {
+            FieldValue::Bool(ref inner) => {
+                format!("{}", if *inner { 1 } else { 0 })
+            }
+            FieldValue::I64(ref inner) => format!("{}", inner),
+            FieldValue::IpAddr(ref inner) => {
+                let addr = match inner {
+                    IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
+                    IpAddr::V6(ref v6) => *v6,
+                };
+                format!("'{}'", addr)
+            }
+            FieldValue::String(ref inner) => format!("'{}'", inner),
+            FieldValue::Uuid(ref inner) => format!("'{}'", inner),
         }
     }
 }
@@ -74,12 +119,6 @@ impl fmt::Display for FieldValue {
 impl From<i64> for FieldValue {
     fn from(value: i64) -> Self {
         FieldValue::I64(value)
-    }
-}
-
-impl From<&i64> for FieldValue {
-    fn from(value: &i64) -> Self {
-        FieldValue::I64(*value)
     }
 }
 
@@ -125,6 +164,15 @@ impl From<bool> for FieldValue {
     }
 }
 
+impl<T> From<&T> for FieldValue
+where
+    T: Clone + Into<FieldValue>,
+{
+    fn from(value: &T) -> Self {
+        value.clone().into()
+    }
+}
+
 /// A `Field` is a named aspect of a target or metric.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct Field {
@@ -167,6 +215,24 @@ pub enum MeasurementType {
     CumulativeF64,
     HistogramI64,
     HistogramF64,
+}
+
+impl MeasurementType {
+    // Return the name of the type as it's referred to in the timeseries database. This is used
+    // internally to build the table containing samples of the corresponding measurement type.
+    pub(crate) fn db_type_name(&self) -> &str {
+        match self {
+            MeasurementType::Bool => "bool",
+            MeasurementType::I64 => "i64",
+            MeasurementType::F64 => "f64",
+            MeasurementType::String => "string",
+            MeasurementType::Bytes => "bytes",
+            MeasurementType::CumulativeI64 => "cumulativei64",
+            MeasurementType::CumulativeF64 => "cumulativef64",
+            MeasurementType::HistogramI64 => "histogrami64",
+            MeasurementType::HistogramF64 => "histogramf64",
+        }
+    }
 }
 
 /// A measurement is a single sampled data point from a metric.
@@ -263,6 +329,14 @@ pub enum Error {
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
+
+    /// An error querying or filtering data
+    #[error("Invalid query or data filter: {0}")]
+    QueryError(String),
+
+    /// An error parsing a field or measurement from a string.
+    #[error("String '{0}' could not be parsed as type '{1}'")]
+    ParseError(String, String),
 }
 
 /// A cumulative or counter data type.
@@ -336,14 +410,6 @@ pub(crate) struct FieldSet {
 }
 
 impl FieldSet {
-    pub fn key(&self) -> String {
-        self.fields
-            .iter()
-            .map(|field| field.value.to_string())
-            .collect::<Vec<_>>()
-            .join(":")
-    }
-
     fn from_target(target: &impl traits::Target) -> Self {
         Self { name: target.name().to_string(), fields: target.fields() }
     }
@@ -432,6 +498,12 @@ pub struct Sample {
     /// The measured value of the metric at this sample
     pub measurement: Measurement,
 
+    /// The name of the timeseries this sample belongs to
+    pub timeseries_name: String,
+
+    /// The key of the timeseries this sample belongs to
+    pub timeseries_key: String,
+
     // Target name and fields
     target: FieldSet,
 
@@ -459,8 +531,8 @@ impl Ord for Sample {
     /// Samples are ordered by their target and metric keys, which include the field values of
     /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
     fn cmp(&self, other: &Sample) -> Ordering {
-        self.timeseries_key()
-            .cmp(&other.timeseries_key())
+        self.timeseries_key
+            .cmp(&other.timeseries_key)
             .then(self.timestamp.cmp(&other.timestamp))
     }
 }
@@ -489,22 +561,12 @@ impl Sample {
     {
         Self {
             timestamp: timestamp.unwrap_or_else(Utc::now),
+            timeseries_name: format!("{}:{}", target.name(), metric.name()),
+            timeseries_key: format!("{}:{}", target.key(), metric.key()),
             target: FieldSet::from_target(target),
             metric: FieldSet::from_metric(metric),
             measurement: metric.measure(),
         }
-    }
-
-    /// Return the timeseries key for this sample, the concatenation of the target/metric field
-    /// values.
-    pub fn timeseries_key(&self) -> String {
-        format!("{}:{}", self.target.key(), self.metric.key())
-    }
-
-    /// Return the name of the timeseries for this sample, the concatenation of the target/metric
-    /// names.
-    pub fn timeseries_name(&self) -> String {
-        format!("{}:{}", self.target.name, self.metric.name)
     }
 
     /// Return the fields for this sample.
@@ -540,9 +602,11 @@ impl Sample {
 mod tests {
     use bytes::Bytes;
     use chrono::Utc;
+    use std::net::IpAddr;
+    use uuid::Uuid;
 
     use super::histogram::Histogram;
-    use super::{Cumulative, Measurement};
+    use super::{Cumulative, FieldType, FieldValue, Measurement};
     use crate::types;
     use crate::{Metric, Target};
 
@@ -635,11 +699,43 @@ mod tests {
         let timestamp = Utc::now();
         let sample = types::Sample::new(&t, &m, Some(timestamp));
         assert_eq!(
-            sample.timeseries_name(),
+            sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
-        assert_eq!(sample.timeseries_key(), format!("{}:{}", t.key(), m.key()));
+        assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(sample.timestamp, timestamp);
         assert_eq!(sample.measurement, Measurement::I64(m.value));
+    }
+
+    #[test]
+    fn test_field_value_parse_as_type() {
+        let as_string = "some string";
+        let as_i64 = "2";
+        let as_ipaddr = "::1";
+        let as_uuid = "3c937cd9-348f-42c2-bd44-d0a4dfffabd9";
+        let as_bool = "false";
+
+        assert_eq!(
+            FieldValue::parse_as_type(&as_string, FieldType::String).unwrap(),
+            FieldValue::from(&as_string),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_i64, FieldType::I64).unwrap(),
+            FieldValue::from(2_i64),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_ipaddr, FieldType::IpAddr).unwrap(),
+            FieldValue::from(as_ipaddr.parse::<IpAddr>().unwrap()),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_uuid, FieldType::Uuid).unwrap(),
+            FieldValue::from(as_uuid.parse::<Uuid>().unwrap()),
+        );
+        assert_eq!(
+            FieldValue::parse_as_type(&as_bool, FieldType::Bool).unwrap(),
+            FieldValue::from(false),
+        );
+
+        assert!(FieldValue::parse_as_type(&as_string, FieldType::Uuid).is_err());
     }
 }

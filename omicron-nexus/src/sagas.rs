@@ -147,11 +147,11 @@ async fn sic_create_instance_record(
             &instance_id?,
             &params.project_id,
             &params.create_params,
-            &runtime,
+            &runtime.into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(instance.runtime)
+    Ok(instance.runtime().into())
 }
 
 async fn sic_instance_ensure(
@@ -185,7 +185,7 @@ async fn sic_instance_ensure(
 
     osagactx
         .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime_state)
+        .instance_update_runtime(&instance_id, &new_runtime_state.into())
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)

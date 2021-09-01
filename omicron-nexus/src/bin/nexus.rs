@@ -16,6 +16,7 @@
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_nexus::run_openapi_external;
+use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 use omicron_nexus::Config;
 use std::path::PathBuf;
@@ -27,9 +28,16 @@ struct Args {
     #[structopt(
         short = "O",
         long = "openapi",
-        help = "Print the OpenAPI Spec document and exit"
+        help = "Print the external OpenAPI Spec document and exit"
     )]
     openapi: bool,
+
+    #[structopt(
+        short = "I",
+        long = "openapi-internal",
+        help = "Print the internal OpenAPI Spec document and exit"
+    )]
+    openapi_internal: bool,
 
     #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
     config_file_path: PathBuf,
@@ -52,6 +60,8 @@ async fn do_run() -> Result<(), CmdError> {
 
     if args.openapi {
         run_openapi_external().map_err(CmdError::Failure)
+    } else if args.openapi_internal {
+        run_openapi_internal().map_err(CmdError::Failure)
     } else {
         run_server(&config).await.map_err(CmdError::Failure)
     }

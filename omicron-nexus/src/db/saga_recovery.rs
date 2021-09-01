@@ -3,14 +3,16 @@
  */
 
 use crate::db;
-use crate::db::schema;
-use crate::db::sql::Table;
-use crate::db::sql_operations::sql_paginate;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 use steno::SagaTemplateGeneric;
@@ -96,7 +98,7 @@ where
              * before we go back to one that's failed.
              */
             /* TODO-debug want visibility into "abandoned" sagas */
-            let saga_id = saga.id;
+            let saga_id: steno::SagaId = saga.id.into();
             if let Err(error) =
                 recover_saga(&log, &uctx, &pool, &sec_client, templates, saga)
                     .await
@@ -128,20 +130,29 @@ async fn list_unfinished_sagas(
      * step, not recovering all the individual sagas.
      */
     trace!(&log, "listing sagas");
-    let client = pool.acquire().await?;
+    use db::diesel_schema::saga::dsl;
 
-    let mut sql = db::sql::SqlString::new();
-    let saga_state_done = steno::SagaCachedState::Done.to_string();
-    let p1 = sql.next_param(&saga_state_done);
-    let p2 = sql.next_param(sec_id);
-    sql.push_str(&format!("saga_state != {} AND current_sec = {}", p1, p2));
-
-    sql_paginate::<
-        schema::LookupGenericByUniqueId,
-        schema::Saga,
-        <schema::Saga as Table>::ModelType,
-    >(&client, (), schema::Saga::ALL_COLUMNS, sql)
-    .await
+    // TODO(diesel-conversion): Do we want this to be paginated?
+    // In the pre-diesel era, this method read all relevant rows from
+    // the database - as we do here - but did so in chunks of 100 at a time,
+    // looping until all rows were loaded.
+    //
+    // It's not clear to me why this happened, as it wasn't a memory-saving
+    // measure - ultimately all rows were stored in a Vec as the return value.
+    //
+    // TODO: See load-saga-log below; a similar call was made there.
+    dsl::saga
+        .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
+        .filter(dsl::current_sec.eq(*sec_id))
+        .load_async(pool.pool())
+        .await
+        .map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::SagaDbg,
+                LookupType::ById(sec_id.0),
+            )
+        })
 }
 
 /**
@@ -160,30 +171,30 @@ async fn recover_saga<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
-    let saga_id = saga.id;
+    let saga_id: steno::SagaId = saga.id.into();
     let template_name = saga.template_name.as_str();
     trace!(log, "recovering saga: start";
-        "saga_id" => saga.id.to_string(),
+        "saga_id" => saga_id.to_string(),
         "template_name" => template_name,
     );
     let template = templates.get(template_name).ok_or_else(|| {
         Error::internal_error(&format!(
             "saga {} uses unknown template {:?}",
-            saga.id, template_name,
+            saga_id, template_name,
         ))
     })?;
     trace!(log, "recovering saga: found template";
-        "saga_id" => ?saga.id,
+        "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let log_events = load_saga_log(pool, &saga).await?;
     trace!(log, "recovering saga: loaded log";
-        "saga_id" => ?saga.id,
+        "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let _ = sec_client
         .saga_resume(
-            saga.id,
+            saga_id,
             Arc::clone(uctx),
             Arc::clone(template),
             saga.template_name,
@@ -204,7 +215,7 @@ where
     sec_client.saga_start(saga_id).await.map_err(|error| {
         Error::internal_error(&format!("failed to start saga: {:#}", error))
     })?;
-    info!(log, "recovering saga: done"; "saga_id" => ?saga.id);
+    info!(log, "recovering saga: done"; "saga_id" => ?saga_id);
     Ok(())
 }
 
@@ -215,24 +226,24 @@ pub async fn load_saga_log(
     pool: &db::Pool,
     saga: &db::saga_types::Saga,
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
-    let client = pool.acquire().await?;
-    let mut extra_sql = db::sql::SqlString::new();
-    extra_sql.push_str("TRUE");
+    use db::diesel_schema::saganodeevent::dsl;
 
-    let log_records = sql_paginate::<
-        schema::LookupSagaNodeEvent,
-        schema::SagaNodeEvent,
-        <schema::SagaNodeEvent as Table>::ModelType,
-    >(
-        &client,
-        (&saga.id.0,),
-        schema::SagaNodeEvent::ALL_COLUMNS,
-        extra_sql,
-    )
-    .await?;
+    // TODO(diesel-conversion): See the note above in list_unfinished_sagas
+    // regarding pagination.
+    let log_records: Vec<steno::SagaNodeEvent> = dsl::saganodeevent
+        .filter(dsl::saga_id.eq(saga.id))
+        .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
+        .await
+        .map_err(|e| {
+            Error::from_diesel(
+                e,
+                ResourceType::SagaDbg,
+                LookupType::ById(saga.id.0 .0),
+            )
+        })?
+        .into_iter()
+        .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
+        .collect::<Result<_, Error>>()?;
 
-    Ok(log_records
-        .iter()
-        .map(steno::SagaNodeEvent::from)
-        .collect::<Vec<steno::SagaNodeEvent>>())
+    Ok(log_records)
 }
