@@ -10,6 +10,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::internal::nexus::CrucibleAgentStartupInfo;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
@@ -29,6 +30,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
+        api.register(cpapi_crucible_agents_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
@@ -73,6 +75,36 @@ async fn cpapi_sled_agents_post(
     let client =
         Arc::new(SledAgentClient::new(&sled_id, si.sa_address, client_log));
     nexus.upsert_sled_agent(client).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Path parameters for Crucible Agent requests (internal API)
+ */
+#[derive(Deserialize, JsonSchema)]
+struct CrucibleAgentPathParam {
+    id: Uuid,
+}
+
+/**
+ * Report that a Crucible agent has come online.
+ */
+#[endpoint {
+     method = POST,
+     path = "/crucible_agents/{id}",
+ }]
+async fn cpapi_crucible_agents_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<CrucibleAgentPathParam>,
+    body: TypedBody<CrucibleAgentStartupInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let a = &body.into_inner().address;
+    let url = format!("http://{}:{}", a.ip(), a.port());
+    let client = Arc::new(crucible_agent_client::Client::new(&url));
+    nexus.upsert_crucible_agent(path.id, client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 

@@ -37,6 +37,9 @@ path = "../omicron-common"
 [dependencies.omicron-sled-agent]
 path = "../omicron-sled-agent"
 
+[dependencies.crucible-agent-client]
+path = "../crucible-agent-client"
+
 [dependencies.schemars]
 version = "0.8"
 features = [ "chrono", "uuid" ]

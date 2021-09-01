@@ -7,6 +7,7 @@
  */
 
 use crate::api::external::Error;
+use crate::api::internal::nexus::CrucibleAgentStartupInfo;
 use crate::api::internal::nexus::DiskRuntimeState;
 use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::nexus::SledAgentStartupInfo;
@@ -41,6 +42,19 @@ impl Client {
         info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
         let path = format!("/sled_agents/{}", id);
+        let body = Body::from(serde_json::to_string(&info).unwrap());
+        self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
+    }
+
+    /**
+     * Publish information about a Crucible agent's startup.
+     */
+    pub async fn notify_crucible_agent_online(
+        &self,
+        id: Uuid,
+        info: CrucibleAgentStartupInfo,
+    ) -> Result<(), Error> {
+        let path = format!("/crucible_agents/{}", id);
         let body = Body::from(serde_json::to_string(&info).unwrap());
         self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
     }

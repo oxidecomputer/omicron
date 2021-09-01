@@ -8,6 +8,7 @@ use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
+use crucible_agent_client::Client as CrucibleAgentClient;
 use futures::future::ready;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -111,6 +112,8 @@ pub struct Nexus {
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 
+    crucible_agents: Mutex<BTreeMap<Uuid, Arc<CrucibleAgentClient>>>,
+
     /**
      * List of oximeter collectors.
      *
@@ -166,6 +169,7 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
+            crucible_agents: Mutex::new(BTreeMap::new()),
             oximeter_collectors: Mutex::new(BTreeMap::new()),
         };
 
@@ -196,6 +200,17 @@ impl Nexus {
         info!(self.log, "registered sled agent";
             "sled_uuid" => sa.id.to_string());
         scs.insert(sa.id, sa);
+    }
+
+    pub async fn upsert_crucible_agent(
+        &self,
+        id: Uuid,
+        ca: Arc<CrucibleAgentClient>,
+    ) {
+        let mut cas = self.crucible_agents.lock().await;
+        info!(self.log, "registered Crucible agent";
+            "id" => id.to_string());
+        cas.insert(id, ca);
     }
 
     /**

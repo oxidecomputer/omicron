@@ -52,6 +52,13 @@ pub struct SledAgentStartupInfo {
     pub sa_address: SocketAddr,
 }
 
+/// Sent by a Crucible agent on startup to Nexus to request further instruction
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CrucibleAgentStartupInfo {
+    /// the address of the Crucible agent's API endpoint
+    pub address: SocketAddr,
+}
+
 // Oximeter producer/collector objects.
 
 /// Information announced by a metric server, used so that clients can contact it and collect
