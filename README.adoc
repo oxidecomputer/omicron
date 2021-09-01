@@ -66,8 +66,7 @@ Linux: `sudo apt-get install libpq-dev`
 Mac: `brew install postgresql`
 Helios: `pkg install library/postgresql-13`
 
-Additionally, to help all cargo build commands find this library, we recommend the following:
-
+Additionally, to help all runtime commands find this library, we recommend the following:
 [source,text]
 ----
 export LD_LIBRARY_PATH="$(pg_config --libdir)"
