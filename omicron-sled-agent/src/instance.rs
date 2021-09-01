@@ -365,7 +365,7 @@ impl Instance {
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
-                // TODO: aligning the byte type would be handy
+                // TODO: Align the byte type w/propolis.
                 memory: initial.runtime.memory.to_whole_mebibytes(),
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
