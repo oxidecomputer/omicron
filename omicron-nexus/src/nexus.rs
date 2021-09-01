@@ -508,19 +508,6 @@ impl Nexus {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
 
-        // TODO TODO TODO TODO TODO TODO
-        //
-        // 1) (not here) Create a default VPC for the project when it is created
-        // RFD21: "When a project is created, a default VPC is created as well."
-        // 1a) (not here) Create a default subnet for a VPC when created
-        // 2) Look up the VPC subnet here, unless one is specified (?).
-        // 2a) Allocate an address within that range.
-        // 2b) Allocate a mac address (?).
-        // 3) Create a network interface from all the allocated stats.
-        // 4) Pass it alongside the "hw info".
-        //
-        // TODO TODO TODO TODO TODO TODO
-
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
             create_params: params.clone(),
@@ -777,12 +764,11 @@ impl Nexus {
          * beat us to it.
          */
 
+        // TODO: Populate this with an appropriate NIC.
+        // See also: sic_create_instance_record in sagas.rs for a similar
+        // construction.
         let instance_hardware = InstanceHardware {
             runtime: instance.runtime().into(),
-            // TODO TODO TODO: Avoid hard-coding this NIC!
-            //
-            // TODO: also, this same thing is called in sagas.rs.
-            // When is one used vs the other?
             nics: vec![],
         };
 
