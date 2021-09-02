@@ -312,7 +312,7 @@ async fn sic_create_instance_record(
 
     // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
-    Ok(InstanceHardware { runtime: instance.runtime().into(), nics: vec![] })
+    Ok(InstanceHardware { runtime: instance.runtime().into(), nics: vec![], disks: vec![] })
 }
 
 async fn sic_instance_ensure(

@@ -4,7 +4,16 @@ use crate::api::{external, internal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
+use std::net::SocketAddr;
 use uuid::Uuid;
+
+/// Sent to Sled Agent & Propolis to represent a connection to Crucible.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CrucibleDiskInfo {
+    pub address: Vec<SocketAddr>,
+    pub slot: u8,
+    pub read_only: bool,
+}
 
 /// Sent from to a sled agent to establish the runtime state of a Disk
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -44,6 +53,7 @@ impl DiskStateRequested {
 pub struct InstanceHardware {
     pub runtime: internal::nexus::InstanceRuntimeState,
     pub nics: Vec<external::NetworkInterface>,
+    pub disks: Vec<CrucibleDiskInfo>,
 }
 
 /// Sent to a sled agent to establish the runtime state of an Instance

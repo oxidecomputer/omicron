@@ -53,9 +53,8 @@ pub struct SledAgentStartupInfo {
 }
 
 /// Sent by a Crucible agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CrucibleAgentStartupInfo {
-    /// the address of the Crucible agent's API endpoint
     pub address: SocketAddr,
 }
 

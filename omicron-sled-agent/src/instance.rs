@@ -12,6 +12,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::CrucibleDiskInfo;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
@@ -194,6 +195,7 @@ struct InstanceInner {
     nic_id_allocator: IdAllocator,
     properties: propolis_client::api::InstanceProperties,
     requested_nics: Vec<NetworkInterface>,
+    requested_disks: Vec<CrucibleDiskInfo>,
     allocated_nics: Vec<Vnic>,
     state: InstanceStates,
     nexus_client: Arc<NexusClient>,
@@ -248,10 +250,10 @@ impl InstanceInner {
             })
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
+    async fn ensure(&self, guest_nics: &Vec<Vnic>, guest_disks: &Vec<CrucibleDiskInfo>)
+        -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
-        let nics = self
-            .requested_nics
+        let nics = guest_nics
             .iter()
             .enumerate()
             .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
@@ -259,10 +261,20 @@ impl InstanceInner {
                 slot: propolis_client::api::Slot(i as u8),
             })
             .collect();
+        let disks = guest_disks
+            .clone()
+            .into_iter()
+            .map(|disk| propolis_client::api::DiskRequest {
+                address: disk.address,
+                slot: propolis_client::api::Slot(disk.slot),
+                read_only: disk.read_only,
+            })
+            .collect();
 
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
+            disks,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -372,6 +384,7 @@ impl Instance {
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
             requested_nics: initial.nics,
+            requested_disks: initial.disks,
             allocated_nics: vec![],
             state: InstanceStates::new(initial.runtime),
             nexus_client,
@@ -474,9 +487,10 @@ impl Instance {
         inner.running_state =
             Some(RunningState { client, ticket, monitor_task: None });
 
+        let guest_disks = &inner.requested_disks;
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(&guest_nics).await?;
+        inner.ensure(&guest_nics, guest_disks).await?;
 
         // Monitor propolis for state changes in the background.
         let self_clone = self.clone();
@@ -947,6 +961,7 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            disks: vec![],
         }
     }
 

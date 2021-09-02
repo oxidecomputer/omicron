@@ -807,6 +807,7 @@ impl Nexus {
         let instance_hardware = InstanceHardware {
             runtime: instance.runtime().into(),
             nics: vec![],
+            disks: vec![],
         };
 
         let new_runtime = sa
