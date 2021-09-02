@@ -189,6 +189,7 @@ fn parse<P: AsRef<Path>>(path: P) -> Result<Config, ParseError> {
     Ok(cfg)
 }
 
+#[cfg(target_os = "illumos")]
 fn runpath_fix<P: AsRef<Path>>(binary: P) -> Result<()> {
     let binary = binary.as_ref();
 

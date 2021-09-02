@@ -71,8 +71,8 @@ pub struct Client {
 
 impl Client {
     pub fn new(id: &uuid::Uuid, addr: &std::net::SocketAddr) -> Client {
-        let id = id.clone();
-        let addr = addr.clone();
+        let id = *id;
+        let addr = *addr;
         let baseurl = format!("http://{}:{}", addr.ip(), addr.port());
         let dur = std::time::Duration::from_secs(15);
         let client = reqwest::ClientBuilder::new()
