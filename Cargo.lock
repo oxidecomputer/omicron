@@ -36,6 +36,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "array-init"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6945cc5422176fc5e602e590c2878d2c2acd9a4fe20a4baa7c28022521698ec6"
+
+[[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=0a6d535#0a6d535f8ac21b407879e6d7dc5214186a187e08"
@@ -110,7 +116,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 dependencies = [
  "libc",
  "num_enum",
@@ -290,6 +296,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#7b517a175da90322fc2716982a3c648ac130c7cf"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "crucible-common",
+ "crucible-protocol",
+ "crucible-scope",
+ "futures",
+ "futures-core",
+ "rand",
+ "ringbuffer",
+ "serde",
+ "serde_json",
+ "structopt",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "usdt",
+]
+
+[[package]]
 name = "crucible-agent-client"
 version = "0.0.0"
 dependencies = [
@@ -298,6 +328,43 @@ dependencies = [
  "reqwest",
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "crucible-common"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#7b517a175da90322fc2716982a3c648ac130c7cf"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "crucible-protocol"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#7b517a175da90322fc2716982a3c648ac130c7cf"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "tokio-util",
+]
+
+[[package]]
+name = "crucible-scope"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#7b517a175da90322fc2716982a3c648ac130c7cf"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "toml",
 ]
 
 [[package]]
@@ -432,7 +499,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 dependencies = [
  "libc",
  "num_enum",
@@ -1357,7 +1424,7 @@ dependencies = [
  "ipnet",
  "mockall",
  "omicron-common",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=a0d1abc2)",
+ "propolis-client",
  "schemars",
  "serde",
  "serde_json",
@@ -1761,16 +1828,19 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 dependencies = [
  "bhyve_api",
  "bitflags",
  "byteorder",
+ "bytes",
+ "crucible",
  "dladm",
  "lazy_static",
  "libc",
  "num_enum",
  "thiserror",
+ "tokio",
  "usdt",
  "viona_api",
 ]
@@ -1778,23 +1848,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
-dependencies = [
- "reqwest",
- "ring",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "structopt",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "propolis-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a0d1abc2#a0d1abc293accedcaae556a68af62e329516a7f0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 dependencies = [
  "reqwest",
  "ring",
@@ -1810,14 +1864,14 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 dependencies = [
  "anyhow",
  "dropshot",
  "futures",
  "hyper",
  "propolis",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?branch=demo_m2)",
+ "propolis-client",
  "serde",
  "serde_derive",
  "slog",
@@ -2011,6 +2065,15 @@ dependencies = [
  "untrusted",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "ringbuffer"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d32014caabacedc94e2a41552987d3edd63ad09a1d2f94cb91c183abd43288a3"
+dependencies = [
+ "array-init",
 ]
 
 [[package]]
@@ -2781,7 +2844,19 @@ checksum = "09adeb8c97449311ccd28a427f96fb563e7fd31aabf994189879d9da2394b89d"
 dependencies = [
  "cfg-if",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c42e6fa53307c8a17e4ccd4dc81cf5ec38db9209f59b222210375b54ee40d1e2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2981,7 +3056,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#f7a6e51c47e7f5c1d09a39ded2893bb9a98f18b9"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#1fadf4eb14da382c0f5fbf20f6029a237ac4910c"
 
 [[package]]
 name = "walkdir"
