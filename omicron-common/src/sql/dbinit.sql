@@ -124,7 +124,11 @@ CREATE TABLE omicron.public.Instance (
     /* Instance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
-    hostname STRING(63) NOT NULL
+    hostname STRING(63) NOT NULL,
+
+    crucible0address STRING(128),
+    crucible1address STRING(128),
+    crucible2address STRING(128)
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Instance (

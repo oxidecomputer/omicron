@@ -297,6 +297,7 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "serde",
+ "uuid",
 ]
 
 [[package]]

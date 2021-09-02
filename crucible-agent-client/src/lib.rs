@@ -43,7 +43,7 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug)]
-    pub struct RegionId(String);
+    pub struct RegionId(pub String);
 
     impl std::fmt::Display for RegionId {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -52,6 +52,7 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug)]
+    #[serde(rename_all = "lowercase")]
     pub enum State {
         Requested,
         Created,
@@ -62,12 +63,17 @@ pub mod types {
 }
 
 pub struct Client {
+    pub id: uuid::Uuid,
+    pub addr: std::net::SocketAddr,
     baseurl: String,
     client: reqwest::Client,
 }
 
 impl Client {
-    pub fn new(baseurl: &str) -> Client {
+    pub fn new(id: &uuid::Uuid, addr: &std::net::SocketAddr) -> Client {
+        let id = id.clone();
+        let addr = addr.clone();
+        let baseurl = format!("http://{}:{}", addr.ip(), addr.port());
         let dur = std::time::Duration::from_secs(15);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -75,7 +81,7 @@ impl Client {
             .build()
             .unwrap();
 
-        Client { baseurl: baseurl.to_string(), client }
+        Client { id, addr, baseurl, client }
     }
 
     /**

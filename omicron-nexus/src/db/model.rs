@@ -252,6 +252,10 @@ pub struct Instance {
     /// RFC1035-compliant hostname for the Instance.
     // TODO-cleanup different type?
     pub hostname: String,
+
+    pub crucible0address: Option<String>,
+    pub crucible1address: Option<String>,
+    pub crucible2address: Option<String>,
 }
 
 impl Instance {
@@ -260,9 +264,14 @@ impl Instance {
         project_id: Uuid,
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
+        crucibles: Vec<std::net::SocketAddr>,
     ) -> Self {
         let identity =
             IdentityMetadata::new(instance_id, params.identity.clone());
+
+        let crucible0address = crucibles.get(0).map(|a| a.to_string());
+        let crucible1address = crucibles.get(1).map(|a| a.to_string());
+        let crucible2address = crucibles.get(2).map(|a| a.to_string());
 
         Self {
             id: identity.id,
@@ -282,6 +291,10 @@ impl Instance {
             ncpus: params.ncpus,
             memory: params.memory,
             hostname: params.hostname.clone(),
+
+            crucible0address,
+            crucible1address,
+            crucible2address,
         }
     }
 

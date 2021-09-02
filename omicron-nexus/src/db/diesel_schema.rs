@@ -36,6 +36,9 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        crucible0address -> Nullable<Text>,
+        crucible1address -> Nullable<Text>,
+        crucible2address -> Nullable<Text>,
     }
 }
 

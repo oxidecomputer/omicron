@@ -237,6 +237,7 @@ impl DataStore {
         project_id: &Uuid,
         params: &api::external::InstanceCreateParams,
         runtime_initial: &db::model::InstanceRuntimeState,
+        crucibles: Vec<std::net::SocketAddr>,
     ) -> CreateResult<db::model::Instance> {
         use db::diesel_schema::instance::dsl;
 
@@ -245,6 +246,7 @@ impl DataStore {
             *project_id,
             params,
             runtime_initial.clone(),
+            crucibles,
         );
         let name = instance.name.clone();
         let instance: db::model::Instance = diesel::insert_into(dsl::instance)

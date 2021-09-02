@@ -91,7 +91,7 @@ pub struct Nexus {
     rack_id: Uuid,
 
     /** general server log */
-    log: Logger,
+    pub log: Logger,
 
     /** cached rack identity metadata */
     api_rack_identity: IdentityMetadata,
@@ -504,6 +504,17 @@ impl Nexus {
             .map(|s| s.id)
     }
 
+    pub async fn crucible_allocate(&self, index: usize) -> Result<Uuid, Error> {
+        let crucibles = self.crucible_agents.lock().await;
+
+        /* TODO replace this with a real allocation policy. */
+        crucibles.keys().nth(index).cloned().ok_or_else(|| {
+            Error::ServiceUnavailable {
+                message: String::from("not enough crucible for new disk"),
+            }
+        })
+    }
+
     pub async fn project_list_instances(
         &self,
         project_name: &Name,
@@ -664,6 +675,17 @@ impl Nexus {
         Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
             let message =
                 format!("no sled agent for sled_uuid \"{}\"", sled_uuid);
+            Error::ServiceUnavailable { message }
+        })?))
+    }
+
+    pub async fn crucible_client(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<CrucibleAgentClient>, Error> {
+        let crucibles = self.crucible_agents.lock().await;
+        Ok(Arc::clone(crucibles.get(id).ok_or_else(|| {
+            let message = format!("no crucible agent for id \"{}\"", id);
             Error::ServiceUnavailable { message }
         })?))
     }

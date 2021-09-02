@@ -4,9 +4,11 @@
 
 use crate::db;
 use crate::Nexus;
+use crucible_agent_client::Client as CrucibleAgentClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::SledAgentClient;
+use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -52,6 +54,10 @@ impl SagaContext {
         self.nexus.sled_allocate().await
     }
 
+    pub async fn alloc_crucible(&self, index: usize) -> Result<Uuid, Error> {
+        self.nexus.crucible_allocate(index).await
+    }
+
     pub fn datastore(&self) -> &db::DataStore {
         self.nexus.datastore()
     }
@@ -61,5 +67,16 @@ impl SagaContext {
         sled_id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
         self.nexus.sled_client(sled_id).await
+    }
+
+    pub async fn crucible_client(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<CrucibleAgentClient>, Error> {
+        self.nexus.crucible_client(id).await
+    }
+
+    pub fn logger(&self) -> Logger {
+        self.nexus.log.clone()
     }
 }

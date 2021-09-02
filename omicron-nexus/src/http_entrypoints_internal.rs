@@ -102,8 +102,7 @@ async fn cpapi_crucible_agents_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let a = &body.into_inner().address;
-    let url = format!("http://{}:{}", a.ip(), a.port());
-    let client = Arc::new(crucible_agent_client::Client::new(&url));
+    let client = Arc::new(crucible_agent_client::Client::new(&path.id, a));
     nexus.upsert_crucible_agent(path.id, client).await;
     Ok(HttpResponseUpdatedNoContent())
 }
