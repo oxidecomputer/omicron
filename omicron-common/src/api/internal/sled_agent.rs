@@ -44,6 +44,7 @@ impl DiskStateRequested {
 pub struct InstanceHardware {
     pub runtime: internal::nexus::InstanceRuntimeState,
     pub nics: Vec<external::NetworkInterface>,
+    pub disks: Vec<internal::nexus::CrucibleAgentStartupInfo>,
 }
 
 /// Sent to a sled agent to establish the runtime state of an Instance

@@ -52,6 +52,16 @@ pub struct SledAgentStartupInfo {
     pub sa_address: SocketAddr,
 }
 
+/// Sent by a Crucible agent on startup to Nexus to request further instruction
+// TODO: if you see this when resolving a merge conflict, this is sean's
+// version. I copied the name from jclulow's branch, but changed the struct.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CrucibleAgentStartupInfo {
+    pub address: Vec<SocketAddr>,
+    pub slot: u8,
+    pub read_only: bool,
+}
+
 // Oximeter producer/collector objects.
 
 /// Information announced by a metric server, used so that clients can contact it and collect
