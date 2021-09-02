@@ -88,7 +88,7 @@ impl Zones {
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Template("OMNIsparse".to_string()),
         );
         cfg.get_global()
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
@@ -128,7 +128,7 @@ impl Zones {
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Template("OMNIsparse".to_string()),
         );
         cfg.get_global()
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
