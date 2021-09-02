@@ -2,10 +2,15 @@
 
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::MacAddr;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
 
-const DLADM: &str = "/usr/sbin/dladm";
+pub const DLADM: &str = "/usr/sbin/dladm";
+
+/// The name of a physical datalink.
+#[derive(Debug)]
+pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
@@ -13,11 +18,11 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Returns the name of the first observed physical data link.
-    pub fn find_physical() -> Result<String, Error> {
+    pub fn find_physical() -> Result<PhysicalLink, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
-        Ok(String::from_utf8(output.stdout)
+        let name = String::from_utf8(output.stdout)
             .map_err(|e| Error::InternalError {
                 message: format!("Cannot parse dladm output as UTF-8: {}", e),
             })?
@@ -30,14 +35,32 @@ impl Dladm {
             .ok_or_else(|| Error::InternalError {
                 message: "No physical devices found".to_string(),
             })?
-            .to_string())
+            .to_string();
+        Ok(PhysicalLink(name))
     }
 
     /// Creates a new VNIC atop a physical device.
-    pub fn create_vnic(physical: &str, vnic_name: &str) -> Result<(), Error> {
+    pub fn create_vnic(
+        physical: &PhysicalLink,
+        vnic_name: &str,
+        mac: Option<MacAddr>,
+    ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[DLADM, "create-vnic", "-l", physical, vnic_name]);
+        let mut args = vec![
+            DLADM.to_string(),
+            "create-vnic".to_string(),
+            "-t".to_string(),
+            "-l".to_string(),
+            physical.0.to_string(),
+        ];
+
+        if let Some(mac) = mac {
+            args.push("-m".to_string());
+            args.push(mac.0.to_string());
+        }
+
+        args.push(vnic_name.to_string());
+        let cmd = command.args(&args);
         execute(cmd)?;
         Ok(())
     }

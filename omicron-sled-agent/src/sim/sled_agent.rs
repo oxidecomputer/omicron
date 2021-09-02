@@ -6,6 +6,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::NexusClient;
 use slog::Logger;
@@ -76,12 +77,12 @@ impl SledAgent {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         Ok(self
             .instances
-            .sim_ensure(&instance_id, initial_runtime, target)
+            .sim_ensure(&instance_id, initial_hardware.runtime, target)
             .await?)
     }
 

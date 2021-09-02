@@ -3,6 +3,7 @@
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -31,6 +32,23 @@ use crate::{
     instance::MockInstance as Instance,
 };
 
+/// A shareable wrapper around an atomic counter.
+/// May be used to allocate runtime-unique IDs.
+#[derive(Clone, Debug)]
+pub struct IdAllocator {
+    value: Arc<AtomicU64>,
+}
+
+impl IdAllocator {
+    pub fn new() -> Self {
+        Self { value: Arc::new(AtomicU64::new(0)) }
+    }
+
+    pub fn next(&self) -> u64 {
+        self.value.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
 struct InstanceManagerInternal {
     log: Logger,
     nexus_client: Arc<NexusClient>,
@@ -40,7 +58,7 @@ struct InstanceManagerInternal {
     // if the Propolis client hasn't been initialized.
     instances: Mutex<BTreeMap<Uuid, Instance>>,
 
-    next_id: AtomicU64,
+    nic_id_allocator: IdAllocator,
 }
 
 /// All instances currently running on the sled.
@@ -91,18 +109,18 @@ impl InstanceManager {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
-                next_id: AtomicU64::new(1),
+                nic_id_allocator: IdAllocator::new(),
             }),
         })
     }
 
     /// Idempotently ensures that the given Instance (described by
-    /// `initial_runtime`) exists on this server in the given runtime state
+    /// `initial_hardware`) exists on this server in the given runtime state
     /// (described by `target`).
     pub async fn ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
@@ -128,8 +146,8 @@ impl InstanceManager {
                     Instance::new(
                         instance_log,
                         instance_id,
-                        self.inner.next_id.fetch_add(1, Ordering::SeqCst),
-                        initial_runtime,
+                        self.inner.nic_id_allocator.clone(),
+                        initial_hardware,
                         self.inner.nexus_client.clone(),
                     )?,
                 );
@@ -219,15 +237,18 @@ mod test {
         .unwrap()
     }
 
-    fn new_runtime_state() -> InstanceRuntimeState {
-        InstanceRuntimeState {
-            run_state: InstanceState::Creating,
-            sled_uuid: Uuid::new_v4(),
-            ncpus: InstanceCpuCount(2),
-            memory: ByteCount::from_mebibytes_u32(512),
-            hostname: "myvm".to_string(),
-            gen: Generation::new(),
-            time_updated: Utc::now(),
+    fn new_initial_instance() -> InstanceHardware {
+        InstanceHardware {
+            runtime: InstanceRuntimeState {
+                run_state: InstanceState::Creating,
+                sled_uuid: Uuid::new_v4(),
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_mebibytes_u32(512),
+                hostname: "myvm".to_string(),
+                gen: Generation::new(),
+                time_updated: Utc::now(),
+            },
+            nics: vec![],
         }
     }
 
@@ -285,9 +306,9 @@ mod test {
                     Ok(())
                 });
                 inst.expect_transition().return_once(|_| {
-                    let mut rt_state = new_runtime_state();
-                    rt_state.run_state = InstanceState::Running;
-                    Ok(rt_state)
+                    let mut rt_state = new_initial_instance();
+                    rt_state.runtime.run_state = InstanceState::Running;
+                    Ok(rt_state.runtime)
                 });
                 inst
             });
@@ -296,7 +317,7 @@ mod test {
         let rt_state = im
             .ensure(
                 test_uuid(),
-                new_runtime_state(),
+                new_initial_instance(),
                 InstanceRuntimeStateRequested {
                     run_state: InstanceStateRequested::Running,
                 },
@@ -356,9 +377,9 @@ mod test {
                         Ok(())
                     });
                     inst.expect_transition().return_once(|_| {
-                        let mut rt_state = new_runtime_state();
-                        rt_state.run_state = InstanceState::Running;
-                        Ok(rt_state)
+                        let mut rt_state = new_initial_instance();
+                        rt_state.runtime.run_state = InstanceState::Running;
+                        Ok(rt_state.runtime)
                     });
                     inst
                 },
@@ -368,9 +389,9 @@ mod test {
                 move || {
                     let mut inst = MockInstance::default();
                     inst.expect_transition().returning(|_| {
-                        let mut rt_state = new_runtime_state();
-                        rt_state.run_state = InstanceState::Running;
-                        Ok(rt_state)
+                        let mut rt_state = new_initial_instance();
+                        rt_state.runtime.run_state = InstanceState::Running;
+                        Ok(rt_state.runtime)
                     });
                     inst
                 },
@@ -379,7 +400,7 @@ mod test {
         });
 
         let id = test_uuid();
-        let rt = new_runtime_state();
+        let rt = new_initial_instance();
         let target = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
         };

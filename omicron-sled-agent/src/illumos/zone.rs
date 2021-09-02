@@ -122,7 +122,7 @@ impl Zones {
     pub fn configure_child_zone(
         log: &Logger,
         name: &str,
-        vnic: &str,
+        vnics: Vec<String>,
     ) -> Result<(), Error> {
         info!(log, "Creating child zone: {}", name);
         let mut cfg = zone::Config::create(
@@ -141,10 +141,12 @@ impl Zones {
             options: vec!["ro".to_string()],
             ..Default::default()
         });
-        cfg.add_net(&zone::Net {
-            physical: vnic.to_string(),
-            ..Default::default()
-        });
+        for vnic in &vnics {
+            cfg.add_net(&zone::Net {
+                physical: vnic.to_string(),
+                ..Default::default()
+            });
+        }
         cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });

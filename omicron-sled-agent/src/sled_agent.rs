@@ -1,9 +1,10 @@
 //! Sled agent implementation
 
-use omicron_common::api::external::Error;
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
+    external::Error, internal::nexus::DiskRuntimeState,
+    internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
+    internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
 
@@ -43,10 +44,10 @@ impl SledAgent {
     pub async fn instance_ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
-        self.instances.ensure(instance_id, initial_runtime, target).await
+        self.instances.ensure(instance_id, initial, target).await
     }
 
     /// Idempotently ensures that the given Disk is attached (or not) as

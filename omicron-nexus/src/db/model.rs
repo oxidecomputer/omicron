@@ -395,7 +395,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
 /// Conversion to the internal API type.
 impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> internal::nexus::InstanceRuntimeState {
-        internal::sled_agent::InstanceRuntimeState {
+        internal::nexus::InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             ncpus: self.ncpus,

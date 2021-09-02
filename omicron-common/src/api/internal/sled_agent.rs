@@ -1,6 +1,6 @@
 //! APIs exposed by Sled Agent.
 
-use crate::api::internal;
+use crate::api::{external, internal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
@@ -39,15 +39,19 @@ impl DiskStateRequested {
     }
 }
 
-/// Runtime state of an instance.
-pub type InstanceRuntimeState = internal::nexus::InstanceRuntimeState;
+/// Describes the instance hardware.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceHardware {
+    pub runtime: internal::nexus::InstanceRuntimeState,
+    pub nics: Vec<external::NetworkInterface>,
+}
 
 /// Sent to a sled agent to establish the runtime state of an Instance
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// Last runtime state of the Instance known to Nexus (used if the agent
     /// has never seen this Instance before).
-    pub initial_runtime: InstanceRuntimeState,
+    pub initial: InstanceHardware,
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
 }
