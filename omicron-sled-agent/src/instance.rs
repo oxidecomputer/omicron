@@ -264,7 +264,12 @@ impl InstanceInner {
         let disks = guest_disks
             .clone()
             .into_iter()
-            .map(|disk| propolis_client::api::DiskRequest {
+            .enumerate()
+            .map(|(i, disk)| propolis_client::api::DiskRequest {
+                // TODO: We should probably have a more stable name, right?
+                // Does the format matter much, or can we just make something
+                // up in Nexus?
+                name: format!("disk{}", i),
                 address: disk.address,
                 slot: propolis_client::api::Slot(disk.slot),
                 read_only: disk.read_only,
