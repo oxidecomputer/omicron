@@ -36,6 +36,8 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        // TODO(demo-m2): Probably should make/use a different DB table pointing
+        // at this instance representing a crucible disk.
         crucible0address -> Nullable<Text>,
         crucible1address -> Nullable<Text>,
         crucible2address -> Nullable<Text>,

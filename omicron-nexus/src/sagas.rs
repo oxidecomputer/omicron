@@ -17,6 +17,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::CrucibleDiskInfo;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
@@ -305,14 +306,25 @@ async fn sic_create_instance_record(
             &params.project_id,
             &params.create_params,
             &runtime.into(),
-            crucibles,
+            crucibles.clone(),
         )
         .await
         .map_err(ActionError::action_failed)?;
 
     // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
-    Ok(InstanceHardware { runtime: instance.runtime().into(), nics: vec![], disks: vec![] })
+    Ok(InstanceHardware {
+        runtime: instance.runtime().into(),
+        nics: vec![],
+        disks: vec![
+            CrucibleDiskInfo {
+                address: crucibles,
+                // TODO: Avoid hard-coding this slot number.
+                slot: 0,
+                read_only: false,
+            }
+        ]
+    })
 }
 
 async fn sic_instance_ensure(
