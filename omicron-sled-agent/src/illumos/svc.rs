@@ -47,7 +47,7 @@ mod inner {
                 return Err(poll::CondCheckError::NotYet);
             },
             &Duration::from_millis(500),
-            &Duration::from_secs(20),
+            &Duration::from_secs(60),
         )
         .await
         .map_err(|e| Error::InternalError {
