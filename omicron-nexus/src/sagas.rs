@@ -23,7 +23,7 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::{error, info};
+use slog::error;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -316,14 +316,12 @@ async fn sic_create_instance_record(
     Ok(InstanceHardware {
         runtime: instance.runtime().into(),
         nics: vec![],
-        disks: vec![
-            CrucibleDiskInfo {
-                address: crucibles,
-                // TODO: Avoid hard-coding this slot number.
-                slot: 0,
-                read_only: false,
-            }
-        ]
+        disks: vec![CrucibleDiskInfo {
+            address: crucibles,
+            // TODO: Avoid hard-coding this slot number.
+            slot: 0,
+            read_only: false,
+        }],
     })
 }
 

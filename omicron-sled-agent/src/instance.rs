@@ -250,8 +250,11 @@ impl InstanceInner {
             })
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>, guest_disks: &Vec<CrucibleDiskInfo>)
-        -> Result<(), Error> {
+    async fn ensure(
+        &self,
+        guest_nics: &Vec<Vnic>,
+        guest_disks: &Vec<CrucibleDiskInfo>,
+    ) -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = guest_nics
             .iter()

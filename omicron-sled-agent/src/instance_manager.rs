@@ -249,6 +249,7 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            disks: vec![],
         }
     }
 
