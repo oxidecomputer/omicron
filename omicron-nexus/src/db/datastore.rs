@@ -238,6 +238,7 @@ impl DataStore {
         params: &api::external::InstanceCreateParams,
         runtime_initial: &db::model::InstanceRuntimeState,
         crucibles: Vec<std::net::SocketAddr>,
+        ip_reservation: Option<i32>,
     ) -> CreateResult<db::model::Instance> {
         use db::diesel_schema::instance::dsl;
 
@@ -247,6 +248,7 @@ impl DataStore {
             params,
             runtime_initial.clone(),
             crucibles,
+            ip_reservation,
         );
         let name = instance.name.clone();
         let instance: db::model::Instance = diesel::insert_into(dsl::instance)
@@ -879,6 +881,72 @@ impl DataStore {
                     e,
                     ResourceType::Vpc,
                     LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    /*
+     * XXX Demo hacks.
+     */
+
+    pub async fn assign_ip_address(
+        &self,
+        slot: i32,
+        instance: &Uuid,
+    ) -> Result<bool, Error> {
+        use db::diesel_schema::addressreservation::dsl;
+
+        use diesel::result::Error::DatabaseError;
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
+
+        let ar =
+            db::model::AddressReservation { slot, instance: instance.clone() };
+
+        let res = diesel::insert_into(dsl::addressreservation)
+            .values(ar)
+            .execute_async(self.pool())
+            .await;
+
+        if let Err(e) = res {
+            if let DatabaseError(kind, _info) = &e {
+                if let UniqueViolation = kind {
+                    /*
+                     * Someone has this slot already.
+                     */
+                    return Ok(false);
+                }
+            }
+
+            Err(Error::from_diesel_create(e, ResourceType::DemoHacks,
+                "network reservation"))
+        } else {
+            /*
+             * We were able to create the reservation.
+             */
+            Ok(true)
+        }
+    }
+
+    pub async fn unassign_ip_address(
+        &self,
+        slot: i32,
+        instance: &Uuid,
+    ) -> Result<(), Error> {
+        use db::diesel_schema::addressreservation::dsl;
+
+        let instance = instance.clone();
+
+        diesel::delete(dsl::addressreservation)
+            .filter(dsl::slot.eq(slot))
+            .filter(dsl::instance.eq(instance))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::DemoHacks,
+                    LookupType::Other("deleting an IP".to_string()),
                 )
             })?;
         Ok(())

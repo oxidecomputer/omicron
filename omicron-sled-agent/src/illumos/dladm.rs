@@ -44,6 +44,7 @@ impl Dladm {
         physical: &PhysicalLink,
         vnic_name: &str,
         mac: Option<MacAddr>,
+        vlan: Option<u16>,
     ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
@@ -57,6 +58,11 @@ impl Dladm {
         if let Some(mac) = mac {
             args.push("-m".to_string());
             args.push(mac.0.to_string());
+        }
+
+        if let Some(vlan) = vlan {
+            args.push("-v".to_string());
+            args.push(vlan.to_string());
         }
 
         args.push(vnic_name.to_string());

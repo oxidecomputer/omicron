@@ -41,6 +41,18 @@ table! {
         crucible0address -> Nullable<Text>,
         crucible1address -> Nullable<Text>,
         crucible2address -> Nullable<Text>,
+        /* XXX demo hack */
+        ip_reservation -> Nullable<Int4>,
+    }
+}
+
+/*
+ * XXX Demo hacks
+ */
+table! {
+    addressreservation (slot) {
+        slot -> Int4,
+        instance -> Uuid,
     }
 }
 

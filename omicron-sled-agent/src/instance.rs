@@ -157,7 +157,7 @@ impl Vnic {
         mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
         let name = guest_vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Dladm::create_vnic(physical_dl, &name, mac, Some(2014))?; /* XXX */
         Ok(Vnic { name, deleted: false })
     }
 
@@ -169,7 +169,7 @@ impl Vnic {
         mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
         let name = vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Dladm::create_vnic(physical_dl, &name, mac, None)?;
         Ok(Vnic { name, deleted: false })
     }
 

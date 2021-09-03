@@ -25,6 +25,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::error;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
@@ -94,6 +95,12 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         // keep track of resources and reservations, etc.  See the comment on
         // SagaContext::alloc_server()
         new_action_noop_undo(sic_alloc_server),
+    );
+
+    template_builder.append(
+        "ip_reservation",
+        "ReserveIP",
+        new_action_noop_undo(sic_reserve_ip),
     );
 
     template_builder.append_parallel(vec![
@@ -278,6 +285,35 @@ async fn sic_ensure_crucible_region(
     }
 }
 
+async fn sic_reserve_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<i32, ActionError> {
+    let osagactx = sagactx.user_data();
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    let mut slot = 2;
+    loop {
+        if slot > 254 {
+            return Err(ActionError::action_failed(
+                Error::InternalError {
+                    message: "no more network slots".to_string(),
+                },
+            ));
+        }
+
+        let assigned = osagactx
+            .datastore()
+            .assign_ip_address(slot, &instance_id)
+            .await
+            .map_err(ActionError::action_failed)?;
+        if assigned {
+            return Ok(slot);
+        }
+
+        slot += 1;
+    }
+}
+
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<InstanceHardware, ActionError> {
@@ -285,6 +321,7 @@ async fn sic_create_instance_record(
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
     let instance_id = sagactx.lookup::<Uuid>("instance_id");
+    let ip_reservation = sagactx.lookup::<i32>("ip_reservation")?;
     let crucibles = (0..=2)
         .map(|n| sagactx.lookup(&format!("crucible{}address", n)))
         .collect::<Result<Vec<_>, _>>()?;
@@ -307,15 +344,44 @@ async fn sic_create_instance_record(
             &params.create_params,
             &runtime.into(),
             crucibles.clone(),
+            Some(ip_reservation),
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    /*
+     * XXX Demo hack NIC.
+     */
+    let mac = macaddr::MacAddr6::new(
+        0xaa,
+        0x00,
+        0x04,
+        0x00,
+        0xff,
+        ip_reservation as u8,
+    );
+    let nic = omicron_common::api::external::NetworkInterface {
+        mac: omicron_common::api::external::MacAddr(mac),
+        ip: format!("172.20.14.{}", ip_reservation).parse().unwrap(),
+        subnet_id: Uuid::new_v4(),
+        vpc_id: Uuid::new_v4(),
+        identity: omicron_common::api::external::IdentityMetadata {
+            id: Uuid::new_v4(),
+            name: omicron_common::api::external::Name::try_from(
+                "bestvnic".to_string(),
+            )
+            .unwrap(),
+            description: "".to_string(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+        },
+    };
 
     // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
     Ok(InstanceHardware {
         runtime: instance.runtime().into(),
-        nics: vec![],
+        nics: vec![nic],
         disks: vec![CrucibleDiskInfo {
             address: crucibles,
             // TODO: Avoid hard-coding this slot number.
@@ -343,6 +409,10 @@ async fn sic_instance_ensure(
         .sled_client(&sled_uuid)
         .await
         .map_err(ActionError::action_failed)?;
+
+    // let ip_reservation = sagactx.lookup::<i32>("ip_reservation")?;
+    // let ip = format!("172.20.14.{}", ip_reservation);
+    // let mac = format!("aa:00:04:00:ff:{:02x}", ip_reservation);
 
     /*
      * XXX Get the list of socket addresses for crucibles so that we can pass it

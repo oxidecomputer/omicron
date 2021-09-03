@@ -618,7 +618,15 @@ impl Nexus {
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
-        self.db_datastore.project_delete_instance(&instance.id).await
+        let res = self.db_datastore.project_delete_instance(&instance.id).await;
+        if let Some(ip) = &instance.ip_reservation {
+            /*
+             * Delete the demo hack IP we've allocated -- but if not, that's OK.
+             * We will just leak one.
+             */
+            self.db_datastore.unassign_ip_address(*ip, &instance.id).await.ok();
+        }
+        res
     }
 
     pub async fn project_lookup_instance(
@@ -836,12 +844,47 @@ impl Nexus {
         };
         info!(&self.log, "Parsed disks: {:#?}", disks);
 
+        let nics = if let Some(slot) = instance.ip_reservation.as_ref() {
+            /*
+             * XXX Demo hack NIC.
+             */
+            let mac = macaddr::MacAddr6::new(
+                0xaa,
+                0x00,
+                0x04,
+                0x00,
+                0xff,
+                (*slot) as u8,
+            );
+            let nic = omicron_common::api::external::NetworkInterface {
+                mac: omicron_common::api::external::MacAddr(mac),
+                ip: format!("172.20.14.{}", *slot).parse().unwrap(),
+                subnet_id: Uuid::new_v4(),
+                vpc_id: Uuid::new_v4(),
+                identity: omicron_common::api::external::IdentityMetadata {
+                    id: Uuid::new_v4(),
+                    name: omicron_common::api::external::Name::try_from(
+                        "bestvnic".to_string(),
+                    )
+                    .unwrap(),
+                    description: "".to_string(),
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                },
+            };
+            vec![nic]
+        } else {
+            Vec::new()
+        };
+        info!(&self.log, "Parsed NICS: {:#?}", nics);
+
+
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = InstanceHardware {
             runtime: instance.runtime().into(),
-            nics: vec![],
+            nics,
             disks,
         };
 

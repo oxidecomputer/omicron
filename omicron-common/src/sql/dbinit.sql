@@ -128,7 +128,12 @@ CREATE TABLE omicron.public.Instance (
 
     crucible0address STRING(128),
     crucible1address STRING(128),
-    crucible2address STRING(128)
+    crucible2address STRING(128),
+
+    /*
+     * XXX This is just a Demo day hack.
+     */
+    ip_reservation INT4
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Instance (
@@ -324,6 +329,14 @@ CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
     name
 ) WHERE
     time_deleted IS NULL;
+
+/*
+ * XXX This is just a Demo day hack.
+ */
+CREATE TABLE omicron.public.AddressReservation (
+    slot INT4 PRIMARY KEY,
+    instance UUID NOT NULL
+);
 
 /*******************************************************************/
 

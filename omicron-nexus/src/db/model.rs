@@ -2,7 +2,7 @@
 
 use super::diesel_schema::{
     disk, instance, metricproducer, networkinterface, oximeter,
-    oximeterassignment, project, vpc, vpcsubnet,
+    oximeterassignment, project, vpc, vpcsubnet, addressreservation,
 };
 use chrono::{DateTime, Utc};
 use diesel::backend::{Backend, RawValue};
@@ -144,6 +144,14 @@ pub struct Project {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
+/// Describes a project within the database.
+#[derive(Queryable, Insertable, Debug)]
+#[table_name = "addressreservation"]
+pub struct AddressReservation {
+    pub slot: i32,
+    pub instance: Uuid,
+}
+
 impl Project {
     /// Creates a new database Project object.
     pub fn new(params: external::ProjectCreateParams) -> Self {
@@ -256,6 +264,8 @@ pub struct Instance {
     pub crucible0address: Option<String>,
     pub crucible1address: Option<String>,
     pub crucible2address: Option<String>,
+
+    pub ip_reservation: Option<i32>,
 }
 
 impl Instance {
@@ -265,6 +275,7 @@ impl Instance {
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
         crucibles: Vec<std::net::SocketAddr>,
+        ip_reservation: Option<i32>,
     ) -> Self {
         let identity =
             IdentityMetadata::new(instance_id, params.identity.clone());
@@ -295,6 +306,8 @@ impl Instance {
             crucible0address,
             crucible1address,
             crucible2address,
+
+            ip_reservation,
         }
     }
 
