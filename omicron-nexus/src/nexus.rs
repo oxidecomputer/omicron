@@ -39,6 +39,7 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::sled_agent::CrucibleDiskInfo;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -801,13 +802,47 @@ impl Nexus {
          * beat us to it.
          */
 
+        // TODO: We lookup the instance (the one passed to this function as an
+        // argument) we probably should just do a JOIN with the devices tables,
+        // WHERE the INSTANCE_ID = our ID.
+        //
+        // For now tho, we live in a world where the instance table is a big
+        // chungus, and has all we need with one query \o/
+        let addrs = vec![
+            instance.crucible0address.as_ref(),
+            instance.crucible1address.as_ref(),
+            instance.crucible2address.as_ref(),
+        ];
+        info!(&self.log, "Parsing crucible addresses: {:#?}", addrs);
+        let disks = {
+            let crucibles = addrs
+                .into_iter()
+                .filter_map(|a| {
+                    if let Some(addr) = a {
+                        Some(addr.parse().map_err(|e| Error::InternalError {
+                            message: format!("Failed to parse address: {}", e),
+                        }))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Result<Vec<std::net::SocketAddr>, Error>>()?;
+
+            vec![CrucibleDiskInfo {
+                address: crucibles,
+                slot: 0,
+                read_only: false,
+            }]
+        };
+        info!(&self.log, "Parsed disks: {:#?}", disks);
+
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = InstanceHardware {
             runtime: instance.runtime().into(),
             nics: vec![],
-            disks: vec![],
+            disks,
         };
 
         let new_runtime = sa
