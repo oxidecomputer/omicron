@@ -5,15 +5,15 @@
 
 bootrom = "/opt/oxide/propolis-server/blob/OVMF_CODE.fd"
 
-[block_dev.bd0]
-type = "file"
-path = "/opt/oxide/propolis-server/blob/alpine.iso"
-readonly = "true"
-
-[dev.block0]
-driver = "pci-virtio-block"
-block_dev = "bd0"
-pci-path = "0.4.0"
+# XXX # [block_dev.bd0]
+# XXX # type = "file"
+# XXX # path = "/opt/oxide/propolis-server/blob/alpine.iso"
+# XXX # readonly = "true"
+# XXX # 
+# XXX # [dev.block0]
+# XXX # driver = "pci-virtio-block"
+# XXX # block_dev = "bd0"
+# XXX # pci-path = "0.4.0"
 
 # NOTE: This VNIC is here for reference, but VNICs are typically managed by the
 # Sled Agent.
