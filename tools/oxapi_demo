@@ -173,12 +173,9 @@ function cmd_project_list_vpcs
 
 function cmd_instance_create_demo
 {
-	#
-	# NOTE: Propolis expresses memory in megabytes.
-	#
 	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
 	mkjson name="$2" description="an instance called $2" ncpus=1 \
-	    memory=256 bootDiskSize=1 hostname="$1" |
+	    memory=268435456 bootDiskSize=1 hostname="$1" |
 		do_curl "/projects/$1/instances" -X POST -T -
 }
 
