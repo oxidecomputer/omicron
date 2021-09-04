@@ -7,9 +7,13 @@
 # When both of those are part of stable Rust, we should update this file to
 # point to "stable" instead.
 #
+# We use "nightly-2021-09-03" specifically because we know it's new enough for
+# the Cargo feature required for the sgrif/pq-sys#36 workaround.  Newer
+# nightlies should be fine as well.
+#
 
 [toolchain]
 # NOTE: This toolchain is also specified within .github/workflows/rust.yml
 # If you update it here, update that file too.
-channel = "nightly"
+channel = "nightly-2021-09-03"
 profile = "default"
