@@ -32,3 +32,12 @@ panic = "abort"
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
+
+#
+# We maintain a fork of pq-sys to address
+# https://github.com/sgrif/pq-sys/issues/36.  If the fix for that (PR#37) lands
+# upstream, we can remove our fork.
+#
+[patch.crates-io.pq-sys]
+git = 'https://github.com/oxidecomputer/pq-sys'
+branch = "oxide"

@@ -1655,8 +1655,7 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "pq-sys"
 version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac25eee5a0582f45a67e837e350d784e7003bd29a5f460796772061ca49ffda"
+source = "git+https://github.com/oxidecomputer/pq-sys?branch=oxide#580b9da96e8d67c99975e55f360e36dc4272fdec"
 dependencies = [
  "vcpkg",
 ]
