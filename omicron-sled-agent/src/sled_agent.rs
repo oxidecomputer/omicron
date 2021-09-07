@@ -17,6 +17,7 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
+use crate::common::vlan::VlanID;
 use crate::instance_manager::InstanceManager;
 
 /// Describes an executing Sled Agent object.
@@ -31,12 +32,13 @@ impl SledAgent {
     pub fn new(
         id: &Uuid,
         log: Logger,
+        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<SledAgent, Error> {
         info!(&log, "created sled agent"; "id" => ?id);
 
         Ok(SledAgent {
-            instances: InstanceManager::new(log.clone(), nexus_client)?,
+            instances: InstanceManager::new(log.clone(), vlan, nexus_client)?,
         })
     }
 

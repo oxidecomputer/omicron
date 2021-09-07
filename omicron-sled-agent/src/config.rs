@@ -1,14 +1,13 @@
 //! Interfaces for working with sled agent configuration
 
+use crate::common::vlan::VlanID;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use serde::Deserialize;
-use serde::Serialize;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// Configuration for a sled agent
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
@@ -18,4 +17,6 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
+    /// Optional VLAN ID to be used for tagging guest VNICs.
+    pub vlan: Option<VlanID>,
 }
