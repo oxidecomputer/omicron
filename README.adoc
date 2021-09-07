@@ -51,27 +51,27 @@ See TODO.adoc for more info.
 
 == Build and run
 
-Both normal execution and the test suite expect the prescence of some existing binaries (described below) to be locatable within the `$PATH` environment variable.
-However, once these have been provided, the codebase should be buildable with `cargo build`, and testable with `cargo test`.
+You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
+
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
 **Prerequisites:**
 
-. Postgres
+Both normal execution and the test suite expect certain binaries (described below) on your PATH.
 
-Postgres is required to link against libpq for access to the database.
+. libpq, the PostgreSQL client library
++
+--
+We use Diesel's PostgreSQL support to connect to CockroachDB (which is wire-compatible with PostgreSQL).  Diesel uses the native libpq to do this.  You can get the client library with:
 
-(See https://github.com/oxidecomputer/omicron/issues/213 ; we may be able to remove this dependency long-term)
+* Helios: `pkg install library/postgresql-13`
+* Linux: `sudo apt-get install libpq-dev`
+* Mac: `brew install postgresql`
 
-Linux: `sudo apt-get install libpq-dev`
-Mac: `brew install postgresql`
-Helios: `pkg install library/postgresql-13`
+After doing this, you should have the `pg_config` command on your PATH.  For example, on Helios, you'd want `/opt/ooce/bin` on your PATH.
 
-Additionally, to help all runtime commands find this library, we recommend the following:
-[source,text]
-----
-export LD_LIBRARY_PATH="$(pg_config --libdir)"
-----
-
+See the note about setting RUSTFLAGS at build time below.
+--
 . CockroachDB v20.2.5.
 +
 The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
@@ -87,7 +87,7 @@ See <<_configuring_clickhouse>> for details on ClickHouse's setup and configurat
 +
 . Additional software requirements:
 +
-On an illumos based machine (Helios, OmniOS), make sure your packages are up to date, and you have the `brand/sparse` package:
+On an illumos-based machine (Helios, OmniOS), if you want to run the real (non-simulated) Sled Agent to run actual VMs with Propolis, make sure your packages are up to date, and you have the `brand/sparse` package:
 +
 [source,text]
 ----
@@ -96,10 +96,6 @@ pkg install pkg:/package/pkg
 pkg update
 ----
  
-You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
-
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
-
 To **run Omicron** you need to run four programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
@@ -108,11 +104,17 @@ the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
 
-The easiest way to start the required databases is to use the built in `omicron-dev` tool.
-This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH,
-and match the versions above.
+The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
 
-1. Start CockroachDB using `omicron-dev db-run`:
+. Set `RUSTFLAGS` in your environment so that built binaries will be able to find your local copy of libpq.  A typical example might look like this:
++
+----
+$ export RUSTFLAGS="-Clink-args=-R$(pg_config --libdir)"
+----
++ Note that this might be wrong in some configurations or if you're using environment variables to control how the `pq-sys` crate finds libpq.  See https://github.com/oxidecomputer/omicron/issues/213[#213] for details.
++
+NOTE: You may be able to skip this step if your libpq is in a directory that's already part of the runtime linker's default search path, which may be the case if you've installed libpq using the system package manager.  This step is necessarily on Helios because the package manager does not put libpq on the default ld.so search path.
+. Start CockroachDB using `omicron-dev db-run`:
 +
 [source,text]
 ----
@@ -167,7 +169,7 @@ omicron-dev: populated database
 +
 Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
 
-2. Start the ClickHouse database server:
+. Start the ClickHouse database server:
 +
 [source,text]
 ----
@@ -178,7 +180,7 @@ omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server 
 omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
 ----
 
-3. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
+. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
@@ -187,11 +189,11 @@ $ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
 listening: http://127.0.0.1:12220
 ----
 
-4. `sled-agent` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
+. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent -- run $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent-sim -- run $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
