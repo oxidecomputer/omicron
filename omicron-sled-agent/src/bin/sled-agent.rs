@@ -5,6 +5,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::common::vlan::VlanID;
 use omicron_sled_agent::config::Config;
 use omicron_sled_agent::server::{run_openapi, run_server};
 use std::net::SocketAddr;
@@ -29,6 +30,9 @@ enum Args {
 
         #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
         nexus_addr: SocketAddr,
+
+        #[structopt(long = "vlan")]
+        vlan: Option<VlanID>,
     },
 }
 
@@ -46,7 +50,7 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::OpenApi => run_openapi().map_err(CmdError::Failure),
-        Args::Run { uuid, sled_agent_addr, nexus_addr } => {
+        Args::Run { uuid, sled_agent_addr, nexus_addr, vlan } => {
             let config = Config {
                 id: uuid,
                 nexus_address: nexus_addr,
@@ -57,6 +61,7 @@ async fn do_run() -> Result<(), CmdError> {
                 log: ConfigLogging::StderrTerminal {
                     level: ConfigLoggingLevel::Info,
                 },
+                vlan,
             };
             run_server(&config).await.map_err(CmdError::Failure)
         }
