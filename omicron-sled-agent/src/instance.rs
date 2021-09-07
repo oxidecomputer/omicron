@@ -278,8 +278,10 @@ impl InstanceInner {
             .clone()
             .into_iter()
             .map(|disk| propolis_client::api::DiskRequest {
+                name: "some_disk".to_string(), // XXX
                 address: disk.address,
                 slot: propolis_client::api::Slot(disk.slot),
+                read_only: false, // XXX
             })
             .collect();
 

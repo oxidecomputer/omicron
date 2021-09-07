@@ -1350,7 +1350,7 @@ dependencies = [
  "ipnet",
  "mockall",
  "omicron-common",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?branch=demo_m2)",
  "schemars",
  "serde",
  "serde_json",
@@ -1771,6 +1771,22 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=demo_m2#4b8c6b82fa5f588b3fb7b28b92ba654ecb4d28bc"
+dependencies = [
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "structopt",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "propolis-client"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
 dependencies = [
  "reqwest",
@@ -1794,7 +1810,7 @@ dependencies = [
  "futures",
  "hyper",
  "propolis",
- "propolis-client",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=bc0661e)",
  "serde",
  "serde_derive",
  "slog",
