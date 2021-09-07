@@ -1,15 +1,15 @@
 //! Utilities for poking at data links.
 
+use crate::common::vlan::VlanID;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::MacAddr;
 
 pub const VNIC_PREFIX: &str = "vnic_propolis";
-
 pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// The name of a physical datalink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.
@@ -40,10 +40,17 @@ impl Dladm {
     }
 
     /// Creates a new VNIC atop a physical device.
+    ///
+    /// * `physical`: The physical link on top of which a device will be
+    /// created.
+    /// * `vnic_name`: Exact name of the VNIC to be created.
+    /// * `mac`: An optional unicast MAC address for the newly created NIC.
+    /// * `vlan`: An optional VLAN ID for VLAN tagging.
     pub fn create_vnic(
         physical: &PhysicalLink,
         vnic_name: &str,
         mac: Option<MacAddr>,
+        vlan: Option<VlanID>,
     ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
@@ -57,6 +64,11 @@ impl Dladm {
         if let Some(mac) = mac {
             args.push("-m".to_string());
             args.push(mac.0.to_string());
+        }
+
+        if let Some(vlan) = vlan {
+            args.push("-v".to_string());
+            args.push(vlan.to_string());
         }
 
         args.push(vnic_name.to_string());

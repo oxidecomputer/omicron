@@ -1,5 +1,6 @@
 //! API for controlling multiple instances on a sled.
 
+use crate::common::vlan::VlanID;
 use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -58,6 +59,7 @@ struct InstanceManagerInternal {
     // if the Propolis client hasn't been initialized.
     instances: Mutex<BTreeMap<Uuid, Instance>>,
 
+    vlan: Option<VlanID>,
     nic_id_allocator: IdAllocator,
 }
 
@@ -70,6 +72,7 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
+        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
         // Before we start creating instances, we need to ensure that the
@@ -109,6 +112,7 @@ impl InstanceManager {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
+                vlan,
                 nic_id_allocator: IdAllocator::new(),
             }),
         })
@@ -148,6 +152,7 @@ impl InstanceManager {
                         instance_id,
                         self.inner.nic_id_allocator.clone(),
                         initial_hardware,
+                        self.inner.vlan,
                         self.inner.nexus_client.clone(),
                     )?,
                 );
@@ -277,7 +282,7 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let im = InstanceManager::new(log, nexus_client).unwrap();
+        let im = InstanceManager::new(log, None, nexus_client).unwrap();
 
         // Verify that no instances exist.
         assert!(im.inner.instances.lock().unwrap().is_empty());
@@ -294,7 +299,7 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
@@ -359,13 +364,13 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let im = InstanceManager::new(log, nexus_client).unwrap();
+        let im = InstanceManager::new(log, None, nexus_client).unwrap();
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(

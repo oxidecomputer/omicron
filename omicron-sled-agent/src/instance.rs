@@ -1,6 +1,9 @@
 //! API for controlling a single instance.
 
-use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::common::{
+    instance::{Action as InstanceAction, InstanceStates},
+    vlan::VlanID,
+};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::{
     dladm::{PhysicalLink, VNIC_PREFIX},
@@ -154,9 +157,10 @@ impl Vnic {
         allocator: &IdAllocator,
         physical_dl: &PhysicalLink,
         mac: Option<MacAddr>,
+        vlan: Option<VlanID>,
     ) -> Result<Self, Error> {
         let name = guest_vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
         Ok(Vnic { name, deleted: false })
     }
 
@@ -168,7 +172,7 @@ impl Vnic {
         mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
         let name = vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac)?;
+        Dladm::create_vnic(physical_dl, &name, mac, None)?;
         Ok(Vnic { name, deleted: false })
     }
 
@@ -191,13 +195,22 @@ impl Drop for Vnic {
 
 struct InstanceInner {
     log: Logger,
-    nic_id_allocator: IdAllocator,
+
+    // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
+
+    // NIC-related properties
+    nic_id_allocator: IdAllocator,
     requested_nics: Vec<NetworkInterface>,
     allocated_nics: Vec<Vnic>,
+    vlan: Option<VlanID>,
+
+    // Internal State management
     state: InstanceStates,
-    nexus_client: Arc<NexusClient>,
     running_state: Option<RunningState>,
+
+    // Connection to Nexus
+    nexus_client: Arc<NexusClient>,
 }
 
 impl InstanceInner {
@@ -323,6 +336,7 @@ mockall::mock! {
             id: Uuid,
             nic_id_allocator: IdAllocator,
             initial: InstanceHardware,
+            vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
         pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
@@ -347,17 +361,19 @@ impl Instance {
     /// lengths, otherwise the UUID would be used instead).
     /// * `initial`: State of the instance at initialization time.
     /// * `nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `vlan`: An optional VLAN ID for tagging guest VNICs.
+    // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
         id: Uuid,
         nic_id_allocator: IdAllocator,
         initial: InstanceHardware,
+        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            nic_id_allocator,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
@@ -371,11 +387,13 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
+            nic_id_allocator,
             requested_nics: initial.nics,
             allocated_nics: vec![],
+            vlan,
             state: InstanceStates::new(initial.runtime),
-            nexus_client,
             running_state: None,
+            nexus_client,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -416,6 +434,7 @@ impl Instance {
                     &inner.nic_id_allocator,
                     &physical_dl,
                     Some(nic.mac),
+                    inner.vlan,
                 )
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -812,7 +831,7 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|phys, vnic, _maybe_mac| {
+            .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
                 assert_eq!(phys.0, "physical");
                 assert_eq!(vnic, vnic_name(0));
                 Ok(())
@@ -997,6 +1016,7 @@ mod test {
             test_uuid(),
             nic_id_allocator,
             new_initial_instance(),
+            None,
             Arc::new(nexus_client),
         )
         .unwrap();
@@ -1051,6 +1071,7 @@ mod test {
             test_uuid(),
             nic_id_allocator,
             new_initial_instance(),
+            None,
             Arc::new(nexus_client),
         )
         .unwrap();
