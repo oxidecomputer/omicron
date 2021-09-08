@@ -39,5 +39,6 @@ panic = "abort"
 # upstream, we can remove our fork.
 #
 [patch.crates-io.pq-sys]
-git = 'https://github.com/oxidecomputer/pq-sys'
-branch = "oxide"
+#git = 'https://github.com/oxidecomputer/pq-sys'
+#branch = "oxide"
+path = "../pq-sys-dynamic"

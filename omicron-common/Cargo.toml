@@ -14,6 +14,8 @@ hyper = "0.14"
 libc = "0.2.98"
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b6da043d" }
 postgres-protocol = "0.6.1"
+# See build.rs for more about the "pq-sys" dependency.
+pq-sys = "0.4"
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"

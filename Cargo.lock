@@ -1232,6 +1232,7 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
+ "pq-sys",
  "serde",
  "serde_json",
  "slog",
@@ -1263,6 +1264,7 @@ dependencies = [
  "libc",
  "macaddr",
  "postgres-protocol",
+ "pq-sys",
  "propolis-server",
  "rayon",
  "reqwest",
@@ -1314,6 +1316,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "pq-sys",
  "schemars",
  "serde",
  "serde_json",
@@ -1344,6 +1347,7 @@ dependencies = [
  "ipnet",
  "mockall",
  "omicron-common",
+ "pq-sys",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3d58a6398)",
  "schemars",
  "serde",
@@ -1442,6 +1446,7 @@ dependencies = [
  "num-traits",
  "omicron-common",
  "oximeter-macro-impl",
+ "pq-sys",
  "reqwest",
  "schemars",
  "serde",
@@ -1655,7 +1660,6 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "pq-sys"
 version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/pq-sys?branch=oxide#580b9da96e8d67c99975e55f360e36dc4272fdec"
 dependencies = [
  "vcpkg",
 ]
