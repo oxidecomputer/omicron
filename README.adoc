@@ -193,7 +193,7 @@ listening: http://127.0.0.1:12220
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- run $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
