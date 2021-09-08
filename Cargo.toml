@@ -34,11 +34,9 @@ panic = "abort"
 #steno = { path = "../steno" }
 
 #
-# We maintain a fork of pq-sys to address
-# https://github.com/sgrif/pq-sys/issues/36.  If the fix for that (PR#37) lands
-# upstream, we can remove our fork.
+# We maintain a fork of pq-sys to address upstream issues.  See the
+# README.md.oxide in the "oxide" branch of our fork for details.
 #
 [patch.crates-io.pq-sys]
-#git = 'https://github.com/oxidecomputer/pq-sys'
-#branch = "oxide"
-path = "../pq-sys-dynamic"
+git = 'https://github.com/oxidecomputer/pq-sys'
+branch = "oxide"
