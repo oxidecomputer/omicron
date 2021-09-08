@@ -88,9 +88,10 @@ impl Zones {
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Blank,
         );
         cfg.get_global()
+            .set_brand("sparse")
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
@@ -128,9 +129,10 @@ impl Zones {
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Blank,
         );
         cfg.get_global()
+            .set_brand("sparse")
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
