@@ -18,8 +18,8 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
-use propolis_client::Client as PropolisClient;
 use propolis_client::api::DiskRequest as PropolisDiskRequest;
+use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -265,8 +265,11 @@ impl InstanceInner {
             })
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>, guest_disks: &Vec<PropolisDiskRequest>)
-        -> Result<(), Error> {
+    async fn ensure(
+        &self,
+        guest_nics: &Vec<Vnic>,
+        guest_disks: &Vec<PropolisDiskRequest>,
+    ) -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = guest_nics
             .iter()
