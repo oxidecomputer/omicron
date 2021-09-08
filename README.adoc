@@ -70,7 +70,7 @@ We use Diesel's PostgreSQL support to connect to CockroachDB (which is wire-comp
 
 After doing this, you should have the `pg_config` command on your PATH.  For example, on Helios, you'd want `/opt/ooce/bin` on your PATH.
 
-See the note about setting RUSTFLAGS at build time below.
+See the note about setting RUSTFLAGS and RUSTDOCFLAGS at build time below.
 --
 . CockroachDB v20.2.5.
 +
@@ -106,10 +106,11 @@ the database files will be deleted when you stop the program.
 
 The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
 
-. Set `RUSTFLAGS` in your environment so that built binaries will be able to find your local copy of libpq.  A typical example might look like this:
+. Set `RUSTFLAGS` and `RUSTDOCFLAGS` in your environment so that built binaries will be able to find your local copy of libpq.  A typical example might look like this:
 +
 ----
 $ export RUSTFLAGS="-Clink-args=-R$(pg_config --libdir)"
+$ export RUSTDOCFLAGS="$RUSTFLAGS"
 ----
 + Note that this might be wrong in some configurations or if you're using environment variables to control how the `pq-sys` crate finds libpq.  See https://github.com/oxidecomputer/omicron/issues/213[#213] for details.
 +
