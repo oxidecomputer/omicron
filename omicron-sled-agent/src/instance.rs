@@ -14,12 +14,12 @@ use futures::lock::Mutex;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::NetworkInterface;
-use omicron_common::api::internal::nexus::CrucibleAgentStartupInfo;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
+use propolis_client::api::DiskRequest as PropolisDiskRequest;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -203,9 +203,11 @@ struct InstanceInner {
     // NIC-related properties
     nic_id_allocator: IdAllocator,
     requested_nics: Vec<NetworkInterface>,
-    requested_disks: Vec<CrucibleAgentStartupInfo>,
     allocated_nics: Vec<Vnic>,
     vlan: Option<VlanID>,
+
+    // Disk-related properties
+    requested_disks: Vec<PropolisDiskRequest>,
 
     // Internal State management
     state: InstanceStates,
@@ -263,32 +265,22 @@ impl InstanceInner {
             })
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>, guest_disks: &Vec<CrucibleAgentStartupInfo>)
+    async fn ensure(&self, guest_nics: &Vec<Vnic>, guest_disks: &Vec<PropolisDiskRequest>)
         -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = guest_nics
             .iter()
             .enumerate()
-            .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
-                name: guest_nics[i].name.clone(),
+            .map(|(i, vnic)| propolis_client::api::NetworkInterfaceRequest {
+                name: vnic.name.clone(),
                 slot: propolis_client::api::Slot(i as u8),
-            })
-            .collect();
-        let disks = guest_disks
-            .clone()
-            .into_iter()
-            .map(|disk| propolis_client::api::DiskRequest {
-                name: "some_disk".to_string(), // XXX
-                address: disk.address,
-                slot: propolis_client::api::Slot(disk.slot),
-                read_only: false, // XXX
             })
             .collect();
 
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            disks,
+            disks: guest_disks.clone(),
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -402,9 +394,9 @@ impl Instance {
             },
             nic_id_allocator,
             requested_nics: initial.nics,
-            requested_disks: initial.disks,
             allocated_nics: vec![],
             vlan,
+            requested_disks: initial.disks,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
