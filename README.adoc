@@ -72,6 +72,17 @@ After doing this, you should have the `pg_config` command on your PATH.  For exa
 
 See the note about setting RUSTFLAGS at build time below.
 --
+. pkg-config, a tool for querying installed libraries
++
+--
+
+* Helios: `pkg install pkg-config`
+* Linux: `sudo apt-get install pkg-config`
+* Mac: `brew install pkg-config`
+
+After doing this, you should have the `pkg_config` command on your PATH.  For
+example, on Helios, you'd want `/usr/ooce/bin` on your PATH.
+--
 . CockroachDB v20.2.5.
 +
 The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
@@ -95,7 +106,7 @@ pkg install brand/sparse
 pkg install pkg:/package/pkg
 pkg update
 ----
- 
+
 To **run Omicron** you need to run four programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
@@ -399,7 +410,7 @@ date: Wed, 27 May 2020 00:46:04 GMT
 }
 
 
-$ ./tools/oxapi_demo instance_list_disks myproject myinstance 
+$ ./tools/oxapi_demo instance_list_disks myproject myinstance
 ++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks
 ++ json -ga
 HTTP/1.1 200 OK
@@ -419,21 +430,11 @@ date: Wed, 27 May 2020 00:46:11 GMT
 }
 ----
 
-== Running on Helios
+== Deploying Omicron
 
-**Prerequisites:**
 
-Have a machine already running Helios. An easy way to
+Prerequisite: Have a machine already running Helios. An easy way to
 do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
-
-Install pkg-config
-
-[source,text]
-----
-$ pkg install pkg-config
-----
-
-**Build and Run**
 
 The control plane repository contains a packaging tool which bundles binaries
 and SMF manifests. After building the expected binaries, they can be packaged
