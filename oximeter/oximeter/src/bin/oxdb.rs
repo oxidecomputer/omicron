@@ -2,7 +2,7 @@
 // Copyright 2021 Oxide Computer Company
 
 use anyhow::{bail, Context};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use oximeter::{
     db::{query, Client},
     types::{Cumulative, Sample},
@@ -34,13 +34,8 @@ impl VirtualMachine {
 #[derive(Debug, Clone, Copy, Metric)]
 struct CpuBusy {
     pub cpu_id: i64,
-    pub value: Cumulative<f64>,
-}
-
-impl CpuBusy {
-    pub fn new(id: i64) -> Self {
-        Self { cpu_id: id, value: Cumulative::new(0.0) }
-    }
+    #[datum]
+    pub busy: Cumulative<f64>,
 }
 
 fn level_from_str(s: &str) -> Result<Level, anyhow::Error> {
@@ -49,13 +44,6 @@ fn level_from_str(s: &str) -> Result<Level, anyhow::Error> {
     } else {
         bail!(format!("Invalid log level: {}", s))
     }
-}
-
-fn duration_from_str(s: &str) -> Result<Duration, anyhow::Error> {
-    let duration = std::time::Duration::from_secs_f64(
-        s.parse().context("Invalid interval")?,
-    );
-    Duration::from_std(duration).context("Duration out of range")
 }
 
 /// Tools for developing with the Oximeter timeseries database.
@@ -90,10 +78,6 @@ struct PopulateArgs {
     /// Number of vCPUs to simulate, per instance.
     #[structopt(short = "c", long, default_value = "4")]
     n_cpus: usize,
-
-    /// The interval between simulated samples from each metric, in seconds
-    #[structopt(short = "I", long, default_value = "1.0", parse(try_from_str = duration_from_str))]
-    interval: Duration,
 
     /// If true, generate data and report logs, but do not actually insert anything into the
     /// database.
@@ -158,11 +142,11 @@ fn describe_data() {
         );
     }
 
-    let cpu = CpuBusy::new(0);
+    let cpu = CpuBusy { cpu_id: 0, busy: 0.0f64.into() };
     print!(
         "\nMetric:\n\n Name: {metric_name:?}\n Type: {ty:?}\n",
         metric_name = cpu.name(),
-        ty = cpu.measurement_type()
+        ty = cpu.datum_type()
     );
     for (i, (field_name, field_type)) in
         cpu.field_names().into_iter().zip(cpu.field_types()).enumerate()
@@ -227,18 +211,13 @@ async fn populate(
                 "project_id" => %vm.project_id,
                 "instance_id" => %vm.instance_id
             );
-            let start_time = Utc::now();
             for cpu in 0..args.n_cpus {
                 for sample in 0..args.n_samples {
                     let cpu_busy = CpuBusy {
                         cpu_id: cpu as _,
-                        value: Cumulative::new(sample as _),
+                        busy: Cumulative::from(sample as f64),
                     };
-                    let sample = Sample::new(
-                        &vm,
-                        &cpu_busy,
-                        Some(start_time + args.interval * sample as i32),
-                    );
+                    let sample = Sample::new(&vm, &cpu_busy);
                     samples.push(sample);
                     if samples.len() == chunk_size {
                         insert_samples(&client, &samples, &log, args.dry_run)

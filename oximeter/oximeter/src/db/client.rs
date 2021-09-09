@@ -223,23 +223,27 @@ impl Client {
     ) -> Result<Vec<model::Timeseries>, Error> {
         let schema =
             self.schema_for_timeseries(&filter.timeseries_name).await?.unwrap();
-        let query = filter.as_select_query(schema.measurement_type);
+        let query = filter.as_select_query(schema.datum_type);
         let body = self.execute_with_body(query).await?;
         let mut timeseries_by_key = BTreeMap::new();
         for line in body.lines() {
-            let (key, sample) =
-                model::parse_timeseries_sample(line, schema.measurement_type)?;
-            timeseries_by_key.entry(key).or_insert_with(Vec::new).push(sample);
+            let (key, measurement) =
+                model::parse_measurement_from_row(line, schema.datum_type);
+            timeseries_by_key
+                .entry(key)
+                .or_insert_with(Vec::new)
+                .push(measurement);
         }
         timeseries_by_key
             .into_iter()
-            .map(|(timeseries_key, samples)| {
+            .map(|(timeseries_key, measurements)| {
                 reconstitute_from_schema(&timeseries_key, &schema).map(
                     |(target, metric)| model::Timeseries {
-                        timeseries_key,
+                        timeseries_name: filter.timeseries_name.clone(),
+                        timeseries_key: timeseries_key.to_string(),
                         target,
                         metric,
-                        samples,
+                        measurements,
                     },
                 )
             })
@@ -442,7 +446,7 @@ fn reconstitute_from_schema(
     let metric = model::Metric {
         name: metric_name.to_string(),
         fields: metric_fields.into_iter().map(|(_, field)| field).collect(),
-        measurement_type: schema.measurement_type,
+        datum_type: schema.datum_type,
     };
     assert_eq!(
         target.fields.len() + metric.fields.len(),
@@ -455,9 +459,10 @@ fn reconstitute_from_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{query, test_util};
-    use crate::types::{FieldType, MeasurementType};
-    use chrono::{Duration, Utc};
+    use crate::db::query;
+    use crate::test_util;
+    use crate::types::{DatumType, FieldType};
+    use chrono::Utc;
     use omicron_common::dev::clickhouse::ClickHouseInstance;
     use slog::o;
 
@@ -507,7 +512,7 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    // This is a target with the same name as that in `db/mod.rs` used for other tests, but with a
+    // This is a target with the same name as that in `lib.rs` used for other tests, but with a
     // different set of fields. This is intentionally used to test schema mismatches.
     mod name_mismatch {
         #[derive(crate::Target)]
@@ -549,9 +554,9 @@ mod tests {
         let metric = test_util::TestMetric {
             id: uuid::Uuid::new_v4(),
             good: true,
-            value: 1,
+            datum: 1,
         };
-        let sample = Sample::new(&bad_name, &metric, None);
+        let sample = Sample::new(&bad_name, &metric);
         let result = client.verify_sample_schema(&sample);
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
@@ -654,7 +659,7 @@ mod tests {
                     source: model::FieldSource::Metric,
                 },
             ],
-            measurement_type: MeasurementType::F64,
+            datum_type: DatumType::F64,
             created: Utc::now(),
         };
         (schema, "0:1:2:3".to_string())
@@ -723,14 +728,12 @@ mod tests {
         let client = Client::new(address, log).await.unwrap();
 
         // Create sample data
-        let interval = Duration::seconds(1);
         let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);
         let samples = test_util::generate_test_samples(
             n_projects,
             n_instances,
             n_cpus,
             n_samples,
-            interval,
         );
         assert_eq!(
             samples.len(),
@@ -770,20 +773,19 @@ mod tests {
         assert_eq!(results.len(), 1, "Expected to find a single timeseries");
         let timeseries = &results[0];
         assert_eq!(
-            timeseries.samples.len(),
+            timeseries.measurements.len(),
             2,
             "Expected 2 samples per timeseries"
         );
         assert_eq!(timeseries.timeseries_key, sample.timeseries_key);
-        assert!(timeseries.samples.iter().zip(samples.iter()).all(
-            |(first, second)| {
-                // Timestamps should be within 1us difference and measurements equal
-                let diff = first.timestamp - second.timestamp;
-                diff >= Duration::nanoseconds(-999)
-                    && diff <= Duration::nanoseconds(999)
-                    && (first.measurement == second.measurement)
-            }
-        ));
+
+        // Compare measurements themselves
+        let expected_measurements =
+            samples.iter().map(|sample| &sample.measurement);
+        let actual_measurements = timeseries.measurements.iter();
+        assert!(actual_measurements
+            .zip(expected_measurements)
+            .all(|(first, second)| first == second));
         assert_eq!(timeseries.target.name, "virtual_machine");
         assert_eq!(&timeseries.target.fields, sample.target_fields());
         assert_eq!(timeseries.metric.name, "cpu_busy");

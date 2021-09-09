@@ -1,11 +1,11 @@
 //! Traits used to describe metric data and its sources.
 // Copyright 2021 Oxide Computer Company
 
-use bytes::Bytes;
-
 use crate::histogram::Histogram;
 use crate::types::{Cumulative, Measurement, Sample};
-use crate::{Error, Field, FieldType, FieldValue, MeasurementType};
+use crate::{DatumType, Error, Field, FieldType, FieldValue};
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -85,51 +85,54 @@ pub trait Target {
 /// The `Metric` trait identifies a measured feature of a target.
 ///
 /// The trait is similar to the `Target` trait, providing metadata about the metric's name and
-/// fields. In addition, a `Metric` has an associated measurement type, which must be one of the
+/// fields. In addition, a `Metric` has an associated datum type, which must be one of the
 /// supported [`DataPoint`] types. This provides type safety, ensuring that the produced
 /// measurements are of the correct type for a metric.
 ///
-/// Most users will derive the metric trait. This trait may be derived for structs with named
-/// fields, which must be one of the support data types. Additionally, structs _must_ have one
-/// field named `value`, which is one of the supported measurement types. The `value` field is used
-/// to store the current measured value of the metric itself.
+/// Users should derive the [`oximeter::Metric`] trait on a struct. The struct's fields are the
+/// fields (names and types) of the metric itself. This generates the trait implementation from the
+/// type's declaration.
+///
+/// One field of the struct is special, describing the actual measured data that the metric
+/// represents. This should be a field named `datum`, or another field (with any name you choose)
+/// annotated with the `#[datum]` attribute. This field represents the underlying data for the
+/// metric, and must be one of the supported metric types: `i64`, `f64`, `bool`, `String`, or
+/// `Bytes` for gauges, and `Cumulative<T>` or `Histogram<T>` for cumulative metrics.
+///
+/// The value of the metric's data is _measured_ by using the `measure()` method, which returns a
+/// [`Measurement`]. This describes a timestamped data point for the metric.
 ///
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::Metric;
+/// use oximeter::{Metric, types::SampleTime};
 ///
 /// // A gauge with a floating-point value.
 /// #[derive(Metric)]
 /// struct MyMetric {
 ///     name: String,
-///     value: f64
+///     datum: f64,
 /// }
 ///
-/// let met = MyMetric{ name: "name".into(), value: 0.0 };
-/// assert_eq!(met.measurement_type(), oximeter::MeasurementType::F64);
-/// assert_eq!(met.measure(), oximeter::Measurement::F64(0.0));
+/// let met = MyMetric { name: "name".into(), datum: 0.0 };
+/// assert_eq!(met.datum_type(), oximeter::DatumType::F64);
+/// let measurement = met.measure();
+/// assert!(measurement.sample_time().start_time().is_none());
+/// assert_eq!(measurement.datum(), &oximeter::Datum::F64(0.0));
 /// ```
 ///
-/// A compiler error will be generated if this trait is derived on a struct without a field named
-/// `value`, or if that field has an unsupported type:
+/// A compiler error will be generated if the attribute is applied to a struct whose fields are of
+/// an unsupported type.
 ///
 /// ```compile_fail
-/// #[derive(oximeter::Metric)]
-/// pub struct NoValueField {
-///     name: String,
-/// }
-/// ```
-///
-/// ```compile_fail
-/// #[derive(oximeter::Metric)]
+/// #[derive(Metric)]
 /// pub struct BadType {
-///     value: f32,
+///     field: f32,
 /// }
 /// ```
 pub trait Metric {
-    /// The type of measurement produced by this metric.
-    type Measurement: DataPoint;
+    /// The type of datum produced by this metric.
+    type Datum: DataPoint;
 
     /// Return the name of the metric, which is the snake_case form of the struct's name.
     fn name(&self) -> &'static str;
@@ -159,13 +162,29 @@ pub trait Metric {
     fn key(&self) -> String;
 
     /// Return the data type of a measurement for this this metric.
-    fn measurement_type(&self) -> MeasurementType;
+    fn datum_type(&self) -> DatumType;
 
     /// Return the current value of the underlying metric itself.
-    fn value(&self) -> &Self::Measurement;
+    fn datum(&self) -> &Self::Datum;
+
+    /// Return a mutable reference to the underlying metric itself.
+    fn datum_mut(&mut self) -> &mut Self::Datum;
 
     /// Sample the underlying metric, returning a measurement from it.
     fn measure(&self) -> Measurement;
+
+    /// Return true if the metric is cumulative, else false.
+    fn is_cumulative(&self) -> bool {
+        self.datum_type().is_cumulative()
+    }
+
+    /// Return the start time over which this metric's data is valid, or None.
+    ///
+    /// Gauges, which measure an instantaneous point in time, always represent the sampled resource
+    /// at a single, specific timestamp. Cumulative metrics reflect accumulated data about a
+    /// resource over a window of time. This method returns `None` for gauge metrics, and the
+    /// start time of the sampled data for cumulative metrics.
+    fn start_time(&self) -> Option<DateTime<Utc>>;
 }
 
 /// The `DataPoint` trait identifies types that may be used as measurements or samples for a
@@ -173,17 +192,41 @@ pub trait Metric {
 ///
 /// Individual samples are produced by client code, and associated with a target and metric by
 /// constructing a [`Sample`](crate::types::Sample).
-pub trait DataPoint {}
+pub trait DataPoint: Clone {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+}
 
 impl DataPoint for bool {}
 impl DataPoint for i64 {}
 impl DataPoint for f64 {}
 impl DataPoint for String {}
 impl DataPoint for Bytes {}
-impl DataPoint for Cumulative<i64> {}
-impl DataPoint for Cumulative<f64> {}
-impl DataPoint for Histogram<i64> {}
-impl DataPoint for Histogram<f64> {}
+
+impl DataPoint for Cumulative<i64> {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        Some(Cumulative::start_time(&self))
+    }
+}
+
+impl DataPoint for Cumulative<f64> {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        Some(Cumulative::start_time(&self))
+    }
+}
+
+impl DataPoint for Histogram<i64> {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        Some(Histogram::start_time(&self))
+    }
+}
+
+impl DataPoint for Histogram<f64> {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        Some(Histogram::start_time(&self))
+    }
+}
 
 /// A trait for generating samples from a target and metric.
 ///
@@ -200,20 +243,24 @@ impl DataPoint for Histogram<f64> {}
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::{Error, Metric, Producer, Target};
+/// use oximeter::{Datum, Error, Metric, Producer, Target};
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
+/// // The `Server` target identifies some HTTP service being monitored.
 /// #[derive(Clone, Target)]
 /// pub struct Server {
 ///     pub name: String,
 /// }
 ///
+/// // The `RequestCount` metric describes the cumulative count of requests the server has
+/// // organized by their routes, the HTTP method, and the response code.
 /// #[derive(Clone, Metric)]
 /// pub struct RequestCount {
-///     pub route: String,
-///     pub method: String,
-///     pub response_code: i64,
-///     pub value: Cumulative<i64>,
+///     route: String,
+///     method: String,
+///     response_code: i64,
+///     #[datum]
+///     count: Cumulative<i64>
 /// }
 ///
 /// fn route_handler(_route: &str, _method: &str) -> i64 {
@@ -221,6 +268,8 @@ impl DataPoint for Histogram<f64> {}
 ///     200
 /// }
 ///
+/// // The `RequestCounter` type implements the `Producer` trait, to generate samples of the
+/// // target/metric being monitored.
 /// pub struct RequestCounter {
 ///     target: Server,
 ///     metric: RequestCount,
@@ -235,34 +284,35 @@ impl DataPoint for Histogram<f64> {}
 ///     }
 ///
 ///     pub fn bump(&mut self) {
-///         self.metric.value.increment();
+///         self.metric.datum_mut().increment();
 ///     }
 /// }
 ///
 /// impl Producer for RequestCounter {
 ///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error> {
-///         let sample = Sample::new(
-///             &self.target,
-///             &self.metric,
-///             None, // Use current timestamp
-///         );
+///         let sample = Sample::new(&self.target, &self.metric);
 ///         Ok(Box::new(vec![sample].into_iter()))
 ///     }
 /// }
 ///
 /// fn main() {
 ///     let server = Server { name: "Nexus".to_string() };
+///
 ///     let request_count = RequestCount {
 ///         route: "/".to_string(),
 ///         method: "HEAD".to_string(),
 ///         response_code: 200,
-///         value: Cumulative::new(0),
+///         count: Cumulative::new(0),
 ///     };
 ///     let mut producer = RequestCounter::new(&server, &request_count);
 ///
 ///     // No requests yet, there should be zero samples
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(0)));
+///     let datum = sample.measurement.datum();
+///     match datum {
+///         Datum::CumulativeI64(ref d) => assert_eq!(d.value(), 0),
+///         _ => panic!("Expected a CumulativeI64 datum"),
+///     }
 ///
 ///     // await some request..
 ///     let response_code = route_handler("/", "GET");
@@ -272,7 +322,11 @@ impl DataPoint for Histogram<f64> {}
 ///
 ///     // The incremented counter is reflected in the new sample.
 ///     let sample = producer.produce().unwrap().next().unwrap();
-///     assert_eq!(sample.measurement, Measurement::CumulativeI64(Cumulative::new(1)));
+///     let datum = sample.measurement.datum();
+///     match datum {
+///         Datum::CumulativeI64(ref d) => assert_eq!(d.value(), 1),
+///         _ => panic!("Expected a CumulativeI64 datum"),
+///     }
 /// }
 /// ```
 pub trait Producer {
@@ -284,8 +338,8 @@ pub trait Producer {
 mod tests {
     use crate::types;
     use crate::{
-        Error, FieldType, FieldValue, Measurement, MeasurementType, Metric,
-        Producer, Target,
+        Datum, DatumType, Error, FieldType, FieldValue, Metric, Producer,
+        Target,
     };
     use std::boxed::Box;
 
@@ -297,9 +351,9 @@ mod tests {
 
     #[derive(Clone, Metric)]
     struct Met {
-        pub good: bool,
-        pub id: i64,
-        pub value: i64,
+        good: bool,
+        id: i64,
+        datum: i64,
     }
 
     struct Prod {
@@ -312,7 +366,7 @@ mod tests {
             &mut self,
         ) -> Result<Box<dyn Iterator<Item = types::Sample>>, Error> {
             Ok(Box::new(
-                vec![types::Sample::new(&self.target, &self.metric, None)]
+                vec![types::Sample::new(&self.target, &self.metric)]
                     .into_iter(),
             ))
         }
@@ -334,8 +388,7 @@ mod tests {
 
     #[test]
     fn test_metric_trait() {
-        let m = Met { good: false, id: 2, value: 0 };
-
+        let m = Met { good: false, id: 2, datum: 0 };
         assert_eq!(m.name(), "met");
         assert_eq!(m.key(), "false:2");
         assert_eq!(m.field_names(), &["good", "id"]);
@@ -344,13 +397,14 @@ mod tests {
             m.field_values(),
             &[FieldValue::Bool(false), FieldValue::I64(2)]
         );
-        assert_eq!(m.measurement_type(), MeasurementType::I64);
+        assert_eq!(m.datum_type(), DatumType::I64);
+        assert!(m.start_time().is_none());
     }
 
     #[test]
     fn test_producer_trait() {
         let t = Targ { good: false, id: 2 };
-        let m = Met { good: false, id: 2, value: 0 };
+        let m = Met { good: false, id: 2, datum: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
         assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
@@ -358,9 +412,9 @@ mod tests {
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
-        assert_eq!(sample.measurement, Measurement::I64(0));
-        p.metric.value += 10;
+        assert_eq!(sample.measurement.datum(), &Datum::I64(0));
+        p.metric.datum += 10;
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.measurement, Measurement::I64(10));
+        assert_eq!(sample.measurement.datum(), &Datum::I64(10));
     }
 }

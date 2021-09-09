@@ -4,8 +4,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value UInt8
+    timestamp DateTime64(9, 'UTC'),
+    datum UInt8
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value Int64
+    timestamp DateTime64(9, 'UTC'),
+    datum Int64
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value Float64
+    timestamp DateTime64(9, 'UTC'),
+    datum Float64
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value String
+    timestamp DateTime64(9, 'UTC'),
+    datum String
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value Array(UInt8)
+    timestamp DateTime64(9, 'UTC'),
+    datum Array(UInt8)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
@@ -54,43 +54,47 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value Int64
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    datum Int64
 )
 ENGINE = MergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
-    value Float64
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    datum Float64
 )
 ENGINE = MergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
     bins Array(Int64),
     counts Array(UInt64)
 )
 ENGINE = MergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
 (
     timeseries_name String,
     timeseries_key String,
-    timestamp DateTime64(6, 'UTC'),
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
     bins Array(Float64),
     counts Array(UInt64)
 )
 ENGINE = MergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 (
@@ -159,7 +163,7 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
             'Metric' = 2
         )
     ),
-    measurement_type Enum(
+    datum_type Enum(
         'Bool' = 1,
         'I64' = 2,
         'F64' = 3,
@@ -170,7 +174,7 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
         'HistogramI64' = 8,
         'HistogramF64' = 9
     ),
-    created DateTime64(6, 'UTC')
+    created DateTime64(9, 'UTC')
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, fields.name);
