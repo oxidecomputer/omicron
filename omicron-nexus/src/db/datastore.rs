@@ -902,4 +902,25 @@ impl DataStore {
                 )
             })
     }
+    pub async fn vpc_subnet_fetch_by_name(
+        &self,
+        vpc_id: &Uuid,
+        subnet_name: &Name,
+    ) -> LookupResult<db::model::VpcSubnet> {
+        use db::diesel_schema::vpcsubnet::dsl;
+
+        dsl::vpcsubnet
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::name.eq(subnet_name.clone()))
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::ByName(subnet_name.as_str().to_owned()),
+                )
+            })
+    }
 }

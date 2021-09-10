@@ -1108,6 +1108,21 @@ impl Nexus {
         Ok(subnets)
     }
 
+    pub async fn vpc_lookup_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+    ) -> LookupResult<VpcSubnet> {
+        // TODO: join projects, vpcs, and subnets and do this in one query
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        Ok(self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.identity.id, subnet_name)
+            .await?
+            .into())
+    }
+
     /*
      * Racks.  We simulate just one for now.
      */

@@ -92,6 +92,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_vpcs_delete_vpc)?;
 
         api.register(vpc_subnets_get)?;
+        api.register(vpc_subnets_get_subnet)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -812,6 +813,40 @@ async fn vpc_subnets_get(
         )
         .await?;
     Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+}
+
+/**
+ * Path parameters for VPC Subnet requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VpcSubnetPathParam {
+    project_name: Name,
+    vpc_name: Name,
+    subnet_name: Name,
+}
+
+/**
+ * List subnets in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_get_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_lookup_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseOk(subnet))
 }
 
 /*

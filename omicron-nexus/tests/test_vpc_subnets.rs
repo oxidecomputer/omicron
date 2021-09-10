@@ -51,13 +51,13 @@ async fn test_vpcs() {
     let subnet_name = "subnet1";
     let subnet_url = format!("{}/{}", subnets_url, subnet_name);
 
-    /*
-
     // fetching a particular subnet should 404
     let error = client
         .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpcsubnet with name \"subnet1\"");
+    assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
+
+    /*
 
     /* Create a VPC Subnet. */
     let new_subnet = VpcSubnetCreateParams {
