@@ -57,8 +57,6 @@ async fn test_vpcs() {
         .await;
     assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
 
-    /*
-
     /* Create a VPC Subnet. */
     let new_subnet = VpcSubnetCreateParams {
         identity: IdentityMetadataCreateParams {
@@ -69,7 +67,7 @@ async fn test_vpcs() {
         ipv6_block: None,
     };
     let subnet: VpcSubnet =
-        objects_post(&client, &subnets_url, new_subnet.clone()).await;
+        objects_post(&client, &subnets_url, new_subnet).await;
     assert_eq!(subnet.identity.name, subnet_name);
     assert_eq!(subnet.identity.description, "it's below the net");
     assert_eq!(subnet.vpc_id, vpc.identity.id);
@@ -85,7 +83,6 @@ async fn test_vpcs() {
         objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 1);
     subnets_eq(&subnets[0], &subnet);
-    */
 
     // second subnet 404s
     // create second subnet

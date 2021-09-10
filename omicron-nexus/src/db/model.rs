@@ -845,6 +845,28 @@ pub struct VpcSubnet {
 }
 
 impl VpcSubnet {
+    pub fn new(
+        subnet_id: Uuid,
+        vpc_id: Uuid,
+        params: external::VpcSubnetCreateParams,
+    ) -> Self {
+        let identity = IdentityMetadata::new(subnet_id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
+            vpc_id,
+
+            // TODO: fix Nones
+            ipv4_block: None,
+            ipv6_block: None,
+        }
+    }
+
     pub fn identity(&self) -> IdentityMetadata {
         IdentityMetadata {
             id: self.id,

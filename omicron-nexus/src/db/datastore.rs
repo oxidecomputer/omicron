@@ -804,7 +804,7 @@ impl DataStore {
 
         let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
         let name = vpc.name.clone();
-        let vpc: db::model::Vpc = diesel::insert_into(dsl::vpc)
+        let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -922,5 +922,32 @@ impl DataStore {
                     LookupType::ByName(subnet_name.as_str().to_owned()),
                 )
             })
+    }
+
+    pub async fn vpc_create_subnet(
+        &self,
+        subnet_id: &Uuid,
+        vpc_id: &Uuid,
+        params: &api::external::VpcSubnetCreateParams,
+    ) -> CreateResult<db::model::VpcSubnet> {
+        use db::diesel_schema::vpcsubnet::dsl;
+
+        let subnet =
+            db::model::VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
+        let name = subnet.name.clone();
+        let subnet = diesel::insert_into(dsl::vpcsubnet)
+            .values(subnet)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::VpcSubnet,
+                    name.as_str(),
+                )
+            })?;
+        Ok(subnet)
     }
 }

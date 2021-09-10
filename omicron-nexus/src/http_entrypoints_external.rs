@@ -47,6 +47,7 @@ use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcSubnet;
+use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -93,6 +94,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(vpc_subnets_get)?;
         api.register(vpc_subnets_get_subnet)?;
+        api.register(vpc_subnets_post)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -847,6 +849,31 @@ async fn vpc_subnets_get_subnet(
         )
         .await?;
     Ok(HttpResponseOk(subnet))
+}
+
+/**
+ * Create a subnet in a VPC.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<VpcSubnetCreateParams>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_create_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &create_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseCreated(subnet))
 }
 
 /*
