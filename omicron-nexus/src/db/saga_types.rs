@@ -10,7 +10,7 @@
  * conversions.
  */
 
-use super::diesel_schema::{saga, saganodeevent};
+use super::schema::{saga, saganodeevent};
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
