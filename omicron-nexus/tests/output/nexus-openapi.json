@@ -1142,6 +1142,166 @@
         }
       }
     },
+    "/projects/{project_name}/vpcs/{vpc_name}/subnets": {
+      "get": {
+        "description": "List subnets in a VPC.",
+        "operationId": "vpc_subnets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnetResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "description": "Create a subnet in a VPC.",
+        "operationId": "vpc_subnets_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcSubnetCreateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnet"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
+      "get": {
+        "description": "List subnets in a VPC.",
+        "operationId": "vpc_subnets_get_subnet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "subnet_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnet"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sagas": {
       "get": {
         "description": "List all sagas (for debugging)",
@@ -2055,12 +2215,6 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
-          },
-          "vpcSubnets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcSubnet"
-            }
           }
         },
         "required": [
@@ -2070,8 +2224,7 @@
           "name",
           "projectId",
           "timeCreated",
-          "timeModified",
-          "vpcSubnets"
+          "timeModified"
         ]
       },
       "VpcCreateParams": {
@@ -2136,6 +2289,48 @@
         "required": [
           "identity",
           "vpc_id"
+        ]
+      },
+      "VpcSubnetCreateParams": {
+        "description": "Create-time parameters for a [`VpcSubnet`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ipv4Block": {
+            "$ref": "#/components/schemas/Ipv4Net"
+          },
+          "ipv6Block": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "VpcSubnetResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcSubnet"
+            }
+          },
+          "next_page": {
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "VpcUpdateParams": {
