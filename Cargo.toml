@@ -39,4 +39,4 @@ panic = "abort"
 #
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
-rev = "74cbd335a85840f7530bec231902d06e2c3f4760"
+branch = "issue-36-with-metadata"

@@ -1660,7 +1660,7 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "pq-sys"
 version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/pq-sys?rev=74cbd335a85840f7530bec231902d06e2c3f4760#74cbd335a85840f7530bec231902d06e2c3f4760"
+source = "git+https://github.com/oxidecomputer/pq-sys?branch=issue-36-with-metadata#303f5c27c325853956389e3a7876b07c5a241bc0"
 dependencies = [
  "vcpkg",
 ]
