@@ -881,4 +881,25 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    pub async fn vpc_list_subnets(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::VpcSubnet> {
+        use db::diesel_schema::vpcsubnet::dsl;
+
+        paginated(dsl::vpcsubnet, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .load_async::<db::model::VpcSubnet>(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
 }

@@ -534,6 +534,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    VpcSubnet,
     Oximeter,
 }
 
@@ -551,6 +552,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::Oximeter => "oximeter",
             }
         )
@@ -1178,9 +1180,6 @@ pub struct Vpc {
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
-
-    // TODO-correctness does the model include this? do we always return these?
-    pub vpc_subnets: Vec<VpcSubnet>,
 }
 
 /**
@@ -1334,6 +1333,18 @@ pub struct VpcSubnet {
     pub ipv4_block: Option<Ipv4Net>,
 
     /** The IPv6 subnet CIDR block. */
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/**
+ * Create-time parameters for a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }
 

@@ -33,6 +33,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -1088,6 +1089,23 @@ impl Nexus {
     ) -> DeleteResult {
         let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
         self.db_datastore.project_delete_vpc(&vpc.identity.id).await
+    }
+
+    pub async fn vpc_list_subnets(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcSubnet> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let subnets = self
+            .db_datastore
+            .vpc_list_subnets(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|subnet| subnet.into())
+            .collect::<Vec<VpcSubnet>>();
+        Ok(subnets)
     }
 
     /*

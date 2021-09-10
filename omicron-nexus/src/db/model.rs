@@ -805,8 +805,6 @@ impl Into<external::Vpc> for Vpc {
             identity: self.identity().into(),
             project_id: self.project_id,
             dns_name: self.dns_name,
-            // VPC subnets are accessed through a separate row lookup.
-            vpc_subnets: vec![],
         }
     }
 }
@@ -855,6 +853,18 @@ impl VpcSubnet {
             time_created: self.time_created,
             time_modified: self.time_modified,
             time_deleted: self.time_deleted,
+        }
+    }
+}
+
+impl Into<external::VpcSubnet> for VpcSubnet {
+    fn into(self) -> external::VpcSubnet {
+        external::VpcSubnet {
+            identity: self.identity().into(),
+            vpc_id: self.vpc_id,
+            // TODO: uh, convert IpNetwork into Ipv4Net/Ipv6Net?
+            ipv4_block: None,
+            ipv6_block: None,
         }
     }
 }

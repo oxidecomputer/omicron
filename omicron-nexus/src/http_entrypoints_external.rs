@@ -46,6 +46,7 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcUpdateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -89,6 +90,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_vpcs_get_vpc)?;
         api.register(project_vpcs_put_vpc)?;
         api.register(project_vpcs_delete_vpc)?;
+
+        api.register(vpc_subnets_get)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -783,6 +786,32 @@ async fn project_vpcs_delete_vpc(
     let vpc_name = &path.vpc_name;
     nexus.project_delete_vpc(&project_name, &vpc_name).await?;
     Ok(HttpResponseDeleted())
+}
+
+/**
+ * List subnets in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let vpcs = nexus
+        .vpc_list_subnets(
+            &path.project_name,
+            &path.vpc_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
 }
 
 /*
