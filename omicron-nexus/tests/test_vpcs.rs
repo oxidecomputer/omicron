@@ -3,8 +3,6 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
@@ -17,6 +15,7 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
+use common::resource_helpers::create_project;
 use common::test_setup;
 
 extern crate slog;
@@ -161,21 +160,4 @@ async fn vpc_put(
 fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
-}
-
-async fn create_project(
-    client: &ClientTestContext,
-    project_name: &str,
-) -> Project {
-    objects_post(
-        &client,
-        "/projects",
-        ProjectCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
-                description: "a pier".to_string(),
-            },
-        },
-    )
-    .await
 }
