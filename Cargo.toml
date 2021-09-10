@@ -32,3 +32,11 @@ panic = "abort"
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
+
+#
+# We maintain a fork of pq-sys to address upstream issues.  See README.md.oxide
+# in the branch for details.
+#
+[patch.crates-io.pq-sys]
+git = 'https://github.com/oxidecomputer/pq-sys'
+branch = "omicron"

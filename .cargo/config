@@ -6,3 +6,10 @@
 #
 [build]
 rustdocflags = "--document-private-items"
+
+#
+# Link libpq statically because there is no good way to specify RPATH for the
+# dynamic version.  See omicron#213 for details.
+#
+[env]
+PQ_LIB_STATIC = "yes"
