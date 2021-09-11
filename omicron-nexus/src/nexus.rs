@@ -1139,6 +1139,17 @@ impl Nexus {
         Ok(subnet.into())
     }
 
+    pub async fn vpc_delete_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+    ) -> DeleteResult {
+        let subnet =
+            self.vpc_lookup_subnet(project_name, vpc_name, subnet_name).await?;
+        self.db_datastore.vpc_delete_subnet(&subnet.identity.id).await
+    }
+
     /*
      * Racks.  We simulate just one for now.
      */

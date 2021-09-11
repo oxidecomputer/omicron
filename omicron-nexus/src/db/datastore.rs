@@ -950,4 +950,24 @@ impl DataStore {
             })?;
         Ok(subnet)
     }
+
+    pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
+        use db::diesel_schema::vpcsubnet::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::vpcsubnet)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*subnet_id))
+            .set(dsl::time_deleted.eq(now))
+            .get_result_async::<db::model::VpcSubnet>(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::ById(*subnet_id),
+                )
+            })?;
+        Ok(())
+    }
 }

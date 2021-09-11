@@ -95,6 +95,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_get)?;
         api.register(vpc_subnets_get_subnet)?;
         api.register(vpc_subnets_post)?;
+        api.register(vpc_subnets_delete_subnet)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -874,6 +875,30 @@ async fn vpc_subnets_post(
         )
         .await?;
     Ok(HttpResponseCreated(subnet))
+}
+
+/**
+ * Delete a subnet from a VPC.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_delete_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .vpc_delete_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseDeleted())
 }
 
 /*
