@@ -73,9 +73,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-10.15 ]
-        # See rust-toolchain.toml.  If you update this, you MUST update
-        # rust-toolchain.toml as well!
-        toolchain: [ nightly-2021-09-03 ]
+        # NOTE: Although we'd like to use stable, we cannot with a newer version
+        # of Propolis as a dependency (which only builds with nightly).
+        #        toolchain: [ nightly-2021-04-24, stable ]
+        toolchain: [ nightly-2021-04-24 ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
