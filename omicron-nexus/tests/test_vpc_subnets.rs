@@ -1,11 +1,13 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
+use omicron_common::api::external::VpcSubnetUpdateParams;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
@@ -117,6 +119,43 @@ async fn test_vpcs() {
     subnets_eq(&subnets[0], &subnet);
     subnets_eq(&subnets[1], &subnet2);
 
+    // update first subnet
+    let update_params = VpcSubnetUpdateParams {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(Name::try_from("new-name").unwrap()),
+            description: Some(String::from("another description")),
+        },
+        ipv4_block: None,
+        ipv6_block: None,
+    };
+    client
+        .make_request(
+            Method::PUT,
+            &subnet_url,
+            Some(update_params),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // fetching by old name 404s
+    let error = client
+        .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
+        .await;
+    assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
+
+    let subnet_url = format!("{}/{}", subnets_url, "new-name");
+
+    // fetching by new name works
+    let updated_subnet = object_get::<VpcSubnet>(client, &subnet_url).await;
+    assert_eq!(&updated_subnet.identity.description, "another description");
+
+    // fetching list should show updated one
+    let subnets =
+        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+    assert_eq!(subnets.len(), 2);
+    subnets_eq(&subnets[0], &updated_subnet);
+
     // delete first subnet
     client
         .make_request_no_body(
@@ -137,14 +176,15 @@ async fn test_vpcs() {
     let error = client
         .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
+    assert_eq!(error.message, "not found: vpc subnet with name \"new-name\"");
 
     // delete subnet should 404
     let error = client
         .make_request_error(Method::DELETE, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
+    assert_eq!(error.message, "not found: vpc subnet with name \"new-name\"");
 
+    // second subnet in vpc with same name is rejected
     // make second vpc and make a subnet with the same name in that vpc
 
     cptestctx.teardown().await;

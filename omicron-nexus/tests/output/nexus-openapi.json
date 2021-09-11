@@ -1257,7 +1257,7 @@
     },
     "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
       "get": {
-        "description": "List subnets in a VPC.",
+        "description": "Get subnet in a VPC.",
         "operationId": "vpc_subnets_get_subnet",
         "parameters": [
           {
@@ -1298,6 +1298,54 @@
                 }
               }
             }
+          }
+        }
+      },
+      "put": {
+        "description": "Update a VPC Subnet.",
+        "operationId": "vpc_subnets_put_subnet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "subnet_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcSubnetUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation"
           }
         }
       },
@@ -2370,6 +2418,24 @@
         "required": [
           "items"
         ]
+      },
+      "VpcSubnetUpdateParams": {
+        "description": "Updateable properties of a [`VpcSubnet`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ipv4Block": {
+            "$ref": "#/components/schemas/Ipv4Net"
+          },
+          "ipv6Block": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        }
       },
       "VpcUpdateParams": {
         "description": "Updateable properties of a [`Vpc`]",

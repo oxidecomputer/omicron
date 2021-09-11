@@ -970,4 +970,28 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    pub async fn vpc_update_subnet(
+        &self,
+        subnet_id: &Uuid,
+        params: &api::external::VpcSubnetUpdateParams,
+    ) -> Result<(), Error> {
+        use db::diesel_schema::vpcsubnet::dsl;
+        let updates: db::model::VpcSubnetUpdate = params.clone().into();
+
+        diesel::update(dsl::vpcsubnet)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*subnet_id))
+            .set(updates)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::ById(*subnet_id),
+                )
+            })?;
+        Ok(())
+    }
 }

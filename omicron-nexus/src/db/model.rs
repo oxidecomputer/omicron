@@ -891,6 +891,28 @@ impl Into<external::VpcSubnet> for VpcSubnet {
     }
 }
 
+#[derive(AsChangeset)]
+#[table_name = "vpcsubnet"]
+pub struct VpcSubnetUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub ipv4_block: Option<ipnetwork::IpNetwork>,
+    pub ipv6_block: Option<ipnetwork::IpNetwork>,
+}
+
+impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
+    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            ipv4_block: None,
+            ipv6_block: None,
+        }
+    }
+}
+
 #[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
 #[table_name = "networkinterface"]
 pub struct NetworkInterface {
