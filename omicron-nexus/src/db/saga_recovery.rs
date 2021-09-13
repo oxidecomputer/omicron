@@ -151,7 +151,9 @@ async fn list_unfinished_sagas(
     let mut sagas = vec![];
     loop {
         let mut some_sagas = paginated(dsl::saga, dsl::id, &pagparams)
-            .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
+            .filter(
+                dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()),
+            )
             .filter(dsl::current_sec.eq(*sec_id))
             .load_async(pool.pool())
             .await
