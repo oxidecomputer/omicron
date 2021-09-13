@@ -11,6 +11,15 @@ FROM rust:latest as cargo-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+#
+# postgresql-server-dev-13 is needed for libpgport.a and libpgcommon.a.  It puts
+# these into /usr/lib/postgresql/13/lib, which would not otherwise be found.
+#
+RUN apt-get update && apt-get install -y \
+    postgresql-server-dev-13
+ENV LIBRARY_PATH=/usr/lib/postgresql/13/lib
+
+
 WORKDIR /usr/src/omicron
 
 COPY . .
