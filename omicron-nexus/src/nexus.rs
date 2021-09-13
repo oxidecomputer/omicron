@@ -43,12 +43,12 @@ use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::bail_unless;
-use omicron_common::collection::collection_page;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use steno::SagaId;
 use steno::SagaResultOk;
@@ -192,11 +192,27 @@ impl Nexus {
      * TODO-robustness we should have a limit on how many sled agents there can
      * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
+    pub async fn upsert_sled(
+        &self,
+        id: Uuid,
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
+
+        // Insert the sled into the database.
+        let create_params = IdentityMetadataCreateParams {
+            name: Name::try_from("sled").unwrap(),
+            description: "Self-Identified Sled".to_string(),
+        };
+        let sled = db::model::Sled::new(id, address, create_params);
+        self.db_datastore.sled_create(sled).await?;
+
+        // Insert a connection to the Sled Agent.
+        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
+        let client = Arc::new(SledAgentClient::new(&id, address, log));
         let mut scs = self.sled_agents.lock().await;
-        info!(self.log, "registered sled agent";
-            "sled_uuid" => sa.id.to_string());
-        scs.insert(sa.id, sa);
+        scs.insert(client.id, client);
+        Ok(())
     }
 
     /**
@@ -1123,61 +1139,21 @@ impl Nexus {
     }
 
     /*
-     * Sleds.
-     * TODO-completeness: Eventually, we'll want sleds to be stored in the
-     * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an Sled for each SledAgentClient
-     * that we've got.
+     * Sleds
      */
+
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<db::model::Sled> {
-        let sled_agents = self.sled_agents.lock().await;
-        let sleds = collection_page(&sled_agents, pagparams)?
-            .filter(|maybe_object| ready(maybe_object.is_ok()))
-            .map(|sa| {
-                let sa = sa.unwrap();
-                Ok(db::model::Sled {
-                    identity: db::model::IdentityMetadata {
-                        /* TODO-correctness cons up real metadata here */
-                        id: sa.id,
-                        name: Name::try_from(format!("sled-{}", sa.id))
-                            .unwrap(),
-                        description: String::from(""),
-                        time_created: Utc::now(),
-                        time_modified: Utc::now(),
-                        time_deleted: None,
-                    },
-                    service_address: sa.service_address,
-                })
-            })
-            .collect::<Vec<Result<db::model::Sled, Error>>>()
-            .await;
-        Ok(futures::stream::iter(sleds).boxed())
+    ) -> ListResultVec<db::model::Sled> {
+        self.db_datastore.sled_list(pagparams).await
     }
 
     pub async fn sled_lookup(
         &self,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let nexuses = self.sled_agents.lock().await;
-        let sa = nexuses.get(sled_id).ok_or_else(|| {
-            Error::not_found_by_id(ResourceType::Sled, sled_id)
-        })?;
-
-        Ok(db::model::Sled {
-            identity: db::model::IdentityMetadata {
-                /* TODO-correctness cons up real metadata here */
-                id: sa.id,
-                name: Name::try_from(format!("sled-{}", sa.id)).unwrap(),
-                description: String::from(""),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-                time_deleted: None,
-            },
-            service_address: sa.service_address,
-        })
+        self.db_datastore.sled_fetch(*sled_id).await
     }
 
     /*

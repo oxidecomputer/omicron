@@ -2,7 +2,7 @@
 
 use super::diesel_schema::{
     disk, instance, metricproducer, networkinterface, oximeter,
-    oximeterassignment, project, vpc, vpcsubnet,
+    oximeterassignment, project, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use diesel::backend::{Backend, RawValue};
@@ -34,20 +34,62 @@ impl Into<external::Rack> for Rack {
     }
 }
 
-// NOTE: This object is not currently stored in the database.
-//
-// However, it likely will be in the future. At the moment,
-// Nexus simply reports all the live connections it knows about.
+/// Database representation of a Sled.
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[table_name = "sled"]
 pub struct Sled {
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
+    // IdentityMetadata
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
+    // ServiceAddress (Sled Agent).
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
+}
+
+impl Sled {
+    pub fn new(
+        id: Uuid,
+        addr: SocketAddr,
+        params: external::IdentityMetadataCreateParams,
+    ) -> Self {
+        let identity = IdentityMetadata::new(id, params);
+        Self {
+            id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+            ip: addr.ip().into(),
+            port: addr.port().into(),
+        }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
 }
 
 impl Into<external::Sled> for Sled {
     fn into(self) -> external::Sled {
         external::Sled {
-            identity: self.identity.into(),
-            service_address: self.service_address,
+            identity: external::IdentityMetadata {
+                id: self.id,
+                name: self.name,
+                description: self.description,
+                time_created: self.time_created,
+                time_modified: self.time_modified,
+            },
+            // TODO: avoid this unwrap
+            service_address: SocketAddr::new(
+                self.ip.ip(),
+                u16::try_from(self.port).unwrap(),
+            ),
         }
     }
 }

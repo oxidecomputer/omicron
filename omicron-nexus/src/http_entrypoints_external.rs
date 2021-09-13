@@ -854,10 +854,13 @@ async fn hardware_sleds_get(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
-    let sled_stream =
-        nexus.sleds_list(&data_page_params_for(&rqctx, &query)?).await?;
-    let view_list = to_list::<db::model::Sled, Sled>(sled_stream).await;
-    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+    let sleds = nexus
+        .sleds_list(&data_page_params_for(&rqctx, &query)?)
+        .await?
+        .into_iter()
+        .map(|s| s.into())
+        .collect();
+    Ok(HttpResponseOk(ScanById::results_page(&query, sleds)?))
 }
 
 /**

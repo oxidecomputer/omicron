@@ -15,7 +15,6 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
-use omicron_common::SledAgentClient;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -68,11 +67,7 @@ async fn cpapi_sled_agents_post(
     let path = path_params.into_inner();
     let si = sled_info.into_inner();
     let sled_id = &path.sled_id;
-    let client_log =
-        apictx.log.new(o!("SledAgent" => sled_id.clone().to_string()));
-    let client =
-        Arc::new(SledAgentClient::new(&sled_id, si.sa_address, client_log));
-    nexus.upsert_sled_agent(client).await;
+    nexus.upsert_sled(*sled_id, si.sa_address).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
