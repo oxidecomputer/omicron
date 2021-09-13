@@ -3,8 +3,6 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
@@ -16,7 +14,7 @@ use dropshot::test_util::objects_post;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::create_project;
+use common::resource_helpers::{create_project, create_vpc};
 use common::test_setup;
 
 extern crate slog;
@@ -29,18 +27,11 @@ async fn test_vpcs() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let vpcs_url = format!("/projects/{}/vpcs", project_name);
-    let _ = create_project(&client, &project_name).await;
+    let _ = create_project(&client, project_name).await;
 
     /* Create a VPC. */
     let vpc_name = "vpc1";
-    let new_vpc = VpcCreateParams {
-        identity: IdentityMetadataCreateParams {
-            name: Name::try_from(vpc_name).unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        dns_name: Name::try_from("abc").unwrap(),
-    };
-    let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
+    let vpc = create_vpc(&client, project_name, vpc_name).await;
 
     let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
     let subnets_url = format!("{}/subnets", vpc_url);
@@ -69,7 +60,7 @@ async fn test_vpcs() {
         ipv6_block: None,
     };
     let subnet: VpcSubnet =
-        objects_post(&client, &subnets_url, new_subnet).await;
+        objects_post(&client, &subnets_url, new_subnet.clone()).await;
     assert_eq!(subnet.identity.name, subnet_name);
     assert_eq!(subnet.identity.description, "it's below the net");
     assert_eq!(subnet.vpc_id, vpc.identity.id);
@@ -85,6 +76,17 @@ async fn test_vpcs() {
         objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 1);
     subnets_eq(&subnets[0], &subnet);
+
+    // creating another subnet in the same VPC with the same name fails
+    let error = client
+        .make_request_error_body(
+            Method::POST,
+            &subnets_url,
+            new_subnet.clone(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    assert_eq!(error.message, "already exists: vpc subnet \"subnet1\"");
 
     let subnet2_name = "subnet2";
     let subnet2_url = format!("{}/{}", subnets_url, subnet2_name);
@@ -105,7 +107,7 @@ async fn test_vpcs() {
         ipv6_block: None,
     };
     let subnet2: VpcSubnet =
-        objects_post(&client, &subnets_url, new_subnet).await;
+        objects_post(&client, &subnets_url, new_subnet.clone()).await;
     assert_eq!(subnet2.identity.name, subnet2_name);
     assert_eq!(subnet2.identity.description, "it's also below the net");
     assert_eq!(subnet2.vpc_id, vpc.identity.id);
@@ -184,8 +186,24 @@ async fn test_vpcs() {
         .await;
     assert_eq!(error.message, "not found: vpc subnet with name \"new-name\"");
 
-    // second subnet in vpc with same name is rejected
-    // make second vpc and make a subnet with the same name in that vpc
+    // Creating a subnet with the same name in a different VPC is allowed
+    let vpc2_name = "vpc2";
+    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
+
+    let subnet_same_name: VpcSubnet = objects_post(
+        &client,
+        format!("{}/{}/subnets", vpcs_url, vpc2_name).as_str(),
+        new_subnet.clone(),
+    )
+    .await;
+    assert_eq!(subnet_same_name.identity.name, subnet2_name);
+    assert_eq!(
+        subnet_same_name.identity.description,
+        "it's also below the net"
+    );
+    assert_eq!(subnet_same_name.vpc_id, vpc2.identity.id);
+    assert_eq!(subnet_same_name.ipv4_block, None);
+    assert_eq!(subnet_same_name.ipv6_block, None);
 
     cptestctx.teardown().await;
 }
