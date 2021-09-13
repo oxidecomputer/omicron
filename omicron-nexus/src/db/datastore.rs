@@ -62,7 +62,7 @@ impl DataStore {
         &self,
         sled: db::model::Sled,
     ) -> CreateResult<db::model::Sled> {
-        use db::diesel_schema::sled::dsl;
+        use db::schema::sled::dsl;
 
         // TODO: What's the right behavior on conflict here?
         //
@@ -93,7 +93,7 @@ impl DataStore {
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        use db::diesel_schema::sled::dsl;
+        use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .load_async::<db::model::Sled>(self.pool())
@@ -108,7 +108,7 @@ impl DataStore {
     }
 
     pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<db::model::Sled> {
-        use db::diesel_schema::sled::dsl;
+        use db::schema::sled::dsl;
         dsl::sled
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(id))
