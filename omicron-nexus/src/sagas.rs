@@ -261,7 +261,7 @@ async fn sic_ensure_crucible_region(
                     }
                 }
 
-                std::time::Duration::from_millis(100)
+                std::time::Duration::from_millis(997)
             }
             Err(e) => {
                 error!(log, "crucible client error: {:?}", e);
@@ -277,7 +277,7 @@ async fn sic_ensure_crucible_region(
                     ));
                 }
                 tries -= 1;
-                std::time::Duration::from_secs(1)
+                std::time::Duration::from_secs(3)
             }
         };
 
