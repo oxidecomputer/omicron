@@ -3,8 +3,10 @@
  */
 
 use crate::db;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl};
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -109,50 +111,63 @@ where
     })
 }
 
+// Creates new page params for querying sagas.
+fn new_page_params<'a>() -> DataPageParams<'a, uuid::Uuid> {
+    DataPageParams {
+        marker: None,
+        direction: dropshot::PaginationOrder::Ascending,
+        limit: std::num::NonZeroU32::new(100).unwrap(),
+    }
+}
+
 /**
  * Queries the database to return a list of uncompleted sagas assigned to SEC
  * `sec_id`
  */
+/*
+* For now, we do the simplest thing: we fetch all the sagas that the
+* caller's going to need before returning any of them.  This is easier to
+* implement than, say, using a channel or some other stream.  In principle
+* we're giving up some opportunity for parallelism.  The caller could be
+* going off and fetching the saga log for the first sagas that we find
+* while we're still listing later sagas.  Doing that properly would require
+* concurrency limits to prevent overload or starvation of other database
+* consumers.
+*/
 async fn list_unfinished_sagas(
     log: &slog::Logger,
     pool: &db::Pool,
     sec_id: &db::SecId,
 ) -> Result<Vec<db::saga_types::Saga>, Error> {
-    /*
-     * For now, we do the simplest thing: we fetch all the sagas that the
-     * caller's going to need before returning any of them.  This is easier to
-     * implement than, say, using a channel or some other stream.  In principle
-     * we're giving up some opportunity for parallelism.  The caller could be
-     * going off and fetching the saga log for the first sagas that we find
-     * while we're still listing later sagas.  Doing that properly would require
-     * concurrency limits to prevent overload or starvation of other database
-     * consumers.  Anyway, having Nexus come up is really only blocked on this
-     * step, not recovering all the individual sagas.
-     */
-    trace!(&log, "listing sagas");
     use db::schema::saga::dsl;
+    trace!(&log, "listing sagas");
 
-    // TODO(diesel-conversion): Do we want this to be paginated?
-    // In the pre-diesel era, this method read all relevant rows from
-    // the database - as we do here - but did so in chunks of 100 at a time,
-    // looping until all rows were loaded.
+    // Read all sagas in batches.
     //
-    // It's not clear to me why this happened, as it wasn't a memory-saving
-    // measure - ultimately all rows were stored in a Vec as the return value.
-    //
-    // TODO: See load-saga-log below; a similar call was made there.
-    dsl::saga
-        .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
-        .filter(dsl::current_sec.eq(*sec_id))
-        .load_async(pool.pool())
-        .await
-        .map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::SagaDbg,
-                LookupType::ById(sec_id.0),
-            )
-        })
+    // Although we could read them all into memory simultaneously, this
+    // risks blocking the DB for an unreasonable amount of time. Instead,
+    // we paginate to avoid cutting off availability.
+    let pagparams = new_page_params();
+    let mut sagas = vec![];
+    loop {
+        let mut some_sagas = paginated(dsl::saga, dsl::id, &pagparams)
+            .filter(dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()))
+            .filter(dsl::current_sec.eq(*sec_id))
+            .load_async(pool.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(sec_id.0),
+                )
+            })?;
+        if some_sagas.is_empty() {
+            break;
+        }
+        sagas.append(&mut some_sagas);
+    }
+    Ok(sagas)
 }
 
 /**
@@ -228,22 +243,33 @@ pub async fn load_saga_log(
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
     use db::schema::saganodeevent::dsl;
 
-    // TODO(diesel-conversion): See the note above in list_unfinished_sagas
-    // regarding pagination.
-    let log_records: Vec<steno::SagaNodeEvent> = dsl::saganodeevent
-        .filter(dsl::saga_id.eq(saga.id))
-        .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
-        .await
-        .map_err(|e| {
-            Error::from_diesel(
-                e,
-                ResourceType::SagaDbg,
-                LookupType::ById(saga.id.0 .0),
-            )
-        })?
-        .into_iter()
-        .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
-        .collect::<Result<_, Error>>()?;
-
-    Ok(log_records)
+    // Read all events in batches.
+    //
+    // Although we could read them all into memory simultaneously, this
+    // risks blocking the DB for an unreasonable amount of time. Instead,
+    // we paginate to avoid cutting off availability.
+    let pagparams = new_page_params();
+    let mut events = vec![];
+    loop {
+        let mut some_events: Vec<steno::SagaNodeEvent> =
+            paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
+                .filter(dsl::saga_id.eq(saga.id))
+                .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
+                .await
+                .map_err(|e| {
+                    Error::from_diesel(
+                        e,
+                        ResourceType::SagaDbg,
+                        LookupType::ById(saga.id.0 .0),
+                    )
+                })?
+                .into_iter()
+                .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
+                .collect::<Result<_, Error>>()?;
+        if some_events.is_empty() {
+            break;
+        }
+        events.append(&mut some_events);
+    }
+    Ok(events)
 }
