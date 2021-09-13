@@ -39,8 +39,8 @@ Diesel auto-generates types which allow callers to construct SQL expressions.
 These types, however, must map to the underlying database to be useful.
 
 We make use of the https://docs.diesel.rs/master/diesel/macro.table.html[table macro]
-within link:diesel_schema.rs[diesel_schema.rs] to define these tables and their
-corresponding SQL types. These types are then accessible within the `diesel_schema`
+within link:schema.rs[schema.rs] to define these tables and their
+corresponding SQL types. These types are then accessible within the `schema`
 module.
 
 === Creating Queries
@@ -65,7 +65,7 @@ struct Instance {
   ...
 }
 
-use db::diesel_schema::instance::dsl;
+use db::schema::instance::dsl;
 let insert_query = diesel::insert_into(dsl::instance)
   .values(Instance::new());
 ----
@@ -79,7 +79,7 @@ struct Instance {
   ...
 }
 
-use db::diesel_schema::instance::dsl;
+use db::schema::instance::dsl;
 let lookup_query = dsl::instance.filter(dsl::id.eq(id_to_lookup));
 ----
 
@@ -92,7 +92,7 @@ struct InstanceUpdate {
   ...
 }
 
-use db::diesel_schema::instance::dsl;
+use db::schema::instance::dsl;
 let update_query = diesel::update(dsl::instance).set(InstanceUpdate::new());
 ----
 

@@ -130,7 +130,7 @@ async fn list_unfinished_sagas(
      * step, not recovering all the individual sagas.
      */
     trace!(&log, "listing sagas");
-    use db::diesel_schema::saga::dsl;
+    use db::schema::saga::dsl;
 
     // TODO(diesel-conversion): Do we want this to be paginated?
     // In the pre-diesel era, this method read all relevant rows from
@@ -226,7 +226,7 @@ pub async fn load_saga_log(
     pool: &db::Pool,
     saga: &db::saga_types::Saga,
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
-    use db::diesel_schema::saganodeevent::dsl;
+    use db::schema::saganodeevent::dsl;
 
     // TODO(diesel-conversion): See the note above in list_unfinished_sagas
     // regarding pagination.

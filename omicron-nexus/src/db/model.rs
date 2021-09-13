@@ -1,6 +1,6 @@
 //! Structures stored to the database.
 
-use super::diesel_schema::{
+use super::schema::{
     disk, instance, metricproducer, networkinterface, oximeter,
     oximeterassignment, project, sled, vpc, vpcsubnet,
 };

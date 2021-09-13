@@ -11,8 +11,8 @@ mod saga_types;
 mod sec_store;
 mod update_and_check;
 
-pub mod diesel_schema;
 pub mod model;
+pub mod schema;
 
 pub use config::Config;
 pub use datastore::DataStore;
