@@ -73,10 +73,16 @@ impl Sled {
     pub fn id(&self) -> &Uuid {
         &self.id
     }
+
+    pub fn address(&self) -> SocketAddr {
+        // TODO: avoid this unwrap
+        SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
+    }
 }
 
 impl Into<external::Sled> for Sled {
     fn into(self) -> external::Sled {
+        let service_address = self.address();
         external::Sled {
             identity: external::IdentityMetadata {
                 id: self.id,
@@ -85,11 +91,7 @@ impl Into<external::Sled> for Sled {
                 time_created: self.time_created,
                 time_modified: self.time_modified,
             },
-            // TODO: avoid this unwrap
-            service_address: SocketAddr::new(
-                self.ip.ip(),
-                u16::try_from(self.port).unwrap(),
-            ),
+            service_address,
         }
     }
 }

@@ -103,16 +103,6 @@ pub struct Nexus {
     sec_client: Arc<steno::SecClient>,
 
     /**
-     * List of sled agents known by this nexus.
-     * TODO This ought to have some representation in the data store as well so
-     * that we don't simply forget about sleds that aren't currently up.  We'll
-     * need to think about the interface between this program and the sleds and
-     * how we discover them, both when they initially show up and when we come
-     * up.
-     */
-    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
-
-    /**
      * List of oximeter collectors.
      *
      * As with the sled agents above, this should be persisted at some point.
@@ -166,7 +156,6 @@ impl Nexus {
             },
             db_datastore,
             sec_client: Arc::clone(&sec_client),
-            sled_agents: Mutex::new(BTreeMap::new()),
             oximeter_collectors: Mutex::new(BTreeMap::new()),
         };
 
@@ -207,11 +196,6 @@ impl Nexus {
         let sled = db::model::Sled::new(id, address, create_params);
         self.db_datastore.sled_create(sled).await?;
 
-        // Insert a connection to the Sled Agent.
-        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        let client = Arc::new(SledAgentClient::new(&id, address, log));
-        let mut scs = self.sled_agents.lock().await;
-        scs.insert(client.id, client);
         Ok(())
     }
 
@@ -494,16 +478,22 @@ impl Nexus {
      * SagaContext::alloc_server().
      */
     pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
-        let sleds = self.sled_agents.lock().await;
+        // TODO: replace this with a real allocation policy.
+        //
+        // This implementation always assigns the first sled (by ID order).
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(1).unwrap(),
+        };
+        let sleds = self.db_datastore.sled_list(&pagparams).await?;
 
-        /* TODO replace this with a real allocation policy. */
         sleds
-            .values()
-            .next()
+            .first()
             .ok_or_else(|| Error::ServiceUnavailable {
                 message: String::from("no sleds available for new Instance"),
             })
-            .map(|s| s.id)
+            .map(|s| *s.id())
     }
 
     pub async fn project_list_instances(
@@ -660,14 +650,19 @@ impl Nexus {
 
     pub async fn sled_client(
         &self,
-        sled_uuid: &Uuid,
+        id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let sled_agents = self.sled_agents.lock().await;
-        Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
-            let message =
-                format!("no sled agent for sled_uuid \"{}\"", sled_uuid);
-            Error::ServiceUnavailable { message }
-        })?))
+        // TODO: We should consider injecting connection pooling here,
+        // but for now, connections to sled agents are constructed
+        // on an "as requested" basis.
+        //
+        // Franky, returning an "Arc" here without a connection pool is a little
+        // silly; it's not actually used if each client connection exists as a
+        // one-shot.
+        let sled = self.sled_lookup(id).await?;
+
+        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
+        Ok(Arc::new(SledAgentClient::new(id, sled.address(), log)))
     }
 
     /**
