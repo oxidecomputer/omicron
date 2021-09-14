@@ -111,6 +111,8 @@ pub fn configure_default_omicron_rpaths() {
         configure_rpaths_from_env_var(&mut rpaths, &env_var_name);
     }
 
+    /* None of this behavior is needed on MacOS. */
+    #[cfg(any(target_os = "illumos", target_os = "linux"))]
     for r in rpaths {
         println!("{}", emit_rpath(&r));
     }
