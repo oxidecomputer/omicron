@@ -1206,10 +1206,10 @@ pub struct VpcUpdateParams {
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Ipv4Net(pub ipnet::Ipv4Net);
+pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl std::ops::Deref for Ipv4Net {
-    type Target = ipnet::Ipv4Net;
+    type Target = ipnetwork::Ipv4Network;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1262,10 +1262,10 @@ impl JsonSchema for Ipv4Net {
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Ipv6Net(pub ipnet::Ipv6Net);
+pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl std::ops::Deref for Ipv6Net {
-    type Target = ipnet::Ipv6Net;
+    type Target = ipnetwork::Ipv6Network;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
