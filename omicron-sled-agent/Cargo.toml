@@ -3,6 +3,9 @@ name = "omicron-sled-agent"
 version = "0.1.0"
 edition = "2018"
 
+[build-dependencies.omicron-rpaths]
+path = "../omicron-rpaths"
+
 [dependencies]
 async-trait = "0.1.51"
 cfg-if = "1.0"
@@ -13,8 +16,8 @@ http = "0.2.0"
 hyper = "0.14"
 ipnet = "2.3"
 omicron-common = { path = "../omicron-common" }
-# See build.rs for more about the "pq-sys" dependency.
-pq-sys = "0.4"
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3d58a6398" }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }

@@ -1,8 +1,6 @@
-// XXX comment and keep in sync with omicron-nexus
+// See omicron-rpaths for documentation.
+// NOTE: This file MUST be kept in sync with the other build.rs files in this
+// repository.
 fn main() {
-    if let Some(rpaths) = std::env::var_os("DEP_PQ_LIBDIRS") {
-        for p in std::env::split_paths(&rpaths) {
-            println!("cargo:rustc-link-arg=-Wl,-R{}", p.to_string_lossy());
-        }
-    }
+    omicron_rpaths::configure_default_omicron_rpaths();
 }

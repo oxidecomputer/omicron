@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Benjamin Naecker <ben@oxide.computer>"]
 edition = "2018"
 
+[build-dependencies.omicron-rpaths]
+path = "../../omicron-rpaths"
+
 [dependencies]
 anyhow = "1.0"
 bytes = { version = "1.0.1", features = [ "serde" ] }
@@ -14,7 +17,7 @@ hyper = "0.14.10"
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
 omicron-common = { path = "../../omicron-common" }
 # See build.rs for more about the "pq-sys" dependency.
-pq-sys = "0.4"
+pq-sys = "*"
 reqwest = { version = "0.11.4", features = [ "json" ] }
 schemars = { version = "0.8.3", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }

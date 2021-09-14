@@ -3,6 +3,9 @@ name = "omicron-common"
 version = "0.1.0"
 edition = "2018"
 
+[build-dependencies.omicron-rpaths]
+path = "../omicron-rpaths"
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.51"
@@ -14,8 +17,8 @@ hyper = "0.14"
 libc = "0.2.98"
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b6da043d" }
 postgres-protocol = "0.6.1"
-# See build.rs for more about the "pq-sys" dependency.
-pq-sys = "0.4"
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"

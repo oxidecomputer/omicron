@@ -1232,6 +1232,7 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
+ "omicron-rpaths",
  "pq-sys",
  "serde",
  "serde_json",
@@ -1263,6 +1264,7 @@ dependencies = [
  "ipnet",
  "libc",
  "macaddr",
+ "omicron-rpaths",
  "postgres-protocol",
  "pq-sys",
  "propolis-server",
@@ -1312,6 +1314,7 @@ dependencies = [
  "libc",
  "newtype_derive",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "openapi-lint",
  "openapiv3",
@@ -1333,6 +1336,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-rpaths"
+version = "0.1.0"
+
+[[package]]
 name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
@@ -1347,6 +1354,7 @@ dependencies = [
  "ipnet",
  "mockall",
  "omicron-common",
+ "omicron-rpaths",
  "pq-sys",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3d58a6398)",
  "schemars",
@@ -1445,6 +1453,7 @@ dependencies = [
  "hyper",
  "num-traits",
  "omicron-common",
+ "omicron-rpaths",
  "oximeter-macro-impl",
  "pq-sys",
  "reqwest",
