@@ -1,15 +1,12 @@
-# We use nightly for two reasons:
 #
-# 1. To enable the "asm" feature for dtrace probes.
-# 2. To make use of our workaround for issue sgrif/pq-sys#36.  This relies on a
-#    Cargo feature that will not be available on stable until 1.56.
+# We use nightly for a few unstable features:
 #
-# When both of those are part of stable Rust, we should update this file to
-# point to "stable" instead.
+# 1. the "asm" unstable Rust feature, used within Propolis for dtrace probes
+# 2. the "extra-link-arg" unstable Cargo feature, used in omicron-rpaths.  This
+#    will be stable in 1.56.
 #
-# We use "nightly-2021-09-03" specifically because we know it's new enough for
-# the Cargo feature required for the sgrif/pq-sys#36 workaround.  Newer
-# nightlies should be fine as well.
+# We specify a specific, known-good nightly to avoid regular breakage.
+# Once the above features stabilize, we should switch back to "stable".
 #
 
 [toolchain]
