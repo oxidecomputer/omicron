@@ -1354,6 +1354,14 @@ pub struct VpcSubnet {
 #[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl TryFrom<String> for MacAddr {
+    type Error = macaddr::ParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse().map(|addr| MacAddr(addr))
+    }
+}
+
 impl<DB> ToSql<sql_types::Text, DB> for MacAddr
 where
     DB: Backend,
