@@ -62,7 +62,7 @@ impl DataStore {
         &self,
         project: db::model::Project,
     ) -> CreateResult<db::model::Project> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
 
         let name = project.name().to_string();
         diesel::insert_into(dsl::project)
@@ -83,7 +83,7 @@ impl DataStore {
         &self,
         name: &Name,
     ) -> LookupResult<db::model::Project> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
@@ -105,7 +105,7 @@ impl DataStore {
      * generation counter that gets bumped when these resources are created.
      */
     pub async fn project_delete(&self, name: &Name) -> DeleteResult {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
@@ -128,7 +128,7 @@ impl DataStore {
         &self,
         name: &Name,
     ) -> Result<Uuid, Error> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
@@ -148,7 +148,7 @@ impl DataStore {
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .load_async::<db::model::Project>(self.pool())
@@ -166,7 +166,7 @@ impl DataStore {
         &self,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         paginated(dsl::project, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .load_async::<db::model::Project>(self.pool())
@@ -186,7 +186,7 @@ impl DataStore {
         name: &Name,
         update_params: &api::external::ProjectUpdateParams,
     ) -> UpdateResult<db::model::Project> {
-        use db::diesel_schema::project::dsl;
+        use db::schema::project::dsl;
         let updates: db::model::ProjectUpdate = update_params.clone().into();
 
         diesel::update(dsl::project)
@@ -238,7 +238,7 @@ impl DataStore {
         params: &api::external::InstanceCreateParams,
         runtime_initial: &db::model::InstanceRuntimeState,
     ) -> CreateResult<db::model::Instance> {
-        use db::diesel_schema::instance::dsl;
+        use db::schema::instance::dsl;
 
         let instance = db::model::Instance::new(
             *instance_id,
@@ -279,7 +279,7 @@ impl DataStore {
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        use db::diesel_schema::instance::dsl;
+        use db::schema::instance::dsl;
 
         paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -299,7 +299,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
     ) -> LookupResult<db::model::Instance> {
-        use db::diesel_schema::instance::dsl;
+        use db::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -320,7 +320,7 @@ impl DataStore {
         project_id: &Uuid,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        use db::diesel_schema::instance::dsl;
+        use db::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -351,7 +351,7 @@ impl DataStore {
         instance_id: &Uuid,
         new_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<bool, Error> {
-        use db::diesel_schema::instance::dsl;
+        use db::schema::instance::dsl;
 
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -390,8 +390,8 @@ impl DataStore {
          * such dependencies here.
          */
         use api::external::InstanceState as ApiInstanceState;
-        use db::diesel_schema::instance::dsl;
         use db::model::InstanceState as DbInstanceState;
+        use db::schema::instance::dsl;
 
         let now = Utc::now();
 
@@ -428,7 +428,7 @@ impl DataStore {
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::DiskAttachment> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -458,7 +458,7 @@ impl DataStore {
         params: &api::external::DiskCreateParams,
         runtime_initial: &db::model::DiskRuntimeState,
     ) -> CreateResult<db::model::Disk> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         let disk = db::model::Disk::new(
             *disk_id,
@@ -496,7 +496,7 @@ impl DataStore {
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -517,7 +517,7 @@ impl DataStore {
         disk_id: &Uuid,
         new_runtime: &db::model::DiskRuntimeState,
     ) -> Result<bool, Error> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
@@ -546,7 +546,7 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
     ) -> LookupResult<db::model::Disk> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
@@ -567,7 +567,7 @@ impl DataStore {
         project_id: &Uuid,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
@@ -585,7 +585,7 @@ impl DataStore {
     }
 
     pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
-        use db::diesel_schema::disk::dsl;
+        use db::schema::disk::dsl;
         let now = Utc::now();
 
         let destroyed = api::external::DiskState::Destroyed.label();
@@ -624,7 +624,7 @@ impl DataStore {
         &self,
         info: &db::model::OximeterInfo,
     ) -> Result<(), Error> {
-        use db::diesel_schema::oximeter::dsl;
+        use db::schema::oximeter::dsl;
 
         diesel::insert_into(dsl::oximeter)
             .values(*info)
@@ -645,7 +645,7 @@ impl DataStore {
         &self,
         producer: &db::model::ProducerEndpoint,
     ) -> Result<(), Error> {
-        use db::diesel_schema::metricproducer::dsl;
+        use db::schema::metricproducer::dsl;
 
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
@@ -667,7 +667,7 @@ impl DataStore {
         oximeter_id: Uuid,
         producer_id: Uuid,
     ) -> Result<(), Error> {
-        use db::diesel_schema::oximeterassignment::dsl;
+        use db::schema::oximeterassignment::dsl;
 
         let assignment =
             db::model::OximeterAssignment::new(oximeter_id, producer_id);
@@ -693,7 +693,7 @@ impl DataStore {
         &self,
         saga: &db::saga_types::Saga,
     ) -> Result<(), Error> {
-        use db::diesel_schema::saga::dsl;
+        use db::schema::saga::dsl;
 
         let name = saga.template_name.clone();
         diesel::insert_into(dsl::saga)
@@ -710,7 +710,7 @@ impl DataStore {
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        use db::diesel_schema::saganodeevent::dsl;
+        use db::schema::saganodeevent::dsl;
 
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
@@ -735,7 +735,7 @@ impl DataStore {
         current_sec: db::saga_types::SecId,
         current_adopt_generation: Generation,
     ) -> Result<(), Error> {
-        use db::diesel_schema::saga::dsl;
+        use db::schema::saga::dsl;
 
         let saga_id: db::saga_types::SagaId = saga_id.into();
         let result = diesel::update(dsl::saga)
@@ -778,7 +778,7 @@ impl DataStore {
         project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        use db::diesel_schema::vpc::dsl;
+        use db::schema::vpc::dsl;
 
         paginated(dsl::vpc, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -800,7 +800,7 @@ impl DataStore {
         project_id: &Uuid,
         params: &api::external::VpcCreateParams,
     ) -> Result<db::model::Vpc, Error> {
-        use db::diesel_schema::vpc::dsl;
+        use db::schema::vpc::dsl;
 
         let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
         let name = vpc.name.clone();
@@ -821,7 +821,7 @@ impl DataStore {
         vpc_id: &Uuid,
         params: &api::external::VpcUpdateParams,
     ) -> Result<(), Error> {
-        use db::diesel_schema::vpc::dsl;
+        use db::schema::vpc::dsl;
         let updates: db::model::VpcUpdate = params.clone().into();
 
         diesel::update(dsl::vpc)
@@ -845,7 +845,7 @@ impl DataStore {
         project_id: &Uuid,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        use db::diesel_schema::vpc::dsl;
+        use db::schema::vpc::dsl;
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
@@ -863,7 +863,7 @@ impl DataStore {
     }
 
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
-        use db::diesel_schema::vpc::dsl;
+        use db::schema::vpc::dsl;
 
         let now = Utc::now();
         diesel::update(dsl::vpc)
@@ -887,7 +887,7 @@ impl DataStore {
         vpc_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        use db::diesel_schema::vpcsubnet::dsl;
+        use db::schema::vpcsubnet::dsl;
 
         paginated(dsl::vpcsubnet, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -907,7 +907,7 @@ impl DataStore {
         vpc_id: &Uuid,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        use db::diesel_schema::vpcsubnet::dsl;
+        use db::schema::vpcsubnet::dsl;
 
         dsl::vpcsubnet
             .filter(dsl::time_deleted.is_null())
@@ -930,7 +930,7 @@ impl DataStore {
         vpc_id: &Uuid,
         params: &api::external::VpcSubnetCreateParams,
     ) -> CreateResult<db::model::VpcSubnet> {
-        use db::diesel_schema::vpcsubnet::dsl;
+        use db::schema::vpcsubnet::dsl;
 
         let subnet =
             db::model::VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
@@ -952,7 +952,7 @@ impl DataStore {
     }
 
     pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
-        use db::diesel_schema::vpcsubnet::dsl;
+        use db::schema::vpcsubnet::dsl;
 
         let now = Utc::now();
         diesel::update(dsl::vpcsubnet)
@@ -976,7 +976,7 @@ impl DataStore {
         subnet_id: &Uuid,
         params: &api::external::VpcSubnetUpdateParams,
     ) -> Result<(), Error> {
-        use db::diesel_schema::vpcsubnet::dsl;
+        use db::schema::vpcsubnet::dsl;
         let updates: db::model::VpcSubnetUpdate = params.clone().into();
 
         diesel::update(dsl::vpcsubnet)
