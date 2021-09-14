@@ -831,9 +831,8 @@ impl VpcSubnet {
 
             vpc_id,
 
-            // TODO: fix Nones
-            ipv4_block: None,
-            ipv6_block: None,
+            ipv4_block: params.ipv4_block.map(|f| f.0.into()),
+            ipv6_block: params.ipv6_block.map(|f| f.0.into()),
         }
     }
 
@@ -854,9 +853,18 @@ impl Into<external::VpcSubnet> for VpcSubnet {
         external::VpcSubnet {
             identity: self.identity().into(),
             vpc_id: self.vpc_id,
-            // TODO: uh, convert IpNetwork into Ipv4Net/Ipv6Net?
-            ipv4_block: None,
-            ipv6_block: None,
+            ipv4_block: match self.ipv4_block {
+                Some(ipnetwork::IpNetwork::V4(net)) => {
+                    Some(external::Ipv4Net(net))
+                }
+                _ => None,
+            },
+            ipv6_block: match self.ipv6_block {
+                Some(ipnetwork::IpNetwork::V6(net)) => {
+                    Some(external::Ipv6Net(net))
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -877,8 +885,8 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
             name: params.identity.name,
             description: params.identity.description,
             time_modified: Utc::now(),
-            ipv4_block: None,
-            ipv6_block: None,
+            ipv4_block: params.ipv4_block.map(|f| f.0.into()),
+            ipv6_block: params.ipv6_block.map(|f| f.0.into()),
         }
     }
 }
