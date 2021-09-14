@@ -1,9 +1,10 @@
 //! Sled agent implementation
 
-use omicron_common::api::external::Error;
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
+    external::Error, internal::nexus::DiskRuntimeState,
+    internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
+    internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
 
@@ -16,6 +17,7 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
+use crate::common::vlan::VlanID;
 use crate::instance_manager::InstanceManager;
 
 /// Describes an executing Sled Agent object.
@@ -30,12 +32,13 @@ impl SledAgent {
     pub fn new(
         id: &Uuid,
         log: Logger,
+        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<SledAgent, Error> {
         info!(&log, "created sled agent"; "id" => ?id);
 
         Ok(SledAgent {
-            instances: InstanceManager::new(log.clone(), nexus_client)?,
+            instances: InstanceManager::new(log.clone(), vlan, nexus_client)?,
         })
     }
 
@@ -43,10 +46,10 @@ impl SledAgent {
     pub async fn instance_ensure(
         &self,
         instance_id: Uuid,
-        initial_runtime: InstanceRuntimeState,
+        initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
-        self.instances.ensure(instance_id, initial_runtime, target).await
+        self.instances.ensure(instance_id, initial, target).await
     }
 
     /// Idempotently ensures that the given Disk is attached (or not) as

@@ -88,9 +88,10 @@ impl Zones {
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Blank,
         );
         cfg.get_global()
+            .set_brand("sparse")
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
@@ -122,15 +123,16 @@ impl Zones {
     pub fn configure_child_zone(
         log: &Logger,
         name: &str,
-        vnic: &str,
+        vnics: Vec<String>,
     ) -> Result<(), Error> {
         info!(log, "Creating child zone: {}", name);
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
-            zone::CreationOptions::Template("sparse".to_string()),
+            zone::CreationOptions::Blank,
         );
         cfg.get_global()
+            .set_brand("sparse")
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
@@ -141,10 +143,12 @@ impl Zones {
             options: vec!["ro".to_string()],
             ..Default::default()
         });
-        cfg.add_net(&zone::Net {
-            physical: vnic.to_string(),
-            ..Default::default()
-        });
+        for vnic in &vnics {
+            cfg.add_net(&zone::Net {
+                physical: vnic.to_string(),
+                ..Default::default()
+            });
+        }
         cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
         cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });

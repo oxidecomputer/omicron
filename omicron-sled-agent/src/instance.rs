@@ -1,12 +1,21 @@
 //! API for controlling a single instance.
 
-use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::common::{
+    instance::{Action as InstanceAction, InstanceStates},
+    vlan::VlanID,
+};
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::{dladm::VNIC_PREFIX, zone::ZONE_PREFIX};
-use crate::instance_manager::InstanceTicket;
+use crate::illumos::{
+    dladm::{PhysicalLink, VNIC_PREFIX},
+    zone::ZONE_PREFIX,
+};
+use crate::instance_manager::{IdAllocator, InstanceTicket};
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::dev::poll;
 use propolis_client::Client as PropolisClient;
@@ -79,8 +88,12 @@ fn zone_name(id: &Uuid) -> String {
     format!("{}{}", ZONE_PREFIX, id)
 }
 
-fn vnic_name(runtime_id: u64) -> String {
-    format!("{}{}", VNIC_PREFIX, runtime_id)
+fn vnic_name(id: u64) -> String {
+    format!("{}{}", VNIC_PREFIX, id)
+}
+
+fn guest_vnic_name(id: u64) -> String {
+    format!("{}_guest{}", VNIC_PREFIX, id)
 }
 
 fn interface_name(vnic_name: &str) -> String {
@@ -126,13 +139,78 @@ impl Drop for RunningState {
     }
 }
 
+/// Represents an allocated VNIC on the system.
+/// The VNIC is de-allocated when it goes out of scope.
+///
+/// Note that the "ownership" of the VNIC is based on convention;
+/// another process in the global zone could also modify / destroy
+/// the VNIC while this object is alive.
+#[derive(Debug)]
+struct Vnic {
+    name: String,
+    deleted: bool,
+}
+
+impl Vnic {
+    // Creates a new NIC, intended for usage by the guest.
+    fn new_guest(
+        allocator: &IdAllocator,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
+        vlan: Option<VlanID>,
+    ) -> Result<Self, Error> {
+        let name = guest_vnic_name(allocator.next());
+        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
+        Ok(Vnic { name, deleted: false })
+    }
+
+    // Creates a new NIC, intended for allowing Propolis to communicate
+    // with the control plane.
+    fn new_control(
+        allocator: &IdAllocator,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
+    ) -> Result<Self, Error> {
+        let name = vnic_name(allocator.next());
+        Dladm::create_vnic(physical_dl, &name, mac, None)?;
+        Ok(Vnic { name, deleted: false })
+    }
+
+    // Deletes a NIC (if it has not already been deleted).
+    fn delete(&mut self) -> Result<(), Error> {
+        if self.deleted {
+            Ok(())
+        } else {
+            self.deleted = true;
+            Dladm::delete_vnic(&self.name)
+        }
+    }
+}
+
+impl Drop for Vnic {
+    fn drop(&mut self) {
+        let _ = self.delete();
+    }
+}
+
 struct InstanceInner {
     log: Logger,
-    runtime_id: u64,
+
+    // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
+
+    // NIC-related properties
+    nic_id_allocator: IdAllocator,
+    requested_nics: Vec<NetworkInterface>,
+    allocated_nics: Vec<Vnic>,
+    vlan: Option<VlanID>,
+
+    // Internal State management
     state: InstanceStates,
-    nexus_client: Arc<NexusClient>,
     running_state: Option<RunningState>,
+
+    // Connection to Nexus
+    nexus_client: Arc<NexusClient>,
 }
 
 impl InstanceInner {
@@ -157,7 +235,7 @@ impl InstanceInner {
 
         // Notify Nexus of the state change.
         self.nexus_client
-            .notify_instance_updated(&self.properties.id, self.state.current())
+            .notify_instance_updated(self.id(), self.state.current())
             .await?;
 
         // Take the next action, if any.
@@ -176,17 +254,31 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(self.properties.id, request)
+            .instance_state_put(*self.id(), request)
             .await
             .map_err(|e| Error::InternalError {
                 message: format!("Failed to set state of instance: {}", e),
             })
     }
 
-    async fn ensure(&self) -> Result<(), Error> {
+    async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
+        // TODO: Store slot in NetworkInterface, make this more stable.
+        let nics = self
+            .requested_nics
+            .iter()
+            .enumerate()
+            .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
+                name: guest_nics[i].name.clone(),
+                slot: propolis_client::api::Slot(i as u8),
+            })
+            .collect();
+
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
+            nics,
         };
+
+        info!(self.log, "Sending ensure request to propolis: {:?}", request);
         self.running_state
             .as_ref()
             .expect("Propolis client should be initialized before usage")
@@ -242,8 +334,9 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            runtime_id: u64,
-            initial_runtime: InstanceRuntimeState,
+            nic_id_allocator: IdAllocator,
+            initial: InstanceHardware,
+            vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
         pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
@@ -259,40 +352,48 @@ mockall::mock! {
 
 impl Instance {
     /// Creates a new (not yet running) instance object.
-
+    ///
     /// Arguments:
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
-    /// * `runtime_id`: A unique (to the sled) numeric ID which may be used to
+    /// * `nic_id_allocator`: A unique (to the sled) ID generator to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
-    /// * `initial_runtime`: State of the instance at initialization time.
+    /// * `initial`: State of the instance at initialization time.
     /// * `nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `vlan`: An optional VLAN ID for tagging guest VNICs.
+    // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
         id: Uuid,
-        runtime_id: u64,
-        initial_runtime: InstanceRuntimeState,
+        nic_id_allocator: IdAllocator,
+        initial: InstanceHardware,
+        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
+        info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            runtime_id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: initial_runtime.hostname.clone(),
+                name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
-                memory: initial_runtime.memory.to_bytes(),
+                // TODO: Align the byte type w/propolis.
+                memory: initial.runtime.memory.to_whole_mebibytes(),
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
-                vcpus: initial_runtime.ncpus.0 as u8,
+                vcpus: initial.runtime.ncpus.0 as u8,
             },
-            state: InstanceStates::new(initial_runtime),
-            nexus_client,
+            nic_id_allocator,
+            requested_nics: initial.nics,
+            allocated_nics: vec![],
+            vlan,
+            state: InstanceStates::new(initial.runtime),
             running_state: None,
+            nexus_client,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -303,48 +404,75 @@ impl Instance {
     /// Begins the execution of the instance's service (Propolis).
     pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
-        let log = &inner.log;
 
         // Create the VNIC which will be attached to the zone.
-        let physical_dl = Dladm::find_physical()?;
-        info!(log, "Saw physical DL: {}", physical_dl);
-
+        //
         // It would be preferable to use the UUID of the instance as a component
         // of the "per-Zone, control plane VNIC", but VNIC names are somewhat
         // restrictive. They must end with numerics, and they must be less than
         // 32 characters.
         //
-        // Instead, we just use a per-agent incrementing number.
-        let vnic_name = vnic_name(inner.runtime_id);
-        Dladm::create_vnic(&physical_dl, &vnic_name)?;
-        info!(log, "Created vnic: {}", vnic_name);
+        // Instead, we just use a per-agent incrementing number. We do the same
+        // for the guest-accessible NICs too.
+        let physical_dl = Dladm::find_physical()?;
+        let control_nic =
+            Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
+
+        // Instantiate all guest-requested VNICs.
+        //
+        // TODO: Ideally, we'd allocate VNICs directly within the Zone.
+        // However, this seems to have been a SmartOS feature which
+        // doesn't exist in illumos.
+        //
+        // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
+        let guest_nics = inner
+            .requested_nics
+            .clone()
+            .into_iter()
+            .map(|nic| {
+                Vnic::new_guest(
+                    &inner.nic_id_allocator,
+                    &physical_dl,
+                    Some(nic.mac),
+                    inner.vlan,
+                )
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
         // Create a zone for the propolis instance, using the previously
-        // configured VNIC.
+        // configured VNICs.
         let zname = zone_name(inner.id());
-        Zones::configure_child_zone(&log, &zname, &vnic_name)?;
-        info!(log, "Configured child zone: {}", zname);
+
+        let nics_to_put_in_zone: Vec<String> = guest_nics
+            .iter()
+            .map(|nic| nic.name.clone())
+            .chain(std::iter::once(control_nic.name.clone()))
+            .collect();
+
+        Zones::configure_child_zone(&inner.log, &zname, nics_to_put_in_zone)?;
+        info!(inner.log, "Configured child zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
         // boot it up.
         Zones::clone_from_base(&zname)?;
-        info!(log, "Cloned child zone: {}", zname);
+        info!(inner.log, "Cloned child zone: {}", zname);
         Zones::boot(&zname)?;
-        info!(log, "Booted zone: {}", zname);
+        info!(inner.log, "Booted zone: {}", zname);
 
         // Wait for the network services to come online, then create an address.
         wait_for_service(Some(&zname), "svc:/milestone/network:default")
             .await?;
-        info!(log, "Network milestone ready for {}", zname);
+        info!(inner.log, "Network milestone ready for {}", zname);
 
-        let ip = Zones::create_address(&zname, &interface_name(&vnic_name))?;
-        info!(log, "Created address {} for zone: {}", ip, zname);
+        let ip =
+            Zones::create_address(&zname, &interface_name(&control_nic.name))?;
+        info!(inner.log, "Created address {} for zone: {}", ip, zname);
 
         // Run Propolis in the Zone.
         let port = 12400;
         let server_addr = SocketAddr::new(ip.addr(), port);
         Zones::run_propolis(&zname, inner.id(), &server_addr)?;
-        info!(log, "Started propolis in zone: {}", zname);
+        info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
@@ -354,20 +482,20 @@ impl Instance {
 
         let client = Arc::new(PropolisClient::new(
             server_addr,
-            log.new(o!("component" => "propolis-client")),
+            inner.log.new(o!("component" => "propolis-client")),
         ));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
-        wait_for_http_server(&log, &client).await?;
+        wait_for_http_server(&inner.log, &client).await?;
 
         inner.running_state =
             Some(RunningState { client, ticket, monitor_task: None });
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure().await?;
+        inner.ensure(&guest_nics).await?;
 
         // Monitor propolis for state changes in the background.
         let self_clone = self.clone();
@@ -381,6 +509,12 @@ impl Instance {
                 }
             }));
 
+        // Store the VNICs while the instance is running.
+        inner.allocated_nics = guest_nics
+            .into_iter()
+            .chain(std::iter::once(control_nic))
+            .collect();
+
         Ok(())
     }
 
@@ -391,8 +525,18 @@ impl Instance {
         let zname = zone_name(inner.id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
-        let vnic_name = vnic_name(inner.runtime_id);
-        Dladm::delete_vnic(&vnic_name)?;
+
+        // Explicitly remove NICs.
+        //
+        // The NICs would self-delete on drop anyway, but this allows us
+        // to explicitly record errors.
+        let mut nics = vec![];
+        std::mem::swap(&mut inner.allocated_nics, &mut nics);
+        for mut nic in nics {
+            if let Err(e) = nic.delete() {
+                error!(inner.log, "Failed to delete NIC {:?}: {}", nic, e);
+            }
+        }
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
         Ok(())
@@ -535,6 +679,7 @@ mod test {
 
         if let Some(server) = server.as_ref() {
             if server.id == id {
+                // TODO: Patch this up with real values
                 let instance_info = api::Instance {
                     properties: api::InstanceProperties {
                         id,
@@ -679,15 +824,15 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|| Ok("physical".to_string()));
+            .returning(|| Ok(PhysicalLink("physical".to_string())));
 
         let dladm_create_vnic_ctx = MockDladm::create_vnic_context();
         dladm_create_vnic_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|phys, vnic| {
-                assert_eq!(phys, "physical");
+            .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
+                assert_eq!(phys.0, "physical");
                 assert_eq!(vnic, vnic_name(0));
                 Ok(())
             });
@@ -698,9 +843,10 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, zone, vnic| {
+            .returning(|_, zone, vnics| {
                 assert_eq!(zone, zone_name(&test_uuid()));
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnics.len(), 1);
+                assert_eq!(vnics[0], vnic_name(0));
                 Ok(())
             });
 
@@ -808,15 +954,18 @@ mod test {
         .unwrap()
     }
 
-    fn new_runtime_state() -> InstanceRuntimeState {
-        InstanceRuntimeState {
-            run_state: InstanceState::Creating,
-            sled_uuid: Uuid::new_v4(),
-            ncpus: InstanceCpuCount(2),
-            memory: ByteCount::from_mebibytes_u32(512),
-            hostname: "myvm".to_string(),
-            gen: Generation::new(),
-            time_updated: Utc::now(),
+    fn new_initial_instance() -> InstanceHardware {
+        InstanceHardware {
+            runtime: InstanceRuntimeState {
+                run_state: InstanceState::Creating,
+                sled_uuid: Uuid::new_v4(),
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_mebibytes_u32(512),
+                hostname: "myvm".to_string(),
+                gen: Generation::new(),
+                time_updated: Utc::now(),
+            },
+            nics: vec![],
         }
     }
 
@@ -836,7 +985,7 @@ mod test {
     #[serial_test::serial]
     async fn start_then_stop() {
         let log = logger();
-        let runtime_id = 0;
+        let nic_id_allocator = IdAllocator::new();
         let mut nexus_client = MockNexusClient::default();
 
         // Set expectations about what will be seen (and when) by Nexus before
@@ -865,8 +1014,9 @@ mod test {
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            runtime_id,
-            new_runtime_state(),
+            nic_id_allocator,
+            new_initial_instance(),
+            None,
             Arc::new(nexus_client),
         )
         .unwrap();
@@ -913,14 +1063,15 @@ mod test {
     )]
     async fn transition_before_start() {
         let log = logger();
-        let runtime_id = 0;
+        let nic_id_allocator = IdAllocator::new();
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            runtime_id,
-            new_runtime_state(),
+            nic_id_allocator,
+            new_initial_instance(),
+            None,
             Arc::new(nexus_client),
         )
         .unwrap();

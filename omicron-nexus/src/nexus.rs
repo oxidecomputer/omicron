@@ -39,6 +39,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
+use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::bail_unless;
@@ -762,8 +763,17 @@ impl Nexus {
          * not the newest one, that's fine.  That might just mean the sled agent
          * beat us to it.
          */
+
+        // TODO: Populate this with an appropriate NIC.
+        // See also: sic_create_instance_record in sagas.rs for a similar
+        // construction.
+        let instance_hardware = InstanceHardware {
+            runtime: instance.runtime().into(),
+            nics: vec![],
+        };
+
         let new_runtime = sa
-            .instance_ensure(instance.id, instance.runtime().into(), requested)
+            .instance_ensure(instance.id, instance_hardware, requested)
             .await?;
 
         self.db_datastore
