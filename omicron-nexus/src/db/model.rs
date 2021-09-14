@@ -10,10 +10,9 @@ use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external::{
-    self, ByteCount, Error, Generation, InstanceCpuCount,
+    self, ByteCount, Generation, InstanceCpuCount,
 };
 use omicron_common::api::internal;
-use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -100,35 +99,6 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             time_modified: metadata.time_modified,
             time_deleted: None,
         }
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let time_deleted: Option<DateTime<Utc>> =
-            sql_row_value(value, "time_deleted")?;
-
-        // We could support representing deleted objects, but we would want to
-        // think about how to do that.  For example, we might want to use
-        // separate types so that the control plane can't accidentally do things
-        // like attach a disk to a deleted Instance.  We haven't figured any of
-        // this out, and there's no need yet.
-        if time_deleted.is_some() {
-            return Err(external::Error::internal_error(
-                "model does not support objects that have been deleted",
-            ));
-        }
-        Ok(IdentityMetadata {
-            id: sql_row_value(value, "id")?,
-            name: sql_row_value(value, "name")?,
-            description: sql_row_value(value, "description")?,
-            time_created: sql_row_value(value, "time_created")?,
-            time_modified: sql_row_value(value, "time_modified")?,
-            time_deleted: sql_row_value(value, "time_deleted")?,
-        })
     }
 }
 
