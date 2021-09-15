@@ -1205,7 +1205,17 @@ pub struct VpcUpdateParams {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Inet"]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl std::ops::Deref for Ipv4Net {
@@ -1218,6 +1228,37 @@ impl std::ops::Deref for Ipv4Net {
 impl std::fmt::Display for Ipv4Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
+where
+    DB: Backend,
+    ipnetwork::IpNetwork: ToSql<sql_types::Inet, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        ipnetwork::IpNetwork::V4(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Inet, DB> for Ipv4Net
+where
+    DB: Backend,
+    ipnetwork::IpNetwork: FromSql<sql_types::Inet, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let inet = ipnetwork::IpNetwork::from_sql(bytes)?;
+        match inet {
+            ipnetwork::IpNetwork::V4(net) => {
+                deserialize::Result::Ok(Ipv4Net(net))
+            }
+            _ => panic!("expected IPV4"),
+            // should look like the below but I can't get it to compile
+            // _ => deserialize::Result::Err("expected IPV4"),
+        }
     }
 }
 

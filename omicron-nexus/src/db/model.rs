@@ -810,7 +810,7 @@ pub struct VpcSubnet {
     pub time_deleted: Option<DateTime<Utc>>,
 
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<ipnetwork::IpNetwork>,
+    pub ipv4_block: Option<external::Ipv4Net>,
     pub ipv6_block: Option<ipnetwork::IpNetwork>,
 }
 
@@ -831,7 +831,7 @@ impl VpcSubnet {
 
             vpc_id,
 
-            ipv4_block: params.ipv4_block.map(|f| f.0.into()),
+            ipv4_block: params.ipv4_block,
             ipv6_block: params.ipv6_block.map(|f| f.0.into()),
         }
     }
@@ -853,12 +853,7 @@ impl Into<external::VpcSubnet> for VpcSubnet {
         external::VpcSubnet {
             identity: self.identity().into(),
             vpc_id: self.vpc_id,
-            ipv4_block: match self.ipv4_block {
-                Some(ipnetwork::IpNetwork::V4(net)) => {
-                    Some(external::Ipv4Net(net))
-                }
-                _ => None,
-            },
+            ipv4_block: self.ipv4_block,
             ipv6_block: match self.ipv6_block {
                 Some(ipnetwork::IpNetwork::V6(net)) => {
                     Some(external::Ipv6Net(net))
