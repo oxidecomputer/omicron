@@ -145,8 +145,10 @@ async fn collection_task(
 struct CollectionTask {
     // Channel used to send messages from the agent to the actual task. The task owns the other
     // side.
+    #[allow(dead_code)]
     pub inbox: mpsc::Sender<CollectionMessage>,
     // Handle to the actual tokio task running the collection loop.
+    #[allow(dead_code)]
     pub task: JoinHandle<()>,
 }
 
