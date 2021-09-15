@@ -1675,7 +1675,7 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "pq-sys"
 version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/pq-sys?branch=issue-36-with-metadata#303f5c27c325853956389e3a7876b07c5a241bc0"
+source = "git+https://github.com/oxidecomputer/pq-sys?branch=omicron#b1194c190f4d4a103c2280908cd1e97628c5c1cb"
 dependencies = [
  "vcpkg",
 ]
