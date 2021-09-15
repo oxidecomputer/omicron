@@ -1,7 +1,10 @@
 use http::method::Method;
 use http::StatusCode;
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
@@ -11,6 +14,7 @@ use std::convert::TryFrom;
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
+use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
@@ -51,21 +55,43 @@ async fn test_vpc_subnets() {
     assert_eq!(error.message, "not found: vpc subnet with name \"subnet1\"");
 
     /* Create a VPC Subnet. */
+    let ipv4_block =
+        Some(Ipv4Net("10.1.9.32/16".parse::<Ipv4Network>().unwrap()));
+    let ipv6_block =
+        Some(Ipv6Net("2001:db8::0/96".parse::<Ipv6Network>().unwrap()));
     let new_subnet = VpcSubnetCreateParams {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(subnet_name).unwrap(),
             description: String::from("it's below the net"),
         },
-        ipv4_block: None,
-        ipv6_block: None,
+        ipv4_block,
+        ipv6_block,
     };
     let subnet: VpcSubnet =
         objects_post(&client, &subnets_url, new_subnet.clone()).await;
     assert_eq!(subnet.identity.name, subnet_name);
     assert_eq!(subnet.identity.description, "it's below the net");
     assert_eq!(subnet.vpc_id, vpc.identity.id);
-    assert_eq!(subnet.ipv4_block, None);
-    assert_eq!(subnet.ipv6_block, None);
+    assert_eq!(subnet.ipv4_block, ipv4_block);
+    assert_eq!(subnet.ipv6_block, ipv6_block);
+
+    // try to update ipv4_block with IPv6 value, should 400
+    assert_put_400(
+        client,
+        &subnet_url,
+        String::from("{ \"ipv4Block\": \"2001:db8::0/96\" }"),
+        "unable to parse body: invalid address: 2001:db8::0",
+    )
+    .await;
+
+    // try to update ipv6_block with IPv4 value, should 400
+    assert_put_400(
+        client,
+        &subnet_url,
+        String::from("{ \"ipv6Block\": \"10.1.9.32/16\" }"),
+        "unable to parse body: invalid address: 10.1.9.32",
+    )
+    .await;
 
     // get subnet, should be the same
     let same_subnet = object_get::<VpcSubnet>(client, &subnet_url).await;
@@ -211,4 +237,22 @@ async fn test_vpc_subnets() {
 fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {
     identity_eq(&sn1.identity, &sn2.identity);
     assert_eq!(sn1.vpc_id, sn2.vpc_id);
+}
+
+async fn assert_put_400(
+    client: &ClientTestContext,
+    url: &str,
+    body: String,
+    message: &str,
+) {
+    let error = client
+        .make_request_with_body(
+            Method::PUT,
+            &url,
+            body.into(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.message.starts_with(message));
 }
