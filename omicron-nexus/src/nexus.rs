@@ -1030,11 +1030,9 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Vpc> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpcs = self
             .db_datastore
-            .project_list_vpcs(&project_id, pagparams)
+            .project_list_vpcs(project_name, pagparams)
             .await?
             .into_iter()
             .map(|vpc| vpc.into())
@@ -1097,15 +1095,13 @@ impl Nexus {
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
-        let subnets = self
+        Ok(self
             .db_datastore
-            .vpc_list_subnets(&vpc.identity.id, pagparams)
+            .vpc_list_subnets(project_name, vpc_name, pagparams)
             .await?
             .into_iter()
             .map(|subnet| subnet.into())
-            .collect::<Vec<VpcSubnet>>();
-        Ok(subnets)
+            .collect::<Vec<VpcSubnet>>())
     }
 
     pub async fn vpc_lookup_subnet(

@@ -775,14 +775,16 @@ impl DataStore {
 
     pub async fn project_list_vpcs(
         &self,
-        project_id: &Uuid,
+        project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        use db::schema::vpc::dsl;
+        use db::schema::{project, vpc};
 
-        paginated(dsl::vpc, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
+        paginated(vpc::table, vpc::columns::name, pagparams)
+            .inner_join(project::table)
+            .filter(project::columns::name.eq(project_name.clone()))
+            .filter(project::columns::time_deleted.is_null())
+            .filter(vpc::columns::time_deleted.is_null())
             .load_async::<db::model::Vpc>(self.pool())
             .await
             .map_err(|e| {
@@ -848,11 +850,11 @@ impl DataStore {
         use db::schema::{project, vpc};
 
         vpc::table
-            .filter(vpc::columns::time_deleted.is_null())
-            .filter(vpc::columns::name.eq(vpc_name.clone()))
             .inner_join(project::table)
             .filter(project::columns::time_deleted.is_null())
             .filter(project::columns::name.eq(project_name.clone()))
+            .filter(vpc::columns::time_deleted.is_null())
+            .filter(vpc::columns::name.eq(vpc_name.clone()))
             .select(vpc::all_columns)
             .get_result_async(self.pool())
             .await
@@ -887,14 +889,19 @@ impl DataStore {
 
     pub async fn vpc_list_subnets(
         &self,
-        vpc_id: &Uuid,
+        project_name: &Name,
+        vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::{project, vpc, vpcsubnet};
 
-        paginated(dsl::vpcsubnet, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+        paginated(vpcsubnet::table, vpcsubnet::columns::name, pagparams)
+            .inner_join(vpc::table.inner_join(project::table))
+            .filter(project::columns::time_deleted.is_null())
+            .filter(project::columns::name.eq(project_name.clone()))
+            .filter(vpc::columns::time_deleted.is_null())
+            .filter(vpc::columns::name.eq(vpc_name.clone()))
+            .filter(vpcsubnet::columns::time_deleted.is_null())
             .load_async::<db::model::VpcSubnet>(self.pool())
             .await
             .map_err(|e| {
@@ -915,10 +922,10 @@ impl DataStore {
 
         vpcsubnet::table
             .inner_join(vpc::table.inner_join(project::table))
-            .filter(vpc::columns::time_deleted.is_null())
-            .filter(vpc::columns::name.eq(vpc_name.clone()))
             .filter(project::columns::time_deleted.is_null())
             .filter(project::columns::name.eq(project_name.clone()))
+            .filter(vpc::columns::time_deleted.is_null())
+            .filter(vpc::columns::name.eq(vpc_name.clone()))
             .filter(vpcsubnet::columns::time_deleted.is_null())
             .filter(vpcsubnet::columns::name.eq(subnet_name.clone()))
             .select(vpcsubnet::all_columns)
