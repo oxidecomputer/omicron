@@ -11,7 +11,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" 
 futures = "0.3.15"
 http = "0.2.0"
 hyper = "0.14"
-ipnet = "2.3"
+ipnetwork = "0.18"
 omicron-common = { path = "../omicron-common" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }

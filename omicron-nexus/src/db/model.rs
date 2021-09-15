@@ -775,8 +775,6 @@ impl Into<external::Vpc> for Vpc {
             identity: self.identity().into(),
             project_id: self.project_id,
             dns_name: self.dns_name,
-            // VPC subnets are accessed through a separate row lookup.
-            vpc_subnets: vec![],
         }
     }
 }
@@ -812,11 +810,32 @@ pub struct VpcSubnet {
     pub time_deleted: Option<DateTime<Utc>>,
 
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<ipnetwork::IpNetwork>,
-    pub ipv6_block: Option<ipnetwork::IpNetwork>,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
 }
 
 impl VpcSubnet {
+    pub fn new(
+        subnet_id: Uuid,
+        vpc_id: Uuid,
+        params: external::VpcSubnetCreateParams,
+    ) -> Self {
+        let identity = IdentityMetadata::new(subnet_id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
+            vpc_id,
+
+            ipv4_block: params.ipv4_block,
+            ipv6_block: params.ipv6_block,
+        }
+    }
+
     pub fn identity(&self) -> IdentityMetadata {
         IdentityMetadata {
             id: self.id,
@@ -825,6 +844,39 @@ impl VpcSubnet {
             time_created: self.time_created,
             time_modified: self.time_modified,
             time_deleted: self.time_deleted,
+        }
+    }
+}
+
+impl Into<external::VpcSubnet> for VpcSubnet {
+    fn into(self) -> external::VpcSubnet {
+        external::VpcSubnet {
+            identity: self.identity().into(),
+            vpc_id: self.vpc_id,
+            ipv4_block: self.ipv4_block,
+            ipv6_block: self.ipv6_block,
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "vpcsubnet"]
+pub struct VpcSubnetUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
+}
+
+impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
+    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            ipv4_block: params.ipv4_block,
+            ipv6_block: params.ipv6_block,
         }
     }
 }

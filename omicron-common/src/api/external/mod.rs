@@ -22,6 +22,7 @@ pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
+use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -534,6 +535,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    VpcSubnet,
     Oximeter,
 }
 
@@ -551,6 +553,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::Oximeter => "oximeter",
             }
         )
@@ -1178,9 +1181,6 @@ pub struct Vpc {
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
-
-    // TODO-correctness does the model include this? do we always return these?
-    pub vpc_subnets: Vec<VpcSubnet>,
 }
 
 /**
@@ -1206,11 +1206,21 @@ pub struct VpcUpdateParams {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Ipv4Net(pub ipnet::Ipv4Net);
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Inet"]
+pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl std::ops::Deref for Ipv4Net {
-    type Target = ipnet::Ipv4Net;
+    type Target = ipnetwork::Ipv4Network;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1219,6 +1229,36 @@ impl std::ops::Deref for Ipv4Net {
 impl std::fmt::Display for Ipv4Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
+// all we have to do is wrap in the container and call to/from on that
+
+impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
+where
+    DB: Backend,
+    IpNetwork: ToSql<sql_types::Inet, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        IpNetwork::V4(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Inet, DB> for Ipv4Net
+where
+    DB: Backend,
+    IpNetwork: FromSql<sql_types::Inet, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let inet = IpNetwork::from_sql(bytes)?;
+        match inet {
+            IpNetwork::V4(net) => Ok(Ipv4Net(net)),
+            _ => Err("Expected IPV4".into()),
+        }
     }
 }
 
@@ -1262,11 +1302,21 @@ impl JsonSchema for Ipv4Net {
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Ipv6Net(pub ipnet::Ipv6Net);
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Inet"]
+pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl std::ops::Deref for Ipv6Net {
-    type Target = ipnet::Ipv6Net;
+    type Target = ipnetwork::Ipv6Network;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1275,6 +1325,36 @@ impl std::ops::Deref for Ipv6Net {
 impl std::fmt::Display for Ipv6Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
+// all we have to do is wrap in the container and call to/from on that
+
+impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
+where
+    DB: Backend,
+    IpNetwork: ToSql<sql_types::Inet, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        IpNetwork::V6(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Inet, DB> for Ipv6Net
+where
+    DB: Backend,
+    IpNetwork: FromSql<sql_types::Inet, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let inet = IpNetwork::from_sql(bytes)?;
+        match inet {
+            IpNetwork::V6(net) => Ok(Ipv6Net(net)),
+            _ => Err("expected IPV6".into()),
+        }
     }
 }
 
@@ -1334,6 +1414,30 @@ pub struct VpcSubnet {
     pub ipv4_block: Option<Ipv4Net>,
 
     /** The IPv6 subnet CIDR block. */
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/**
+ * Create-time parameters for a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/**
+ * Updateable properties of a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }
 
