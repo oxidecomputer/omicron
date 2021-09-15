@@ -907,15 +907,21 @@ impl DataStore {
     }
     pub async fn vpc_subnet_fetch_by_name(
         &self,
-        vpc_id: &Uuid,
+        project_name: &Name,
+        vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::{project, vpc, vpcsubnet};
 
-        dsl::vpcsubnet
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
-            .filter(dsl::name.eq(subnet_name.clone()))
+        vpcsubnet::table
+            .inner_join(vpc::table.inner_join(project::table))
+            .filter(vpc::columns::time_deleted.is_null())
+            .filter(vpc::columns::name.eq(vpc_name.clone()))
+            .filter(project::columns::time_deleted.is_null())
+            .filter(project::columns::name.eq(project_name.clone()))
+            .filter(vpcsubnet::columns::time_deleted.is_null())
+            .filter(vpcsubnet::columns::name.eq(subnet_name.clone()))
+            .select(vpcsubnet::all_columns)
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
