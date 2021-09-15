@@ -811,7 +811,7 @@ pub struct VpcSubnet {
 
     pub vpc_id: Uuid,
     pub ipv4_block: Option<external::Ipv4Net>,
-    pub ipv6_block: Option<ipnetwork::IpNetwork>,
+    pub ipv6_block: Option<external::Ipv6Net>,
 }
 
 impl VpcSubnet {
@@ -832,7 +832,7 @@ impl VpcSubnet {
             vpc_id,
 
             ipv4_block: params.ipv4_block,
-            ipv6_block: params.ipv6_block.map(|f| f.0.into()),
+            ipv6_block: params.ipv6_block,
         }
     }
 
@@ -854,12 +854,7 @@ impl Into<external::VpcSubnet> for VpcSubnet {
             identity: self.identity().into(),
             vpc_id: self.vpc_id,
             ipv4_block: self.ipv4_block,
-            ipv6_block: match self.ipv6_block {
-                Some(ipnetwork::IpNetwork::V6(net)) => {
-                    Some(external::Ipv6Net(net))
-                }
-                _ => None,
-            },
+            ipv6_block: self.ipv6_block,
         }
     }
 }
@@ -870,8 +865,8 @@ pub struct VpcSubnetUpdate {
     pub name: Option<external::Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
-    pub ipv4_block: Option<ipnetwork::IpNetwork>,
-    pub ipv6_block: Option<ipnetwork::IpNetwork>,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
 }
 
 impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
@@ -880,8 +875,8 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
             name: params.identity.name,
             description: params.identity.description,
             time_modified: Utc::now(),
-            ipv4_block: params.ipv4_block.map(|f| f.0.into()),
-            ipv6_block: params.ipv6_block.map(|f| f.0.into()),
+            ipv4_block: params.ipv4_block,
+            ipv6_block: params.ipv6_block,
         }
     }
 }

@@ -20,8 +20,8 @@ use common::test_setup;
 extern crate slog;
 
 #[tokio::test]
-async fn test_vpcs() {
-    let cptestctx = test_setup("test_vpcs").await;
+async fn test_vpc_subnets() {
+    let cptestctx = test_setup("test_vpc_subnets").await;
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */

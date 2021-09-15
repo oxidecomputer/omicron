@@ -1302,7 +1302,17 @@ impl JsonSchema for Ipv4Net {
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    AsExpression,
+    FromSqlRow,
+)]
+#[sql_type = "sql_types::Inet"]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl std::ops::Deref for Ipv6Net {
@@ -1315,6 +1325,37 @@ impl std::ops::Deref for Ipv6Net {
 impl std::fmt::Display for Ipv6Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
+where
+    DB: Backend,
+    ipnetwork::IpNetwork: ToSql<sql_types::Inet, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        ipnetwork::IpNetwork::V6(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Inet, DB> for Ipv6Net
+where
+    DB: Backend,
+    ipnetwork::IpNetwork: FromSql<sql_types::Inet, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let inet = ipnetwork::IpNetwork::from_sql(bytes)?;
+        match inet {
+            ipnetwork::IpNetwork::V6(net) => {
+                deserialize::Result::Ok(Ipv6Net(net))
+            }
+            _ => panic!("expected IPV6"),
+            // should look like the below but I can't get it to compile
+            // _ => deserialize::Result::Err("expected IPV6"),
+        }
     }
 }
 
