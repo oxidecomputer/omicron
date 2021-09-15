@@ -1255,9 +1255,7 @@ where
             ipnetwork::IpNetwork::V4(net) => {
                 deserialize::Result::Ok(Ipv4Net(net))
             }
-            _ => panic!("expected IPV4"),
-            // should look like the below but I can't get it to compile
-            // _ => deserialize::Result::Err("expected IPV4"),
+            _ => deserialize::Result::Err("Expected IPV4".into()),
         }
     }
 }
@@ -1352,9 +1350,7 @@ where
             ipnetwork::IpNetwork::V6(net) => {
                 deserialize::Result::Ok(Ipv6Net(net))
             }
-            _ => panic!("expected IPV6"),
-            // should look like the below but I can't get it to compile
-            // _ => deserialize::Result::Err("expected IPV6"),
+            _ => deserialize::Result::Err("expected IPV6".into()),
         }
     }
 }
