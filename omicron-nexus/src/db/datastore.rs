@@ -905,7 +905,7 @@ impl DataStore {
                 )
             })
     }
-    pub async fn vpc_subnet_fetch_by_name(
+    pub async fn vpc_subnet_lookup_by_name(
         &self,
         project_name: &Name,
         vpc_name: &Name,

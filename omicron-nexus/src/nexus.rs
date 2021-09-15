@@ -1116,7 +1116,7 @@ impl Nexus {
     ) -> LookupResult<VpcSubnet> {
         Ok(self
             .db_datastore
-            .vpc_subnet_fetch_by_name(project_name, vpc_name, subnet_name)
+            .vpc_subnet_lookup_by_name(project_name, vpc_name, subnet_name)
             .await?
             .into())
     }
