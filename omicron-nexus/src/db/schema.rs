@@ -142,6 +142,8 @@ table! {
     }
 }
 
+joinable!(vpc -> project (project_id));
+
 table! {
     vpcsubnet (id) {
         id -> Uuid,

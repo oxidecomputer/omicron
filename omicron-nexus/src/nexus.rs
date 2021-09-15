@@ -1062,11 +1062,9 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<Vpc> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
         Ok(self
             .db_datastore
-            .vpc_fetch_by_name(&project_id, vpc_name)
+            .vpc_lookup_by_name(project_name, vpc_name)
             .await?
             .into())
     }
@@ -1077,10 +1075,10 @@ impl Nexus {
         vpc_name: &Name,
         params: &VpcUpdateParams,
     ) -> UpdateResult<()> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
-        let vpc =
-            self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
+        let vpc = self
+            .db_datastore
+            .vpc_lookup_by_name(project_name, vpc_name)
+            .await?;
         Ok(self.db_datastore.project_update_vpc(&vpc.id, params).await?)
     }
 

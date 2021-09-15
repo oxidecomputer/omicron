@@ -840,17 +840,20 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn vpc_fetch_by_name(
+    pub async fn vpc_lookup_by_name(
         &self,
-        project_id: &Uuid,
+        project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        use db::schema::vpc::dsl;
+        use db::schema::{project, vpc};
 
-        dsl::vpc
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(vpc_name.clone()))
+        vpc::table
+            .filter(vpc::columns::time_deleted.is_null())
+            .filter(vpc::columns::name.eq(vpc_name.clone()))
+            .inner_join(project::table)
+            .filter(project::columns::time_deleted.is_null())
+            .filter(project::columns::name.eq(project_name.clone()))
+            .select(vpc::all_columns)
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
