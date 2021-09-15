@@ -32,9 +32,6 @@ use common::identity_eq;
 use common::resource_helpers::create_project;
 use common::test_setup;
 
-#[macro_use]
-extern crate slog;
-
 /*
  * TODO-cleanup the mess of URLs used here and in test_instances.rs ought to
  * come from common code.

@@ -29,9 +29,6 @@ use common::identity_eq;
 use common::resource_helpers::create_project;
 use common::test_setup;
 
-#[macro_use]
-extern crate slog;
-
 #[tokio::test]
 async fn test_instances() {
     let cptestctx = test_setup("test_instances").await;
