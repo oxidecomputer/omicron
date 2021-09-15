@@ -22,6 +22,7 @@ pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
+use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1231,31 +1232,32 @@ impl std::fmt::Display for Ipv4Net {
     }
 }
 
+// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
+// all we have to do is wrap in the container and call to/from on that
+
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
 where
     DB: Backend,
-    ipnetwork::IpNetwork: ToSql<sql_types::Inet, DB>,
+    IpNetwork: ToSql<sql_types::Inet, DB>,
 {
     fn to_sql<W: std::io::Write>(
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        ipnetwork::IpNetwork::V4(self.0).to_sql(out)
+        IpNetwork::V4(self.0).to_sql(out)
     }
 }
 
 impl<DB> FromSql<sql_types::Inet, DB> for Ipv4Net
 where
     DB: Backend,
-    ipnetwork::IpNetwork: FromSql<sql_types::Inet, DB>,
+    IpNetwork: FromSql<sql_types::Inet, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let inet = ipnetwork::IpNetwork::from_sql(bytes)?;
+        let inet = IpNetwork::from_sql(bytes)?;
         match inet {
-            ipnetwork::IpNetwork::V4(net) => {
-                deserialize::Result::Ok(Ipv4Net(net))
-            }
-            _ => deserialize::Result::Err("Expected IPV4".into()),
+            IpNetwork::V4(net) => Ok(Ipv4Net(net)),
+            _ => Err("Expected IPV4".into()),
         }
     }
 }
@@ -1326,31 +1328,32 @@ impl std::fmt::Display for Ipv6Net {
     }
 }
 
+// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
+// all we have to do is wrap in the container and call to/from on that
+
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
 where
     DB: Backend,
-    ipnetwork::IpNetwork: ToSql<sql_types::Inet, DB>,
+    IpNetwork: ToSql<sql_types::Inet, DB>,
 {
     fn to_sql<W: std::io::Write>(
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        ipnetwork::IpNetwork::V6(self.0).to_sql(out)
+        IpNetwork::V6(self.0).to_sql(out)
     }
 }
 
 impl<DB> FromSql<sql_types::Inet, DB> for Ipv6Net
 where
     DB: Backend,
-    ipnetwork::IpNetwork: FromSql<sql_types::Inet, DB>,
+    IpNetwork: FromSql<sql_types::Inet, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let inet = ipnetwork::IpNetwork::from_sql(bytes)?;
+        let inet = IpNetwork::from_sql(bytes)?;
         match inet {
-            ipnetwork::IpNetwork::V6(net) => {
-                deserialize::Result::Ok(Ipv6Net(net))
-            }
-            _ => deserialize::Result::Err("expected IPV6".into()),
+            IpNetwork::V6(net) => Ok(Ipv6Net(net)),
+            _ => Err("expected IPV6".into()),
         }
     }
 }

@@ -1,6 +1,6 @@
 //! API for interacting with Zones running Propolis.
 
-use ipnetwork;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -192,7 +192,7 @@ impl Zones {
     pub fn create_address(
         zone: &str,
         interface: &str,
-    ) -> Result<ipnetwork::IpNetwork, Error> {
+    ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
