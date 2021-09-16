@@ -102,19 +102,16 @@ jobs:
         path: "clickhouse"
     - name: Build
       # We build with:
-      # - RUSTFLAGS="-D warnings": disallow warnings in CI builds.  This can
-      #   result in breakage when the toolchain is updated, but that should only
-      #   happen with a change to the repo, which gives us an opportunity to
-      #   find and fix any newly-introduced warnings.
-      # - RUSTDOCFLAGS="-D warnings -Clink-args=-Wl,R$(pg_config --libdir)": The
-      #   "-D warnings" part is the rustdoc analog for the RUSTFLAGS above.  For
-      #   the "-Clink-args" part, see README.adoc.
+      # - RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings": disallow warnings
+      #   in CI builds.  This can result in breakage when the toolchain is
+      #   updated, but that should only happen with a change to the repo, which
+      #   gives us an opportunity to find and fix any newly-introduced warnings.
       # - `--locked`: do not update Cargo.lock when building.  Checking in
       #   Cargo.lock ensures that everyone is using the same dependencies and
       #   also gives us a record of which dependencies were used for each CI
       #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
       #   is up to date.
-      run: RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings -Clink-args=-Wl,R$(pg_config --libdir)" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+      run: RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -126,4 +123,4 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings -Clink-args=-R$(pg_config --libdir)" cargo +${{ matrix.toolchain }} test --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --locked --verbose
