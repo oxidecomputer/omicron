@@ -119,5 +119,6 @@ jobs:
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
+      # Use the same RUSTFLAGS as above to avoid having to rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --locked --verbose
