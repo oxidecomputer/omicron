@@ -106,6 +106,7 @@ the database files will be deleted when you stop the program.
 
 The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
 
+// NOTE: If we're able to remove this workaround, we should also be able to remove it from the GitHub CI action in .github/workflows/rust.yml.
 . Work around https://github.com/rust-lang/cargo/issues/9895[rust-lang/cargo#9895]: set `RUSTDOCFLAGS` in your environment so that built test binaries will be able to find your local copy of libpq.  A typical example might look like this:
 +
 ----
