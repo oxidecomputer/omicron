@@ -190,6 +190,7 @@ fn configure_rpaths_from_path(
  * Emits the Cargo instruction for a given RPATH.  This is only separated out to
  * make different parts of this module easier to test.
  */
+#[cfg(any(target_os = "illumos", target_os = "linux"))]
 fn emit_rpath(path_str: &str) -> String {
     format!("cargo:rustc-link-arg=-Wl,-R{}", path_str)
 }
@@ -244,6 +245,7 @@ mod tests {
         assert_eq!(error, "contains non-UTF8 data");
     }
 
+    #[cfg(any(target_os = "illumos", target_os = "linux"))]
     #[test]
     fn test_emit_rpath() {
         use super::emit_rpath;
