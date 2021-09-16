@@ -109,7 +109,7 @@ The easiest way to start the required databases is to use the built-in `omicron-
 . Work around https://github.com/rust-lang/cargo/issues/9895[rust-lang/cargo#9895]: set `RUSTDOCFLAGS` in your environment so that built test binaries will be able to find your local copy of libpq.  A typical example might look like this:
 +
 ----
-$ export RUSTDOCFLAGS="-Clink-args=-R$(pg_config --libdir)"
+$ export RUSTDOCFLAGS="-Clink-args=-Wl,-R$(pg_config --libdir)"
 ----
 + Note that this might be wrong in some configurations or if you're using environment variables to control how the `pq-sys` crate finds libpq.  See https://github.com/oxidecomputer/omicron/issues/213[#213] for details.
 +
