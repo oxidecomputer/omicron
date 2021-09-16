@@ -101,7 +101,17 @@ jobs:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
         path: "clickhouse"
     - name: Build
-      run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+      # We build with:
+      # - RUSTFLAGS="-D warnings": disallow warnings in CI builds.  This can
+      #   result in breakage when the toolchain is updated, but that should only
+      #   happen with a change to the repo, which gives us an opportunity to
+      #   find and fix any newly-introduced warnings.
+      # - `--locked`: do not update Cargo.lock when building.  Checking in
+      #   Cargo.lock ensures that everyone is using the same dependencies and
+      #   also gives us a record of which dependencies were used for each CI
+      #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
+      #   is up to date.
+      run: RUSTFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -109,5 +119,6 @@ jobs:
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
+      # Use the same RUSTFLAGS as above to avoid having to rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --locked --verbose

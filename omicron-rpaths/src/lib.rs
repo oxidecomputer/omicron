@@ -90,9 +90,6 @@
  * [4]: https://github.com/rust-lang/cargo/issues/9554
  */
 
-use std::ffi::OsStr;
-use std::ffi::OsString;
-
 /**
  * Tells Cargo to pass linker arguments that specify the right RPATH for Omicron
  * binaries
@@ -104,157 +101,183 @@ use std::ffi::OsString;
  * arguments here that specify exactly which ones are expected to be found.
  */
 pub fn configure_default_omicron_rpaths() {
-    let mut rpaths = Vec::new();
-
-    for env_var_name in RPATH_ENV_VARS {
-        let env_var_name = OsString::from(&env_var_name);
-        configure_rpaths_from_env_var(&mut rpaths, &env_var_name);
-    }
-
-    /* None of this behavior is needed on MacOS. */
-    #[cfg(any(target_os = "illumos", target_os = "linux"))]
-    for r in rpaths {
-        println!("{}", emit_rpath(&r));
-    }
+    internal::configure_default_omicron_rpaths();
 }
 
-/**
- * Environment variables that contain RPATHs we want to use in our built
- * binaries
- *
- * These environment variables are set by Cargo based on metadata emitted by our
- * dependencies' build scripts.  Since a particular dependency could use
- * multiple libraries in different paths, each of these environment variables
- * may itself look like a path, not just a directory.  That is, these are
- * colon-separated lists of directories.
- *
- * Currently, we only do this for libpq ("pq-sys" package), but this pattern
- * could be generalized for other native libraries.
- */
-static RPATH_ENV_VARS: &'static [&'static str] = &["DEP_PQ_LIBDIRS"];
-
-/**
- * Tells Cargo to pass linker arguments that specify RPATHs from the environment
- * variable `env_var_name`
- *
- * Panics if the environment variable is not set or contains non-UTF8 data.
- * This might be surprising, since environment variables are optional in most
- * build-time mechanisms.  We opt for strictness here because in fact we _do_
- * expect these to always be set, and if they're not, it's most likely that
- * somebody has forgotten to include a required dependency.  We want to tell
- * them that rather than silently produce unrunnable binaries.
- */
-fn configure_rpaths_from_env_var(
-    rpaths: &mut Vec<String>,
-    env_var_name: &OsStr,
-) {
-    /*
-     * If you see this message, that means that the build script for some
-     * Omicron crate is trying to configure RPATHs for a native library, but the
-     * environment variable that's supposed to contain the RPATH information for
-     * that library is unset.  That most likely means that the crate you're
-     * building is lacking a direct dependency on the '*-sys' crate, or else
-     * that the '*-sys' crate's build script failed to set this metadata.
-     */
-    let env_var_value = std::env::var_os(env_var_name).unwrap_or_else(|| {
-        panic!(
-            "omicron-rpaths: expected {:?} to be set in the environment, but \
-            found it unset.  (Is the current crate missing a dependency on \
-            a *-sys crate?)",
-            env_var_name,
-        )
-    });
-
-    configure_rpaths_from_path(rpaths, &env_var_value).unwrap_or_else(
-        |error| panic!("omicron-rpaths: env var {:?}: {}", env_var_name, error),
-    );
+/* None of this behavior is needed on MacOS. */
+#[cfg(not(any(target_os = "illumos", target_os = "linux")))]
+mod internal {
+    pub fn configure_default_omicron_rpaths() {}
 }
 
-/**
- * Given a colon-separated list of paths in `env_var_value`, append to `rpaths`
- * the same list of paths.
- */
-fn configure_rpaths_from_path(
-    rpaths: &mut Vec<String>,
-    env_var_value: &OsStr,
-) -> Result<(), String> {
-    for path in std::env::split_paths(env_var_value) {
-        let path_str = path.to_str().ok_or_else(|| "contains non-UTF8 data")?;
-        rpaths.push(path_str.to_owned());
-    }
-
-    Ok(())
-}
-
-/**
- * Emits the Cargo instruction for a given RPATH.  This is only separated out to
- * make different parts of this module easier to test.
- */
-fn emit_rpath(path_str: &str) -> String {
-    format!("cargo:rustc-link-arg=-Wl,-R{}", path_str)
-}
-
-#[cfg(test)]
-mod tests {
+#[cfg(any(target_os = "illumos", target_os = "linux"))]
+mod internal {
     use std::ffi::OsStr;
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStrExt;
 
-    #[test]
-    #[should_panic = "omicron-rpaths: expected \"SHOULD_NOT_EXIST\" \
+    pub fn configure_default_omicron_rpaths() {
+        let mut rpaths = Vec::new();
+
+        for env_var_name in RPATH_ENV_VARS {
+            let env_var_name = std::ffi::OsString::from(&env_var_name);
+            configure_rpaths_from_env_var(&mut rpaths, &env_var_name);
+        }
+
+        for r in rpaths {
+            println!("{}", emit_rpath(&r));
+        }
+    }
+
+    /**
+     * Environment variables that contain RPATHs we want to use in our built
+     * binaries
+     *
+     * These environment variables are set by Cargo based on metadata emitted by
+     * our dependencies' build scripts.  Since a particular dependency could use
+     * multiple libraries in different paths, each of these environment
+     * variables may itself look like a path, not just a directory.  That is,
+     * these are colon-separated lists of directories.
+     *
+     * Currently, we only do this for libpq ("pq-sys" package), but this pattern
+     * could be generalized for other native libraries.
+     */
+    pub static RPATH_ENV_VARS: &'static [&'static str] = &["DEP_PQ_LIBDIRS"];
+
+    /**
+     * Tells Cargo to pass linker arguments that specify RPATHs from the
+     * environment variable `env_var_name`
+     *
+     * Panics if the environment variable is not set or contains non-UTF8 data.
+     * This might be surprising, since environment variables are optional in
+     * most build-time mechanisms.  We opt for strictness here because in fact
+     * we _do_ expect these to always be set, and if they're not, it's most
+     * likely that somebody has forgotten to include a required dependency.  We
+     * want to tell them that rather than silently produce unrunnable binaries.
+     */
+    pub fn configure_rpaths_from_env_var(
+        rpaths: &mut Vec<String>,
+        env_var_name: &OsStr,
+    ) {
+        /*
+         * If you see this message, that means that the build script for some
+         * Omicron crate is trying to configure RPATHs for a native library, but
+         * the environment variable that's supposed to contain the RPATH
+         * information for that library is unset.  That most likely means that
+         * the crate you're building is lacking a direct dependency on the
+         * '*-sys' crate, or else that the '*-sys' crate's build script failed
+         * to set this metadata.
+         */
+        let env_var_value =
+            std::env::var_os(env_var_name).unwrap_or_else(|| {
+                panic!(
+                    "omicron-rpaths: expected {:?} to be set in the \
+                    environment, but found it unset.  (Is the current \
+                    crate missing a dependency on a *-sys crate?)",
+                    env_var_name,
+                )
+            });
+
+        configure_rpaths_from_path(rpaths, &env_var_value).unwrap_or_else(
+            |error| {
+                panic!("omicron-rpaths: env var {:?}: {}", env_var_name, error)
+            },
+        );
+    }
+
+    /**
+     * Given a colon-separated list of paths in `env_var_value`, append to
+     * `rpaths` the same list of paths.
+     */
+    fn configure_rpaths_from_path(
+        rpaths: &mut Vec<String>,
+        env_var_value: &OsStr,
+    ) -> Result<(), String> {
+        for path in std::env::split_paths(env_var_value) {
+            let path_str =
+                path.to_str().ok_or_else(|| "contains non-UTF8 data")?;
+            rpaths.push(path_str.to_owned());
+        }
+
+        Ok(())
+    }
+
+    /**
+     * Emits the Cargo instruction for a given RPATH.  This is only separated
+     * out to make different parts of this module easier to test.
+     */
+    pub fn emit_rpath(path_str: &str) -> String {
+        format!("cargo:rustc-link-arg=-Wl,-R{}", path_str)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::ffi::OsStr;
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStrExt;
+
+        #[test]
+        #[should_panic = "omicron-rpaths: expected \"SHOULD_NOT_EXIST\" \
         to be set in the environment, but found it unset"]
-    fn test_configure_rpaths_from_bad_envvar() {
-        use super::configure_rpaths_from_env_var;
+        fn test_configure_rpaths_from_bad_envvar() {
+            use super::configure_rpaths_from_env_var;
 
-        let mut v = Vec::new();
-        configure_rpaths_from_env_var(
-            &mut v,
-            &OsString::from("SHOULD_NOT_EXIST"),
-        );
-    }
+            let mut v = Vec::new();
+            configure_rpaths_from_env_var(
+                &mut v,
+                &OsString::from("SHOULD_NOT_EXIST"),
+            );
+        }
 
-    #[test]
-    fn test_configure_from_path() {
-        use super::configure_rpaths_from_path;
+        #[test]
+        fn test_configure_from_path() {
+            use super::configure_rpaths_from_path;
 
-        let mut v = Vec::new();
+            let mut v = Vec::new();
 
-        configure_rpaths_from_path(
-            &mut v,
-            &OsString::from("/opt/local/lib:/usr/local/lib"),
-        )
-        .unwrap();
-        assert_eq!(v, vec!["/opt/local/lib", "/usr/local/lib"]);
-
-        configure_rpaths_from_path(&mut v, &OsString::from("foo")).unwrap();
-        assert_eq!(v, vec!["/opt/local/lib", "/usr/local/lib", "foo"]);
-
-        configure_rpaths_from_path(&mut v, &OsString::from("/my/special/lib"))
+            configure_rpaths_from_path(
+                &mut v,
+                &OsString::from("/opt/local/lib:/usr/local/lib"),
+            )
             .unwrap();
-        assert_eq!(
-            v,
-            vec!["/opt/local/lib", "/usr/local/lib", "foo", "/my/special/lib"]
-        );
+            assert_eq!(v, vec!["/opt/local/lib", "/usr/local/lib"]);
 
-        let error = configure_rpaths_from_path(
-            &mut v,
-            &OsStr::from_bytes(b"/foo/b\x80ar"),
-        )
-        .unwrap_err();
-        assert_eq!(error, "contains non-UTF8 data");
-    }
+            configure_rpaths_from_path(&mut v, &OsString::from("foo")).unwrap();
+            assert_eq!(v, vec!["/opt/local/lib", "/usr/local/lib", "foo"]);
 
-    #[test]
-    fn test_emit_rpath() {
-        use super::emit_rpath;
+            configure_rpaths_from_path(
+                &mut v,
+                &OsString::from("/my/special/lib"),
+            )
+            .unwrap();
+            assert_eq!(
+                v,
+                vec![
+                    "/opt/local/lib",
+                    "/usr/local/lib",
+                    "foo",
+                    "/my/special/lib"
+                ]
+            );
 
-        assert_eq!(
-            "cargo:rustc-link-arg=-Wl,-R/foo/bar",
-            emit_rpath("/foo/bar").as_str()
-        );
-        assert_eq!(
-            "cargo:rustc-link-arg=-Wl,-R$ORIGIN/../lib",
-            emit_rpath("$ORIGIN/../lib").as_str()
-        );
+            let error = configure_rpaths_from_path(
+                &mut v,
+                &OsStr::from_bytes(b"/foo/b\x80ar"),
+            )
+            .unwrap_err();
+            assert_eq!(error, "contains non-UTF8 data");
+        }
+
+        #[test]
+        fn test_emit_rpath() {
+            use super::emit_rpath;
+
+            assert_eq!(
+                "cargo:rustc-link-arg=-Wl,-R/foo/bar",
+                emit_rpath("/foo/bar").as_str()
+            );
+            assert_eq!(
+                "cargo:rustc-link-arg=-Wl,-R$ORIGIN/../lib",
+                emit_rpath("$ORIGIN/../lib").as_str()
+            );
+        }
     }
 }
