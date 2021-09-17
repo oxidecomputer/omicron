@@ -80,7 +80,7 @@ See the note about setting RUSTFLAGS at build time below.
 * Linux: `sudo apt-get install pkg-config`
 * Mac: `brew install pkg-config`
 
-After doing this, you should have the `pkg_config` command on your PATH.  For
+After doing this, you should have the `pkg-config` command on your PATH.  For
 example, on Helios, you'd want `/usr/bin` on your PATH.
 --
 . CockroachDB v20.2.5.
