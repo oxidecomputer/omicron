@@ -11,8 +11,6 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -28,10 +26,8 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
+use common::resource_helpers::create_project;
 use common::test_setup;
-
-#[macro_use]
-extern crate slog;
 
 #[tokio::test]
 async fn test_instances() {
@@ -43,17 +39,7 @@ async fn test_instances() {
     /* Create a project that we'll use for testing. */
     let project_name = "springfield-squidport";
     let url_instances = format!("/projects/{}/instances", project_name);
-    let _: Project = objects_post(
-        &client,
-        "/projects",
-        ProjectCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
-                description: "a pier".to_string(),
-            },
-        },
-    )
-    .await;
+    let _ = create_project(&client, &project_name).await;
 
     /* List instances.  There aren't any yet. */
     let instances = instances_list(&client, &url_instances).await;

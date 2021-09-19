@@ -16,7 +16,7 @@
  * We only use rustdoc for internal documentation, including private items, so
  * it's expected that we'll have links to private items in the docs.
  */
-#![allow(private_intra_doc_links)]
+#![allow(rustdoc::private_intra_doc_links)]
 /* TODO(#32): Remove this exception once resolved. */
 #![allow(clippy::field_reassign_with_default)]
 
@@ -28,7 +28,6 @@ pub mod config;
 pub mod db;
 pub mod dev;
 pub mod http_client;
-pub mod model_db;
 pub mod packaging;
 
 mod sled_agent_client;

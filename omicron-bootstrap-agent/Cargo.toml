@@ -3,9 +3,14 @@ name = "omicron-bootstrap-agent"
 version = "0.1.0"
 edition = "2018"
 
+[build-dependencies.omicron-rpaths]
+path = "../omicron-rpaths"
+
 [dependencies]
 http = "0.2.0"
 hyper = "0.14"
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 serde_json = "1.0"
 smf = "0.2"
 structopt = "0.3"

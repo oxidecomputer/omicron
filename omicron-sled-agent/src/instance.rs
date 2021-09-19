@@ -464,13 +464,13 @@ impl Instance {
             .await?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
-        let ip =
+        let network =
             Zones::create_address(&zname, &interface_name(&control_nic.name))?;
-        info!(inner.log, "Created address {} for zone: {}", ip, zname);
+        info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
         let port = 12400;
-        let server_addr = SocketAddr::new(ip.addr(), port);
+        let server_addr = SocketAddr::new(network.ip(), port);
         Zones::run_propolis(&zname, inner.id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 

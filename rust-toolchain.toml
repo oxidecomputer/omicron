@@ -1,17 +1,16 @@
-# We use nightly to enable the "asm" feature for dtrace probes.
 #
-# Additionally, we specify this specific verion of nightly to
-# workaround known bugs for illumos on more recent versions.
-# Context: https://github.com/rust-lang/rust/pull/85772
+# We use nightly for a few unstable features:
 #
-# Short-term: Once that bug is fixed, we should feel free
-# to update to migrate to a more recent nightly.
+# 1. the "asm" unstable Rust feature, used within Propolis for dtrace probes
+# 2. the "extra-link-arg" unstable Cargo feature, used in omicron-rpaths.  This
+#    will be stable in 1.56.
 #
-# Long-term: Once the ASM feature is stabilized, we should
-# consider using stable instead of nightly.
+# We specify a specific, known-good nightly to avoid regular breakage.
+# Once the above features stabilize, we should switch back to "stable".
+#
 
 [toolchain]
 # NOTE: This toolchain is also specified within .github/workflows/rust.yml
 # If you update it here, update that file too.
-channel = "nightly-2021-04-24"
+channel = "nightly-2021-09-03"
 profile = "default"

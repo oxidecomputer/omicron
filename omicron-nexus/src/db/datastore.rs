@@ -686,9 +686,7 @@ impl DataStore {
         Ok(())
     }
 
-    /*
-     * Saga management
-     */
+    // Sagas
 
     pub async fn saga_create(
         &self,
@@ -774,6 +772,52 @@ impl DataStore {
         }
     }
 
+    pub async fn saga_list_unfinished_by_id(
+        &self,
+        sec_id: &db::SecId,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::saga_types::Saga> {
+        use db::schema::saga::dsl;
+        paginated(dsl::saga, dsl::id, &pagparams)
+            .filter(
+                dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()),
+            )
+            .filter(dsl::current_sec.eq(*sec_id))
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(sec_id.0),
+                )
+            })
+    }
+
+    pub async fn saga_node_event_list_by_id(
+        &self,
+        id: db::saga_types::SagaId,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<steno::SagaNodeEvent> {
+        use db::schema::saganodeevent::dsl;
+        paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
+            .filter(dsl::saga_id.eq(id))
+            .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(id.0 .0),
+                )
+            })?
+            .into_iter()
+            .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
+            .collect::<Result<_, Error>>()
+    }
+
+    // VPCs
+
     pub async fn project_list_vpcs(
         &self,
         project_id: &Uuid,
@@ -805,7 +849,7 @@ impl DataStore {
 
         let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
         let name = vpc.name.clone();
-        let vpc: db::model::Vpc = diesel::insert_into(dsl::vpc)
+        let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -883,51 +927,116 @@ impl DataStore {
         Ok(())
     }
 
-    /*
-     * Sagas
-     */
-
-    pub async fn saga_list_unfinished_by_id(
+    pub async fn vpc_list_subnets(
         &self,
-        sec_id: &db::SecId,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::saga_types::Saga> {
-        use db::schema::saga::dsl;
-        paginated(dsl::saga, dsl::id, &pagparams)
-            .filter(
-                dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()),
-            )
-            .filter(dsl::current_sec.eq(*sec_id))
-            .load_async(self.pool())
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::VpcSubnet> {
+        use db::schema::vpcsubnet::dsl;
+
+        paginated(dsl::vpcsubnet, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .load_async::<db::model::VpcSubnet>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
                     e,
-                    ResourceType::SagaDbg,
-                    LookupType::ById(sec_id.0),
+                    ResourceType::VpcSubnet,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+    pub async fn vpc_subnet_fetch_by_name(
+        &self,
+        vpc_id: &Uuid,
+        subnet_name: &Name,
+    ) -> LookupResult<db::model::VpcSubnet> {
+        use db::schema::vpcsubnet::dsl;
+
+        dsl::vpcsubnet
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::name.eq(subnet_name.clone()))
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::ByName(subnet_name.as_str().to_owned()),
                 )
             })
     }
 
-    pub async fn saga_node_event_list_by_id(
+    pub async fn vpc_create_subnet(
         &self,
-        id: db::saga_types::SagaId,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<steno::SagaNodeEvent> {
-        use db::schema::saganodeevent::dsl;
-        paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
-            .filter(dsl::saga_id.eq(id))
-            .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
+        subnet_id: &Uuid,
+        vpc_id: &Uuid,
+        params: &api::external::VpcSubnetCreateParams,
+    ) -> CreateResult<db::model::VpcSubnet> {
+        use db::schema::vpcsubnet::dsl;
+
+        let subnet =
+            db::model::VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
+        let name = subnet.name.clone();
+        let subnet = diesel::insert_into(dsl::vpcsubnet)
+            .values(subnet)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::VpcSubnet,
+                    name.as_str(),
+                )
+            })?;
+        Ok(subnet)
+    }
+
+    pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
+        use db::schema::vpcsubnet::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::vpcsubnet)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*subnet_id))
+            .set(dsl::time_deleted.eq(now))
+            .get_result_async::<db::model::VpcSubnet>(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
                     e,
-                    ResourceType::SagaDbg,
-                    LookupType::ById(id.0 .0),
+                    ResourceType::VpcSubnet,
+                    LookupType::ById(*subnet_id),
                 )
-            })?
-            .into_iter()
-            .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
-            .collect::<Result<_, Error>>()
+            })?;
+        Ok(())
+    }
+
+    pub async fn vpc_update_subnet(
+        &self,
+        subnet_id: &Uuid,
+        params: &api::external::VpcSubnetUpdateParams,
+    ) -> Result<(), Error> {
+        use db::schema::vpcsubnet::dsl;
+        let updates: db::model::VpcSubnetUpdate = params.clone().into();
+
+        diesel::update(dsl::vpcsubnet)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*subnet_id))
+            .set(updates)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::ById(*subnet_id),
+                )
+            })?;
+        Ok(())
     }
 }
