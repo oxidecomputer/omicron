@@ -118,6 +118,8 @@ pub struct Nexus {
      * As with the sled agents above, this should be persisted at some point.
      */
     oximeter_collectors: Mutex<BTreeMap<Uuid, Arc<OximeterClient>>>,
+
+    recovery_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 /*
@@ -164,27 +166,25 @@ impl Nexus {
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
             },
-            db_datastore,
+            db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
             oximeter_collectors: Mutex::new(BTreeMap::new()),
+            recovery_task: std::sync::Mutex::new(None),
         };
 
-        /*
-         * TODO-design Would really like to store this recovery_task, but Nexus
-         * is immutable (behind the Arc) once we've done this.
-         */
         /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        db::recover(
+        let recovery_task = db::recover(
             log.new(o!("component" => "SagaRecoverer")),
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
-            Arc::clone(&pool),
+            db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
+        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
     }
 
