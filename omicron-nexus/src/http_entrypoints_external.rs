@@ -46,6 +46,9 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcSubnet;
+use omicron_common::api::external::VpcSubnetCreateParams;
+use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -89,6 +92,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_vpcs_get_vpc)?;
         api.register(project_vpcs_put_vpc)?;
         api.register(project_vpcs_delete_vpc)?;
+
+        api.register(vpc_subnets_get)?;
+        api.register(vpc_subnets_get_subnet)?;
+        api.register(vpc_subnets_post)?;
+        api.register(vpc_subnets_delete_subnet)?;
+        api.register(vpc_subnets_put_subnet)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -783,6 +792,141 @@ async fn project_vpcs_delete_vpc(
     let vpc_name = &path.vpc_name;
     nexus.project_delete_vpc(&project_name, &vpc_name).await?;
     Ok(HttpResponseDeleted())
+}
+
+/**
+ * List subnets in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let vpcs = nexus
+        .vpc_list_subnets(
+            &path.project_name,
+            &path.vpc_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+}
+
+/**
+ * Path parameters for VPC Subnet requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VpcSubnetPathParam {
+    project_name: Name,
+    vpc_name: Name,
+    subnet_name: Name,
+}
+
+/**
+ * Get subnet in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_get_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_lookup_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseOk(subnet))
+}
+
+/**
+ * Create a subnet in a VPC.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<VpcSubnetCreateParams>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_create_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &create_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseCreated(subnet))
+}
+
+/**
+ * Delete a subnet from a VPC.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_delete_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .vpc_delete_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a VPC Subnet.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_put_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+    subnet_params: TypedBody<VpcSubnetUpdateParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .vpc_update_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+            &subnet_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(()))
 }
 
 /*

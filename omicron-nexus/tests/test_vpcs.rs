@@ -1,22 +1,20 @@
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::objects_post;
 use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
+use common::resource_helpers::{
+    create_project, create_vpc, create_vpc_with_error,
+};
 use common::test_setup;
 
 extern crate slog;
@@ -32,7 +30,6 @@ async fn test_vpcs() {
     let _ = create_project(&client, &project_name).await;
 
     let project_name2 = "pokemon";
-    let vpcs_url2 = format!("/projects/{}/vpcs", project_name2);
     let _ = create_project(&client, &project_name2).await;
 
     /* List vpcs.  We see the default VPC, and nothing else. */
@@ -57,31 +54,24 @@ async fn test_vpcs() {
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
     /* Create a VPC. */
-    let new_vpc = VpcCreateParams {
-        identity: IdentityMetadataCreateParams {
-            name: Name::try_from("just-rainsticks").unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        dns_name: Name::try_from("abc").unwrap(),
-    };
-    let vpc: Vpc = objects_post(&client, &vpcs_url, new_vpc.clone()).await;
+    let vpc_name = "just-rainsticks";
+    let vpc = create_vpc(&client, project_name, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
-    assert_eq!(vpc.identity.description, "sells rainsticks");
+    assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
 
     /* Attempt to create a second VPC with a conflicting name. */
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &vpcs_url,
-            new_vpc.clone(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error = create_vpc_with_error(
+        &client,
+        project_name,
+        vpc_name,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     /* creating a VPC with the same name in another project works, though */
-    let vpc2: Vpc = objects_post(&client, &vpcs_url2, new_vpc.clone()).await;
+    let vpc2: Vpc = create_vpc(&client, project_name2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     /* List VPCs again and expect to find the one we just created. */
@@ -161,21 +151,4 @@ async fn vpc_put(
 fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
-}
-
-async fn create_project(
-    client: &ClientTestContext,
-    project_name: &str,
-) -> Project {
-    objects_post(
-        &client,
-        "/projects",
-        ProjectCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
-                description: "a pier".to_string(),
-            },
-        },
-    )
-    .await
 }

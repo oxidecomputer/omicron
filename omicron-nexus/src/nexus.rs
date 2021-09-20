@@ -33,6 +33,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcSubnet;
+use omicron_common::api::external::VpcSubnetCreateParams;
+use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -1099,6 +1102,79 @@ impl Nexus {
     ) -> DeleteResult {
         let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
         self.db_datastore.project_delete_vpc(&vpc.identity.id).await
+    }
+
+    pub async fn vpc_list_subnets(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcSubnet> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let subnets = self
+            .db_datastore
+            .vpc_list_subnets(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|subnet| subnet.into())
+            .collect::<Vec<VpcSubnet>>();
+        Ok(subnets)
+    }
+
+    pub async fn vpc_lookup_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+    ) -> LookupResult<VpcSubnet> {
+        // TODO: join projects, vpcs, and subnets and do this in one query
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        Ok(self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.identity.id, subnet_name)
+            .await?
+            .into())
+    }
+
+    pub async fn vpc_create_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcSubnetCreateParams,
+    ) -> CreateResult<VpcSubnet> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let id = Uuid::new_v4();
+        let subnet = self
+            .db_datastore
+            .vpc_create_subnet(&id, &vpc.identity.id, params)
+            .await?;
+        Ok(subnet.into())
+    }
+
+    pub async fn vpc_delete_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+    ) -> DeleteResult {
+        let subnet =
+            self.vpc_lookup_subnet(project_name, vpc_name, subnet_name).await?;
+        self.db_datastore.vpc_delete_subnet(&subnet.identity.id).await
+    }
+
+    pub async fn vpc_update_subnet(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        params: &VpcSubnetUpdateParams,
+    ) -> UpdateResult<()> {
+        let subnet =
+            self.vpc_lookup_subnet(project_name, vpc_name, subnet_name).await?;
+        Ok(self
+            .db_datastore
+            .vpc_update_subnet(&subnet.identity.id, params)
+            .await?)
     }
 
     /*

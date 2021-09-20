@@ -990,13 +990,13 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 [[package]]
 name = "libc"
 version = "0.2.101"
-source = "git+https://github.com/rust-lang/libc.git?rev=796459785#796459785e5190a02fdf7c223fc8aa91d04306f7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
 
 [[package]]
 name = "libc"
 version = "0.2.101"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
+source = "git+https://github.com/rust-lang/libc.git?rev=796459785#796459785e5190a02fdf7c223fc8aa91d04306f7"
 
 [[package]]
 name = "linked-hash-map"
@@ -1237,6 +1237,8 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
+ "omicron-rpaths",
+ "pq-sys",
  "serde",
  "serde_json",
  "slog",
@@ -1265,9 +1267,12 @@ dependencies = [
  "http",
  "hyper",
  "ipnet",
+ "ipnetwork",
  "libc 0.2.101 (registry+https://github.com/rust-lang/crates.io-index)",
  "macaddr",
+ "omicron-rpaths",
  "postgres-protocol",
+ "pq-sys",
  "propolis-server",
  "rayon",
  "reqwest",
@@ -1316,10 +1321,12 @@ dependencies = [
  "macaddr",
  "newtype_derive",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "pq-sys",
  "schemars",
  "serde",
  "serde_json",
@@ -1336,6 +1343,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-rpaths"
+version = "0.1.0"
+
+[[package]]
 name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
@@ -1347,9 +1358,11 @@ dependencies = [
  "futures",
  "http",
  "hyper",
- "ipnet",
+ "ipnetwork",
  "mockall",
  "omicron-common",
+ "omicron-rpaths",
+ "pq-sys",
  "propolis-client",
  "schemars",
  "serde",
@@ -1447,7 +1460,9 @@ dependencies = [
  "hyper",
  "num-traits",
  "omicron-common",
+ "omicron-rpaths",
  "oximeter-macro-impl",
+ "pq-sys",
  "reqwest",
  "schemars",
  "serde",
@@ -1661,8 +1676,7 @@ checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 [[package]]
 name = "pq-sys"
 version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac25eee5a0582f45a67e837e350d784e7003bd29a5f460796772061ca49ffda"
+source = "git+https://github.com/oxidecomputer/pq-sys?branch=omicron#b1194c190f4d4a103c2280908cd1e97628c5c1cb"
 dependencies = [
  "vcpkg",
 ]

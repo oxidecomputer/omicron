@@ -14,8 +14,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -31,10 +29,8 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
+use common::resource_helpers::create_project;
 use common::test_setup;
-
-#[macro_use]
-extern crate slog;
 
 /*
  * TODO-cleanup the mess of URLs used here and in test_instances.rs ought to
@@ -50,17 +46,7 @@ async fn test_disks() {
     /* Create a project for testing. */
     let project_name = "springfield-squidport-disks";
     let url_disks = format!("/projects/{}/disks", project_name);
-    let project: Project = objects_post(
-        &client,
-        "/projects",
-        ProjectCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
-                description: "a pier".to_string(),
-            },
-        },
-    )
-    .await;
+    let project = create_project(client, &project_name).await;
 
     /* List disks.  There aren't any yet. */
     let disks = disks_list(&client, &url_disks).await;

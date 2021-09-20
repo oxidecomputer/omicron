@@ -1,6 +1,6 @@
 //! Integration tests for oximeter collectors and producers.
 
-mod common;
+pub mod common;
 
 use uuid::Uuid;
 

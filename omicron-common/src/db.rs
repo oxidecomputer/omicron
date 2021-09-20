@@ -6,26 +6,7 @@
  */
 
 use crate::api::external::Error;
-use std::fmt;
 use thiserror::Error;
-use tokio_postgres::types::FromSql;
-
-/**
- * Extract a named field from a row.
- */
-pub fn sql_row_value<'a, I, T>(
-    row: &'a tokio_postgres::Row,
-    idx: I,
-) -> Result<T, Error>
-where
-    I: tokio_postgres::row::RowIndex + fmt::Display,
-    T: FromSql<'a>,
-{
-    let column_name = idx.to_string();
-    row.try_get(idx).map_err(|source| {
-        sql_error_generic(DbError::DeserializeError { column_name, source })
-    })
-}
 
 /*
  * TODO-debug It would be nice to have a backtrace in these errors.  thiserror

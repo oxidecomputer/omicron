@@ -70,7 +70,18 @@ We use Diesel's PostgreSQL support to connect to CockroachDB (which is wire-comp
 
 After doing this, you should have the `pg_config` command on your PATH.  For example, on Helios, you'd want `/opt/ooce/bin` on your PATH.
 
-See the note about setting RUSTFLAGS and RUSTDOCFLAGS at build time below.
+See the note about setting RUSTDOCFLAGS at build time below.
+--
+. pkg-config, a tool for querying installed libraries
++
+--
+
+* Helios: `pkg install pkg-config`
+* Linux: `sudo apt-get install pkg-config`
+* Mac: `brew install pkg-config`
+
+After doing this, you should have the `pkg-config` command on your PATH.  For
+example, on Helios, you'd want `/usr/bin` on your PATH.
 --
 . CockroachDB v20.2.5.
 +
@@ -95,7 +106,7 @@ pkg install brand/sparse
 pkg install pkg:/package/pkg
 pkg update
 ----
- 
+
 To **run Omicron** you need to run four programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
@@ -106,11 +117,10 @@ the database files will be deleted when you stop the program.
 
 The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
 
-. Set `RUSTFLAGS` and `RUSTDOCFLAGS` in your environment so that built binaries will be able to find your local copy of libpq.  A typical example might look like this:
+. Work around https://github.com/rust-lang/cargo/issues/9895[rust-lang/cargo#9895]: set `RUSTDOCFLAGS` in your environment so that built test binaries will be able to find your local copy of libpq.  A typical example might look like this:
 +
 ----
-$ export RUSTFLAGS="-Clink-args=-R$(pg_config --libdir)"
-$ export RUSTDOCFLAGS="$RUSTFLAGS"
+$ export RUSTDOCFLAGS="-Clink-args=-Wl,-R$(pg_config --libdir)"
 ----
 + Note that this might be wrong in some configurations or if you're using environment variables to control how the `pq-sys` crate finds libpq.  See https://github.com/oxidecomputer/omicron/issues/213[#213] for details.
 +
@@ -400,7 +410,7 @@ date: Wed, 27 May 2020 00:46:04 GMT
 }
 
 
-$ ./tools/oxapi_demo instance_list_disks myproject myinstance 
+$ ./tools/oxapi_demo instance_list_disks myproject myinstance
 ++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks
 ++ json -ga
 HTTP/1.1 200 OK
@@ -420,7 +430,8 @@ date: Wed, 27 May 2020 00:46:11 GMT
 }
 ----
 
-== Running on Helios
+== Deploying Omicron
+
 
 Prerequisite: Have a machine already running Helios. An easy way to
 do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].

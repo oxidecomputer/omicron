@@ -73,10 +73,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-10.15 ]
-        # NOTE: Although we'd like to use stable, we cannot with a newer version
-        # of Propolis as a dependency (which only builds with nightly).
-        #        toolchain: [ nightly-2021-04-24, stable ]
-        toolchain: [ nightly-2021-04-24 ]
+        # See rust-toolchain for why we're using nightly here.
+        toolchain: [ nightly-2021-09-03 ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
@@ -103,7 +101,17 @@ jobs:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
         path: "clickhouse"
     - name: Build
-      run: cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+      # We build with:
+      # - RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings": disallow warnings
+      #   in CI builds.  This can result in breakage when the toolchain is
+      #   updated, but that should only happen with a change to the repo, which
+      #   gives us an opportunity to find and fix any newly-introduced warnings.
+      # - `--locked`: do not update Cargo.lock when building.  Checking in
+      #   Cargo.lock ensures that everyone is using the same dependencies and
+      #   also gives us a record of which dependencies were used for each CI
+      #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
+      #   is up to date.
+      run: RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -111,5 +119,8 @@ jobs:
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
-      # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" cargo +${{ matrix.toolchain }} test --locked --verbose
+      # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
+      # rebuild here.
+      # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
+      # suite.
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --locked --verbose

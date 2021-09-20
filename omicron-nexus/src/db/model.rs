@@ -10,10 +10,9 @@ use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external::{
-    self, ByteCount, Error, Generation, InstanceCpuCount,
+    self, ByteCount, Generation, InstanceCpuCount,
 };
 use omicron_common::api::internal;
-use omicron_common::db::sql_row_value;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -144,35 +143,6 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             time_modified: metadata.time_modified,
             time_deleted: None,
         }
-    }
-}
-
-/// Deserialization from the DB.
-impl TryFrom<&tokio_postgres::Row> for IdentityMetadata {
-    type Error = Error;
-
-    fn try_from(value: &tokio_postgres::Row) -> Result<Self, Self::Error> {
-        let time_deleted: Option<DateTime<Utc>> =
-            sql_row_value(value, "time_deleted")?;
-
-        // We could support representing deleted objects, but we would want to
-        // think about how to do that.  For example, we might want to use
-        // separate types so that the control plane can't accidentally do things
-        // like attach a disk to a deleted Instance.  We haven't figured any of
-        // this out, and there's no need yet.
-        if time_deleted.is_some() {
-            return Err(external::Error::internal_error(
-                "model does not support objects that have been deleted",
-            ));
-        }
-        Ok(IdentityMetadata {
-            id: sql_row_value(value, "id")?,
-            name: sql_row_value(value, "name")?,
-            description: sql_row_value(value, "description")?,
-            time_created: sql_row_value(value, "time_created")?,
-            time_modified: sql_row_value(value, "time_modified")?,
-            time_deleted: sql_row_value(value, "time_deleted")?,
-        })
     }
 }
 
@@ -849,8 +819,6 @@ impl Into<external::Vpc> for Vpc {
             identity: self.identity().into(),
             project_id: self.project_id,
             dns_name: self.dns_name,
-            // VPC subnets are accessed through a separate row lookup.
-            vpc_subnets: vec![],
         }
     }
 }
@@ -886,11 +854,32 @@ pub struct VpcSubnet {
     pub time_deleted: Option<DateTime<Utc>>,
 
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<ipnetwork::IpNetwork>,
-    pub ipv6_block: Option<ipnetwork::IpNetwork>,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
 }
 
 impl VpcSubnet {
+    pub fn new(
+        subnet_id: Uuid,
+        vpc_id: Uuid,
+        params: external::VpcSubnetCreateParams,
+    ) -> Self {
+        let identity = IdentityMetadata::new(subnet_id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+
+            vpc_id,
+
+            ipv4_block: params.ipv4_block,
+            ipv6_block: params.ipv6_block,
+        }
+    }
+
     pub fn identity(&self) -> IdentityMetadata {
         IdentityMetadata {
             id: self.id,
@@ -899,6 +888,39 @@ impl VpcSubnet {
             time_created: self.time_created,
             time_modified: self.time_modified,
             time_deleted: self.time_deleted,
+        }
+    }
+}
+
+impl Into<external::VpcSubnet> for VpcSubnet {
+    fn into(self) -> external::VpcSubnet {
+        external::VpcSubnet {
+            identity: self.identity().into(),
+            vpc_id: self.vpc_id,
+            ipv4_block: self.ipv4_block,
+            ipv6_block: self.ipv6_block,
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "vpcsubnet"]
+pub struct VpcSubnetUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub ipv4_block: Option<external::Ipv4Net>,
+    pub ipv6_block: Option<external::Ipv6Net>,
+}
+
+impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
+    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            ipv4_block: params.ipv4_block,
+            ipv6_block: params.ipv6_block,
         }
     }
 }
