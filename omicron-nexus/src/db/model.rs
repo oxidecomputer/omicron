@@ -186,7 +186,7 @@ impl From<external::ProjectUpdateParams> for ProjectUpdate {
 }
 
 /// An Instance (VM).
-#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Selectable)]
 #[table_name = "instance"]
 pub struct Instance {
     pub id: Uuid,
@@ -406,7 +406,7 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "disk"]
 pub struct Disk {
     // IdentityMetadata
@@ -422,14 +422,16 @@ pub struct Disk {
 
     // DiskRuntimeState
     /// runtime state of the Disk
-    pub disk_state: String,
-    pub attach_instance_id: Option<Uuid>,
-    /// generation number for this state
-    #[column_name = "state_generation"]
-    pub gen: Generation,
-    /// timestamp for this information
-    #[column_name = "time_state_updated"]
-    pub time_updated: DateTime<Utc>,
+    #[diesel(embed)]
+    pub runtime_state: DiskRuntimeState,
+//    pub disk_state: String,
+//    pub attach_instance_id: Option<Uuid>,
+//    /// generation number for this state
+//    #[column_name = "state_generation"]
+//    pub gen: Generation,
+//    /// timestamp for this information
+//    #[column_name = "time_state_updated"]
+//    pub time_updated: DateTime<Utc>,
 
     /// size of the Disk
     #[column_name = "size_bytes"]
@@ -458,10 +460,12 @@ impl Disk {
 
             project_id,
 
-            disk_state: runtime_initial.disk_state,
-            attach_instance_id: runtime_initial.attach_instance_id,
-            gen: runtime_initial.gen,
-            time_updated: runtime_initial.time_updated,
+            runtime_state: DiskRuntimeState {
+                disk_state: runtime_initial.disk_state,
+                attach_instance_id: runtime_initial.attach_instance_id,
+                gen: runtime_initial.gen,
+                time_updated: runtime_initial.time_updated,
+            },
 
             size: params.size,
             create_snapshot_id: params.snapshot_id,
@@ -486,24 +490,19 @@ impl Disk {
         // TODO: also impl'd for DiskRuntimeState
         DiskState::new(
             external::DiskState::try_from((
-                self.disk_state.as_str(),
-                self.attach_instance_id,
+                self.runtime_state.disk_state.as_str(),
+                self.runtime_state.attach_instance_id,
             ))
             .unwrap(),
         )
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
-        DiskRuntimeState {
-            disk_state: self.disk_state.clone(),
-            attach_instance_id: self.attach_instance_id,
-            gen: self.gen,
-            time_updated: self.time_updated,
-        }
+        self.runtime_state.clone()
     }
 
     pub fn attachment(&self) -> Option<DiskAttachment> {
-        if let Some(instance_id) = self.attach_instance_id {
+        if let Some(instance_id) = self.runtime_state.attach_instance_id {
             Some(DiskAttachment {
                 instance_id,
                 disk_id: self.id,
@@ -531,7 +530,7 @@ impl Into<external::Disk> for Disk {
     }
 }
 
-#[derive(AsChangeset, Clone, Debug)]
+#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable)]
 #[table_name = "disk"]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.
