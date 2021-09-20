@@ -251,6 +251,7 @@ impl DataStore {
             .values(instance)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(db::model::Instance::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -262,14 +263,15 @@ impl DataStore {
             })?;
 
         bail_unless!(
-            instance.state.state() == &api::external::InstanceState::Creating,
+            instance.runtime().state.state()
+                == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.state
+            instance.runtime().state
         );
         bail_unless!(
-            instance.state_generation == runtime_initial.gen,
+            instance.runtime().gen == runtime_initial.gen,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.state_generation
+            instance.runtime().gen
         );
         Ok(instance)
     }
@@ -284,6 +286,7 @@ impl DataStore {
         paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
+            .select(db::model::Instance::as_select())
             .load_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {
@@ -304,6 +307,7 @@ impl DataStore {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
+            .select(db::model::Instance::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -326,6 +330,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(instance_name.clone()))
+            .select(db::model::Instance::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -404,7 +409,8 @@ impl DataStore {
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state.eq_any(vec![stopped, failed]))
             .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .get_result_async::<db::model::Instance>(self.pool())
+            .returning(db::model::Instance::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(

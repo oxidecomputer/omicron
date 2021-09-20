@@ -24,7 +24,10 @@ pub trait UpdateAndCheck<T, K, U, V> {
     /// Nests the existing update statement in a CTE which
     /// identifies if the row exists (by ID), even if the row
     /// cannot be successfully updated.
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<T, K, U, V, Q>;
+    fn check_if_exists<Q>(
+        self,
+        key: K,
+    ) -> UpdateAndQueryStatement<T, K, U, V, Q>;
 }
 
 // UpdateStatement has four generic parameters:
@@ -41,7 +44,10 @@ pub trait UpdateAndCheck<T, K, U, V> {
 // This allows our implementation of the  CTE to overwrite
 // the return behavior of the SQL statement.
 impl<T, K, U, V> UpdateAndCheck<T, K, U, V> for UpdateStatement<T, U, V> {
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<T, K, U, V, Q> {
+    fn check_if_exists<Q>(
+        self,
+        key: K,
+    ) -> UpdateAndQueryStatement<T, K, U, V, Q> {
         UpdateAndQueryStatement {
             update_statement: self,
             key,
@@ -120,6 +126,9 @@ where
     }
 }
 
+type SelectableSqlType<Q> =
+    <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
+
 impl<T, K, U, V, Q> Query for UpdateAndQueryStatement<T, K, U, V, Q>
 where
     T: Table,
@@ -128,7 +137,7 @@ where
     type SqlType = (
         Nullable<SerializedPrimaryKey<T>>,
         Nullable<SerializedPrimaryKey<T>>,
-        <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType,
+        SelectableSqlType<Q>,
     );
 }
 
