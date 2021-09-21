@@ -67,6 +67,7 @@ impl DataStore {
         let name = project.name().to_string();
         diesel::insert_into(dsl::project)
             .values(project)
+            .returning(db::model::Project::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -87,7 +88,8 @@ impl DataStore {
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
-            .first_async::<db::model::Project>(self.pool())
+            .select(db::model::Project::as_select())
+            .first_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -111,7 +113,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<db::model::Project>(self.pool())
+            .returning(db::model::Project::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -151,7 +154,8 @@ impl DataStore {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Project>(self.pool())
+            .select(db::model::Project::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -169,7 +173,8 @@ impl DataStore {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Project>(self.pool())
+            .select(db::model::Project::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -193,6 +198,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
+            .returning(db::model::Project::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -246,7 +252,7 @@ impl DataStore {
             params,
             runtime_initial.clone(),
         );
-        let name = instance.name.clone();
+        let name = instance.identity.name.clone();
         let instance: db::model::Instance = diesel::insert_into(dsl::instance)
             .values(instance)
             .on_conflict(dsl::id)
@@ -473,7 +479,7 @@ impl DataStore {
             params.clone(),
             runtime_initial.clone(),
         );
-        let name = disk.name.clone();
+        let name = disk.identity.name.clone();
         let disk: db::model::Disk = diesel::insert_into(dsl::disk)
             .values(disk)
             .on_conflict(dsl::id)

@@ -469,7 +469,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.id).await
+        self.db_datastore.project_delete_disk(&disk.id()).await
     }
 
     /*
@@ -594,7 +594,7 @@ impl Nexus {
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
-        self.db_datastore.project_delete_instance(&instance.id).await
+        self.db_datastore.project_delete_instance(&instance.id()).await
     }
 
     pub async fn project_lookup_instance(
@@ -701,7 +701,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -724,7 +724,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -747,7 +747,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -776,11 +776,11 @@ impl Nexus {
         };
 
         let new_runtime = sa
-            .instance_ensure(instance.id, instance_hardware, requested)
+            .instance_ensure(instance.id(), instance_hardware, requested)
             .await?;
 
         self.db_datastore
-            .instance_update_runtime(&instance.id, &new_runtime.into())
+            .instance_update_runtime(&instance.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -796,7 +796,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
-        self.db_datastore.instance_list_disks(&instance.id, pagparams).await
+        self.db_datastore.instance_list_disks(&instance.id(), pagparams).await
     }
 
     /**
@@ -812,11 +812,11 @@ impl Nexus {
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
-            if instance_id == instance.id {
+            if instance_id == instance.id() {
                 return Ok(DiskAttachment {
-                    instance_id: instance.id,
-                    disk_name: disk.name.clone(),
-                    disk_id: disk.id,
+                    instance_id: instance.id(),
+                    disk_name: disk.name().clone(),
+                    disk_id: disk.id(),
                     disk_state: disk.state().into(),
                 });
             }
@@ -844,20 +844,20 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.id;
+        let instance_id = &instance.id();
 
         fn disk_attachment_for(
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
             assert_eq!(
-                instance.id,
+                instance.id(),
                 disk.runtime_state.attach_instance_id.unwrap()
             );
             Ok(DiskAttachment {
-                instance_id: instance.id,
-                disk_id: disk.id,
-                disk_name: disk.name.clone(),
+                instance_id: instance.id(),
+                disk_id: disk.id(),
+                disk_name: disk.identity().name.clone(),
                 disk_state: disk.runtime().state().into(),
             })
         }
@@ -889,7 +889,7 @@ impl Nexus {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                disk.name.as_str(),
+                disk.identity().name.as_str(),
                 disk_status
             );
             Err(Error::InvalidRequest { message })
@@ -943,7 +943,7 @@ impl Nexus {
             DiskStateRequested::Attached(*instance_id),
         )
         .await?;
-        let disk = self.db_datastore.disk_fetch(&disk.id).await?;
+        let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
         disk_attachment_for(&instance, &disk)
     }
 
@@ -959,7 +959,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.id;
+        let instance_id = &instance.id();
 
         match &disk.state().into() {
             /*
@@ -1021,9 +1021,9 @@ impl Nexus {
          * reflect the new intermediate state.
          */
         let new_runtime =
-            sa.disk_ensure(disk.id, disk.runtime().into(), requested).await?;
+            sa.disk_ensure(disk.id(), disk.runtime().into(), requested).await?;
         self.db_datastore
-            .disk_update_runtime(&disk.id, &new_runtime.into())
+            .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }

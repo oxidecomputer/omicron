@@ -1326,6 +1326,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "paste",
  "pq-sys",
  "schemars",
  "serde",

@@ -51,8 +51,7 @@ impl Into<external::Sled> for Sled {
     }
 }
 
-// TODO: As Diesel needs to flatten things out, this structure
-// may become unused.
+// TODO: DELETE ME IN FAVOR OF THE DERIVED ONE
 #[derive(Clone, Debug)]
 pub struct IdentityMetadata {
     pub id: Uuid,
@@ -102,52 +101,38 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
     }
 }
 
+define_identity!(project);
+use project_identity::IdentityMetadata as ProjectIdentity;
+
 /// Describes a project within the database.
-#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[derive(Selectable, Queryable, Insertable, Debug)]
 #[table_name = "project"]
 pub struct Project {
-    pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    pub identity: ProjectIdentity,
 }
 
 impl Project {
     /// Creates a new database Project object.
     pub fn new(params: external::ProjectCreateParams) -> Self {
-        let id = Uuid::new_v4();
-        let identity = IdentityMetadata::new(id, params.identity);
         Self {
-            id: identity.id,
-            name: identity.name,
-            description: identity.description,
-            time_created: identity.time_created,
-            time_modified: identity.time_modified,
-            time_deleted: identity.time_deleted,
+            identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
         }
     }
 
     pub fn name(&self) -> &str {
-        self.name.as_str()
+        self.identity.name.as_str()
     }
 
     pub fn id(&self) -> &Uuid {
-        &self.id
+        &self.identity.id
     }
 }
 
 impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
         external::Project {
-            identity: external::IdentityMetadata {
-                id: self.id,
-                name: self.name,
-                description: self.description,
-                time_created: self.time_created,
-                time_modified: self.time_modified,
-            },
+            identity: self.identity.into(),
         }
     }
 }
@@ -156,12 +141,7 @@ impl Into<external::Project> for Project {
 impl From<external::Project> for Project {
     fn from(project: external::Project) -> Self {
         Self {
-            id: project.identity.id,
-            name: project.identity.name,
-            description: project.identity.description,
-            time_created: project.identity.time_created,
-            time_modified: project.identity.time_modified,
-            time_deleted: None,
+            identity: ProjectIdentity::from(project.identity),
         }
     }
 }
@@ -185,16 +165,15 @@ impl From<external::ProjectUpdateParams> for ProjectUpdate {
     }
 }
 
+define_identity!(instance);
+use instance_identity::IdentityMetadata as InstanceIdentity;
+
 /// An Instance (VM).
-#[derive(Queryable, Identifiable, Insertable, Debug, Selectable)]
+#[derive(Queryable, Insertable, Debug, Selectable)]
 #[table_name = "instance"]
 pub struct Instance {
-    pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    pub identity: InstanceIdentity,
 
     /// id for the project containing this Instance
     pub project_id: Uuid,
@@ -211,34 +190,23 @@ impl Instance {
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
     ) -> Self {
-        let identity =
-            IdentityMetadata::new(instance_id, params.identity.clone());
+        let identity = InstanceIdentity::new(instance_id, params.identity.clone());
         Self {
-            id: identity.id,
-            name: identity.name,
-            description: identity.description,
-            time_created: identity.time_created,
-            time_modified: identity.time_modified,
-            time_deleted: identity.time_deleted,
-
+            identity,
             project_id,
-
             runtime_state: runtime,
         }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.identity.id
     }
 
     // TODO: We could definitely derive this.
     // We could actually derive any "into subset" struct with
     // identically named fields.
-    pub fn identity(&self) -> IdentityMetadata {
-        IdentityMetadata {
-            id: self.id,
-            name: self.name.clone(),
-            description: self.description.clone(),
-            time_created: self.time_created,
-            time_modified: self.time_modified,
-            time_deleted: self.time_deleted,
-        }
+    pub fn identity(&self) -> &InstanceIdentity {
+        &self.identity
     }
 
     pub fn runtime(&self) -> &InstanceRuntimeState {
@@ -250,7 +218,7 @@ impl Instance {
 impl Into<external::Instance> for Instance {
     fn into(self) -> external::Instance {
         external::Instance {
-            identity: self.identity().into(),
+            identity: self.identity().clone().into(),
             project_id: self.project_id,
             ncpus: self.runtime().ncpus,
             memory: self.runtime().memory,
@@ -371,17 +339,15 @@ where
     }
 }
 
+define_identity!(disk);
+use disk_identity::IdentityMetadata as DiskIdentity;
+
 /// A Disk (network block device).
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug, Selectable)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "disk"]
 pub struct Disk {
-    // IdentityMetadata
-    pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    pub identity: DiskIdentity,
 
     /// id for the project containing this Disk
     pub project_id: Uuid,
@@ -406,38 +372,26 @@ impl Disk {
         params: external::DiskCreateParams,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
-        let identity = IdentityMetadata::new(disk_id, params.identity);
+        let identity = DiskIdentity::new(disk_id, params.identity);
         Self {
-            id: identity.id,
-            name: identity.name,
-            description: identity.description,
-            time_created: identity.time_created,
-            time_modified: identity.time_modified,
-            time_deleted: identity.time_deleted,
-
+            identity,
             project_id,
-
-            runtime_state: DiskRuntimeState {
-                disk_state: runtime_initial.disk_state,
-                attach_instance_id: runtime_initial.attach_instance_id,
-                gen: runtime_initial.gen,
-                time_updated: runtime_initial.time_updated,
-            },
-
+            runtime_state: runtime_initial,
             size: params.size,
             create_snapshot_id: params.snapshot_id,
         }
     }
 
-    pub fn identity(&self) -> IdentityMetadata {
-        IdentityMetadata {
-            id: self.id,
-            name: self.name.clone(),
-            description: self.description.clone(),
-            time_created: self.time_created,
-            time_modified: self.time_modified,
-            time_deleted: self.time_deleted,
-        }
+    pub fn id(&self) -> Uuid {
+        self.identity.id
+    }
+
+    pub fn name(&self) -> &external::Name {
+        &self.identity.name
+    }
+
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
     }
 
     pub fn state(&self) -> DiskState {
@@ -452,8 +406,8 @@ impl Disk {
         if let Some(instance_id) = self.runtime_state.attach_instance_id {
             Some(DiskAttachment {
                 instance_id,
-                disk_id: self.id,
-                disk_name: self.name.clone(),
+                disk_id: self.identity().id,
+                disk_name: self.identity().name.clone(),
                 disk_state: self.state().into(),
             })
         } else {
@@ -465,9 +419,9 @@ impl Disk {
 /// Conversion to the external API type.
 impl Into<external::Disk> for Disk {
     fn into(self) -> external::Disk {
-        let device_path = format!("/mnt/{}", self.name.as_str());
+        let device_path = format!("/mnt/{}", self.identity().name.as_str());
         external::Disk {
-            identity: self.identity().into(),
+            identity: self.identity().clone().into(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             size: self.size,
@@ -594,7 +548,7 @@ pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[derive(Queryable, Insertable, Debug, Clone)]
 #[table_name = "metricproducer"]
 pub struct ProducerEndpoint {
     pub id: Uuid,
@@ -627,7 +581,7 @@ impl ProducerEndpoint {
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Queryable, Identifiable, Insertable, Debug, Clone, Copy)]
+#[derive(Queryable, Insertable, Debug, Clone, Copy)]
 #[table_name = "oximeter"]
 pub struct OximeterInfo {
     /// The ID for this oximeter instance.
@@ -669,7 +623,7 @@ impl OximeterAssignment {
     }
 }
 
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "vpc"]
 pub struct Vpc {
     pub id: Uuid,
@@ -745,7 +699,7 @@ impl From<external::VpcUpdateParams> for VpcUpdate {
     }
 }
 
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "vpcsubnet"]
 pub struct VpcSubnet {
     pub id: Uuid,
@@ -827,7 +781,7 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "networkinterface"]
 pub struct NetworkInterface {
     pub id: Uuid,
