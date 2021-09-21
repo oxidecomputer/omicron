@@ -230,7 +230,7 @@ impl From<external::ProjectUpdateParams> for ProjectUpdate {
 }
 
 /// An Instance (VM).
-#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Selectable)]
 #[table_name = "instance"]
 pub struct Instance {
     pub id: Uuid,
@@ -244,28 +244,8 @@ pub struct Instance {
     pub project_id: Uuid,
 
     /// runtime state of the Instance
-    pub state: InstanceState,
-
-    /// timestamp for this information
-    // TODO: Is this redundant with "time_modified"?
-    pub time_state_updated: DateTime<Utc>,
-
-    /// generation number for this state
-    pub state_generation: Generation,
-
-    /// which sled is running this Instance
-    pub active_server_id: Uuid,
-
-    // TODO-completeness: add disks, network, tags, metrics
-    /// number of CPUs allocated for this Instance
-    pub ncpus: InstanceCpuCount,
-
-    /// memory allocated for this Instance
-    pub memory: ByteCount,
-
-    /// RFC1035-compliant hostname for the Instance.
-    // TODO-cleanup different type?
-    pub hostname: String,
+    #[diesel(embed)]
+    pub runtime_state: InstanceRuntimeState,
 }
 
 impl Instance {
@@ -277,7 +257,6 @@ impl Instance {
     ) -> Self {
         let identity =
             IdentityMetadata::new(instance_id, params.identity.clone());
-
         Self {
             id: identity.id,
             name: identity.name,
@@ -288,14 +267,7 @@ impl Instance {
 
             project_id,
 
-            state: runtime.state,
-            time_state_updated: runtime.time_updated,
-            state_generation: runtime.gen,
-            active_server_id: runtime.sled_uuid,
-
-            ncpus: params.ncpus,
-            memory: params.memory,
-            hostname: params.hostname.clone(),
+            runtime_state: runtime,
         }
     }
 
@@ -313,16 +285,8 @@ impl Instance {
         }
     }
 
-    pub fn runtime(&self) -> InstanceRuntimeState {
-        InstanceRuntimeState {
-            state: self.state,
-            sled_uuid: self.active_server_id,
-            ncpus: self.ncpus,
-            memory: self.memory,
-            hostname: self.hostname.clone(),
-            gen: self.state_generation,
-            time_updated: self.time_state_updated,
-        }
+    pub fn runtime(&self) -> &InstanceRuntimeState {
+        &self.runtime_state
     }
 }
 
@@ -332,10 +296,10 @@ impl Into<external::Instance> for Instance {
         external::Instance {
             identity: self.identity().into(),
             project_id: self.project_id,
-            ncpus: self.ncpus,
-            memory: self.memory,
-            hostname: self.hostname.clone(),
-            runtime: self.runtime().into(),
+            ncpus: self.runtime().ncpus,
+            memory: self.runtime().memory,
+            hostname: self.runtime().hostname.clone(),
+            runtime: self.runtime().clone().into(),
         }
     }
 }
@@ -344,12 +308,19 @@ impl Into<external::Instance> for Instance {
 /// metadata
 ///
 /// This state is owned by the sled agent running that Instance.
-#[derive(Clone, Debug, AsChangeset)]
+#[derive(Clone, Debug, AsChangeset, Selectable, Insertable, Queryable)]
 #[table_name = "instance"]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
     #[column_name = "state"]
     pub state: InstanceState,
+    /// timestamp for this information
+    // TODO: Is this redundant with "time_modified"?
+    #[column_name = "time_state_updated"]
+    pub time_updated: DateTime<Utc>,
+    /// generation number for this state
+    #[column_name = "state_generation"]
+    pub gen: Generation,
     /// which sled is running this Instance
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
@@ -358,14 +329,9 @@ pub struct InstanceRuntimeState {
     pub ncpus: InstanceCpuCount,
     #[column_name = "memory"]
     pub memory: ByteCount,
+    // TODO-cleanup: Different type?
     #[column_name = "hostname"]
     pub hostname: String,
-    /// generation number for this state
-    #[column_name = "state_generation"]
-    pub gen: Generation,
-    /// timestamp for this information
-    #[column_name = "time_state_updated"]
-    pub time_updated: DateTime<Utc>,
 }
 
 /// Conversion to the external API type.
@@ -450,7 +416,7 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "disk"]
 pub struct Disk {
     // IdentityMetadata
@@ -464,16 +430,9 @@ pub struct Disk {
     /// id for the project containing this Disk
     pub project_id: Uuid,
 
-    // DiskRuntimeState
     /// runtime state of the Disk
-    pub disk_state: String,
-    pub attach_instance_id: Option<Uuid>,
-    /// generation number for this state
-    #[column_name = "state_generation"]
-    pub gen: Generation,
-    /// timestamp for this information
-    #[column_name = "time_state_updated"]
-    pub time_updated: DateTime<Utc>,
+    #[diesel(embed)]
+    pub runtime_state: DiskRuntimeState,
 
     /// size of the Disk
     #[column_name = "size_bytes"]
@@ -502,10 +461,12 @@ impl Disk {
 
             project_id,
 
-            disk_state: runtime_initial.disk_state,
-            attach_instance_id: runtime_initial.attach_instance_id,
-            gen: runtime_initial.gen,
-            time_updated: runtime_initial.time_updated,
+            runtime_state: DiskRuntimeState {
+                disk_state: runtime_initial.disk_state,
+                attach_instance_id: runtime_initial.attach_instance_id,
+                gen: runtime_initial.gen,
+                time_updated: runtime_initial.time_updated,
+            },
 
             size: params.size,
             create_snapshot_id: params.snapshot_id,
@@ -524,30 +485,15 @@ impl Disk {
     }
 
     pub fn state(&self) -> DiskState {
-        // TODO: If we could store disk state in-line, we could avoid the
-        // unwrap. Would prefer to parse it as such.
-        //
-        // TODO: also impl'd for DiskRuntimeState
-        DiskState::new(
-            external::DiskState::try_from((
-                self.disk_state.as_str(),
-                self.attach_instance_id,
-            ))
-            .unwrap(),
-        )
+        self.runtime_state.state()
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
-        DiskRuntimeState {
-            disk_state: self.disk_state.clone(),
-            attach_instance_id: self.attach_instance_id,
-            gen: self.gen,
-            time_updated: self.time_updated,
-        }
+        self.runtime_state.clone()
     }
 
     pub fn attachment(&self) -> Option<DiskAttachment> {
-        if let Some(instance_id) = self.attach_instance_id {
+        if let Some(instance_id) = self.runtime_state.attach_instance_id {
             Some(DiskAttachment {
                 instance_id,
                 disk_id: self.id,
@@ -575,7 +521,7 @@ impl Into<external::Disk> for Disk {
     }
 }
 
-#[derive(AsChangeset, Clone, Debug)]
+#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable)]
 #[table_name = "disk"]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.

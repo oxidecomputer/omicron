@@ -675,7 +675,7 @@ impl Nexus {
         &self,
         instance: &db::model::Instance,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let sa_id = &instance.active_server_id;
+        let sa_id = &instance.runtime().sled_uuid;
         self.sled_client(&sa_id).await
     }
 
@@ -703,7 +703,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -726,7 +726,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -749,7 +749,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().into())?;
+        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
@@ -782,7 +782,7 @@ impl Nexus {
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = InstanceHardware {
-            runtime: instance.runtime().into(),
+            runtime: instance.runtime().clone().into(),
             nics: vec![],
         };
 
@@ -822,7 +822,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        if let Some(instance_id) = disk.attach_instance_id {
+        if let Some(instance_id) = disk.runtime_state.attach_instance_id {
             if instance_id == instance.id {
                 return Ok(DiskAttachment {
                     instance_id: instance.id,
@@ -861,7 +861,10 @@ impl Nexus {
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
-            assert_eq!(instance.id, disk.attach_instance_id.unwrap());
+            assert_eq!(
+                instance.id,
+                disk.runtime_state.attach_instance_id.unwrap()
+            );
             Ok(DiskAttachment {
                 instance_id: instance.id,
                 disk_id: disk.id,

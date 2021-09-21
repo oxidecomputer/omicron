@@ -9,20 +9,45 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
 use diesel::sql_types::Nullable;
+use std::marker::PhantomData;
+
+/// A simple wrapper type for Diesel's [`UpdateStatement`], which
+/// allows referencing generics with names (and extending usage
+/// without re-stating those generic parameters everywhere).
+pub trait UpdateStatementExt {
+    type Table;
+    type WhereClause;
+    type Changeset;
+
+    fn statement(
+        self,
+    ) -> UpdateStatement<Self::Table, Self::WhereClause, Self::Changeset>;
+}
+
+impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
+    type Table = T;
+    type WhereClause = U;
+    type Changeset = V;
+
+    fn statement(self) -> UpdateStatement<T, U, V> {
+        self
+    }
+}
 
 /// Wrapper around [`diesel::update`] for a Table, which allows
 /// callers to distinguish between "not found", "found but not updated", and
 /// "updated".
 ///
-/// T: Table on which the UpdateAndCheck should be applied.
+/// US: [`UpdateStatement`] which we are extending.
 /// K: Primary Key type.
-/// U: Where clause of the update statement.
-/// V: Changeset to be applied to the update statement.
-pub trait UpdateAndCheck<T, K, U, V> {
+pub trait UpdateAndCheck<US, K>
+where
+    US: UpdateStatementExt,
+{
     /// Nests the existing update statement in a CTE which
     /// identifies if the row exists (by ID), even if the row
     /// cannot be successfully updated.
-    fn check_if_exists(self, key: K) -> UpdateAndQueryStatement<T, K, U, V>;
+    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q>;
 }
 
 // UpdateStatement has four generic parameters:
@@ -38,9 +63,16 @@ pub trait UpdateAndCheck<T, K, U, V> {
 //
 // This allows our implementation of the CTE to overwrite
 // the return behavior of the SQL statement.
-impl<T, K, U, V> UpdateAndCheck<T, K, U, V> for UpdateStatement<T, U, V> {
-    fn check_if_exists(self, key: K) -> UpdateAndQueryStatement<T, K, U, V> {
-        UpdateAndQueryStatement { update_statement: self, key }
+impl<US, K> UpdateAndCheck<US, K> for US
+where
+    US: UpdateStatementExt,
+{
+    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
+        UpdateAndQueryStatement {
+            update_statement: self.statement(),
+            key,
+            query_type: PhantomData,
+        }
     }
 }
 
@@ -48,12 +80,20 @@ impl<T, K, U, V> UpdateAndCheck<T, K, U, V> for UpdateStatement<T, U, V> {
 /// with other statements to also SELECT a row.
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
-pub struct UpdateAndQueryStatement<T, K, U, V> {
-    update_statement: UpdateStatement<T, U, V>,
+pub struct UpdateAndQueryStatement<US, K, Q>
+where
+    US: UpdateStatementExt,
+{
+    update_statement:
+        UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
     key: K,
+    query_type: PhantomData<Q>,
 }
 
-impl<T, K, U, V> QueryId for UpdateAndQueryStatement<T, K, U, V> {
+impl<US, K, Q> QueryId for UpdateAndQueryStatement<US, K, Q>
+where
+    US: UpdateStatementExt,
+{
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
@@ -74,17 +114,21 @@ pub enum UpdateStatus {
     NotUpdatedButExists,
 }
 
+// Representation of an UpdateStatement's table.
+type UpdateTable<US> = <US as UpdateStatementExt>::Table;
 // Representation of Primary Key in Rust.
-type PrimaryKey<T> = <T as diesel::Table>::PrimaryKey;
+type PrimaryKey<US> = <UpdateTable<US> as diesel::Table>::PrimaryKey;
 // Representation of Primary Key in SQL.
-type SerializedPrimaryKey<T> = <PrimaryKey<T> as diesel::Expression>::SqlType;
+type SerializedPrimaryKey<US> = <PrimaryKey<US> as diesel::Expression>::SqlType;
 
-impl<T, K, U, V> UpdateAndQueryStatement<T, K, U, V>
+impl<US, K, Q> UpdateAndQueryStatement<US, K, Q>
 where
+    US: 'static + UpdateStatementExt,
     K: 'static + PartialEq + Send,
-    T: 'static + Table + Send,
-    U: 'static + Send,
-    V: 'static + Send,
+    US::Table: 'static + Table + Send,
+    US::WhereClause: 'static + Send,
+    US::Changeset: 'static + Send,
+    Q: std::fmt::Debug + Send + 'static,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -92,12 +136,12 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub async fn execute_and_check<Q>(
+    pub async fn execute_and_check(
         self,
         pool: &bb8::Pool<DieselConnectionManager<PgConnection>>,
     ) -> Result<UpdateAndQueryResult<Q>, diesel::result::Error>
     where
-        Q: Queryable<T::SqlType, Pg> + std::fmt::Debug + Send + 'static,
+        // We require this bound to ensure that "Self" is runnable as query.
         Self: LoadQuery<PgConnection, (Option<K>, Option<K>, Q)>,
     {
         let (id0, id1, found) =
@@ -112,21 +156,26 @@ where
     }
 }
 
-impl<T, K, U, V> Query for UpdateAndQueryStatement<T, K, U, V>
+type SelectableSqlType<Q> =
+    <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
+
+impl<US, K, Q> Query for UpdateAndQueryStatement<US, K, Q>
 where
-    T: Table,
+    US: UpdateStatementExt,
+    US::Table: Table,
+    Q: Selectable<Pg>,
 {
     type SqlType = (
-        Nullable<SerializedPrimaryKey<T>>,
-        Nullable<SerializedPrimaryKey<T>>,
-        T::SqlType,
+        Nullable<SerializedPrimaryKey<US>>,
+        Nullable<SerializedPrimaryKey<US>>,
+        SelectableSqlType<Q>,
     );
 }
 
-impl<T, K, U, V> RunQueryDsl<PgConnection>
-    for UpdateAndQueryStatement<T, K, U, V>
+impl<US, K, Q> RunQueryDsl<PgConnection> for UpdateAndQueryStatement<US, K, Q>
 where
-    T: Table,
+    US: UpdateStatementExt,
+    US::Table: Table,
 {
 }
 
@@ -146,17 +195,21 @@ where
 /// // ON
 /// //      found.<primary_key> = updated.<primary_key>;
 /// ```
-impl<T, K, U, V> QueryFragment<Pg> for UpdateAndQueryStatement<T, K, U, V>
+impl<US, K, Q> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q>
 where
-    T: HasTable<Table = T> + Table + diesel::query_dsl::methods::FindDsl<K>,
+    US: UpdateStatementExt,
+    US::Table: HasTable<Table = US::Table>
+        + Table
+        + diesel::query_dsl::methods::FindDsl<K>,
     K: Copy,
-    Find<T, K>: QueryFragment<Pg>,
-    PrimaryKey<T>: diesel::Column,
-    UpdateStatement<T, U, V>: QueryFragment<Pg>,
+    Find<US::Table, K>: QueryFragment<Pg>,
+    PrimaryKey<US>: diesel::Column,
+    UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
+        QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.push_sql("WITH found AS (");
-        let subquery = T::table().find(self.key);
+        let subquery = US::Table::table().find(self.key);
         subquery.walk_ast(out.reborrow())?;
         out.push_sql("), updated AS (");
         self.update_statement.walk_ast(out.reborrow())?;
@@ -166,7 +219,7 @@ where
 
         out.push_sql("SELECT");
 
-        let name = <T::PrimaryKey as Column>::NAME;
+        let name = <PrimaryKey<US> as Column>::NAME;
         out.push_sql(" found.");
         out.push_identifier(name)?;
         out.push_sql(", updated.");
