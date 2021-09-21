@@ -152,7 +152,7 @@ let result = pool.transaction(|conn| {
 }).await?;
 ----
 
-=== Helpers Functions
+=== Helper Functions
 
 As with any style of programming, when operations are repeated, it can be
 useful to refactor them. As one example, we make use of link:pagination.rs[pagination]
@@ -187,9 +187,9 @@ let updated = diesel::update(dsl::instance)
   .filter(dsl::id.eq(instance_id))
   .set(new_runtime)
   // New query method: blanket implemented as an extension for update queries.
-  .check_if_exists(instance_id)
+  .check_if_exists::<db::model::Instance>(instance_id)
   // New execution method: only callable after "check_if_exists".
-  .execute_and_check::<db::model::Instance>(pool)
+  .execute_and_check(pool)
   .await?;
 ----
 

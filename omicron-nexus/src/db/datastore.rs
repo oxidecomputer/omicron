@@ -21,7 +21,7 @@
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
 use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl};
+use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -251,6 +251,7 @@ impl DataStore {
             .values(instance)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(db::model::Instance::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -262,14 +263,15 @@ impl DataStore {
             })?;
 
         bail_unless!(
-            instance.state.state() == &api::external::InstanceState::Creating,
+            instance.runtime().state.state()
+                == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.state
+            instance.runtime().state
         );
         bail_unless!(
-            instance.state_generation == runtime_initial.gen,
+            instance.runtime().gen == runtime_initial.gen,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.state_generation
+            instance.runtime().gen
         );
         Ok(instance)
     }
@@ -284,6 +286,7 @@ impl DataStore {
         paginated(dsl::instance, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
+            .select(db::model::Instance::as_select())
             .load_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {
@@ -304,6 +307,7 @@ impl DataStore {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
+            .select(db::model::Instance::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -326,6 +330,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(instance_name.clone()))
+            .select(db::model::Instance::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -358,8 +363,8 @@ impl DataStore {
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists(*instance_id)
-            .execute_and_check::<db::model::Instance>(self.pool())
+            .check_if_exists::<db::model::Instance>(*instance_id)
+            .execute_and_check(self.pool())
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -404,7 +409,8 @@ impl DataStore {
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state.eq_any(vec![stopped, failed]))
             .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .get_result_async::<db::model::Instance>(self.pool())
+            .returning(db::model::Instance::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -433,6 +439,7 @@ impl DataStore {
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::attach_instance_id.eq(*instance_id))
+            .select(db::model::Disk::as_select())
             .load_async::<db::model::Disk>(self.pool())
             .await
             .map(|disks| {
@@ -471,6 +478,7 @@ impl DataStore {
             .values(disk)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(db::model::Disk::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -501,6 +509,7 @@ impl DataStore {
         paginated(dsl::disk, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
+            .select(db::model::Disk::as_select())
             .load_async::<db::model::Disk>(self.pool())
             .await
             .map_err(|e| {
@@ -524,8 +533,8 @@ impl DataStore {
             .filter(dsl::id.eq(*disk_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists(*disk_id)
-            .execute_and_check::<db::model::Disk>(self.pool())
+            .check_if_exists::<db::model::Disk>(*disk_id)
+            .execute_and_check(self.pool())
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -551,6 +560,7 @@ impl DataStore {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*disk_id))
+            .select(db::model::Disk::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -573,6 +583,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(disk_name.clone()))
+            .select(db::model::Disk::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -597,8 +608,8 @@ impl DataStore {
             .filter(dsl::id.eq(*disk_id))
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .check_if_exists(*disk_id)
-            .execute_and_check::<db::model::Disk>(self.pool())
+            .check_if_exists::<db::model::Disk>(*disk_id)
+            .execute_and_check(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -613,7 +624,7 @@ impl DataStore {
             UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
                 message: format!(
                     "disk cannot be deleted in state \"{}\"",
-                    result.found.disk_state
+                    result.found.runtime_state.disk_state
                 ),
             }),
         }
@@ -743,8 +754,8 @@ impl DataStore {
             .filter(dsl::current_sec.eq(current_sec))
             .filter(dsl::adopt_generation.eq(current_adopt_generation))
             .set(dsl::saga_state.eq(new_state.to_string()))
-            .check_if_exists(saga_id)
-            .execute_and_check::<db::saga_types::Saga>(self.pool())
+            .check_if_exists::<db::saga_types::Saga>(saga_id)
+            .execute_and_check(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
