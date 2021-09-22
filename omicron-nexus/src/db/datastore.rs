@@ -86,7 +86,13 @@ impl DataStore {
             .do_nothing()
             .get_result_async(self.pool())
             .await
-            .map_err(|e| Error::from_diesel_create(e, ResourceType::Sled, &id.to_string()))
+            .map_err(|e| {
+                Error::from_diesel_create(
+                    e,
+                    ResourceType::Sled,
+                    &id.to_string(),
+                )
+            })
     }
 
     pub async fn sled_list(
