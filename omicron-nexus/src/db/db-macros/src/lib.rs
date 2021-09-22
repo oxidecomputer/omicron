@@ -9,7 +9,7 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{TokenStream};
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
@@ -39,9 +39,7 @@ pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 fn get_meta_attr(attrs: &[syn::Attribute], name: &str) -> Option<Meta> {
     attrs
         .iter()
-        .filter_map(|attr| {
-            attr.parse_meta().ok()
-        })
+        .filter_map(|attr| attr.parse_meta().ok())
         .find(|meta| meta.path().is_ident(name))
 }
 
@@ -55,17 +53,18 @@ fn get_attribute_value(meta: &Meta) -> Option<&Lit> {
 }
 
 // Looks up a named field within a struct.
-fn get_field_with_name<'a>(data: &'a DataStruct, name: &str) -> Option<&'a syn::Field> {
+fn get_field_with_name<'a>(
+    data: &'a DataStruct,
+    name: &str,
+) -> Option<&'a syn::Field> {
     if let Fields::Named(ref data_fields) = data.fields {
-        data_fields.named
-            .iter()
-            .find(|field| {
-                if let Some(ident) = &field.ident {
-                    ident == name
-                } else {
-                    false
-                }
-            })
+        data_fields.named.iter().find(|field| {
+            if let Some(ident) = &field.ident {
+                ident == name
+            } else {
+                false
+            }
+        })
     } else {
         None
     }
@@ -77,15 +76,15 @@ fn identity_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let name = &item.ident;
 
     // Ensure that the "table_name" attribute exists, and get it.
-    let table_meta = get_meta_attr(&item.attrs, "table_name")
-        .ok_or_else(|| {
+    let table_meta =
+        get_meta_attr(&item.attrs, "table_name").ok_or_else(|| {
             Error::new(
                 item.span(),
                 format!(
                     "IdentityMetadata needs 'table_name' attribute.\n\
                      Try adding #[table_name = \"your_table_name\"] to {}.",
-                     name
-                )
+                    name
+                ),
             )
         })?;
     let table_name = get_attribute_value(&table_meta)
@@ -122,10 +121,7 @@ fn identity_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     ))
 }
 
-fn build_struct(
-    struct_name: &Ident,
-    table_name: &Lit,
-) -> TokenStream {
+fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [macro@IdentityMetadata].",
         struct_name,

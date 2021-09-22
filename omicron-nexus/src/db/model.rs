@@ -99,26 +99,20 @@ pub struct Project {
 impl Project {
     /// Creates a new database Project object.
     pub fn new(params: external::ProjectCreateParams) -> Self {
-        Self {
-            identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
-        }
+        Self { identity: ProjectIdentity::new(Uuid::new_v4(), params.identity) }
     }
 }
 
 impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
-        external::Project {
-            identity: self.identity.into(),
-        }
+        external::Project { identity: self.identity.into() }
     }
 }
 
 /// Conversion from the internal API type.
 impl From<external::Project> for Project {
     fn from(project: external::Project) -> Self {
-        Self {
-            identity: ProjectIdentity::from(project.identity),
-        }
+        Self { identity: ProjectIdentity::from(project.identity) }
     }
 }
 
@@ -163,12 +157,9 @@ impl Instance {
         params: &external::InstanceCreateParams,
         runtime: InstanceRuntimeState,
     ) -> Self {
-        let identity = InstanceIdentity::new(instance_id, params.identity.clone());
-        Self {
-            identity,
-            project_id,
-            runtime_state: runtime,
-        }
+        let identity =
+            InstanceIdentity::new(instance_id, params.identity.clone());
+        Self { identity, project_id, runtime_state: runtime }
     }
 
     pub fn runtime(&self) -> &InstanceRuntimeState {
@@ -587,11 +578,7 @@ impl Vpc {
         params: external::VpcCreateParams,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self {
-            identity,
-            project_id,
-            dns_name: params.dns_name,
-        }
+        Self { identity, project_id, dns_name: params.dns_name }
     }
 }
 
