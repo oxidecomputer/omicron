@@ -67,15 +67,8 @@ impl DataStore {
         // TODO: What's the right behavior on conflict here?
         //
         // Currently Sled Agent UUIDs come from a config
-        // (omicron-sled-agent/src/server.rs), but longer-term, will they be
-        // deterministic?
-        //
-        // I'm wondering about a case where:
-        // - Sled Agent comes online, reports itself to Nexus
-        // - Sled bounces, and reboots
-        // - Sled Agent comes online (again), and reports itself to Nexus. Will
-        // Nexus be able to reliably determine the identity of the Sled Agent is
-        // the same as it was on the first registration?
+        // (omicron-sled-agent/src/server.rs). Longer-term, we should
+        // likely use UUIDs derived from the root-of-trust.
         //
         // This current implementation relies on the determinism of these
         // UUIDs.
