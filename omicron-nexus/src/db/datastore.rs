@@ -79,7 +79,7 @@ impl DataStore {
         //
         // This current implementation relies on the determinism of these
         // UUIDs.
-        let id = sled.id().clone();
+        let id = *sled.id();
         diesel::insert_into(dsl::sled)
             .values(sled)
             .on_conflict(dsl::id)
