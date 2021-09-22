@@ -79,14 +79,14 @@ impl DataStore {
         //
         // This current implementation relies on the determinism of these
         // UUIDs.
-        let id = sled.id().to_string();
+        let id = sled.id().clone();
         diesel::insert_into(dsl::sled)
             .values(sled)
             .on_conflict(dsl::id)
             .do_nothing()
             .get_result_async(self.pool())
             .await
-            .map_err(|e| Error::from_diesel_create(e, ResourceType::Sled, &id))
+            .map_err(|e| Error::from_diesel_create(e, ResourceType::Sled, &id.to_string()))
     }
 
     pub async fn sled_list(
