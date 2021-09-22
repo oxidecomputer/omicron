@@ -335,6 +335,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1309,6 +1318,7 @@ dependencies = [
  "bb8",
  "bytes",
  "chrono",
+ "db-macros",
  "diesel",
  "dropshot",
  "expectorate",

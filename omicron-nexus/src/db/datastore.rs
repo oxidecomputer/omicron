@@ -64,7 +64,7 @@ impl DataStore {
     ) -> CreateResult<db::model::Project> {
         use db::schema::project::dsl;
 
-        let name = project.name().to_string();
+        let name = project.name().as_str().to_string();
         diesel::insert_into(dsl::project)
             .values(project)
             .returning(db::model::Project::as_returning())
@@ -800,7 +800,8 @@ impl DataStore {
         paginated(dsl::vpc, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .load_async::<db::model::Vpc>(self.pool())
+            .select(db::model::Vpc::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -820,11 +821,12 @@ impl DataStore {
         use db::schema::vpc::dsl;
 
         let vpc = db::model::Vpc::new(*vpc_id, *project_id, params.clone());
-        let name = vpc.name.clone();
+        let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(db::model::Vpc::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -868,6 +870,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(vpc_name.clone()))
+            .select(db::model::Vpc::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -887,7 +890,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<db::model::Vpc>(self.pool())
+            .returning(db::model::Vpc::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -909,7 +913,8 @@ impl DataStore {
         paginated(dsl::vpcsubnet, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
-            .load_async::<db::model::VpcSubnet>(self.pool())
+            .select(db::model::VpcSubnet::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(
@@ -930,6 +935,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(subnet_name.clone()))
+            .select(db::model::VpcSubnet::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -951,11 +957,12 @@ impl DataStore {
 
         let subnet =
             db::model::VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
-        let name = subnet.name.clone();
+        let name = subnet.name().clone();
         let subnet = diesel::insert_into(dsl::vpcsubnet)
             .values(subnet)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(db::model::VpcSubnet::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -976,7 +983,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<db::model::VpcSubnet>(self.pool())
+            .returning(db::model::VpcSubnet::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 Error::from_diesel(

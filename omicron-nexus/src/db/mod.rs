@@ -4,8 +4,6 @@
 
 mod config;
 mod datastore;
-#[macro_use]
-mod model_identity;
 mod pagination;
 mod pool;
 mod saga_recovery;

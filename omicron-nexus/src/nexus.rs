@@ -316,7 +316,7 @@ impl Nexus {
             .db_datastore
             .project_create_vpc(
                 &id,
-                db_project.id(),
+                &db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
                         name: Name::try_from("default").unwrap(),
@@ -402,7 +402,7 @@ impl Nexus {
             .db_datastore
             .project_create_disk(
                 &disk_id,
-                project.id(),
+                &project.id(),
                 params,
                 &db::model::DiskRuntimeState::new(),
             )
@@ -857,7 +857,7 @@ impl Nexus {
             Ok(DiskAttachment {
                 instance_id: instance.id(),
                 disk_id: disk.id(),
-                disk_name: disk.identity().name.clone(),
+                disk_name: disk.name().clone(),
                 disk_state: disk.runtime().state().into(),
             })
         }
@@ -889,7 +889,7 @@ impl Nexus {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                disk.identity().name.as_str(),
+                disk.name().as_str(),
                 disk_status
             );
             Err(Error::InvalidRequest { message })
@@ -1084,7 +1084,7 @@ impl Nexus {
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self.db_datastore.project_update_vpc(&vpc.id, params).await?)
+        Ok(self.db_datastore.project_update_vpc(&vpc.id(), params).await?)
     }
 
     pub async fn project_delete_vpc(
