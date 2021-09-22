@@ -180,7 +180,7 @@ where
 }
 
 /// Represents a row in the "Saga" table
-#[derive(Queryable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "saga"]
 pub struct Saga {
     pub id: SagaId,
