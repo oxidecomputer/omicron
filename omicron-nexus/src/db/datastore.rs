@@ -19,7 +19,7 @@
  */
 
 use super::Pool;
-use async_bb8_diesel::{AsyncRunQueryDsl, DieselConnectionManager};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
@@ -38,9 +38,14 @@ use omicron_common::bail_unless;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db;
-use crate::db::pagination::paginated;
-use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
+use crate::db::{
+    self,
+    error::{
+        public_error_from_diesel_pool, public_error_from_diesel_pool_create,
+    },
+    pagination::paginated,
+    update_and_check::{UpdateAndCheck, UpdateStatus},
+};
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -51,9 +56,7 @@ impl DataStore {
         DataStore { pool }
     }
 
-    fn pool(
-        &self,
-    ) -> &bb8::Pool<DieselConnectionManager<diesel::PgConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
         self.pool.pool()
     }
 
@@ -70,7 +73,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
                     name.as_str(),
@@ -90,7 +93,7 @@ impl DataStore {
             .first_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::ByName(name.as_str().to_owned()),
@@ -114,7 +117,7 @@ impl DataStore {
             .get_result_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::ByName(name.as_str().to_owned()),
@@ -136,7 +139,7 @@ impl DataStore {
             .get_result_async::<Uuid>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::ByName(name.as_str().to_owned()),
@@ -154,7 +157,7 @@ impl DataStore {
             .load_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::Other("Listing All".to_string()),
@@ -172,7 +175,7 @@ impl DataStore {
             .load_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::Other("Listing All".to_string()),
@@ -196,7 +199,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
                     LookupType::ByName(name.as_str().to_owned()),
@@ -255,7 +258,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Instance,
                     name.as_str(),
@@ -290,7 +293,7 @@ impl DataStore {
             .load_async::<db::model::Instance>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Instance,
                     LookupType::Other("Listing All".to_string()),
@@ -311,7 +314,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Instance,
                     LookupType::ById(*instance_id),
@@ -334,7 +337,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Instance,
                     LookupType::ByName(instance_name.as_str().to_owned()),
@@ -371,7 +374,7 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Instance,
                     LookupType::ById(*instance_id),
@@ -413,7 +416,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Instance,
                     LookupType::ById(*instance_id),
@@ -450,7 +453,7 @@ impl DataStore {
                     .collect()
             })
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::Other("Listing All".to_string()),
@@ -482,7 +485,11 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(e, ResourceType::Disk, name.as_str())
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Disk,
+                    name.as_str(),
+                )
             })?;
 
         let runtime = disk.runtime();
@@ -513,7 +520,7 @@ impl DataStore {
             .load_async::<db::model::Disk>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::Other("Listing All".to_string()),
@@ -541,7 +548,7 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::ById(*disk_id),
@@ -564,7 +571,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::ById(*disk_id),
@@ -587,7 +594,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::ByName(disk_name.as_str().to_owned()),
@@ -612,7 +619,7 @@ impl DataStore {
             .execute_and_check(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Disk,
                     LookupType::ById(*disk_id),
@@ -642,7 +649,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Oximeter,
                     "Oximeter Info",
@@ -663,7 +670,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Oximeter,
                     "Producer Endpoint",
@@ -687,7 +694,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Oximeter,
                     "Oximeter Assignment",
@@ -712,7 +719,11 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(e, ResourceType::SagaDbg, &name)
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::SagaDbg,
+                    &name,
+                )
             })?;
         Ok(())
     }
@@ -730,7 +741,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::SagaDbg,
                     "Saga Event",
@@ -758,7 +769,7 @@ impl DataStore {
             .execute_and_check(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::SagaDbg,
                     LookupType::ById(saga_id.0.into()),
@@ -797,7 +808,7 @@ impl DataStore {
             .load_async::<db::model::Vpc>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Vpc,
                     LookupType::Other("Listing All".to_string()),
@@ -822,7 +833,11 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(e, ResourceType::Vpc, name.as_str())
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Vpc,
+                    name.as_str(),
+                )
             })?;
         Ok(vpc)
     }
@@ -842,7 +857,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Vpc,
                     LookupType::ById(*vpc_id),
@@ -865,7 +880,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Vpc,
                     LookupType::ByName(vpc_name.as_str().to_owned()),
@@ -884,7 +899,7 @@ impl DataStore {
             .get_result_async::<db::model::Vpc>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Vpc,
                     LookupType::ById(*vpc_id),
@@ -906,7 +921,7 @@ impl DataStore {
             .load_async::<db::model::VpcSubnet>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcSubnet,
                     LookupType::Other("Listing All".to_string()),
@@ -927,7 +942,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcSubnet,
                     LookupType::ByName(subnet_name.as_str().to_owned()),
@@ -953,7 +968,7 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel_create(
+                public_error_from_diesel_pool_create(
                     e,
                     ResourceType::VpcSubnet,
                     name.as_str(),
@@ -973,7 +988,7 @@ impl DataStore {
             .get_result_async::<db::model::VpcSubnet>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcSubnet,
                     LookupType::ById(*subnet_id),
@@ -997,7 +1012,7 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcSubnet,
                     LookupType::ById(*subnet_id),
