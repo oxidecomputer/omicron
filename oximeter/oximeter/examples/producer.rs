@@ -81,7 +81,7 @@ impl Producer for CpuBusyProducer {
 
 #[tokio::main]
 async fn main() {
-    let address = "[::1]:12225".parse().unwrap();
+    let address = "[::1]:0".parse().unwrap();
     let dropshot_config =
         ConfigDropshot { bind_address: address, request_body_max_bytes: 2048 };
     let logging_config =

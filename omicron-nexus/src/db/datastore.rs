@@ -658,6 +658,43 @@ impl DataStore {
         Ok(())
     }
 
+    // Fetch a record for an Oximeter instance, by its ID.
+    pub async fn oximeter_fetch(
+        &self,
+        id: Uuid,
+    ) -> Result<db::model::OximeterInfo, Error> {
+        use db::schema::oximeter::dsl;
+        dsl::oximeter
+            .filter(dsl::id.eq(id))
+            .first_async::<db::model::OximeterInfo>(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Oximeter,
+                    LookupType::ById(id),
+                )
+            })
+    }
+
+    // List the oximeter collector instances
+    pub async fn oximeter_list(
+        &self,
+        page_params: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::OximeterInfo> {
+        use db::schema::oximeter::dsl;
+        paginated(dsl::oximeter, dsl::id, page_params)
+            .load_async::<db::model::OximeterInfo>(self.pool())
+            .await
+            .map_err(|e| {
+                Error::from_diesel(
+                    e,
+                    ResourceType::Oximeter,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
     // Create a record for a new producer endpoint
     pub async fn producer_endpoint_create(
         &self,
