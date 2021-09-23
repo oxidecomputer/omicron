@@ -52,6 +52,8 @@ use omicron_common::SledAgentClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use steno::SagaId;
 use steno::SagaResultOk;
@@ -114,13 +116,6 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
-
-    /**
-     * List of oximeter collectors.
-     *
-     * As with the sled agents above, this should be persisted at some point.
-     */
-    oximeter_collectors: Mutex<BTreeMap<Uuid, Arc<OximeterClient>>>,
 }
 
 /*
@@ -170,7 +165,6 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
-            oximeter_collectors: Mutex::new(BTreeMap::new()),
         };
 
         /*
@@ -212,23 +206,44 @@ impl Nexus {
         // Insert into the DB
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
         self.db_datastore.oximeter_create(&db_info).await?;
+        Ok(())
+    }
 
-        let id = oximeter_info.collector_id;
+    pub async fn oximeter_client(
+        &self,
+        id: Uuid,
+    ) -> Result<Arc<OximeterClient>, Error> {
+        let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
+        let client = self.build_oximeter_client(&oximeter_info);
+        Ok(Arc::new(client))
+    }
+
+    fn build_oximeter_client(
+        &self,
+        oximeter_info: &db::model::OximeterInfo,
+    ) -> OximeterClient {
+        let id = oximeter_info.id;
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
-        let client = Arc::new(OximeterClient::new(
-            oximeter_info.collector_id,
-            oximeter_info.address,
-            client_log,
-        ));
-        let mut clients = self.oximeter_collectors.lock().await;
+        let port: u16 = oximeter_info.port.try_into().unwrap();
+        let address = SocketAddr::from((oximeter_info.ip.ip(), port));
+        let client = OximeterClient::new(id, address, client_log);
         info!(
             self.log,
             "registered oximeter collector client";
             "id" => id.to_string(),
         );
-        clients.insert(id, client);
-        Ok(())
+        client
+    }
+
+    /**
+     * List all registered Oximeter collector instances.
+     */
+    pub async fn oximeter_list(
+        &self,
+        page_params: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::OximeterInfo> {
+        self.db_datastore.oximeter_list(page_params).await
     }
 
     pub fn datastore(&self) -> &db::DataStore {
@@ -1446,20 +1461,17 @@ impl Nexus {
      */
     async fn next_collector(&self) -> Result<Arc<OximeterClient>, Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
-        self.oximeter_collectors
-            .lock()
-            .await
-            .values()
-            .next()
-            .map(Arc::clone)
-            .ok_or_else(|| {
-                warn!(self.log, "no collectors available to assign producer");
-                Error::ServiceUnavailable {
-                    message: String::from(
-                        "no collectors available to assign producer",
-                    ),
-                }
-            })
+        let page_params = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(1).unwrap(),
+        };
+        let oxs = self.db_datastore.oximeter_list(&page_params).await?;
+        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
+            message: String::from("no oximeter collectors available"),
+        })?;
+        let client = self.build_oximeter_client(info);
+        Ok(Arc::new(client))
     }
 }
 
