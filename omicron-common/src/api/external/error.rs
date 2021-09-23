@@ -6,8 +6,6 @@
 
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
-use diesel::result::DatabaseErrorKind as DieselErrorKind;
-use diesel::result::Error as DieselError;
 use dropshot::HttpError;
 use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
@@ -161,46 +159,6 @@ impl Error {
                     error_message_base, error_response
                 ),
             },
-        }
-    }
-
-    /// Converts a Diesel error to an external type error.
-    pub fn from_diesel(
-        error: DieselError,
-        resource_type: ResourceType,
-        lookup_type: LookupType,
-    ) -> Error {
-        match error {
-            DieselError::NotFound => {
-                Error::ObjectNotFound { type_name: resource_type, lookup_type }
-            }
-            DieselError::DatabaseError(kind, _info) => {
-                Error::unavail(format!("Database error: {:?}", kind).as_str())
-            }
-            _ => Error::internal_error("Unknown diesel error"),
-        }
-    }
-
-    /// Converts a Diesel error to an external type error, when requested as
-    /// part of a creation operation.
-    pub fn from_diesel_create(
-        error: DieselError,
-        resource_type: ResourceType,
-        object_name: &str,
-    ) -> Error {
-        match error {
-            DieselError::DatabaseError(kind, _info) => match kind {
-                DieselErrorKind::UniqueViolation => {
-                    Error::ObjectAlreadyExists {
-                        type_name: resource_type,
-                        object_name: object_name.to_string(),
-                    }
-                }
-                _ => Error::unavail(
-                    format!("Database error: {:?}", kind).as_str(),
-                ),
-            },
-            _ => Error::internal_error("Unknown diesel error"),
         }
     }
 }
