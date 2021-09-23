@@ -84,6 +84,11 @@ pub trait TestInterfaces {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
+
+    /**
+     * Attempts to do a table scan on some table
+     */
+    async fn try_table_scan(&self) -> String;
 }
 
 /**
@@ -1481,5 +1486,9 @@ impl TestInterfaces for Nexus {
         let instance_id = disk.runtime().attach_instance_id.unwrap();
         let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
+    }
+
+    async fn try_table_scan(&self) -> String {
+        self.db_datastore.test_try_table_scan().await
     }
 }

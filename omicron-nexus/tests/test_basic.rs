@@ -20,6 +20,7 @@ use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Sled;
+use omicron_nexus::TestInterfaces;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -612,6 +613,20 @@ async fn test_sleds_list() {
     for sa in sas {
         sa.http_server.close().await.unwrap();
     }
+
+    testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_table_scan() {
+    let testctx = test_setup("table_scan").await;
+    let apictx = &testctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    let message = nexus.try_table_scan().await;
+    assert!(message.contains(
+        "contains a full table/index scan which is explicitly disallowed"
+    ));
 
     testctx.teardown().await;
 }

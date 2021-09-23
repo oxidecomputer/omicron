@@ -1020,4 +1020,22 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    /*
+     * Test interfaces
+     */
+    pub async fn test_try_table_scan(&self) -> String {
+        use db::schema::project::dsl;
+        let result = dsl::project
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(self.pool())
+            .await;
+        // XXX PoolError in async-bb8-diesel appears to say "failed to checkout
+        // a connection" when the query fails
+        if result.is_ok() {
+            return "unexpectedly succeeded in table scan".to_owned()
+        }
+
+        return format!("{:?}", result.unwrap_err());
+    }
 }
