@@ -537,6 +537,7 @@ pub enum ResourceType {
     Vpc,
     VpcSubnet,
     Oximeter,
+    MetricProducer,
 }
 
 impl Display for ResourceType {
@@ -555,6 +556,7 @@ impl Display for ResourceType {
                 ResourceType::Vpc => "vpc",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::Oximeter => "oximeter",
+                ResourceType::MetricProducer => "metric producer",
             }
         )
     }

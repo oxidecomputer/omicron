@@ -232,17 +232,13 @@ CREATE TABLE omicron.public.MetricProducer (
     port INT4 NOT NULL,
     interval FLOAT NOT NULL,
     /* TODO: Is this length appropriate? */
-    base_route STRING(512)
+    base_route STRING(512) NOT NULL,
+    /* Oximeter collector instance to which this metric producer is assigned. */
+    oximeter_id UUID NOT NULL
 );
 
-/*
- * Assignment of producers to oximeter collectors
- */
-CREATE TABLE omicron.public.OximeterAssignment (
-    oximeter_id UUID NOT NULL REFERENCES omicron.public.Oximeter (id) ON DELETE CASCADE,
-    producer_id UUID NOT NULL REFERENCES omicron.public.MetricProducer (id) ON DELETE CASCADE,
-    time_created TIMESTAMPTZ NOT NULL,
-    CONSTRAINT "primary" PRIMARY KEY (oximeter_id, producer_id)
+CREATE INDEX ON omicron.public.MetricProducer (
+    oximeter_id
 );
 
 /*

@@ -27,6 +27,7 @@ use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
@@ -55,6 +56,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use steno::SagaId;
 use steno::SagaResultOk;
 use steno::SagaTemplate;
@@ -197,36 +199,82 @@ impl Nexus {
     }
 
     /**
-     * Insert a new client of an Oximeter collector server.
+     * Insert a new record of an Oximeter collector server.
      */
     pub async fn upsert_oximeter_collector(
         &self,
         oximeter_info: &OximeterInfo,
     ) -> Result<(), Error> {
-        // Insert into the DB
+        // Insert the Oximeter instance into the DB. Note that this _updates_ the record,
+        // specifically, the time_modified, ip, and port columns, if the instance has already been
+        // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
         self.db_datastore.oximeter_create(&db_info).await?;
+
+        // Regardless, notify the collector of any assigned metric producers. This should be empty
+        // if this Oximeter collector is registering for the first time, but may not be if the
+        // service is re-registering after failure.
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+        let producers = self
+            .db_datastore
+            .producers_list_by_oximeter_id(
+                oximeter_info.collector_id,
+                &pagparams,
+            )
+            .await?;
+        if !producers.is_empty() {
+            debug!(
+                self.log,
+                "registered oximeter collector that is already assigned producers, re-assigning them to the collector";
+                "n_producers" => producers.len(),
+                "collector_id" => ?oximeter_info.collector_id,
+            );
+            let client = self.build_oximeter_client(
+                oximeter_info.collector_id,
+                oximeter_info.address,
+            );
+            for producer in producers.into_iter() {
+                let producer_info = ProducerEndpoint {
+                    id: producer.id,
+                    address: SocketAddr::new(
+                        producer.ip.ip(),
+                        producer.port.try_into().unwrap(),
+                    ),
+                    base_route: producer.base_route,
+                    interval: Duration::from_secs_f64(producer.interval),
+                };
+                client.register_producer(&producer_info).await?;
+            }
+        }
         Ok(())
     }
 
+    /// Return a client to the Oximeter instance with the given ID.
     pub async fn oximeter_client(
         &self,
         id: Uuid,
-    ) -> Result<Arc<OximeterClient>, Error> {
+    ) -> Result<OximeterClient, Error> {
         let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
-        let client = self.build_oximeter_client(&oximeter_info);
-        Ok(Arc::new(client))
+        let address = SocketAddr::new(
+            oximeter_info.ip.ip(),
+            oximeter_info.port.try_into().unwrap(),
+        );
+        Ok(self.build_oximeter_client(oximeter_info.id, address))
     }
 
+    // Internal helper to build an Oximeter client from its ID and address (common data between
+    // model type and the API type).
     fn build_oximeter_client(
         &self,
-        oximeter_info: &db::model::OximeterInfo,
+        id: Uuid,
+        address: SocketAddr,
     ) -> OximeterClient {
-        let id = oximeter_info.id;
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
-        let port: u16 = oximeter_info.port.try_into().unwrap();
-        let address = SocketAddr::from((oximeter_info.ip.ip(), port));
         let client = OximeterClient::new(id, address, client_log);
         info!(
             self.log,
@@ -1440,13 +1488,11 @@ impl Nexus {
         &self,
         producer_info: ProducerEndpoint,
     ) -> Result<(), Error> {
-        let db_info = db::model::ProducerEndpoint::new(&producer_info);
-        self.db_datastore.producer_endpoint_create(&db_info).await?;
         let collector = self.next_collector().await?;
+        let db_info =
+            db::model::ProducerEndpoint::new(&producer_info, collector.id);
+        self.db_datastore.producer_endpoint_create(&db_info).await?;
         collector.register_producer(&producer_info).await?;
-        self.db_datastore
-            .oximeter_assignment_create(collector.id, producer_info.id)
-            .await?;
         info!(
             self.log,
             "assigned collector to new producer";
@@ -1459,7 +1505,7 @@ impl Nexus {
     /**
      * Return an oximeter collector to assign a newly-registered producer
      */
-    async fn next_collector(&self) -> Result<Arc<OximeterClient>, Error> {
+    async fn next_collector(&self) -> Result<OximeterClient, Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {
             marker: None,
@@ -1470,8 +1516,9 @@ impl Nexus {
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
             message: String::from("no oximeter collectors available"),
         })?;
-        let client = self.build_oximeter_client(info);
-        Ok(Arc::new(client))
+        let address =
+            SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
+        Ok(self.build_oximeter_client(info.id, address))
     }
 }
 
