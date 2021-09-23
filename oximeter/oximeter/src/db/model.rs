@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::histogram;
 use crate::types::{
     self, Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
-    Sample, SampleTime,
+    Sample,
 };
 
 /// The name of the database storing all metric information.
@@ -417,10 +417,9 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     let timeseries_name = sample.timeseries_name.clone();
     let timeseries_key = sample.timeseries_key.clone();
     let measurement = &sample.measurement;
-    let timestamp = measurement.sample_time().timestamp();
+    let timestamp = measurement.timestamp();
     let extract_start_time = |measurement: &Measurement| {
         measurement
-            .sample_time()
             .start_time()
             .expect("Cumulative measurements must have a start time")
     };
@@ -581,9 +580,8 @@ where
     let sample =
         serde_json::from_str::<DbTimeseriesScalarGaugeSample<'a, T>>(line)
             .unwrap();
-    let sample_time = SampleTime::instant(sample.timestamp);
     let datum = Datum::from(sample.datum);
-    let measurement = Measurement::with_sample_time(sample_time, datum);
+    let measurement = Measurement::with_timestamp(sample.timestamp, datum);
     (sample.timeseries_key.to_string(), measurement)
 }
 
@@ -597,12 +595,10 @@ where
     let sample =
         serde_json::from_str::<DbTimeseriesScalarCumulativeSample<'a, T>>(line)
             .unwrap();
-    let sample_time =
-        SampleTime::interval(sample.start_time, sample.timestamp).unwrap();
     let cumulative =
         Cumulative::with_start_time(sample.start_time, sample.datum);
     let datum = Datum::from(cumulative);
-    let measurement = Measurement::with_sample_time(sample_time, datum);
+    let measurement = Measurement::with_timestamp(sample.timestamp, datum);
     (sample.timeseries_key.to_string(), measurement)
 }
 
@@ -616,8 +612,6 @@ where
     let sample =
         serde_json::from_str::<DbTimeseriesHistogramSample<'a, T>>(line)
             .unwrap();
-    let sample_time =
-        SampleTime::interval(sample.start_time, sample.timestamp).unwrap();
     let datum = Datum::from(
         histogram::Histogram::from_arrays(
             sample.start_time,
@@ -628,7 +622,7 @@ where
     );
     (
         sample.timeseries_key.to_string(),
-        Measurement::with_sample_time(sample_time, datum),
+        Measurement::with_timestamp(sample.timestamp, datum),
     )
 }
 
@@ -763,10 +757,7 @@ mod tests {
         } else {
             panic!("Expected a histogram measurement");
         }
-        assert_eq!(
-            unpacked.start_time,
-            measurement.sample_time().start_time().unwrap()
-        );
+        assert_eq!(unpacked.start_time, measurement.start_time().unwrap());
     }
 
     #[test]
@@ -778,8 +769,8 @@ mod tests {
             let (key, measurement) =
                 parse_measurement_from_row(line, datum.datum_type());
             assert_eq!(key, "foo:bar");
-            assert!(measurement.sample_time().start_time().is_none());
-            assert_eq!(measurement.sample_time().timestamp(), timestamp);
+            assert!(measurement.start_time().is_none());
+            assert_eq!(measurement.timestamp(), timestamp);
             assert_eq!(measurement.datum(), datum);
         }
 
@@ -811,11 +802,8 @@ mod tests {
             let (key, measurement) =
                 parse_measurement_from_row(line, datum.datum_type());
             assert_eq!(key, "foo:bar");
-            assert_eq!(
-                measurement.sample_time().start_time().unwrap(),
-                start_time
-            );
-            assert_eq!(measurement.sample_time().timestamp(), timestamp);
+            assert_eq!(measurement.start_time().unwrap(), start_time);
+            assert_eq!(measurement.timestamp(), timestamp);
             assert_eq!(measurement.datum(), datum);
         }
 
@@ -848,8 +836,8 @@ mod tests {
         let (key, measurement) =
             parse_measurement_from_row(line, DatumType::HistogramI64);
         assert_eq!(key, "foo:bar");
-        assert_eq!(measurement.sample_time().start_time().unwrap(), start_time);
-        assert_eq!(measurement.sample_time().timestamp(), timestamp);
+        assert_eq!(measurement.start_time().unwrap(), start_time);
+        assert_eq!(measurement.timestamp(), timestamp);
         if let Datum::HistogramI64(hist) = measurement.datum() {
             assert_eq!(hist.n_bins(), 3);
             assert_eq!(hist.n_samples(), 2);

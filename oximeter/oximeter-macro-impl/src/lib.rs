@@ -61,19 +61,20 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
 // Implementation of the `#[derive(Metric)]` derive macro.
 fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<ItemStruct>(item)?;
-    let (datum_field_name, dat_type, datum_type) = extract_datum_type(&item)?;
+    let datum_field = extract_datum_type(&item)?;
     let name = &item.ident;
     if let Fields::Named(ref data_fields) = item.fields {
         let (field_names, field_types, field_values, _) =
-            extract_struct_fields(&data_fields, Some(&datum_field_name))?;
+            extract_struct_fields(
+                &data_fields,
+                Some(&datum_field.ident.as_ref().unwrap().to_string()),
+            )?;
         let metric_impl = build_metric_trait_impl(
             name,
             &field_names,
             &field_types,
             &field_values,
-            &datum_field_name,
-            &datum_type,
-            &dat_type,
+            &datum_field,
         );
         Ok(quote! {
             #metric_impl
@@ -89,61 +90,12 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
 // Find a field named `datum` or annotated with the `#[datum]` attribute helper. Return its name,
 // the type of the field, and the tokens representing the `oximeter::DatumType` enum variant
 // corresponding to the field's type.
-fn extract_datum_type(
-    item: &ItemStruct,
-) -> syn::Result<(String, Type, TokenStream)> {
-    let err = |span| {
-        Error::new(
-            span,
-            "Must be one of the supported data types: \
-            bool, i64, f64, String, Bytes, Cumulative<i64>, Cumulative<f64>, \
-            Histogram<i64>, or Histogram<f64>",
-        )
-    };
+fn extract_datum_type(item: &ItemStruct) -> syn::Result<&syn::Field> {
     if let Fields::Named(ref fields) = item.fields {
-        let datum_field = find_datum_field(fields)
-            .ok_or_else(|| Error::new(item.span(), "Metric structs must have exactly one field named `datum` or a field annotated with the `#[datum]` attribute helper"))?;
-        let name = datum_field.ident.as_ref().unwrap().to_string();
-
-        if let Type::Path(ref p) = datum_field.ty {
-            let path = p
-                .path
-                .segments
-                .last()
-                .ok_or_else(|| err(datum_field.ty.span()))?;
-            let as_segment =
-                |s: &str| syn::parse_str::<syn::PathSegment>(s).unwrap();
-
-            let dat_type = if path == &as_segment("bool") {
-                quote! { ::oximeter::DatumType::Bool }
-            } else if path == &as_segment("i64") {
-                quote! { ::oximeter::DatumType::I64 }
-            } else if path == &as_segment("f64") {
-                quote! { ::oximeter::DatumType::F64 }
-            } else if path == &as_segment("String") {
-                quote! { ::oximeter::DatumType::String }
-            } else if path == &as_segment("Bytes") {
-                quote! { ::oximeter::DatumType::Bytes }
-            } else if path == &as_segment("Cumulative<i64>") {
-                quote! { ::oximeter::DatumType::CumulativeI64 }
-            } else if path == &as_segment("Cumulative<f64>") {
-                quote! { ::oximeter::DatumType::CumulativeF64 }
-            } else if path == &as_segment("Histogram<i64>") {
-                quote! { ::oximeter::DatumType::HistogramI64 }
-            } else if path == &as_segment("Histogram<f64>") {
-                quote! { ::oximeter::DatumType::HistogramF64 }
-            } else {
-                return Err(err(datum_field.span()));
-            };
-            Ok((name, datum_field.ty.clone(), dat_type))
-        } else {
-            Err(err(datum_field.span()))
-        }
+        find_datum_field(fields)
+            .ok_or_else(|| Error::new(item.span(), "Metric structs must have exactly one field named `datum` or a field annotated with the `#[datum]` attribute helper"))
     } else {
-        return Err(Error::new(
-            item.span(),
-            "Struct must contain named fields",
-        ));
+        Err(Error::new(item.span(), "Struct must contain named fields"))
     }
 }
 
@@ -228,9 +180,7 @@ fn build_metric_trait_impl(
     names: &[String],
     types: &[TokenStream],
     values: &[TokenStream],
-    datum_field_name: &String,
-    datum_type: &TokenStream,
-    dat_type: &Type,
+    datum_field: &syn::Field,
 ) -> TokenStream {
     let refs =
         names.iter().map(|name| format_ident!("{}", name)).collect::<Vec<_>>();
@@ -239,9 +189,8 @@ fn build_metric_trait_impl(
     // key format: "field0_value:field1_value:..."
     let fmt = vec!["{}"; values.len()].join(":");
     let key_formatter = quote! { format!(#fmt, #(self.#refs),*) };
-    let datum_type =
-        syn::parse_str::<syn::Expr>(&format!("{}", datum_type)).unwrap();
-    let datum_field_ident = format_ident!("{}", datum_field_name);
+    let datum_field_ident = datum_field.ident.as_ref().unwrap();
+    let dat_type = &datum_field.ty;
     quote! {
         impl ::oximeter::Metric for #item_name {
             type Datum = #dat_type;
@@ -267,7 +216,7 @@ fn build_metric_trait_impl(
             }
 
             fn datum_type(&self) -> ::oximeter::DatumType {
-                #datum_type
+                <Self::Datum as ::oximeter::traits::Datum>::datum_type(&self.#datum_field_ident)
             }
 
             fn datum(&self) -> &#dat_type {
@@ -283,7 +232,7 @@ fn build_metric_trait_impl(
             }
 
             fn start_time(&self) -> Option<::chrono::DateTime<::chrono::Utc>> {
-                <Self::Datum as ::oximeter::traits::DataPoint>::start_time(&self.#datum_field_ident)
+                <Self::Datum as ::oximeter::traits::Datum>::start_time(&self.#datum_field_ident)
             }
         }
     }
@@ -517,17 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn test_metric_unsupported_type() {
-        let out = metric_impl(quote! {
-            struct MyMetric {
-                field: String,
-                datum: f32,
-            }
-        });
-        assert!(out.is_err());
-    }
-
-    #[test]
     fn test_metric_without_datum_field() {
         let out = metric_impl(quote! {
             struct MyMetric {
@@ -556,9 +494,9 @@ mod tests {
             }
         })
         .unwrap();
-        let (name, ty, tokens) = extract_datum_type(&item).unwrap();
-        assert_eq!(name, "datum");
-        if let syn::Type::Path(ref p) = ty {
+        let field = extract_datum_type(&item).unwrap();
+        assert_eq!(field.ident.as_ref().unwrap(), "datum");
+        if let syn::Type::Path(ref p) = field.ty {
             assert_eq!(
                 p.path.segments.last().unwrap().ident.to_string(),
                 "i64"
@@ -566,10 +504,6 @@ mod tests {
         } else {
             panic!("Expected the extracted datum type");
         }
-        assert_eq!(
-            tokens.to_string().replace(" ", ""),
-            "::oximeter::DatumType::I64"
-        );
     }
 
     #[test]
@@ -582,9 +516,9 @@ mod tests {
             }
         })
         .unwrap();
-        let (name, ty, tokens) = extract_datum_type(&item).unwrap();
-        assert_eq!(name, "also_not_datum");
-        if let syn::Type::Path(ref p) = ty {
+        let field = extract_datum_type(&item).unwrap();
+        assert_eq!(field.ident.as_ref().unwrap(), "also_not_datum");
+        if let syn::Type::Path(ref p) = field.ty {
             assert_eq!(
                 p.path.segments.last().unwrap().ident.to_string(),
                 "i64"
@@ -592,10 +526,6 @@ mod tests {
         } else {
             panic!("Expected the extracted datum type");
         }
-        assert_eq!(
-            tokens.to_string().replace(" ", ""),
-            "::oximeter::DatumType::I64"
-        );
     }
 
     #[test]
@@ -637,9 +567,9 @@ mod tests {
             }
         })
         .unwrap();
-        let (name, ty, tokens) = extract_datum_type(&item).unwrap();
-        assert_eq!(name, "datum");
-        if let syn::Type::Path(ref p) = ty {
+        let field = extract_datum_type(&item).unwrap();
+        assert_eq!(field.ident.as_ref().unwrap(), "datum");
+        if let syn::Type::Path(ref p) = field.ty {
             assert_eq!(
                 p.path.segments.last().unwrap().ident.to_string(),
                 "i64"
@@ -647,9 +577,5 @@ mod tests {
         } else {
             panic!("Expected the extracted datum type");
         }
-        assert_eq!(
-            tokens.to_string().replace(" ", ""),
-            "::oximeter::DatumType::I64"
-        );
     }
 }

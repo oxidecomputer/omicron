@@ -246,71 +246,6 @@ impl DatumType {
     }
 }
 
-/// The `SampleTime` represents the instant or range of time over which a metric is sampled.
-///
-/// Gauge metrics are sampled at instantaneous points in time. Cumulative metrics are by definition
-/// over an interval of time. The `SampleTime` provides a safer interface to both these concepts.
-///
-/// The type may be constructed via the `SampleTime::instant` or `SampleTime::interval` associated
-/// functions. The latter is fallible, and enforces that the start time is strictly before the end
-/// time.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-)]
-pub struct SampleTime {
-    start_time: Option<DateTime<Utc>>,
-    timestamp: DateTime<Utc>,
-}
-
-impl SampleTime {
-    /// Create a new instantaneous sample time
-    pub fn instant(timestamp: DateTime<Utc>) -> Self {
-        SampleTime { start_time: None, timestamp }
-    }
-
-    /// Create a new interval sample time
-    pub fn interval(
-        start_time: DateTime<Utc>,
-        timestamp: DateTime<Utc>,
-    ) -> Result<Self, Error> {
-        if start_time < timestamp {
-            Ok(Self { start_time: Some(start_time), timestamp })
-        } else {
-            Err(Error::DatumError(
-                "Start time of an interval must be strictly before end time"
-                    .to_string(),
-            ))
-        }
-    }
-
-    /// Return the current timestamp for a `SampleTime`.
-    ///
-    /// Note that this is defined as the end time for an `Interval`.
-    pub fn timestamp(&self) -> DateTime<Utc> {
-        self.timestamp
-    }
-
-    /// Return the start time for an interval, or `None` if this is an instant.
-    pub fn start_time(&self) -> Option<DateTime<Utc>> {
-        self.start_time
-    }
-
-    /// Return true if this is an instant, else false.
-    pub fn is_instant(&self) -> bool {
-        self.start_time.is_none()
-    }
-}
-
 /// A `Datum` is a single sampled data point from a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub enum Datum {
@@ -398,29 +333,24 @@ impl From<&str> for Datum {
 /// A `Measurement` is a timestamped datum from a single metric
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct Measurement {
-    // The time point or interval over which the datum is collected
-    sample_time: SampleTime,
+    // The timestamp at which the measurement of the metric was taken.
+    timestamp: DateTime<Utc>,
     // The underlying data point for the metric
     datum: Datum,
 }
 
 impl Measurement {
-    // Internal constructor. `sample_time` is assumed valid for `datum`.
-    pub(crate) fn with_sample_time(
-        sample_time: SampleTime,
+    // Internal constructor. `timestamp` is assumed valid for `datum`.
+    pub(crate) fn with_timestamp(
+        timestamp: DateTime<Utc>,
         datum: Datum,
     ) -> Self {
-        Self { sample_time, datum }
+        Self { timestamp, datum }
     }
 
     /// Generate a new measurement from a `Datum`
     pub fn new<D: Into<Datum>>(datum: D) -> Measurement {
-        let datum = datum.into();
-        let sample_time = SampleTime {
-            start_time: datum.start_time(),
-            timestamp: Utc::now(),
-        };
-        Measurement { sample_time, datum }
+        Measurement { timestamp: Utc::now(), datum: datum.into() }
     }
 
     /// Return the datum for this measurement
@@ -428,9 +358,15 @@ impl Measurement {
         &self.datum
     }
 
-    /// Return the sample time for this measurement
-    pub fn sample_time(&self) -> &SampleTime {
-        &self.sample_time
+    /// Return the timestamp for this measurement
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+
+    /// Return the start time for this measurement, if it is from a cumulative metric, or `None` if
+    /// a gauge.
+    pub fn start_time(&self) -> Option<DateTime<Utc>> {
+        self.datum.start_time()
     }
 
     /// Return the type of the underlying datum of a measurement
@@ -487,7 +423,7 @@ pub struct Cumulative<T> {
 }
 
 pub trait CumulativeType:
-    traits::DataPoint + Add + AddAssign + Copy + One + Zero
+    traits::Datum + Add + AddAssign + Copy + One + Zero
 {
 }
 impl CumulativeType for i64 {}
@@ -605,10 +541,8 @@ impl PartialEq for Sample {
     fn eq(&self, other: &Sample) -> bool {
         self.target.eq(&other.target)
             && self.metric.eq(&other.metric)
-            && self
-                .measurement
-                .sample_time()
-                .eq(&other.measurement.sample_time())
+            && self.measurement.start_time().eq(&other.measurement.start_time())
+            && self.measurement.timestamp().eq(&other.measurement.timestamp())
     }
 }
 
@@ -620,11 +554,18 @@ impl Ord for Sample {
     /// Samples are ordered by their target and metric keys, which include the field values of
     /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
     fn cmp(&self, other: &Sample) -> Ordering {
-        self.timeseries_key.cmp(&other.timeseries_key).then(
-            self.measurement
-                .sample_time()
-                .cmp(&other.measurement.sample_time()),
-        )
+        self.timeseries_key
+            .cmp(&other.timeseries_key)
+            .then(
+                self.measurement
+                    .timestamp()
+                    .cmp(&other.measurement.timestamp()),
+            )
+            .then(
+                self.measurement
+                    .start_time()
+                    .cmp(&other.measurement.start_time()),
+            )
     }
 }
 
@@ -643,7 +584,7 @@ impl Sample {
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
-        D: traits::DataPoint + Into<Datum>,
+        D: traits::Datum + Into<Datum>,
     {
         Self {
             timeseries_name: format!("{}:{}", target.name(), metric.name()),
@@ -686,14 +627,12 @@ impl Sample {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use chrono::Utc;
     use std::net::IpAddr;
     use uuid::Uuid;
 
     use super::histogram::Histogram;
     use super::{
         Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
-        SampleTime,
     };
     use crate::test_util;
     use crate::types;
@@ -721,22 +660,6 @@ mod tests {
         assert_eq!(x.value(), 2.0);
         x = x + 0.5;
         assert_eq!(x.value(), 2.5);
-    }
-
-    #[test]
-    fn test_sample_time() {
-        let now = Utc::now();
-        let then = now + chrono::Duration::seconds(1);
-        let t = SampleTime::instant(now);
-        assert_eq!(t.timestamp(), now);
-        assert!(t.start_time().is_none());
-
-        let t = SampleTime::interval(now, then).unwrap();
-        assert_eq!(t.start_time().unwrap(), now);
-        assert_eq!(t.timestamp(), then);
-
-        let t = SampleTime::interval(then, now);
-        assert!(t.is_err());
     }
 
     #[test]
@@ -768,14 +691,13 @@ mod tests {
     fn test_measurement() {
         let measurement = Measurement::new(0i64);
         assert_eq!(measurement.datum_type(), DatumType::I64);
-        assert_eq!(measurement.sample_time().start_time(), None);
+        assert_eq!(measurement.start_time(), None);
 
         let datum = Cumulative::new(0i64);
         let measurement = Measurement::new(datum.clone());
         assert_eq!(measurement.datum(), &Datum::from(datum));
-        let sample_time = measurement.sample_time();
-        assert!(sample_time.start_time().is_some());
-        assert!(sample_time.timestamp() >= sample_time.start_time().unwrap());
+        assert!(measurement.start_time().is_some());
+        assert!(measurement.timestamp() >= measurement.start_time().unwrap());
     }
 
     #[test]
@@ -792,7 +714,7 @@ mod tests {
             format!("{}:{}", t.name(), m.name())
         );
         assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
-        assert!(sample.measurement.sample_time().start_time().is_none());
+        assert!(sample.measurement.start_time().is_none());
         assert_eq!(sample.measurement.datum(), &Datum::from(1i64));
 
         let m = test_util::TestCumulativeMetric {
@@ -801,7 +723,7 @@ mod tests {
             datum: 1i64.into(),
         };
         let sample = types::Sample::new(&t, &m);
-        assert!(sample.measurement.sample_time().start_time().is_some());
+        assert!(sample.measurement.start_time().is_some());
     }
 
     #[test]

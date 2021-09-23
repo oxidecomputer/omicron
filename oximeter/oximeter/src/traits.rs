@@ -86,7 +86,7 @@ pub trait Target {
 ///
 /// The trait is similar to the `Target` trait, providing metadata about the metric's name and
 /// fields. In addition, a `Metric` has an associated datum type, which must be one of the
-/// supported [`DataPoint`] types. This provides type safety, ensuring that the produced
+/// supported [`Datum`] types. This provides type safety, ensuring that the produced
 /// measurements are of the correct type for a metric.
 ///
 /// Users should derive the [`oximeter::Metric`] trait on a struct. The struct's fields are the
@@ -96,8 +96,9 @@ pub trait Target {
 /// One field of the struct is special, describing the actual measured data that the metric
 /// represents. This should be a field named `datum`, or another field (with any name you choose)
 /// annotated with the `#[datum]` attribute. This field represents the underlying data for the
-/// metric, and must be one of the supported metric types: `i64`, `f64`, `bool`, `String`, or
-/// `Bytes` for gauges, and `Cumulative<T>` or `Histogram<T>` for cumulative metrics.
+/// metric, and must be one of the supported types, implementing the [`Datum`] trait. This can
+/// be any of: `i64`, `f64`, `bool`, `String`, or `Bytes` for gauges, and `Cumulative<T>` or
+/// `Histogram<T>` for cumulative metrics, where `T` is `i64` or `f64`.
 ///
 /// The value of the metric's data is _measured_ by using the `measure()` method, which returns a
 /// [`Measurement`]. This describes a timestamped data point for the metric.
@@ -105,7 +106,7 @@ pub trait Target {
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::{Metric, types::SampleTime};
+/// use oximeter::Metric;
 ///
 /// // A gauge with a floating-point value.
 /// #[derive(Metric)]
@@ -117,7 +118,7 @@ pub trait Target {
 /// let met = MyMetric { name: "name".into(), datum: 0.0 };
 /// assert_eq!(met.datum_type(), oximeter::DatumType::F64);
 /// let measurement = met.measure();
-/// assert!(measurement.sample_time().start_time().is_none());
+/// assert!(measurement.start_time().is_none());
 /// assert_eq!(measurement.datum(), &oximeter::Datum::F64(0.0));
 /// ```
 ///
@@ -132,7 +133,7 @@ pub trait Target {
 /// ```
 pub trait Metric {
     /// The type of datum produced by this metric.
-    type Datum: DataPoint;
+    type Datum: Datum;
 
     /// Return the name of the metric, which is the snake_case form of the struct's name.
     fn name(&self) -> &'static str;
@@ -187,44 +188,84 @@ pub trait Metric {
     fn start_time(&self) -> Option<DateTime<Utc>>;
 }
 
-/// The `DataPoint` trait identifies types that may be used as measurements or samples for a
-/// timeseries.
+/// The `Datum` trait identifies types that may be used as the underlying data points or samples
+/// for a metric.
 ///
-/// Individual samples are produced by client code, and associated with a target and metric by
-/// constructing a [`Sample`](crate::types::Sample).
-pub trait DataPoint: Clone {
+/// Any type implementing this trait may be used in the `datum` field of the [`Metric`] trait.
+pub trait Datum: Clone {
+    /// Returns the start time, if data of this type is cumulative, or `None` if data represents a
+    /// gauge (instantaneous measurement).
     fn start_time(&self) -> Option<DateTime<Utc>> {
         None
     }
+
+    /// Return the [`DatumType`] variant for this type.
+    fn datum_type(&self) -> DatumType;
 }
 
-impl DataPoint for bool {}
-impl DataPoint for i64 {}
-impl DataPoint for f64 {}
-impl DataPoint for String {}
-impl DataPoint for Bytes {}
+impl Datum for bool {
+    fn datum_type(&self) -> DatumType {
+        DatumType::Bool
+    }
+}
 
-impl DataPoint for Cumulative<i64> {
+impl Datum for i64 {
+    fn datum_type(&self) -> DatumType {
+        DatumType::I64
+    }
+}
+
+impl Datum for f64 {
+    fn datum_type(&self) -> DatumType {
+        DatumType::F64
+    }
+}
+
+impl Datum for String {
+    fn datum_type(&self) -> DatumType {
+        DatumType::String
+    }
+}
+
+impl Datum for Bytes {
+    fn datum_type(&self) -> DatumType {
+        DatumType::Bytes
+    }
+}
+
+impl Datum for Cumulative<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
         Some(Cumulative::start_time(&self))
     }
+    fn datum_type(&self) -> DatumType {
+        DatumType::CumulativeI64
+    }
 }
 
-impl DataPoint for Cumulative<f64> {
+impl Datum for Cumulative<f64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
         Some(Cumulative::start_time(&self))
     }
-}
-
-impl DataPoint for Histogram<i64> {
-    fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Histogram::start_time(&self))
+    fn datum_type(&self) -> DatumType {
+        DatumType::CumulativeF64
     }
 }
 
-impl DataPoint for Histogram<f64> {
+impl Datum for Histogram<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
         Some(Histogram::start_time(&self))
+    }
+    fn datum_type(&self) -> DatumType {
+        DatumType::HistogramI64
+    }
+}
+
+impl Datum for Histogram<f64> {
+    fn start_time(&self) -> Option<DateTime<Utc>> {
+        Some(Histogram::start_time(&self))
+    }
+    fn datum_type(&self) -> DatumType {
+        DatumType::HistogramF64
     }
 }
 

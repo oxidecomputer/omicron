@@ -24,7 +24,6 @@ pub use producer_server::ProducerServer;
 pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
-    SampleTime,
 };
 
 #[cfg(test)]
