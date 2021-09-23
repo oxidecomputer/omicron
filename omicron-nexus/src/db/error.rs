@@ -1,6 +1,7 @@
 //! Error handling and conversions.
 
 use async_bb8_diesel::{ConnectionError, PoolError};
+use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::{
@@ -73,11 +74,41 @@ pub fn public_error_from_diesel(
             type_name: resource_type,
             lookup_type,
         },
-        DieselError::DatabaseError(kind, _info) => {
-            PublicError::unavail(format!("Database error: {:?}", kind).as_str())
+        DieselError::DatabaseError(kind, info) => {
+            PublicError::internal_error(&format_database_error(kind, &*info))
         }
-        _ => PublicError::internal_error("Unknown diesel error"),
+        error => PublicError::internal_error(&format!(
+            "Unknown diesel error: {:?}",
+            error
+        )),
     }
+}
+
+pub fn format_database_error(
+    kind: DieselErrorKind,
+    info: &dyn DatabaseErrorInformation,
+) -> String {
+    let mut rv =
+        format!("database error (kind = {:?}): {}\n", kind, info.message());
+    if let Some(details) = info.details() {
+        rv.push_str(&format!("DETAILS: {}\n", details));
+    }
+    if let Some(hint) = info.hint() {
+        rv.push_str(&format!("HINT: {}\n", hint));
+    }
+    if let Some(table_name) = info.table_name() {
+        rv.push_str(&format!("TABLE NAME: {}\n", table_name));
+    }
+    if let Some(column_name) = info.column_name() {
+        rv.push_str(&format!("COLUMN NAME: {}\n", column_name));
+    }
+    if let Some(constraint_name) = info.constraint_name() {
+        rv.push_str(&format!("CONSTRAINT NAME: {}\n", constraint_name));
+    }
+    if let Some(statement_position) = info.statement_position() {
+        rv.push_str(&format!("STATEMENT POSITION: {}\n", statement_position));
+    }
+    rv
 }
 
 /// Converts a Diesel error to an external error, when requested as
