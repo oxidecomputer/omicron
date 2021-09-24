@@ -2,7 +2,7 @@
  * Handles recovery of sagas
  */
 
-use crate::db;
+use crate::db::{self, error::public_error_from_diesel_pool};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::Error;
@@ -147,7 +147,7 @@ async fn list_unfinished_sagas(
         .load_async(pool.pool())
         .await
         .map_err(|e| {
-            Error::from_diesel(
+            public_error_from_diesel_pool(
                 e,
                 ResourceType::SagaDbg,
                 LookupType::ById(sec_id.0),
@@ -235,7 +235,7 @@ pub async fn load_saga_log(
         .load_async::<db::saga_types::SagaNodeEvent>(pool.pool())
         .await
         .map_err(|e| {
-            Error::from_diesel(
+            public_error_from_diesel_pool(
                 e,
                 ResourceType::SagaDbg,
                 LookupType::ById(saga.id.0 .0),
