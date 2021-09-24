@@ -265,7 +265,7 @@ async fn load_saga_log(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::test_utils::{new_log, UnpluggableCockroachDbSecStore};
+    use crate::db::test_utils::UnpluggableCockroachDbSecStore;
     use lazy_static::lazy_static;
     use omicron_common::dev;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -406,7 +406,8 @@ mod test {
     #[tokio::test]
     async fn test_failure_during_saga_can_be_recovered() {
         // Test setup
-        let log = new_log();
+        let logctx = dev::test_setup_log("test_failure_during_saga_can_be_recovered");
+        let log = logctx.log;
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
@@ -473,7 +474,8 @@ mod test {
     #[tokio::test]
     async fn test_successful_saga_does_not_replay_during_recovery() {
         // Test setup
-        let log = new_log();
+        let logctx = dev::test_setup_log("test_successful_saga_does_not_replay_during_recovery");
+        let log = logctx.log;
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
