@@ -26,7 +26,8 @@ pub struct VirtualMachine {
 #[derive(Metric)]
 pub struct CpuBusy {
     pub cpu_id: i64,
-    pub value: Cumulative<f64>,
+    #[datum]
+    pub busy: Cumulative<f64>,
 }
 
 /// A simple struct for tracking busy time of a set of vCPUs, relative to a start time.
@@ -49,7 +50,7 @@ impl CpuBusyProducer {
             cpu: (0..n_cpus)
                 .map(|i| CpuBusy {
                     cpu_id: i as _,
-                    value: Cumulative::default(),
+                    busy: Cumulative::default(),
                 })
                 .collect(),
         }
@@ -69,10 +70,11 @@ impl Producer for CpuBusyProducer {
             // is part of how we get type-safety in producing metrics, but it may need some work.
             let elapsed = (timestamp - self.start_time)
                 .to_std()
-                .map_err(|e| Error::ProductionError(e.to_string()))?
+                .map_err(|e| Error::DatumError(e.to_string()))?
                 .as_secs_f64();
-            cpu.value += elapsed - cpu.value.value();
-            data.push(Sample::new(&self.vm, cpu, None));
+            let datum = cpu.datum_mut();
+            *datum += elapsed - datum.value();
+            data.push(Sample::new(&self.vm, cpu));
         }
         // Yield the available samples.
         Ok(Box::new(data.into_iter()))
