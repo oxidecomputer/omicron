@@ -107,10 +107,10 @@ pub mod db;
 pub mod histogram;
 pub mod oximeter_server;
 pub mod producer_server;
-pub mod traits;
-pub mod types;
 #[cfg(test)]
 pub(crate) mod test_util;
+pub mod traits;
+pub mod types;
 
 pub use oximeter_server::Oximeter;
 pub use producer_server::ProducerServer;

@@ -56,8 +56,7 @@ pub fn make_hist_sample() -> Sample {
     hist.sample(1.0).unwrap();
     hist.sample(2.0).unwrap();
     hist.sample(6.0).unwrap();
-    let metric =
-        TestHistogram { id: Uuid::new_v4(), good: true, datum: hist };
+    let metric = TestHistogram { id: Uuid::new_v4(), good: true, datum: hist };
     Sample::new(&target, &metric)
 }
 
@@ -86,8 +85,7 @@ pub fn generate_test_samples(
     for _ in 0..n_projects {
         let project_id = Uuid::new_v4();
         for _ in 0..n_instances {
-            let vm =
-                VirtualMachine { project_id, instance_id: Uuid::new_v4() };
+            let vm = VirtualMachine { project_id, instance_id: Uuid::new_v4() };
             for cpu in 0..n_cpus {
                 for sample in 0..n_samples {
                     let cpu_busy = CpuBusy {

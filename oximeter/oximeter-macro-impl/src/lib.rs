@@ -17,6 +17,11 @@ use syn::{
 };
 
 /// Derive the `Target` trait for a type.
+///
+/// The `Target` trait can be attached to structs, where those structs describe the named fields
+/// (and their types) for a target.
+///
+/// See the [`oximeter::Target`](../oximeter/traits/trait.Target.html) trait for details.
 #[proc_macro_derive(Target)]
 pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     target_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
@@ -25,7 +30,11 @@ pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// Create a `Metric` trait implementation for a struct that defines the metric's schema
 ///
 /// The `Metric` macro can be attached to structs, where those structs describe the named fields
-/// (and their) types of a metric. See the [`oximeter::Metric`] trait for details.
+/// (and their types) for a metric. The struct must also have a field named `datum`, or one
+/// annotated with the `#[datum]` helper attribute (but named whatever you wish). This field
+/// describes the datum of the metric, the type of underlying data that the metric tracks.
+///
+/// See the [`oximeter::Metric`](../oximeter/traits/trait.Metric.html) trait for details.
 #[proc_macro_derive(Metric, attributes(datum))]
 pub fn metric(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     metric_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
