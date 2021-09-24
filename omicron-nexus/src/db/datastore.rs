@@ -669,7 +669,7 @@ impl DataStore {
             .first_async::<db::model::OximeterInfo>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Oximeter,
                     LookupType::ById(id),
@@ -687,7 +687,7 @@ impl DataStore {
             .load_async::<db::model::OximeterInfo>(self.pool())
             .await
             .map_err(|e| {
-                Error::from_diesel(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::Oximeter,
                     LookupType::Other("Listing All".to_string()),
