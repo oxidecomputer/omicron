@@ -1,4 +1,95 @@
 //! Tools for generating and collecting metric data in the Oxide rack.
+//!
+//! Overview
+//! --------
+//!
+//! `oximeter` is a crate for working with metric data. It includes tools for defining new metrics
+//! in Rust code, exporting them to a collection server, storing them in a ClickHouse database, and
+//! retrieving the data through queries. The system is designed to enable reporting of lots of
+//! metric and telemetry information from the Oxide rack, and into Omicron, the Oxide control
+//! plane.
+//!
+//! In general, a _metric_ is a quantity or value exposed by some software. For example, this might
+//! be "requests per second" from a service, or the current temperature on a DIMM temperature
+//! sensor. A _target_ is the thing being measured -- the service or the DIMM, in these cases. Both
+//! targets and metrics may have key-value pairs associated with them, called _fields_.
+//!
+//! Motivating example
+//! ------------------
+//!
+//! ```rust
+//! use uuid::Uuid;
+//! use oximeter::{types::Cumulative, Metric, Target};
+//!
+//! #[derive(Target)]
+//! struct HttpServer {
+//!     name: String,
+//!     id: Uuid,
+//! }
+//!
+//! #[derive(Metric)]
+//! struct TotalRequests {
+//!     route: String,
+//!     method: String,
+//!     response_code: i64,
+//!     #[datum]
+//!     total: Cumulative<i64>,
+//! }
+//! ```
+//!
+//! In this case, our target is some HTTP server, which we identify with the fields "name" and
+//! "id". The metric of interest is the total count of requests, by route/method/response code,
+//! over time. The [`types::Cumulative`] type keeps track of cumulative scalar values, an integer
+//! in this case.
+//!
+//! Datum, measurement, and samples
+//! -------------------------------
+//!
+//! In the above example, the field `total` in the `TotalRequests` struct is annotated with the
+//! `#[datum]` helper. This identifies this field as the _datum_, or underlying quantity or value
+//! that the metric captures. (Note that the field may also just be _named_ `datum`. These two
+//! methods for identifying the field of interest are the same.) A datum may be:
+//!
+//! - a **gauge**, an instantaneous value at some point in time, or
+//! - **cumulative**, an aggregated value over some defined time interval.
+//!
+//! The supported data types are identified by the [`traits::Datum`] trait.
+//!
+//! When the current value for a metric is to be retrieved, the [`Metric::measure`] method is
+//! called. This generates a [`Measurement`], which contains the value of the datum, along with the
+//! current timestamp.
+//!
+//! While the measurement captures the timestamped datum, it must be combined with information
+//! about the target and metric to be meaningful. This is represented by a [`Sample`], which
+//! includes the measurement and the collection of fields from both the target and metric.
+//!
+//! Producers
+//! ---------
+//!
+//! How are samples generated? Consumers should define a type that implements the [`Producer`]
+//! trait. This is a simple interface for generating an iterator over `Sample`s. A producer can
+//! generate any number of samples, from any number of targets and metrics. For example, we might
+//! have a producer that keeps track of all requests the above `HttpServer` receives, by storing
+//! one instance of the `TotalRequests` for each unique combination of route, method, and response
+//! code. This producer could then produce a collection of `Sample`s, one from each request counter
+//! it tracks.
+//!
+//! Exporting data
+//! --------------
+//!
+//! Data can be exported from a software component, and stored in the control plane's timeseries
+//! database. The easiest way to export data is to use a [`ProducerServer`]. Once running, any
+//! `Producer` may be registered with the server. The server will register itself for periodic data
+//! collection with the rest of the Oxide control plane. When its configurable API endpoint is hit,
+//! it will call the `produce` method of all registered producers, and submit the resulting data
+//! for storage in the timeseries database.
+//!
+//! Keep in mind that, although the data may be collected on one interval, `Producer`s may opt to
+//! sample the data on any interval they choose. Consumers may wish to sample data every second,
+//! but only submit that once per minute to the rest of the control plane. Similarly, different
+//! `Producer`s may be registered with the same `ProducerServer`, each with potentially different
+//! sampling intervals.
+
 // Copyright 2021 Oxide Computer Company
 
 pub use oximeter_macro_impl::*;
@@ -18,6 +109,8 @@ pub mod oximeter_server;
 pub mod producer_server;
 pub mod traits;
 pub mod types;
+#[cfg(test)]
+pub(crate) mod test_util;
 
 pub use oximeter_server::Oximeter;
 pub use producer_server::ProducerServer;
@@ -25,108 +118,3 @@ pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
 };
-
-#[cfg(test)]
-pub(crate) mod test_util {
-    use crate::histogram;
-    use crate::histogram::Histogram;
-    use crate::types::{Cumulative, Sample};
-    use uuid::Uuid;
-
-    #[derive(oximeter::Target)]
-    pub struct TestTarget {
-        pub name1: String,
-        pub name2: String,
-        pub num: i64,
-    }
-
-    impl Default for TestTarget {
-        fn default() -> Self {
-            TestTarget {
-                name1: "first_name".into(),
-                name2: "second_name".into(),
-                num: 0,
-            }
-        }
-    }
-
-    #[derive(oximeter::Metric)]
-    pub struct TestMetric {
-        pub id: Uuid,
-        pub good: bool,
-        pub datum: i64,
-    }
-
-    #[derive(oximeter::Metric)]
-    pub struct TestCumulativeMetric {
-        pub id: Uuid,
-        pub good: bool,
-        pub datum: Cumulative<i64>,
-    }
-
-    #[derive(oximeter::Metric)]
-    pub struct TestHistogram {
-        pub id: Uuid,
-        pub good: bool,
-        pub datum: Histogram<f64>,
-    }
-
-    pub fn make_sample() -> Sample {
-        let target = TestTarget::default();
-        let metric = TestMetric { id: Uuid::new_v4(), good: true, datum: 1 };
-        Sample::new(&target, &metric)
-    }
-
-    pub fn make_hist_sample() -> Sample {
-        let target = TestTarget::default();
-        let mut hist = histogram::Histogram::new(&[0.0, 5.0, 10.0]).unwrap();
-        hist.sample(1.0).unwrap();
-        hist.sample(2.0).unwrap();
-        hist.sample(6.0).unwrap();
-        let metric =
-            TestHistogram { id: Uuid::new_v4(), good: true, datum: hist };
-        Sample::new(&target, &metric)
-    }
-
-    /// A target identifying a single virtual machine instance
-    #[derive(Debug, Clone, Copy, oximeter::Target)]
-    pub struct VirtualMachine {
-        pub project_id: Uuid,
-        pub instance_id: Uuid,
-    }
-
-    /// A metric recording the total time a vCPU is busy, by its ID
-    #[derive(Debug, Clone, Copy, oximeter::Metric)]
-    pub struct CpuBusy {
-        cpu_id: i64,
-        datum: Cumulative<f64>,
-    }
-
-    pub fn generate_test_samples(
-        n_projects: usize,
-        n_instances: usize,
-        n_cpus: usize,
-        n_samples: usize,
-    ) -> Vec<Sample> {
-        let n_timeseries = n_projects * n_instances * n_cpus;
-        let mut samples = Vec::with_capacity(n_samples * n_timeseries);
-        for _ in 0..n_projects {
-            let project_id = Uuid::new_v4();
-            for _ in 0..n_instances {
-                let vm =
-                    VirtualMachine { project_id, instance_id: Uuid::new_v4() };
-                for cpu in 0..n_cpus {
-                    for sample in 0..n_samples {
-                        let cpu_busy = CpuBusy {
-                            cpu_id: cpu as _,
-                            datum: Cumulative::new(sample as f64),
-                        };
-                        let sample = Sample::new(&vm, &cpu_busy);
-                        samples.push(sample);
-                    }
-                }
-            }
-        }
-        samples
-    }
-}
