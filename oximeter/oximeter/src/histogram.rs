@@ -1,12 +1,12 @@
 //! Types for managing metrics that are histograms.
 // Copyright 2021 Oxide Computer Company
 
-use std::cmp::Ordering;
-use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeTo};
-
+use chrono::{DateTime, Utc};
 use num_traits::Bounded;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeTo};
 use thiserror::Error;
 
 /// A trait used to identify the data types that can be used as the support of a histogram.
@@ -224,6 +224,7 @@ pub struct Bin<T> {
 /// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Histogram<T> {
+    start_time: DateTime<Utc>,
     bins: Vec<Bin<T>>,
     n_samples: u64,
 }
@@ -324,7 +325,7 @@ where
         if let Bound::Excluded(end) = bins_.last().unwrap().range.end_bound() {
             ensure_finite(*end)?;
         }
-        Ok(Self { bins: bins_, n_samples: 0 })
+        Ok(Self { start_time: Utc::now(), bins: bins_, n_samples: 0 })
     }
 
     /// Construct a new histogram from left bin edges.
@@ -369,7 +370,7 @@ where
         if current < <T as Bounded>::max_value() {
             bins.push(Bin { range: BinRange::from(current), count: 0 });
         }
-        Ok(Self { bins, n_samples: 0 })
+        Ok(Self { start_time: Utc::now(), bins, n_samples: 0 })
     }
 
     /// Add a new sample into the histogram.
@@ -427,13 +428,16 @@ where
         (bins, counts)
     }
 
-    // An internal helper function to deserialize a histogram from the database.
+    // An internal helper function to deserialize a histogram from the database, including the
+    // start time of the cumulative data.
     pub(crate) fn from_arrays(
+        start_time: DateTime<Utc>,
         bins: Vec<T>,
         counts: Vec<u64>,
     ) -> Result<Self, HistogramError> {
         assert_eq!(bins.len(), counts.len());
         let mut hist = Self::new(&bins)?;
+        hist.start_time = start_time;
         let mut n_samples = 0;
         for (bin, count) in hist.bins.iter_mut().zip(counts.into_iter()) {
             bin.count = count;
@@ -441,6 +445,11 @@ where
         }
         hist.n_samples = n_samples;
         Ok(hist)
+    }
+
+    /// Return the start time for this histogram
+    pub fn start_time(&self) -> DateTime<Utc> {
+        self.start_time
     }
 }
 
@@ -672,7 +681,8 @@ mod tests {
         );
         assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
 
-        let rebuilt = Histogram::from_arrays(bins, counts).unwrap();
+        let rebuilt =
+            Histogram::from_arrays(hist.start_time(), bins, counts).unwrap();
         assert_eq!(
             hist, rebuilt,
             "Histogram reconstructed from paired arrays is not correct"

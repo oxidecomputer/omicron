@@ -10,6 +10,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::dev;
+use oximeter::Metric;
 use slog::o;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -190,7 +191,7 @@ struct IntegrationTarget {
 #[derive(oximeter::Metric)]
 struct IntegrationMetric {
     pub name: String,
-    pub value: i64,
+    pub datum: i64,
 }
 
 // A producer of simple counter metrics used in the integration tests
@@ -206,9 +207,8 @@ impl oximeter::Producer for IntegrationProducer {
         Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
         oximeter::Error,
     > {
-        let sample =
-            oximeter::types::Sample::new(&self.target, &self.metric, None);
-        self.metric.value += 1;
+        let sample = oximeter::types::Sample::new(&self.target, &self.metric);
+        *self.metric.datum_mut() += 1;
         Ok(Box::new(vec![sample].into_iter()))
     }
 }
@@ -254,7 +254,7 @@ pub async fn start_producer_server(
         },
         metric: IntegrationMetric {
             name: "integration-test-metric".to_string(),
-            value: 0,
+            datum: 0,
         },
     };
     server

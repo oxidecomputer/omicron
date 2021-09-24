@@ -10,7 +10,7 @@ path = "../omicron-rpaths"
 anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "0a6d535" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1a5c55d" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.15"
