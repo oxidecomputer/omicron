@@ -37,6 +37,22 @@ impl std::fmt::Display for FieldType {
     }
 }
 
+macro_rules! impl_field_type_from {
+    ($ty:ty, $variant:path) => {
+        impl From<&$ty> for FieldType {
+            fn from(_: &$ty) -> FieldType {
+                $variant
+            }
+        }
+    };
+}
+
+impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { i64, FieldType::I64 }
+impl_field_type_from! { IpAddr, FieldType::IpAddr }
+impl_field_type_from! { Uuid, FieldType::Uuid }
+impl_field_type_from! { bool, FieldType::Bool }
+
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub enum FieldValue {

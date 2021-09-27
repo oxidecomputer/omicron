@@ -61,7 +61,7 @@ pub trait Target {
     fn field_names(&self) -> &'static [&'static str];
 
     /// Return the types of the target's fields.
-    fn field_types(&self) -> &'static [FieldType];
+    fn field_types(&self) -> Vec<FieldType>;
 
     /// Return the values of the target's fields.
     fn field_values(&self) -> Vec<FieldValue>;
@@ -142,7 +142,7 @@ pub trait Metric {
     fn field_names(&self) -> &'static [&'static str];
 
     /// Return the types of the metric's fields.
-    fn field_types(&self) -> &'static [FieldType];
+    fn field_types(&self) -> Vec<FieldType>;
 
     /// Return the values of the metric's fields.
     fn field_values(&self) -> Vec<FieldValue>;

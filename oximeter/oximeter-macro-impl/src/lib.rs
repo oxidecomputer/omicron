@@ -9,11 +9,11 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::spanned::Spanned;
 use syn::{
-    Data, DeriveInput, Error, Fields, FieldsNamed, Ident, ItemStruct, Type,
+    Data, DeriveInput, Error, Field, Fields, FieldsNamed, Ident, ItemStruct,
 };
 
 /// Derive the `Target` trait for a type.
@@ -45,21 +45,17 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     if let Data::Struct(ref data) = item.data {
         let name = &item.ident;
-        let (names, types, values) = if let Fields::Named(ref data_fields) =
-            data.fields
-        {
-            let (names, types, values, _) =
-                extract_struct_fields(&data_fields, None)?;
-            (names, types, values)
+        let fields = if let Fields::Named(ref data_fields) = data.fields {
+            extract_struct_fields(&data_fields, None)
         } else if matches!(data.fields, Fields::Unit) {
-            (vec![], vec![], vec![])
+            vec![]
         } else {
             return Err(Error::new(
                     item.span(),
                     "Can only be derived for structs with named fields or unit structs",
                 ));
         };
-        return Ok(build_target_trait_impl(&name, &names, &types, &values));
+        return Ok(build_target_trait_impl(&name, &fields[..]));
     }
     Err(Error::new(
         item.span(),
@@ -73,18 +69,10 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let datum_field = extract_datum_type(&item)?;
     let name = &item.ident;
     if let Fields::Named(ref data_fields) = item.fields {
-        let (field_names, field_types, field_values, _) =
-            extract_struct_fields(
-                &data_fields,
-                Some(&datum_field.ident.as_ref().unwrap().to_string()),
-            )?;
-        let metric_impl = build_metric_trait_impl(
-            name,
-            &field_names,
-            &field_types,
-            &field_values,
-            &datum_field,
-        );
+        let ignore = datum_field.ident.as_ref().unwrap().to_string();
+        let fields = extract_struct_fields(&data_fields, Some(&ignore));
+        let metric_impl =
+            build_metric_trait_impl(name, &fields[..], &datum_field);
         Ok(quote! {
             #metric_impl
         })
@@ -145,40 +133,52 @@ fn find_datum_field(fields: &FieldsNamed) -> Option<&syn::Field> {
     .map(|field| &**field)
 }
 
-// Build the derived implementation for the Target trait
-fn build_target_trait_impl(
-    item_name: &Ident,
-    names: &[String],
-    types: &[TokenStream],
-    values: &[TokenStream],
-) -> TokenStream {
-    let refs = names.iter().map(|name| format_ident!("{}", name));
+fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
+    let field_idents = fields
+        .iter()
+        .map(|field| field.ident.as_ref().unwrap())
+        .collect::<Vec<_>>();
+    let names = fields
+        .iter()
+        .map(|field| field.ident.as_ref().unwrap().to_string())
+        .collect::<Vec<_>>();
     let name = to_snake_case(&format!("{}", item_name));
 
     // key format: "field0_value:field1_value:..."
-    let fmt = vec!["{}"; values.len()].join(":");
-    let key_formatter = quote! { format!(#fmt, #(self.#refs),*) };
+    let fmt = vec!["{}"; fields.len()].join(":");
+    let key_formatter = quote! { format!(#fmt, #(self.#field_idents),*) };
+    quote! {
+        fn name(&self) -> &'static str {
+            #name
+        }
+
+        fn field_names(&self) -> &'static [&'static str] {
+            &[#(#names),*]
+        }
+
+        fn field_types(&self) -> Vec<::oximeter::FieldType> {
+            vec![#(::oximeter::FieldType::from(&self.#field_idents),)*]
+        }
+
+        fn field_values(&self) -> Vec<::oximeter::FieldValue> {
+            vec![#(::oximeter::FieldValue::from(&self.#field_idents),)*]
+        }
+
+        fn key(&self) -> String {
+            #key_formatter
+        }
+    }
+}
+
+// Build the derived implementation for the Target trait
+fn build_target_trait_impl(
+    item_name: &Ident,
+    fields: &[&Field],
+) -> TokenStream {
+    let shared_methods = build_shared_methods(item_name, fields);
     quote! {
         impl ::oximeter::Target for #item_name {
-            fn name(&self) -> &'static str {
-                #name
-            }
-
-            fn field_names(&self) -> &'static [&'static str] {
-                &[#(#names),*]
-            }
-
-            fn field_types(&self) -> &'static [::oximeter::FieldType] {
-                &[#(#types,)*]
-            }
-
-            fn field_values(&self) -> Vec<::oximeter::FieldValue> {
-                vec![#(#values,)*]
-            }
-
-            fn key(&self) -> String {
-                #key_formatter
-            }
+            #shared_methods
         }
     }
 }
@@ -186,43 +186,17 @@ fn build_target_trait_impl(
 // Build the derived implementation for the Metric trait
 fn build_metric_trait_impl(
     item_name: &Ident,
-    names: &[String],
-    types: &[TokenStream],
-    values: &[TokenStream],
+    fields: &[&Field],
     datum_field: &syn::Field,
 ) -> TokenStream {
-    let refs =
-        names.iter().map(|name| format_ident!("{}", name)).collect::<Vec<_>>();
-    let name = to_snake_case(&format!("{}", item_name));
-
-    // key format: "field0_value:field1_value:..."
-    let fmt = vec!["{}"; values.len()].join(":");
-    let key_formatter = quote! { format!(#fmt, #(self.#refs),*) };
+    let shared_methods = build_shared_methods(item_name, fields);
     let datum_field_ident = datum_field.ident.as_ref().unwrap();
     let dat_type = &datum_field.ty;
     quote! {
         impl ::oximeter::Metric for #item_name {
             type Datum = #dat_type;
 
-            fn name(&self) -> &'static str {
-                #name
-            }
-
-            fn field_names(&self) -> &'static [&'static str] {
-                &[#(#names),*]
-            }
-
-            fn field_types(&self) -> &'static [::oximeter::FieldType] {
-                &[#(#types,)*]
-            }
-
-            fn field_values(&self) -> Vec<::oximeter::FieldValue> {
-                vec![#(#values,)*]
-            }
-
-            fn key(&self) -> String {
-                #key_formatter
-            }
+            #shared_methods
 
             fn datum_type(&self) -> ::oximeter::DatumType {
                 <Self::Datum as ::oximeter::traits::Datum>::datum_type(&self.#datum_field_ident)
@@ -237,7 +211,7 @@ fn build_metric_trait_impl(
             }
 
             fn measure(&self) -> ::oximeter::Measurement {
-                ::oximeter::Measurement::new(::oximeter::Datum::from(self.#datum_field_ident.clone()))
+                ::oximeter::Measurement::new(::oximeter::Datum::from(&self.#datum_field_ident))
             }
 
             fn start_time(&self) -> Option<::chrono::DateTime<::chrono::Utc>> {
@@ -247,83 +221,19 @@ fn build_metric_trait_impl(
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn extract_struct_fields(
-    fields: &FieldsNamed,
-    ignore: Option<&str>,
-) -> syn::Result<(Vec<String>, Vec<TokenStream>, Vec<TokenStream>, Vec<Type>)> {
-    let n_fields = fields.named.len();
-    let mut names = Vec::with_capacity(n_fields);
-    let mut types = Vec::with_capacity(n_fields);
-    let mut values = Vec::with_capacity(n_fields);
-    let mut arg_types = Vec::with_capacity(n_fields);
-    for field in fields.named.iter() {
-        if let Type::Path(ref ty) = field.ty {
-            let field_name = format!(
-                "{}",
-                field.ident.as_ref().expect("Field must have a name")
-            );
-            if ignore.is_some() && ignore == Some(field_name.as_str()) {
-                continue;
-            }
-            let field_type = format!(
-                "{}",
-                ty.path
-                    .segments
-                    .iter()
-                    .last()
-                    .ok_or_else(|| Error::new(
-                        ty.path.span(),
-                        "Expected a field with a path type"
-                    ))?
-                    .ident
-            );
-
-            let (type_variant, value_variant) =
-                extract_variants(&field_type, &field_name, &field.span())?;
-            names.push(field_name);
-            types.push(type_variant);
-            values.push(value_variant);
-            arg_types.push(field.ty.clone());
-        } else {
-            return Err(Error::new(
-                field.span(),
-                "Expected a field with a path type",
-            ));
-        }
+fn extract_struct_fields<'a>(
+    fields: &'a FieldsNamed,
+    ignore: Option<&'a str>,
+) -> Vec<&'a Field> {
+    if let Some(ignore) = ignore {
+        fields
+            .named
+            .iter()
+            .filter(|field| *field.ident.as_ref().unwrap() != ignore)
+            .collect()
+    } else {
+        fields.named.iter().collect()
     }
-    Ok((names, types, values, arg_types))
-}
-
-// Extract the field type and field value variants for the given field of a target struct
-fn extract_variants(
-    type_name: &str,
-    field_name: &str,
-    span: &Span,
-) -> syn::Result<(TokenStream, TokenStream)> {
-    let (fragment, maybe_clone) = match type_name {
-        "String" => (type_name, ".clone()"),
-        "IpAddr" | "Uuid" => (type_name, ""),
-        "i64" => ("I64", ""),
-        "bool" => ("Bool", ""),
-        _ => {
-            return Err(Error::new(
-                *span,
-                "Fields must be one of type: String, IpAddr, i64, bool, Uuid",
-            ));
-        }
-    };
-    let type_variant = syn::parse_str::<syn::Expr>(&format!(
-        "::oximeter::FieldType::{}",
-        fragment
-    ))
-    .unwrap();
-    let value_variant = syn::parse_str::<syn::Expr>(&format!(
-        "::oximeter::FieldValue::{}(self.{}{})",
-        fragment, field_name, maybe_clone
-    ))
-    .unwrap();
-    Ok((quote! { #type_variant }, quote! { #value_variant }))
 }
 
 // Convert the CapitalCase struct name in to snake_case.
@@ -343,6 +253,7 @@ fn to_snake_case(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use syn::Type;
 
     #[test]
     fn test_target() {
@@ -358,20 +269,6 @@ mod tests {
             .into(),
         );
         assert!(out.is_ok());
-    }
-
-    #[test]
-    fn test_target_unsupported_type() {
-        let out = target_impl(
-            quote! {
-                #[derive(Target)]
-                struct MyTarget {
-                    no_no: f64,
-                }
-            }
-            .into(),
-        );
-        assert!(out.is_err());
     }
 
     #[test]
