@@ -33,7 +33,7 @@ zone = "0.1"
 expectorate = "1.0.1"
 mockall = "0.10"
 serial_test = "0.5"
-subprocess = "0.2.7"
+subprocess = "0.2.8"
 
 #
 # Disable doc builds by default for our binaries to work around issue
