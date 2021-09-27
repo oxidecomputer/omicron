@@ -7,7 +7,7 @@ edition = "2018"
 path = "../omicron-rpaths"
 
 [dependencies]
-http = "0.2.0"
+http = "0.2.5"
 hyper = "0.14"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
