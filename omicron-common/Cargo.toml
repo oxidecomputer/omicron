@@ -79,7 +79,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.10"
+version = "1.12"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -95,7 +95,7 @@ expectorate = "1.0.1"
 serde_urlencoded = "0.7.0"
 
 [dev-dependencies.tokio]
-version = "1.10"
+version = "1.12"
 features = [ "test-util" ]
 
 #
