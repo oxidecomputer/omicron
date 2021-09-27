@@ -192,7 +192,7 @@ schema for pagination parameters: page selector, scan by name or id
       "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])"
     },
     "NameOrIdMarker": {
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "required": [
