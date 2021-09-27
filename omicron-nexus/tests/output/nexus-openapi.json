@@ -1605,7 +1605,7 @@
       },
       "DiskState": {
         "description": "State of a Disk (primarily: attached or not)",
-        "anyOf": [
+        "oneOf": [
           {
             "description": "Disk is being initialized",
             "type": "object",
@@ -2048,7 +2048,7 @@
         ]
       },
       "SagaErrorInfo": {
-        "anyOf": [
+        "oneOf": [
           {
             "type": "object",
             "properties": {
@@ -2156,7 +2156,7 @@
         ]
       },
       "SagaState": {
-        "anyOf": [
+        "oneOf": [
           {
             "type": "object",
             "properties": {
