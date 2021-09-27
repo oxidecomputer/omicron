@@ -75,7 +75,7 @@ features = [ "serde", "v4" ]
 bytes = "1.0.1"
 expectorate = "1.0.1"
 openapiv3 = "0.5.0"
-subprocess = "0.2.7"
+subprocess = "0.2.8"
 
 [dev-dependencies.oximeter]
 version = "0.1.0"
