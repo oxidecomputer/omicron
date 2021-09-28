@@ -20,6 +20,8 @@ pub trait HistogramSupport:
     + Serialize
     + DeserializeOwned
     + Clone
+    + num_traits::Zero
+    + num_traits::One
     + 'static
 {
     fn is_finite(&self) -> bool;
@@ -451,6 +453,101 @@ where
     pub fn start_time(&self) -> DateTime<Utc> {
         self.start_time
     }
+
+    /// Generate a histogram with bins linearly spaced within each decade in the range
+    /// `[start_decade, stop_decade)`.
+    ///
+    /// This generates a "log-linear" histogram. Within each power of 10, the bins of the histogram
+    /// are linearly spaced. Note that any additional bins on the left will be added, as described
+    /// in `[Histogram::new]`. Also, an extra bin will be added from `[0, x)`, where `x == 10 **
+    /// start_decade` -- in other words, this will add the first bin from zero to the start of the
+    /// decades specified.
+    ///
+    /// Example
+    /// -------
+    /// ```rust
+    /// use oximeter::histogram::{Histogram, BinRange};
+    /// use std::ops::{RangeBounds, Bound};
+    ///
+    /// let hist = Histogram::span_decades(-1, 1).unwrap();
+    /// let bins = hist.iter().collect::<Vec<_>>();
+    ///
+    /// // First bin is from the left support edge to zero
+    /// assert_eq!(bins[0].range.end_bound(), Bound::Excluded(&0.0));
+    ///
+    /// // First decade of bins is `[0.0, 0.1, 0.2, ...)`.
+    /// assert_eq!(bins[1].range, BinRange::range(0.0, 0.1));
+    /// assert_eq!(bins[2].range, BinRange::range(0.1, 0.2));
+    ///
+    /// // Second decade is `[1.0, 2.0, 3.0, ...]`
+    /// assert_eq!(bins[10].range, BinRange::range(0.9, 1.0));
+    /// assert_eq!(bins[11].range, BinRange::range(1.0, 2.0));
+    ///
+    /// // Ends at the third decade, so the last bin is the remainder of the support
+    /// assert_eq!(bins[19].range, BinRange::from(9.0));
+    /// ```
+    pub fn span_decades<D>(
+        start_decade: D,
+        end_decade: D,
+    ) -> Result<Self, HistogramError>
+    where
+        D: SpanDecade<D, T>,
+        std::ops::Range<D>: Iterator<Item = D>,
+    {
+        let edges = [
+            vec![<T as num_traits::Zero>::zero()],
+            (start_decade..end_decade)
+                .into_iter()
+                .map(|x| x.span_decade())
+                .flatten()
+                .collect(),
+        ]
+        .concat();
+        Histogram::new(&edges)
+    }
+}
+
+/// A trait to support generating linearly-spaced bin edges that span the given decade.
+///
+/// This trait is used to generate what's sometimes called a "log-linear" histogram support. This
+/// support has linearly spaced bins over a range, and many ranges, each of which is
+/// logarithmically-spaced. Trait accepts a decade, a power of 10, and linearly spaces bins over
+/// that decade, from `10 ** decade` to `10 ** (decade + 1)`, not inclusive of the right edges.
+/// Note that the left bin is `1.0`, `10.0`, etc, not zero.
+///
+/// Example
+/// -------
+/// ```rust
+/// use oximeter::histogram::SpanDecade;
+/// let x = 0i8.span_decade();
+/// assert_eq!(x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+/// ```
+///
+/// Note that the `SpanDecade` trait is parametrized by _two_ types, `D` is the input type, and `T`
+/// is the output type, the type of elements generated in the return vector. This crate only
+/// defines this trait for type pairs `(i8, f64)` and `(u8, i64)`. That is, calling
+/// `i8::span_decade()` generates a `Vec<f64>` and `u8::span_decade()` generates a `Vec<i64>`.
+pub trait SpanDecade<D, T>
+where
+    T: HistogramSupport,
+{
+    /// Return a set of bin edges linearly-spaced across the decade defined by `self`, i.e, `10 **
+    /// self`.
+    fn span_decade(&self) -> Vec<T>;
+}
+
+impl SpanDecade<i8, f64> for i8 {
+    fn span_decade(&self) -> Vec<f64> {
+        let mul = 10.0f64.powi((*self).into());
+        (1..10).map(|x| (x as f64) * mul).collect()
+    }
+}
+
+impl SpanDecade<u8, i64> for u8 {
+    fn span_decade(&self) -> Vec<i64> {
+        let mul = 10i64.pow((*self).into());
+        (1..10).map(|x| x * mul).collect()
+    }
 }
 
 // Helper to ensure all values are comparable, i.e., not NaN.
@@ -468,6 +565,38 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_approx_eq(x: f64, y: f64) {
+        assert!((x - y).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_span_decade_f64() {
+        fn run_test(decade: i8) {
+            let diff = 10.0f64.powi(decade.into());
+            let x = decade.span_decade();
+            for (x, y) in x.iter().zip(x.iter().skip(1)) {
+                assert_approx_eq(y - x, diff);
+            }
+        }
+        run_test(0);
+        run_test(-1);
+        run_test(1);
+    }
+
+    #[test]
+    fn test_span_decade_i64() {
+        fn run_test(decade: u8) {
+            let diff = 10i64.pow(decade.into());
+            let x = decade.span_decade();
+            for (x, y) in x.iter().zip(x.iter().skip(1)) {
+                assert_eq!(y - x, diff);
+            }
+        }
+        run_test(0);
+        run_test(1);
+        run_test(2);
+    }
 
     #[test]
     fn test_ensure_finite() {
@@ -687,5 +816,12 @@ mod tests {
             hist, rebuilt,
             "Histogram reconstructed from paired arrays is not correct"
         );
+    }
+
+    #[test]
+    fn test_span_decades() {
+        let hist = Histogram::span_decades(0i8, 3i8).unwrap();
+        println!("{:#?}", hist.bins);
+        assert_eq!(hist.n_bins(), 9 * 3 + 2); // 1 for bin from (-infty, 1), 1 for (0, 0.1)
     }
 }
