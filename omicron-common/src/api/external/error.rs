@@ -27,6 +27,15 @@ use uuid::Uuid;
  */
 #[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
 pub enum Error {
+    /**
+     * Authentication failed
+     *
+     * Like most systems, we're deliberately cagey about why authentication
+     * failed to avoid leaking information to an attacker.
+     */
+    #[error("Authentication failed")]
+    AuthnFailed { internal_message: String },
+
     /** An object needed as part of this operation was not found. */
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
     ObjectNotFound { type_name: ResourceType, lookup_type: LookupType },
@@ -70,7 +79,8 @@ impl Error {
         match self {
             Error::ServiceUnavailable { .. } => true,
 
-            Error::ObjectNotFound { .. }
+            Error::AuthnFailed { .. }
+            | Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
@@ -171,6 +181,24 @@ impl From<Error> for HttpError {
      */
     fn from(error: Error) -> HttpError {
         match error {
+            Error::AuthnFailed { internal_message } => {
+                HttpError {
+                    /*
+                     * The HTTP short summary of this status code is
+                     * "Unauthorized", but the code describes an authentication
+                     * failure, not an authorization one.
+                     * TODO But is that the right status code to use here?
+                     * TODO-security Under what conditions should this be a 404
+                     * instead?
+                     * TODO Add a WWW-Authenticate header?
+                     */
+                    status_code: http::StatusCode::UNAUTHORIZED,
+                    error_code: None,
+                    external_message: String::from("authorization failed"),
+                    internal_message: internal_message,
+                }
+            }
+
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
                 if let LookupType::Other(message) = lt {
                     HttpError::for_client_error(

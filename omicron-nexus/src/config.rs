@@ -26,6 +26,19 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
+    /** Parameters that compromise security (used for testing) */
+    pub insecure: InsecureParams,
+}
+
+/** Parameters that compromise security (used for testing) */
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct InsecureParams {
+    ///
+    /// If enabled, any client request may specify a particular actor using the
+    /// oxide-authn header.  This is obviously grossly insecure in any real
+    /// deployment, which is why it's behind the "insecure" config block.
+    ///
+    pub allow_any_request_to_spoof_authn_header: bool,
 }
 
 #[derive(Debug)]
@@ -96,6 +109,7 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::Config;
+    use super::InsecureParams;
     use super::{LoadError, LoadErrorKind};
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -246,8 +260,39 @@ mod test {
                     url: "postgresql://127.0.0.1?sslmode=disable"
                         .parse()
                         .unwrap()
+                },
+                insecure: InsecureParams {
+                    allow_any_request_to_spoof_authn_header: false,
                 }
             }
+        );
+
+        let config = read_config(
+            "valid",
+            r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            [insecure]
+            allow_any_request_to_spoof_authn_header = true
+            "##,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.insecure,
+            InsecureParams { allow_any_request_to_spoof_authn_header: true }
         );
     }
 }

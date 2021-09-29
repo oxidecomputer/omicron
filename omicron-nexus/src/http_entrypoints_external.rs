@@ -3,6 +3,7 @@
  */
 
 use super::ServerContext;
+use crate::authn::authn_http;
 use crate::db;
 
 use dropshot::endpoint;
@@ -166,6 +167,7 @@ async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
+    let _authn = authn_http(&rqctx).await?;
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();

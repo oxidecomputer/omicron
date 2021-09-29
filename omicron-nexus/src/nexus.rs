@@ -2,6 +2,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::config::InsecureParams;
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
@@ -116,6 +117,10 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
+
+    /** insecure parts of config */
+    // XXX pub
+    pub config_insecure: InsecureParams,
 }
 
 /*
@@ -136,6 +141,7 @@ impl Nexus {
         log: Logger,
         pool: db::Pool,
         nexus_id: &Uuid,
+        insecure_config: &InsecureParams,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let my_sec_id = db::SecId::from(*nexus_id);
@@ -165,6 +171,7 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
+            config_insecure: insecure_config.clone(),
         };
 
         /*
