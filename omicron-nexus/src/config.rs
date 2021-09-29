@@ -11,6 +11,11 @@ use serde::Serialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+/*
+ * By design, we require that all config properties be specified (i.e., we don't
+ * use `serde(default)` except for the "insecure" parameters.
+ */
+
 /**
  * Configuration for a nexus server
  */
@@ -27,18 +32,26 @@ pub struct Config {
     /** Database parameters */
     pub database: db::Config,
     /** Parameters that compromise security (used for testing) */
+    #[serde(default)]
     pub insecure: InsecureParams,
 }
 
 /** Parameters that compromise security (used for testing) */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub struct InsecureParams {
     ///
     /// If enabled, any client request may specify a particular actor using the
-    /// oxide-authn header.  This is obviously grossly insecure in any real
-    /// deployment, which is why it's behind the "insecure" config block.
+    /// "oxide-authn-spoof" header.  This is obviously grossly insecure in any
+    /// real deployment, which is why it's behind the "insecure" config block.
     ///
     pub allow_any_request_to_spoof_authn_header: bool,
+}
+
+impl Default for InsecureParams {
+    fn default() -> Self {
+        InsecureParams { allow_any_request_to_spoof_authn_header: false }
+    }
 }
 
 #[derive(Debug)]

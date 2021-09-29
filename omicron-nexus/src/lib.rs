@@ -93,17 +93,11 @@ impl Server {
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
 
-        // XXX Working here:
-        // Consider putting the current "insecure" block behind a new "nexus"
-        // block.  Put "id" in there too.  We should pass this whole config down
-        // to ServerContext.
-        //
-        // Either way, definitely want to pass that config down to
-        // Nexus::new_with_id here.  Then: flesh out `authn_http` to use the
-        // config and look at some header.  Then write some automated tests for
-        // all this.  Those tests will need a way to override the "insecure"
-        // config for Nexus.
-        //
+        // XXX Consider putting the current "insecure" block behind a new
+        // "nexus" block.  Put "id" in there too.  We should pass this whole
+        // config down to ServerContext.
+        // XXX automated tests for all this.  Will need a way to override the
+        // "insecure" config for Nexus.
         // Will also want to provide a default impl for the config objects so
         // that people don't have to specify the insecure config block at all or
         // any of its properties.
