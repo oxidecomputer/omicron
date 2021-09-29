@@ -93,20 +93,13 @@ impl Server {
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
 
-        // XXX Consider putting the current "insecure" block behind a new
-        // "nexus" block.  Put "id" in there too.  We should pass this whole
-        // config down to ServerContext.
         // XXX automated tests for all this.  Will need a way to override the
         // "insecure" config for Nexus.
-        // Will also want to provide a default impl for the config objects so
-        // that people don't have to specify the insecure config block at all or
-        // any of its properties.
         let apictx = ServerContext::new(
             rack_id,
             ctxlog,
             pool,
-            &config.id,
-            &config.insecure,
+            &config
         );
 
         let c1 = Arc::clone(&apictx);

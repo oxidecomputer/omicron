@@ -2,7 +2,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
-use crate::config::InsecureParams;
+use crate::config;
 use crate::db;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
@@ -119,8 +119,7 @@ pub struct Nexus {
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 
     /** insecure parts of config */
-    // XXX pub
-    pub config_insecure: InsecureParams,
+    config_insecure: config::InsecureParams,
 }
 
 /*
@@ -140,11 +139,10 @@ impl Nexus {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        nexus_id: &Uuid,
-        insecure_config: &InsecureParams,
+        config: &config::Config,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(*nexus_id);
+        let my_sec_id = db::SecId::from(config.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -171,7 +169,7 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
-            config_insecure: insecure_config.clone(),
+            config_insecure: config.insecure.clone(),
         };
 
         /*
@@ -190,6 +188,10 @@ impl Nexus {
         );
 
         nexus_arc
+    }
+
+    pub fn config_insecure(&self) -> &config::InsecureParams {
+        &self.config_insecure
     }
 
     /*

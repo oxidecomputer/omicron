@@ -1,7 +1,7 @@
 /*!
  * Shared state used by API request handlers
  */
-use super::config::InsecureParams;
+use super::config;
 use super::db;
 use super::Nexus;
 
@@ -28,16 +28,14 @@ impl ServerContext {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        nexus_id: &Uuid,
-        insecure_config: &InsecureParams,
+        config: &config::Config,
     ) -> Arc<ServerContext> {
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
                 log.new(o!("component" => "nexus")),
                 pool,
-                nexus_id,
-                insecure_config,
+                config,
             ),
             log,
         })

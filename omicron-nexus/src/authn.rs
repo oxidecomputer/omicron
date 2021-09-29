@@ -112,7 +112,8 @@ pub async fn authn_http(
     let nexus = &apictx.nexus;
     let log = &rqctx.log;
     let headers = request.headers();
-    let allowed = nexus.config_insecure.allow_any_request_to_spoof_authn_header;
+    let allowed =
+        nexus.config_insecure().allow_any_request_to_spoof_authn_header;
 
     fn extract_spoof_header(
         log: &slog::Logger,
