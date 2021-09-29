@@ -115,52 +115,30 @@ pub async fn authn_http(
     let allowed =
         nexus.config_insecure().allow_any_request_to_spoof_authn_header;
 
-    fn extract_spoof_header(
-        log: &slog::Logger,
-        headers: &http::HeaderMap<http::HeaderValue>,
-        allowed: bool,
-    ) -> Option<Result<Uuid, Error>> {
-        match headers.get(HTTP_HEADER_OXIDE_AUTHN_SPOOF) {
-            None => None,
-            Some(_) if !allowed => {
-                trace!(
-                    log,
-                    "authn_http: ignoring attempted spoof (not allowed by \
-                    configuration)"
-                );
-                None
-            }
-            Some(raw_value) => Some(
-                raw_value
-                    .to_str()
-                    .map_err(|error_to_str| {
-                        Error::BadFormat(format!(
-                            "header {:?}: {:#}",
-                            HTTP_HEADER_OXIDE_AUTHN_SPOOF, error_to_str
-                        ))
-                    })
-                    .and_then(|s: &str| {
-                        Uuid::parse_str(s).map_err(|error_parse| {
-                            Error::BadFormat(format!(
-                                "header {:?}: {:#}",
-                                HTTP_HEADER_OXIDE_AUTHN_SPOOF, error_parse
-                            ))
-                        })
-                    }),
-            ),
-        }
-    }
-
-    match extract_spoof_header(log, headers, allowed) {
-        None => {
+    let header_name = HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+    let spoof = extract_spoof_header(headers.get(header_name), allowed);
+    match spoof {
+        SpoofHeader::NotPresent => {
             trace!(log, "authn_http: unauthenticated");
             Ok(Context::Unauthenticated)
         }
-        Some(Err(error)) => {
-            trace!(log, "authn_http: failed authentication");
-            Err(error)
+        SpoofHeader::PresentNotAllowed => {
+            trace!(
+                log,
+                "authn_http: ignoring attempted spoof \
+                (not allowed by configuration)"
+            );
+            trace!(log, "authn_http: unauthenticated");
+            Ok(Context::Unauthenticated)
         }
-        Some(Ok(found_uuid)) => {
+        SpoofHeader::PresentInvalid(error_message) => {
+            trace!(log, "authn_http: failed authentication");
+            Err(Error::BadFormat(format!(
+                "header {:?}: {}",
+                header_name, error_message
+            )))
+        }
+        SpoofHeader::PresentValid(found_uuid) => {
             let details = Details { actor: Actor(found_uuid) };
             trace!(
                 log,
@@ -168,6 +146,36 @@ pub async fn authn_http(
                 "details" => ?details
             );
             Ok(Context::Authenticated(details))
+        }
+    }
+}
+
+enum SpoofHeader {
+    NotPresent,
+    PresentNotAllowed,
+    PresentInvalid(String),
+    PresentValid(Uuid),
+}
+
+fn extract_spoof_header(
+    raw_value: Option<&http::HeaderValue>,
+    allowed: bool,
+) -> SpoofHeader {
+    match (raw_value, allowed) {
+        (None, _) => SpoofHeader::NotPresent,
+        (Some(_), false) => SpoofHeader::PresentNotAllowed,
+        (Some(raw_value), true) => {
+            let r = raw_value
+                .to_str()
+                .map_err(|error_to_str| format!("{:#}", error_to_str))
+                .and_then(|s: &str| {
+                    Uuid::parse_str(s)
+                        .map_err(|error_parse| format!("{:#}", error_parse))
+                });
+            match r {
+                Ok(id) => SpoofHeader::PresentValid(id),
+                Err(message) => SpoofHeader::PresentInvalid(message),
+            }
         }
     }
 }
