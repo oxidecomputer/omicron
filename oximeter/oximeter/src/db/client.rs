@@ -346,6 +346,8 @@ impl Client {
         handle_db_response(
             self.client
                 .post(&self.url)
+                // See regression test `test_unquoted_64bit_integers` for details.
+                .query(&[("output_format_json_quote_64bit_integers", "0")])
                 .body(sql)
                 .send()
                 .await
@@ -833,6 +835,27 @@ mod tests {
             samples.len(),
         )
         .await;
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    // Regression test verifying that integers are returned in the expected format from the
+    // database.
+    //
+    // By default, ClickHouse _quotes_ 64-bit integers, which is apparently to support JavaScript
+    // implementations of JSON. See https://github.com/ClickHouse/ClickHouse/issues/2375 for
+    // details. This test verifies that we get back _unquoted_ integers from the database.
+    #[tokio::test]
+    async fn test_unquoted_64bit_integers() {
+        use serde_json::Value;
+        let (mut db, client, _) = setup_filter_testcase().await;
+        let output = client
+            .execute_with_body(
+                "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
+            )
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["foo"], Value::Number(1u64.into()));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 }
