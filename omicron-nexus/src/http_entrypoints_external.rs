@@ -3,7 +3,7 @@
  */
 
 use super::ServerContext;
-use crate::authn::authn_http;
+use crate::authn::http::authn_http;
 use crate::db;
 
 use dropshot::endpoint;

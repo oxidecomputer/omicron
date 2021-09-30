@@ -1,37 +1,13 @@
-//!
-//! Facilities related to external authentication
-//!
+//! HTTP-specific external authentication
 
+use crate::authn;
 use crate::ServerContext;
 use dropshot::RequestContext;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
-const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &str = "oxide-authn-spoof";
-
-/// Describes how the actor performing the current operation is authenticated
-pub enum Context {
-    /// This actor is not authenticated at all.
-    Unauthenticated,
-    /// The actor is authenticated.  Details in [`Details`].
-    Authenticated(Details),
-}
-
-/// Describes who is performing an operation
-// TODO: This will probably wind up being an enum of: user | service
-#[derive(Debug)]
-pub struct Actor(Uuid);
-
-/// Describes how the actor authenticated
-// TODO Might this want to have a list of active roles?
-#[derive(Debug)]
-pub struct Details {
-    /// the actor performing the request
-    actor: Actor,
-}
-
-/// Describes why authentication failed
+/// Describes why HTTP authentication failed
 ///
 /// This should usually *not* be exposed to end users because it can leak
 /// information that makes it easier to exploit the system.  There are two
@@ -106,46 +82,106 @@ impl From<Error> for dropshot::HttpError {
 //
 pub async fn authn_http(
     rqctx: &RequestContext<Arc<ServerContext>>,
-) -> Result<Context, Error> {
+) -> Result<authn::Context, Error> {
     let apictx = rqctx.context();
     let request = rqctx.request.lock().await;
-    let nexus = &apictx.nexus;
     let log = &rqctx.log;
-    let headers = request.headers();
+
+    // XXX Should happen at server setup time, not now.
+    let nexus = &apictx.nexus;
     let allowed =
         nexus.config_insecure().allow_any_request_to_spoof_authn_header;
+    let auth_modes = vec![Box::new(HttpAuthnSpoof::new(allowed))];
 
-    let header_name = HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-    let spoof = extract_spoof_header(headers.get(header_name), allowed);
-    match spoof {
-        SpoofHeader::NotPresent => {
-            trace!(log, "authn_http: unauthenticated");
-            Ok(Context::Unauthenticated)
+    for mode in auth_modes {
+        trace!(log, "authn_http: trying {:?}", mode);
+        let result = mode.authn(&rqctx, &request)?;
+        if let authn::Context::Authenticated(_) = &result {
+            return Ok(result);
         }
-        SpoofHeader::PresentNotAllowed => {
-            trace!(
-                log,
-                "authn_http: ignoring attempted spoof \
+    }
+
+    return Ok(authn::Context::Unauthenticated);
+}
+
+/// Implements an authentication mode
+///
+/// The idea here is that we may support multiple different modes of
+/// authentication.
+trait HttpAuthnMode: std::fmt::Debug {
+    /// Attempt to authenticate the current request
+    ///
+    /// If the request appears to be trying to use this mode, but fails
+    /// authentication, that should be an error.  If the request is not using
+    /// this mode, this should return an Unauthenticated context instead.
+    // TODO-cleanup Would it be less confusing if this returned an enum of
+    // Authenticated/ModeNotApplicable/Error?
+    fn authn(
+        &self,
+        rqctx: &RequestContext<Arc<ServerContext>>,
+        request: &http::Request<hyper::Body>,
+    ) -> Result<authn::Context, Error>;
+}
+
+/// Implements a (test-only) authentication mode where the client simply
+/// provides the required information in a custom header.
+#[derive(Debug)]
+struct HttpAuthnSpoof {
+    /// whether the server is configured to allow this authn mode
+    allowed: bool,
+}
+
+impl HttpAuthnSpoof {
+    fn new(allowed: bool) -> Self {
+        HttpAuthnSpoof {
+            allowed,
+        }
+    }
+}
+
+const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &str = "oxide-authn-spoof";
+
+impl HttpAuthnMode for HttpAuthnSpoof {
+    fn authn(
+        &self,
+        rqctx: &RequestContext<Arc<ServerContext>>,
+        request: &http::Request<hyper::Body>,
+    ) -> Result<authn::Context, Error> {
+        let log = &rqctx.log;
+        let headers = request.headers();
+        let header_name = HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+        let spoof =
+            extract_spoof_header(headers.get(header_name), self.allowed);
+        match spoof {
+            SpoofHeader::NotPresent => {
+                trace!(log, "HttpAuthnSpoof: unauthenticated");
+                Ok(authn::Context::Unauthenticated)
+            }
+            SpoofHeader::PresentNotAllowed => {
+                trace!(
+                    log,
+                    "HttpAuthnSpoof: ignoring attempted spoof \
                 (not allowed by configuration)"
-            );
-            trace!(log, "authn_http: unauthenticated");
-            Ok(Context::Unauthenticated)
-        }
-        SpoofHeader::PresentInvalid(error_message) => {
-            trace!(log, "authn_http: failed authentication");
-            Err(Error::BadFormat(format!(
-                "header {:?}: {}",
-                header_name, error_message
-            )))
-        }
-        SpoofHeader::PresentValid(found_uuid) => {
-            let details = Details { actor: Actor(found_uuid) };
-            trace!(
-                log,
-                "authn_http: spoofed authentication";
-                "details" => ?details
-            );
-            Ok(Context::Authenticated(details))
+                );
+                trace!(log, "authn_http: unauthenticated");
+                Ok(authn::Context::Unauthenticated)
+            }
+            SpoofHeader::PresentInvalid(error_message) => {
+                trace!(log, "HttpAuthnSpoof: failed authentication");
+                Err(Error::BadFormat(format!(
+                    "header {:?}: {}",
+                    header_name, error_message
+                )))
+            }
+            SpoofHeader::PresentValid(found_uuid) => {
+                let details = authn::Details { actor: authn::Actor(found_uuid) };
+                trace!(
+                    log,
+                    "HttpAuthnSpoof: spoofed authentication";
+                    "details" => ?details
+                );
+                Ok(authn::Context::Authenticated(details))
+            }
         }
     }
 }
