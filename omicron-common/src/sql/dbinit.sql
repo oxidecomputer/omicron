@@ -238,7 +238,8 @@ CREATE TABLE omicron.public.MetricProducer (
 );
 
 CREATE INDEX ON omicron.public.MetricProducer (
-    oximeter_id
+    oximeter_id,
+    id
 );
 
 /*

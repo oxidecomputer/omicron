@@ -665,8 +665,8 @@ impl DataStore {
                     ResourceType::Oximeter,
                     "Oximeter Info",
                 )
-            })
-            .map(|_size| ())
+            })?;
+        Ok(())
     }
 
     // Fetch a record for an Oximeter instance, by its ID.
@@ -736,6 +736,7 @@ impl DataStore {
         use db::schema::metricproducer::dsl;
         paginated(dsl::metricproducer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
+            .order_by((dsl::oximeter_id, dsl::id))
             .load_async::<db::model::ProducerEndpoint>(self.pool())
             .await
             .map_err(|e| {
