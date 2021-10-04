@@ -77,71 +77,63 @@ pub fn recover<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
-    let join_handle =
-        tokio::spawn(async move {
-            info!(&log, "start saga recovery");
+    let join_handle = tokio::spawn(async move {
+        info!(&log, "start saga recovery");
 
-            /*
-             * We perform the initial list of sagas using a standard retry policy.
-             * We treat all errors as transient because there's nothing we can do
-             * about any of them except try forever.  As a result, we never expect
-             * an error from the overall operation.
-             * TODO-monitoring we definitely want a way to raise a big red flag if
-             * saga recovery is not completing.
-             * TODO-robustness It would be better to retry the individual database
-             * operations within this operation than retrying the overall operation.
-             * As this is written today, if the listing requires a bunch of pages
-             * and the operation fails partway through, we'll re-fetch all the pages
-             * we successfully fetched before.  If the database is overloaded and
-             * only N% of requests are completing, the probability of this operation
-             * succeeding decreases considerably as the number of separate queries
-             * (pages) goes up.  We'd be much more likely to finish the overall
-             * operation if we didn't throw away the results we did get each time.
-             */
-            let found_sagas = retry_notify(
-                internal_service_policy(),
-                || async {
-                    list_unfinished_sagas(&log, &datastore, &sec_id)
-                        .await
-                        .map_err(BackoffError::Transient)
-                },
-                |error, duration| {
-                    warn!(
-                        &log,
-                        "failed to list sagas (will retry after {:?}): {:#}",
-                        duration,
-                        error
-                    )
-                },
-            )
-            .await
-            .unwrap();
-
-            info!(&log, "listed sagas ({} total)", found_sagas.len());
-
-            let recovery_futures = found_sagas.into_iter().map(|saga| async {
-                /*
-                 * TODO-robustness We should put this into a retry loop.  We may
-                 * also want to take any failed sagas and put them at the end of the
-                 * queue.  It shouldn't really matter, in that the transient
-                 * failures here are likely to affect recovery of all sagas.
-                 * However, it's conceivable we misclassify a permanent failure as a
-                 * transient failure, or that a transient failure is more likely to
-                 * affect some sagas than others (e.g, data on a different node, or
-                 * it has a larger log that requires more queries).  To avoid one
-                 * bad saga ruining the rest, we should try to recover the rest
-                 * before we go back to one that's failed.
-                 */
-                /* TODO-debug want visibility into "abandoned" sagas */
-                let saga_id: steno::SagaId = saga.id.into();
-                recover_saga(
+        /*
+         * We perform the initial list of sagas using a standard retry policy.
+         * We treat all errors as transient because there's nothing we can do
+         * about any of them except try forever.  As a result, we never expect
+         * an error from the overall operation.
+         * TODO-monitoring we definitely want a way to raise a big red flag if
+         * saga recovery is not completing.
+         * TODO-robustness It would be better to retry the individual database
+         * operations within this operation than retrying the overall operation.
+         * As this is written today, if the listing requires a bunch of pages
+         * and the operation fails partway through, we'll re-fetch all the pages
+         * we successfully fetched before.  If the database is overloaded and
+         * only N% of requests are completing, the probability of this operation
+         * succeeding decreases considerably as the number of separate queries
+         * (pages) goes up.  We'd be much more likely to finish the overall
+         * operation if we didn't throw away the results we did get each time.
+         */
+        let found_sagas = retry_notify(
+            internal_service_policy(),
+            || async {
+                list_unfinished_sagas(&log, &datastore, &sec_id)
+                    .await
+                    .map_err(BackoffError::Transient)
+            },
+            |error, duration| {
+                warn!(
                     &log,
-                    &uctx,
-                    &datastore,
-                    &sec_client,
-                    templates,
-                    saga,
+                    "failed to list sagas (will retry after {:?}): {:#}",
+                    duration,
+                    error
                 )
+            },
+        )
+        .await
+        .unwrap();
+
+        info!(&log, "listed sagas ({} total)", found_sagas.len());
+
+        let recovery_futures = found_sagas.into_iter().map(|saga| async {
+            /*
+             * TODO-robustness We should put this into a retry loop.  We may
+             * also want to take any failed sagas and put them at the end of the
+             * queue.  It shouldn't really matter, in that the transient
+             * failures here are likely to affect recovery of all sagas.
+             * However, it's conceivable we misclassify a permanent failure as a
+             * transient failure, or that a transient failure is more likely to
+             * affect some sagas than others (e.g, data on a different node, or
+             * it has a larger log that requires more queries).  To avoid one
+             * bad saga ruining the rest, we should try to recover the rest
+             * before we go back to one that's failed.
+             */
+            /* TODO-debug want visibility into "abandoned" sagas */
+            let saga_id: steno::SagaId = saga.id.into();
+            recover_saga(&log, &uctx, &datastore, &sec_client, templates, saga)
                 .map_err(|error| {
                     warn!(
                         &log,
@@ -150,21 +142,21 @@ where
                     error
                 })
                 .await
-            });
-
-            let mut completion_futures = vec![];
-            completion_futures.reserve(recovery_futures.len());
-            // Loads and resumes all sagas in serial.
-            for recovery_future in recovery_futures {
-                let saga_complete_future = recovery_future.await?;
-                completion_futures.push(saga_complete_future);
-            }
-            // Returns a future that awaits the completion of all resumed sagas.
-            Ok(CompletionTask(Box::pin(async move {
-                futures::future::try_join_all(completion_futures).await?;
-                Ok(())
-            })))
         });
+
+        let mut completion_futures = vec![];
+        completion_futures.reserve(recovery_futures.len());
+        // Loads and resumes all sagas in serial.
+        for recovery_future in recovery_futures {
+            let saga_complete_future = recovery_future.await?;
+            completion_futures.push(saga_complete_future);
+        }
+        // Returns a future that awaits the completion of all resumed sagas.
+        Ok(CompletionTask(Box::pin(async move {
+            futures::future::try_join_all(completion_futures).await?;
+            Ok(())
+        })))
+    });
 
     RecoveryTask(Box::pin(async move {
         // Unwraps join-related errors.
