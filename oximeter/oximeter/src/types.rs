@@ -1,23 +1,21 @@
 //! Types used to describe targets, metrics, and measurements.
 // Copyright 2021 Oxide Computer Company
 
+use crate::histogram;
+use crate::traits;
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use num_traits::{One, Zero};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
-
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::identities::{One, Zero};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-
-use crate::histogram;
-use crate::traits;
 
 /// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
@@ -36,6 +34,22 @@ impl std::fmt::Display for FieldType {
         write!(f, "{:?}", self)
     }
 }
+
+macro_rules! impl_field_type_from {
+    ($ty:ty, $variant:path) => {
+        impl From<&$ty> for FieldType {
+            fn from(_: &$ty) -> FieldType {
+                $variant
+            }
+        }
+    };
+}
+
+impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { i64, FieldType::I64 }
+impl_field_type_from! { IpAddr, FieldType::IpAddr }
+impl_field_type_from! { Uuid, FieldType::Uuid }
+impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
@@ -422,16 +436,9 @@ pub struct Cumulative<T> {
     value: T,
 }
 
-pub trait CumulativeType:
-    traits::Datum + Add + AddAssign + Copy + One + Zero
-{
-}
-impl CumulativeType for i64 {}
-impl CumulativeType for f64 {}
-
 impl<T> Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     // Internal constructor
     pub(crate) fn with_start_time(start_time: DateTime<Utc>, value: T) -> Self {
@@ -461,7 +468,7 @@ where
 
 impl<T> Add<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     type Output = Self;
 
@@ -472,7 +479,7 @@ where
 
 impl<T> AddAssign<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn add_assign(&mut self, other: T) {
         self.value += other;
@@ -481,7 +488,7 @@ where
 
 impl<T> Default for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn default() -> Self {
         Self { start_time: Utc::now(), value: Zero::zero() }
@@ -490,7 +497,7 @@ where
 
 impl<T> From<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn from(value: T) -> Cumulative<T> {
         Cumulative::new(value)
@@ -584,7 +591,6 @@ impl Sample {
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
-        D: traits::Datum + Into<Datum>,
     {
         Self {
             timeseries_name: format!("{}:{}", target.name(), metric.name()),

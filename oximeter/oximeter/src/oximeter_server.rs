@@ -4,7 +4,7 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use dropshot::{
@@ -17,19 +17,22 @@ use omicron_common::backoff;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, trace, warn, Logger};
-use tokio::{sync::mpsc, task::JoinHandle, time::interval};
+use tokio::{sync::mpsc, sync::Mutex, task::JoinHandle, time::interval};
 use uuid::Uuid;
 
 use crate::{collect::ProducerResults, db, Error};
 
 // Messages for controlling a collection task
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
 enum CollectionMessage {
     // Explicit request that the task collect data from its producer
+    #[allow(dead_code)]
     Collect,
-    // Request that the task update its interval on which it collects data
-    Interval(Duration),
+    // Request that the task update its interval and the socket address on which it collects data
+    // from its producer.
+    Update(ProducerEndpoint),
     // Request that the task exit
+    #[allow(dead_code)]
     Shutdown,
 }
 
@@ -42,7 +45,7 @@ enum CollectionMessage {
 async fn collection_task(
     id: Uuid,
     log: Logger,
-    producer: ProducerEndpoint,
+    mut producer: ProducerEndpoint,
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<ProducerResults>,
 ) {
@@ -80,14 +83,17 @@ async fn collection_task(
                             "collector_id" => ?id
                         );
                     },
-                    Some(CollectionMessage::Interval(int)) => {
+                    Some(CollectionMessage::Update(new_info)) => {
+                        producer = new_info;
                         debug!(
                             log,
-                            "collection task received request to update interval";
+                            "collection task received request to update its producer information";
                             "collector_id" => ?id,
-                            "interval" => ?int
+                            "producer_id" => ?producer.id,
+                            "interval" => ?producer.interval,
+                            "address" => producer.address,
                         );
-                        collection_timer = interval(int);
+                        collection_timer = interval(producer.interval);
                         collection_timer.tick().await; // completes immediately
                     }
                 }
@@ -142,10 +148,10 @@ async fn collection_task(
 }
 
 // Struct representing a task for collecting metric data from a single producer
+#[derive(Debug)]
 struct CollectionTask {
     // Channel used to send messages from the agent to the actual task. The task owns the other
     // side.
-    #[allow(dead_code)]
     pub inbox: mpsc::Sender<CollectionMessage>,
     // Handle to the actual tokio task running the collection loop.
     #[allow(dead_code)]
@@ -238,6 +244,7 @@ pub struct DbConfig {
 }
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
+#[derive(Debug)]
 pub struct OximeterAgent {
     /// The collector ID for this agent
     pub id: Uuid,
@@ -283,12 +290,12 @@ impl OximeterAgent {
     }
 
     /// Register a new producer with this oximeter instance.
-    pub fn register_producer(
+    pub async fn register_producer(
         &self,
         info: ProducerEndpoint,
     ) -> Result<(), Error> {
         let id = info.id;
-        match self.collection_tasks.lock().unwrap().entry(id) {
+        match self.collection_tasks.lock().await.entry(id) {
             Entry::Vacant(value) => {
                 info!(self.log, "registered new metric producer";
                       "producer_id" => id.to_string(),
@@ -304,20 +311,24 @@ impl OximeterAgent {
                     collection_task(id, log, info, rx, q).await;
                 });
                 value.insert(CollectionTask { inbox: tx, task });
-                Ok(())
             }
-            Entry::Occupied(_) => {
-                warn!(
+            Entry::Occupied(value) => {
+                info!(
                     self.log,
-                    "received request to register duplicate producer";
+                    "received request to register existing metric producer, updating collection information";
                    "producer_id" => id.to_string(),
+                   "interval" => ?info.interval,
+                   "address" => info.address,
                 );
-                Err(Error::OximeterServer(format!(
-                    "producer with ID {} already exists",
-                    id
-                )))
+                value
+                    .get()
+                    .inbox
+                    .send(CollectionMessage::Update(info))
+                    .await
+                    .unwrap();
             }
         }
+        Ok(())
     }
 }
 
@@ -451,9 +462,10 @@ async fn producers_post(
     body: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let agent = request_context.context();
-    let server_info = body.into_inner();
+    let producer_info = body.into_inner();
     agent
-        .register_producer(server_info)
+        .register_producer(producer_info)
+        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }
