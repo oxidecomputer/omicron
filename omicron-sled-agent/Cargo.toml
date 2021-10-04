@@ -30,7 +30,7 @@ uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"
 
 [dev-dependencies]
-expectorate = "1.0.1"
+expectorate = "1.0.4"
 mockall = "0.10"
 serial_test = "0.5"
 subprocess = "0.2.8"
