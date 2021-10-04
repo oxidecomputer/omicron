@@ -77,7 +77,7 @@ pub fn recover<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
-    let join_handle: tokio::task::JoinHandle<Result<CompletionTask, Error>> =
+    let join_handle =
         tokio::spawn(async move {
             info!(&log, "start saga recovery");
 
