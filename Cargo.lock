@@ -2431,7 +2431,7 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#8da3eda3bd3fd5d077872c687bb2de1a8b326982"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#7677fdd8f127b09341cca3dfa53564a4c9308e31"
 dependencies = [
  "anyhow",
  "async-trait",
