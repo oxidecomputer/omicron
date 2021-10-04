@@ -4,6 +4,7 @@
 
 mod config;
 mod datastore;
+mod error;
 mod pagination;
 mod pool;
 mod saga_recovery;

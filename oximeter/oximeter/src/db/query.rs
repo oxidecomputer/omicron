@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::db::model::DATABASE_NAME;
-use crate::types::{FieldValue, MeasurementType};
+use crate::types::{DatumType, FieldValue};
 use crate::Error;
 
 /// Object used to filter timestamps, specifying a start and/or end time.
@@ -215,10 +215,7 @@ impl TimeseriesFilter {
     }
 
     /// Generate a select query for this filter
-    pub(crate) fn as_select_query(
-        &self,
-        measurement_type: MeasurementType,
-    ) -> String {
+    pub(crate) fn as_select_query(&self, datum_type: DatumType) -> String {
         let select_queries = self.field_select_queries();
         let query = if select_queries.len() == 1 {
             // We only have one subquery, just use it directly
@@ -276,7 +273,7 @@ impl TimeseriesFilter {
             {query}\n\
             ){timestamp_filter} FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
-            data_type = measurement_type.db_type_name(),
+            data_type = datum_type.db_type_name(),
             query = indent(&query, 4),
             timestamp_filter = timestamp_filter,
         )
@@ -397,14 +394,14 @@ mod tests {
             time_filter: Some(TimeFilter::Before(Utc::now())),
         };
         assert_eq!(filter.table_names()[0], "oximeter.fields_uuid");
-        let query = filter.as_select_query(MeasurementType::F64);
+        let query = filter.as_select_query(DatumType::F64);
         assert!(query.contains("AS filter0"));
         assert!(query.contains("AS filter1"));
         assert!(query
             .contains("ON filter1.timeseries_name = filter0.timeseries_name"));
         assert!(query
             .contains("AND filter1.timeseries_key = filter0.timeseries_key"));
-        println!("{}", filter.as_select_query(MeasurementType::F64));
+        println!("{}", filter.as_select_query(DatumType::F64));
     }
 
     #[test]
