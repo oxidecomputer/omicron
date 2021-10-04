@@ -447,8 +447,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_sim_instance_running_then_destroyed() {
-        let logctx =
-            test_setup_log("test_sim_instance_running_then_destroyed");
+        let logctx = test_setup_log("test_sim_instance_running_then_destroyed");
         let (mut instance, mut rx) = make_instance(&logctx);
         let r1 = instance.object.current().clone();
 
@@ -556,8 +555,7 @@ mod test {
 
     #[tokio::test]
     async fn test_sim_instance_preempt_transition() {
-        let logctx =
-            test_setup_log("test_sim_instance_preempt_transition");
+        let logctx = test_setup_log("test_sim_instance_preempt_transition");
         let (mut instance, mut rx) = make_instance(&logctx);
         let r1 = instance.object.current().clone();
 

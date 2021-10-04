@@ -99,19 +99,15 @@ where
              */
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id: steno::SagaId = saga.id.into();
-            recover_saga(
-                &log,
-                &uctx,
-                &datastore,
-                &sec_client,
-                templates,
-                saga,
-            )
-            .map_err(|error | {
-                warn!(&log, "failed to recover saga {}: {:#}", saga_id, error);
-                error
-            })
-            .await
+            recover_saga(&log, &uctx, &datastore, &sec_client, templates, saga)
+                .map_err(|error| {
+                    warn!(
+                        &log,
+                        "failed to recover saga {}: {:#}", saga_id, error
+                    );
+                    error
+                })
+                .await
         });
 
         let mut completion_futures = vec![];
@@ -425,7 +421,8 @@ mod test {
     #[tokio::test]
     async fn test_failure_during_saga_can_be_recovered() {
         // Test setup
-        let logctx = dev::test_setup_log("test_failure_during_saga_can_be_recovered");
+        let logctx =
+            dev::test_setup_log("test_failure_during_saga_can_be_recovered");
         let log = logctx.log;
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
@@ -494,7 +491,9 @@ mod test {
     #[tokio::test]
     async fn test_successful_saga_does_not_replay_during_recovery() {
         // Test setup
-        let logctx = dev::test_setup_log("test_successful_saga_does_not_replay_during_recovery");
+        let logctx = dev::test_setup_log(
+            "test_successful_saga_does_not_replay_during_recovery",
+        );
         let log = logctx.log;
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
