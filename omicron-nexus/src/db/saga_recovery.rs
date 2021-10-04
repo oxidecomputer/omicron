@@ -3,6 +3,7 @@
  */
 
 use crate::db;
+use futures::TryFutureExt;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::internal_service_policy;
@@ -38,7 +39,7 @@ pub fn recover<T>(
         &'static str,
         Arc<dyn steno::SagaTemplateGeneric<T>>,
     >,
-) -> tokio::task::JoinHandle<()>
+) -> tokio::task::JoinHandle<Result<(), Error>>
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
@@ -83,7 +84,7 @@ where
 
         info!(&log, "listed sagas ({} total)", found_sagas.len());
 
-        let futures = found_sagas.into_iter().map(|saga| async {
+        let recovery_futures = found_sagas.into_iter().map(|saga| async {
             /*
              * TODO-robustness We should put this into a retry loop.  We may
              * also want to take any failed sagas and put them at the end of the
@@ -98,7 +99,7 @@ where
              */
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id: steno::SagaId = saga.id.into();
-            if let Err(error) = recover_saga(
+            recover_saga(
                 &log,
                 &uctx,
                 &datastore,
@@ -106,13 +107,26 @@ where
                 templates,
                 saga,
             )
-            .await
-            {
+            .map_err(|error | {
                 warn!(&log, "failed to recover saga {}: {:#}", saga_id, error);
-            }
+                error
+            })
+            .await
         });
 
-        futures::future::join_all(futures).await;
+        let mut completion_futures = vec![];
+        completion_futures.reserve(recovery_futures.len());
+        // Loads and resumes all sagas in serial.
+        for recovery_future in recovery_futures {
+            let saga_complete_future = recovery_future.await?;
+            completion_futures.push(saga_complete_future);
+        }
+        // Awaits the completion of all resumed sagas.
+        futures::future::join_all(completion_futures)
+            .await
+            .into_iter()
+            .collect::<Result<(), Error>>()?;
+        Ok(())
     })
 }
 
@@ -172,7 +186,10 @@ async fn list_unfinished_sagas(
 ///
 /// This function loads the saga log and uses `sec_client` to resume execution.
 ///
-/// This function returns once the underlying saga has completed or failed.
+/// This function returns a future that completes when the resumed saga
+/// has completed. The saga executor will attempt to execute the saga
+/// regardless of this future - it is for notification purposes only,
+/// and does not need to be polled.
 async fn recover_saga<T>(
     log: &slog::Logger,
     uctx: &Arc<T>,
@@ -180,7 +197,7 @@ async fn recover_saga<T>(
     sec_client: &steno::SecClient,
     templates: &BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<T>>>,
     saga: db::saga_types::Saga,
-) -> Result<(), Error>
+) -> Result<impl core::future::Future<Output = Result<(), Error>>, Error>
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
@@ -228,11 +245,13 @@ where
     sec_client.saga_start(saga_id).await.map_err(|error| {
         Error::internal_error(&format!("failed to start saga: {:#}", error))
     })?;
-    saga_completion.await.kind.map_err(|e| {
-        Error::internal_error(&format!("Saga failure: {:?}", e))
-    })?;
-    info!(log, "recovering saga: done"; "saga_id" => ?saga_id);
-    Ok(())
+
+    Ok(async {
+        saga_completion.await.kind.map_err(|e| {
+            Error::internal_error(&format!("Saga failure: {:?}", e))
+        })?;
+        Ok(())
+    })
 }
 
 /**
@@ -461,6 +480,7 @@ mod test {
             &ALL_TEMPLATES,
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 2);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 2);
@@ -518,6 +538,7 @@ mod test {
             &ALL_TEMPLATES,
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
