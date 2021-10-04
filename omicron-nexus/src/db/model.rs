@@ -1,8 +1,8 @@
 //! Structures stored to the database.
 
 use super::schema::{
-    disk, instance, metricproducer, networkinterface, oximeter,
-    oximeterassignment, project, vpc, vpcsubnet,
+    disk, instance, metricproducer, networkinterface, oximeter, project, vpc,
+    vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use diesel::backend::{Backend, RawValue};
@@ -594,7 +594,7 @@ pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[derive(Queryable, Identifiable, Insertable, Debug, Clone, Selectable)]
 #[table_name = "metricproducer"]
 pub struct ProducerEndpoint {
     pub id: Uuid,
@@ -604,10 +604,16 @@ pub struct ProducerEndpoint {
     pub port: i32,
     pub interval: f64,
     pub base_route: String,
+    pub oximeter_id: Uuid,
 }
 
 impl ProducerEndpoint {
-    pub fn new(endpoint: &internal::nexus::ProducerEndpoint) -> Self {
+    /// Create a new endpoint, with the data announced by the producer and a chosen Oximeter
+    /// instance to act as its collector.
+    pub fn new(
+        endpoint: &internal::nexus::ProducerEndpoint,
+        oximeter_id: Uuid,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id: endpoint.id,
@@ -617,6 +623,7 @@ impl ProducerEndpoint {
             port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),
             interval: endpoint.interval.as_secs_f64(),
+            oximeter_id,
         }
     }
 
@@ -651,21 +658,6 @@ impl OximeterInfo {
             ip: info.address.ip().into(),
             port: info.address.port().into(),
         }
-    }
-}
-
-/// An assignment of an Oximeter instance to a metric producer for collection.
-#[derive(Queryable, Insertable, Debug, Clone, Copy)]
-#[table_name = "oximeterassignment"]
-pub struct OximeterAssignment {
-    pub oximeter_id: Uuid,
-    pub producer_id: Uuid,
-    pub time_created: DateTime<Utc>,
-}
-
-impl OximeterAssignment {
-    pub fn new(oximeter_id: Uuid, producer_id: Uuid) -> Self {
-        Self { oximeter_id, producer_id, time_created: Utc::now() }
     }
 }
 

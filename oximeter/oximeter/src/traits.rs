@@ -2,10 +2,13 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::histogram::Histogram;
-use crate::types::{Cumulative, Measurement, Sample};
+use crate::types;
+use crate::types::{Measurement, Sample};
 use crate::{DatumType, Error, Field, FieldType, FieldValue};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use num_traits::{One, Zero};
+use std::ops::{Add, AddAssign};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -61,7 +64,7 @@ pub trait Target {
     fn field_names(&self) -> &'static [&'static str];
 
     /// Return the types of the target's fields.
-    fn field_types(&self) -> &'static [FieldType];
+    fn field_types(&self) -> Vec<FieldType>;
 
     /// Return the values of the target's fields.
     fn field_values(&self) -> Vec<FieldValue>;
@@ -142,7 +145,7 @@ pub trait Metric {
     fn field_names(&self) -> &'static [&'static str];
 
     /// Return the types of the metric's fields.
-    fn field_types(&self) -> &'static [FieldType];
+    fn field_types(&self) -> Vec<FieldType>;
 
     /// Return the values of the metric's fields.
     fn field_values(&self) -> Vec<FieldValue>;
@@ -233,18 +236,18 @@ impl Datum for Bytes {
     }
 }
 
-impl Datum for Cumulative<i64> {
+impl Datum for types::Cumulative<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Cumulative::start_time(&self))
+        Some(types::Cumulative::start_time(&self))
     }
     fn datum_type(&self) -> DatumType {
         DatumType::CumulativeI64
     }
 }
 
-impl Datum for Cumulative<f64> {
+impl Datum for types::Cumulative<f64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Cumulative::start_time(&self))
+        Some(types::Cumulative::start_time(&self))
     }
     fn datum_type(&self) -> DatumType {
         DatumType::CumulativeF64
@@ -268,6 +271,22 @@ impl Datum for Histogram<f64> {
         DatumType::HistogramF64
     }
 }
+
+/// A trait identifying types used in [`types::Cumulative`] data.
+pub trait Cumulative: Datum + Add + AddAssign + Copy + One + Zero {}
+
+impl Cumulative for i64 {}
+impl Cumulative for f64 {}
+
+/// A trait identifying types used as gauges
+pub trait Gauge: Datum {}
+
+impl Gauge for String {}
+impl Gauge for bool {}
+impl Gauge for i64 {}
+impl Gauge for f64 {}
+
+pub use crate::histogram::HistogramSupport;
 
 /// A trait for generating samples from a target and metric.
 ///

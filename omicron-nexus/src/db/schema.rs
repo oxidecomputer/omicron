@@ -47,7 +47,8 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        base_route -> Nullable<Text>,
+        base_route -> Text,
+        oximeter_id -> Uuid,
     }
 }
 
@@ -73,14 +74,6 @@ table! {
         time_modified -> Timestamptz,
         ip -> Inet,
         port -> Int4,
-    }
-}
-
-table! {
-    oximeterassignment (oximeter_id, producer_id) {
-        oximeter_id -> Uuid,
-        producer_id -> Uuid,
-        time_created -> Timestamptz,
     }
 }
 
@@ -162,7 +155,6 @@ allow_tables_to_appear_in_same_query!(
     metricproducer,
     networkinterface,
     oximeter,
-    oximeterassignment,
     project,
     saga,
     saganodeevent,

@@ -644,8 +644,19 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::oximeter::dsl;
 
+        // If we get a conflict on the Oximeter ID, this means that collector instance was
+        // previously registered, and it's re-registering due to something like a service restart.
+        // In this case, we update the time modified and the service address, rather than
+        // propagating a constraint violation to the caller.
         diesel::insert_into(dsl::oximeter)
             .values(*info)
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(info.ip),
+                dsl::port.eq(info.port),
+            ))
             .execute_async(self.pool())
             .await
             .map_err(|e| {
@@ -709,35 +720,32 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
                     e,
-                    ResourceType::Oximeter,
+                    ResourceType::MetricProducer,
                     "Producer Endpoint",
                 )
             })?;
         Ok(())
     }
 
-    // Create a record of an assignment of a producer to a collector
-    pub async fn oximeter_assignment_create(
+    // List the producer endpoint records by the oximeter instance to which they're assigned.
+    pub async fn producers_list_by_oximeter_id(
         &self,
         oximeter_id: Uuid,
-        producer_id: Uuid,
-    ) -> Result<(), Error> {
-        use db::schema::oximeterassignment::dsl;
-
-        let assignment =
-            db::model::OximeterAssignment::new(oximeter_id, producer_id);
-        diesel::insert_into(dsl::oximeterassignment)
-            .values(assignment)
-            .execute_async(self.pool())
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::ProducerEndpoint> {
+        use db::schema::metricproducer::dsl;
+        paginated(dsl::metricproducer, dsl::id, &pagparams)
+            .filter(dsl::oximeter_id.eq(oximeter_id))
+            .order_by((dsl::oximeter_id, dsl::id))
+            .load_async::<db::model::ProducerEndpoint>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
                     e,
-                    ResourceType::Oximeter,
-                    "Oximeter Assignment",
+                    ResourceType::MetricProducer,
+                    "By Oximeter ID",
                 )
-            })?;
-        Ok(())
+            })
     }
 
     /*
