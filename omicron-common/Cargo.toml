@@ -91,7 +91,7 @@ version = "0.8"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
-expectorate = "1.0.1"
+expectorate = "1.0.4"
 serde_urlencoded = "0.7.0"
 
 [dev-dependencies.tokio]
