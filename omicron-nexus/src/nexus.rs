@@ -120,8 +120,7 @@ pub struct Nexus {
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 
     /** Task representing completion of recovered Sagas */
-    recovery_task:
-        std::sync::Mutex<Option<tokio::task::JoinHandle<Result<(), Error>>>>,
+    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 }
 
 /*
