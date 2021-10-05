@@ -189,7 +189,7 @@ impl Nexus {
             description: "Self-Identified Sled".to_string(),
         };
         let sled = db::model::Sled::new(id, address, create_params);
-        self.db_datastore.sled_create(sled).await?;
+        self.db_datastore.sled_upsert(sled).await?;
 
         Ok(())
     }

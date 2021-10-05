@@ -46,8 +46,6 @@ GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 CREATE TABLE omicron.public.Sled (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -56,11 +54,6 @@ CREATE TABLE omicron.public.Sled (
     ip INET NOT NULL,
     port INT4 NOT NULL
 );
-
-CREATE UNIQUE INDEX ON omicron.public.Sled (
-    id
-) WHERE
-    time_deleted IS NULL;
 
 /*
  * Projects

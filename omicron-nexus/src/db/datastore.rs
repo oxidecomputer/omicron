@@ -61,32 +61,27 @@ impl DataStore {
     }
 
     /// Store a new sled in the database.
-    pub async fn sled_create(
+    pub async fn sled_upsert(
         &self,
         sled: db::model::Sled,
     ) -> CreateResult<db::model::Sled> {
         use db::schema::sled::dsl;
-
-        // TODO: What's the right behavior on conflict here?
-        //
-        // Currently Sled Agent UUIDs come from a config
-        // (omicron-sled-agent/src/server.rs). Longer-term, we should
-        // likely use UUIDs derived from the root-of-trust.
-        //
-        // This current implementation relies on the determinism of these
-        // UUIDs.
-        let id = *sled.id();
         diesel::insert_into(dsl::sled)
-            .values(sled)
+            .values(sled.clone())
             .on_conflict(dsl::id)
-            .do_nothing()
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(sled.ip),
+                dsl::port.eq(sled.port),
+            ))
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Sled,
-                    &id.to_string(),
+                    &sled.id.to_string(),
                 )
             })
     }

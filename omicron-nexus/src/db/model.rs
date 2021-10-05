@@ -39,8 +39,6 @@ impl Into<external::Rack> for Rack {
 pub struct Sled {
     // IdentityMetadata
     pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
@@ -59,8 +57,6 @@ impl Sled {
         let identity = IdentityMetadata::new(id, params);
         Self {
             id,
-            name: identity.name,
-            description: identity.description,
             time_created: identity.time_created,
             time_modified: identity.time_modified,
             time_deleted: identity.time_deleted,
@@ -85,8 +81,8 @@ impl Into<external::Sled> for Sled {
         external::Sled {
             identity: external::IdentityMetadata {
                 id: self.id,
-                name: self.name,
-                description: self.description,
+                name: external::Name::try_from("<Sled>").unwrap(),
+                description: "<Sled Description>".to_string(),
                 time_created: self.time_created,
                 time_modified: self.time_modified,
             },
