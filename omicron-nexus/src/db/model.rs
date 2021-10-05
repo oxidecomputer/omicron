@@ -81,8 +81,8 @@ impl Into<external::Sled> for Sled {
         external::Sled {
             identity: external::IdentityMetadata {
                 id: self.id,
-                name: external::Name::try_from("<Sled>").unwrap(),
-                description: "<Sled Description>".to_string(),
+                name: external::Name::try_from("sled").unwrap(),
+                description: "sled description".to_string(),
                 time_created: self.time_created,
                 time_modified: self.time_modified,
             },
