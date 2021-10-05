@@ -17,7 +17,7 @@ hyper = "0.14"
 ipnetwork = "0.18"
 libc = "0.2.103"
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
-postgres-protocol = "0.6.1"
+postgres-protocol = "0.6.2"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rayon = "1.5"
@@ -91,7 +91,7 @@ version = "0.8"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
-expectorate = "1.0.1"
+expectorate = "1.0.4"
 serde_urlencoded = "0.7.0"
 
 [dev-dependencies.tokio]
