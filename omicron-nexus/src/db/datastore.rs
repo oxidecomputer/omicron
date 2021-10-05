@@ -60,7 +60,7 @@ impl DataStore {
         self.pool.pool()
     }
 
-    /// Store a new sled in the database.
+    /// Stores a new sled in the database.
     pub async fn sled_upsert(
         &self,
         sled: db::model::Sled,
