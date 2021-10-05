@@ -18,6 +18,7 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
+use super::identity::Resource;
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -255,7 +256,7 @@ impl DataStore {
             params,
             runtime_initial.clone(),
         );
-        let name = instance.identity.name.clone();
+        let name = instance.name().clone();
         let instance: db::model::Instance = diesel::insert_into(dsl::instance)
             .values(instance)
             .on_conflict(dsl::id)
@@ -482,7 +483,7 @@ impl DataStore {
             params.clone(),
             runtime_initial.clone(),
         );
-        let name = disk.identity.name.clone();
+        let name = disk.name().clone();
         let disk: db::model::Disk = diesel::insert_into(dsl::disk)
             .values(disk)
             .on_conflict(dsl::id)

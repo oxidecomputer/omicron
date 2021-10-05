@@ -12,6 +12,7 @@ mod saga_types;
 mod sec_store;
 mod update_and_check;
 
+pub mod identity;
 pub mod model;
 pub mod schema;
 

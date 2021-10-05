@@ -14,28 +14,10 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
 
-/// Generates a "StructNameIdentity" structure for the associated struct, along
-/// with helper accessor functions.
+/// Looks for a Meta-style attribute with a particular identifier.
 ///
-/// Many tables within our database make use of common fields,
-/// including:
-/// - ID
-/// - Name
-/// - Description
-/// - Time Created, modified, and deleted.
-///
-/// Although these fields can be refactored into a common structure, to be used
-/// within the context of Diesel, they must be uniquely identified for a single
-/// table.
-#[proc_macro_derive(IdentityMetadata)]
-pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    identity_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
-}
-
-// Looks for a Meta-style attribute with a particular identifier.
-//
-// As an example, for an attribute like `#[foo = "bar"]`, we can find this
-// attribute by calling `get_meta_attr(&item.attrs, "foo")`.
+/// As an example, for an attribute like `#[foo = "bar"]`, we can find this
+/// attribute by calling `get_meta_attr(&item.attrs, "foo")`.
 fn get_meta_attr(attrs: &[syn::Attribute], name: &str) -> Option<Meta> {
     attrs
         .iter()
@@ -43,7 +25,7 @@ fn get_meta_attr(attrs: &[syn::Attribute], name: &str) -> Option<Meta> {
         .find(|meta| meta.path().is_ident(name))
 }
 
-// Accesses the "value" part of a name-value Meta attribute.
+/// Accesses the "value" part of a name-value Meta attribute.
 fn get_attribute_value(meta: &Meta) -> Option<&Lit> {
     if let Meta::NameValue(ref nv) = meta {
         Some(&nv.lit)
@@ -52,7 +34,7 @@ fn get_attribute_value(meta: &Meta) -> Option<&Lit> {
     }
 }
 
-// Looks up a named field within a struct.
+/// Looks up a named field within a struct.
 fn get_field_with_name<'a>(
     data: &'a DataStruct,
     name: &str,
@@ -70,8 +52,26 @@ fn get_field_with_name<'a>(
     }
 }
 
-// Implementation of `#[derive(IdentityMetadata)]`
-fn identity_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
+/// Generates a "StructNameIdentity" structure for the associated struct,
+/// and implements the Resource trait to provide accessor functions.
+///
+/// Many tables within our database make use of common fields,
+/// including:
+/// - ID
+/// - Name
+/// - Description
+/// - Time Created, modified, and deleted.
+///
+/// Although these fields can be refactored into a common structure (to be used
+/// within the context of Diesel) they must be uniquely identified for a single
+/// table.
+#[proc_macro_derive(Resource)]
+pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    resource_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+// Implementation of `#[derive(Resource)]`
+fn resource_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     let name = &item.ident;
 
@@ -81,7 +81,7 @@ fn identity_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
             Error::new(
                 item.span(),
                 format!(
-                    "IdentityMetadata needs 'table_name' attribute.\n\
+                    "Resource needs 'table_name' attribute.\n\
                      Try adding #[table_name = \"your_table_name\"] to {}.",
                     name
                 ),
@@ -117,13 +117,13 @@ fn identity_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     Err(Error::new(
         item.span(),
-        "IdentityMetadata can only be derived for structs",
+        "Resource can only be derived for structs",
     ))
 }
 
 fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
     let identity_doc = format!(
-        "Auto-generated identity for [`{}`] from deriving [macro@IdentityMetadata].",
+        "Auto-generated identity for [`{}`] from deriving [macro@Resource].",
         struct_name,
     );
     let identity_name = format_ident!("{}Identity", struct_name);
@@ -132,20 +132,20 @@ fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
         #[derive(Clone, Debug, Selectable, Queryable, Insertable)]
         #[table_name = #table_name ]
         pub struct #identity_name {
-            pub id: uuid::Uuid,
-            pub name: omicron_common::api::external::Name,
-            pub description: String,
-            pub time_created: chrono::DateTime<chrono::Utc>,
-            pub time_modified: chrono::DateTime<chrono::Utc>,
-            pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+            pub id: ::uuid::Uuid,
+            pub name: ::omicron_common::api::external::Name,
+            pub description: ::std::string::String,
+            pub time_created: ::chrono::DateTime<::chrono::Utc>,
+            pub time_modified: ::chrono::DateTime<::chrono::Utc>,
+            pub time_deleted: ::std::option::Option<chrono::DateTime<chrono::Utc>>,
         }
 
         impl #identity_name {
             pub fn new(
-                id: uuid::Uuid,
-                params: omicron_common::api::external::IdentityMetadataCreateParams
+                id: ::uuid::Uuid,
+                params: ::omicron_common::api::external::IdentityMetadataCreateParams
             ) -> Self {
-                let now = chrono::Utc::now();
+                let now = ::chrono::Utc::now();
                 Self {
                     id,
                     name: params.name,
@@ -157,9 +157,9 @@ fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
             }
         }
 
-        impl Into<omicron_common::api::external::IdentityMetadata> for #identity_name {
-            fn into(self) -> omicron_common::api::external::IdentityMetadata {
-                omicron_common::api::external::IdentityMetadata {
+        impl Into<::omicron_common::api::external::IdentityMetadata> for #identity_name {
+            fn into(self) -> ::omicron_common::api::external::IdentityMetadata {
+                ::omicron_common::api::external::IdentityMetadata {
                     id: self.id,
                     name: self.name,
                     description: self.description,
@@ -169,8 +169,8 @@ fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
             }
         }
 
-        impl From<omicron_common::api::external::IdentityMetadata> for #identity_name {
-            fn from(metadata: omicron_common::api::external::IdentityMetadata) -> Self {
+        impl From<::omicron_common::api::external::IdentityMetadata> for #identity_name {
+            fn from(metadata: ::omicron_common::api::external::IdentityMetadata) -> Self {
                 Self {
                     id: metadata.id,
                     name: metadata.name,
@@ -182,13 +182,29 @@ fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
             }
         }
 
-        impl #struct_name {
-            pub fn id(&self) -> uuid::Uuid {
+        impl crate::db::identity::Resource for #struct_name {
+            fn id(&self) -> ::uuid::Uuid {
                 self.identity.id
             }
 
-            pub fn name(&self) -> &omicron_common::api::external::Name {
+            fn name(&self) -> &::omicron_common::api::external::Name {
                 &self.identity.name
+            }
+
+            fn description(&self) -> &str {
+                &self.identity.description
+            }
+
+            fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {
+                self.identity.time_created
+            }
+
+            fn time_modified(&self) -> ::chrono::DateTime<::chrono::Utc> {
+                self.identity.time_modified
+            }
+
+            fn time_deleted(&self) -> ::std::option::Option<::chrono::DateTime<::chrono::Utc>> {
+                self.identity.time_deleted
             }
         }
     }
@@ -200,9 +216,9 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_without_table_name() {
-        let out = identity_impl(
+        let out = resource_impl(
             quote! {
-                #[derive(IdentityMetadata)]
+                #[derive(Resource)]
                 struct MyTarget {
                     identity: MyTargetIdentity,
                     name: String,
@@ -213,7 +229,7 @@ mod tests {
         );
         assert!(out.is_err());
         assert_eq!(
-            "IdentityMetadata needs 'table_name' attribute.\n\
+            "Resource needs 'table_name' attribute.\n\
              Try adding #[table_name = \"your_table_name\"] to MyTarget.",
             out.unwrap_err().to_string()
         );
@@ -221,9 +237,9 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_with_wrong_table_name_type() {
-        let out = identity_impl(
+        let out = resource_impl(
             quote! {
-                #[derive(IdentityMetadata)]
+                #[derive(Resource)]
                 #[table_name]
                 struct MyTarget {
                     identity: MyTargetIdentity,
@@ -242,9 +258,9 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_for_enums() {
-        let out = identity_impl(
+        let out = resource_impl(
             quote! {
-                #[derive(IdentityMetadata)]
+                #[derive(Resource)]
                 #[table_name = "foo"]
                 enum MyTarget {
                     Foo,
@@ -255,16 +271,16 @@ mod tests {
         );
         assert!(out.is_err());
         assert_eq!(
-            "IdentityMetadata can only be derived for structs",
+            "Resource can only be derived for structs",
             out.unwrap_err().to_string()
         );
     }
 
     #[test]
     fn test_derive_metadata_identity_fails_without_embedded_identity() {
-        let out = identity_impl(
+        let out = resource_impl(
             quote! {
-                #[derive(IdentityMetadata)]
+                #[derive(Resource)]
                 #[table_name = "my_target"]
                 struct MyTarget {
                     name: String,
@@ -284,9 +300,9 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_minimal_example_compiles() {
-        let out = identity_impl(
+        let out = resource_impl(
             quote! {
-                #[derive(IdentityMetadata)]
+                #[derive(Resource)]
                 #[table_name = "my_target"]
                 struct MyTarget {
                     identity: MyTargetIdentity,

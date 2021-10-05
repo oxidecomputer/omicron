@@ -1,11 +1,12 @@
 //! Structures stored to the database.
 
-use super::schema::{
+use crate::db::identity::Resource;
+use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, oximeter, project, vpc,
     vpcsubnet,
 };
 use chrono::{DateTime, Utc};
-use db_macros::IdentityMetadata;
+use db_macros::Resource;
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
@@ -89,11 +90,11 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
 }
 
 /// Describes a project within the database.
-#[derive(Selectable, Queryable, Insertable, Debug, IdentityMetadata)]
+#[derive(Selectable, Queryable, Insertable, Debug, Resource)]
 #[table_name = "project"]
 pub struct Project {
     #[diesel(embed)]
-    pub identity: ProjectIdentity,
+    identity: ProjectIdentity,
 }
 
 impl Project {
@@ -136,11 +137,11 @@ impl From<external::ProjectUpdateParams> for ProjectUpdate {
 }
 
 /// An Instance (VM).
-#[derive(Queryable, Insertable, Debug, Selectable, IdentityMetadata)]
+#[derive(Queryable, Insertable, Debug, Selectable, Resource)]
 #[table_name = "instance"]
 pub struct Instance {
     #[diesel(embed)]
-    pub identity: InstanceIdentity,
+    identity: InstanceIdentity,
 
     /// id for the project containing this Instance
     pub project_id: Uuid,
@@ -293,11 +294,11 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, IdentityMetadata)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "disk"]
 pub struct Disk {
     #[diesel(embed)]
-    pub identity: DiskIdentity,
+    identity: DiskIdentity,
 
     /// id for the project containing this Disk
     pub project_id: Uuid,
@@ -553,11 +554,11 @@ impl OximeterInfo {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, IdentityMetadata)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpc"]
 pub struct Vpc {
     #[diesel(embed)]
-    pub identity: VpcIdentity,
+    identity: VpcIdentity,
 
     pub project_id: Uuid,
     pub dns_name: external::Name,
@@ -604,11 +605,11 @@ impl From<external::VpcUpdateParams> for VpcUpdate {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, IdentityMetadata)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpcsubnet"]
 pub struct VpcSubnet {
     #[diesel(embed)]
-    pub identity: VpcSubnetIdentity,
+    identity: VpcSubnetIdentity,
 
     pub vpc_id: Uuid,
     pub ipv4_block: Option<external::Ipv4Net>,

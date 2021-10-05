@@ -3,6 +3,7 @@
  */
 
 use crate::db;
+use crate::db::identity::Resource;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
