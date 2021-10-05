@@ -45,28 +45,11 @@ async fn test_oximeter_database_records() {
         common::PRODUCER_UUID.parse().unwrap(),
         "Producer ID does not match the ID returned from the database"
     );
-
-    // Verify that the assignment of the producer to oximeter lives in the DB.
-    let result = conn
-        .query("SELECT * FROM omicron.public.OximeterAssignment;", &[])
-        .await
-        .unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Expected a single oximeter assignment in the database"
-    );
     let actual_oximeter_id = result[0].get::<&str, Uuid>("oximeter_id");
-    let actual_producer_id = result[0].get::<&str, Uuid>("producer_id");
     assert_eq!(
         actual_oximeter_id,
         common::OXIMETER_UUID.parse().unwrap(),
-        "Assigned Oximeter ID does not match"
-    );
-    assert_eq!(
-        actual_producer_id,
-        common::PRODUCER_UUID.parse().unwrap(),
-        "Assigned Oximeter ID does not match"
+        "Producer's oximeter ID returned from the database does not match the expected ID"
     );
 
     context.teardown().await;

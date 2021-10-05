@@ -10,16 +10,16 @@ path = "../omicron-rpaths"
 anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "0a6d535" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1a5c55d" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.15"
-http = "0.2.0"
+http = "0.2.5"
 hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.98"
+libc = "0.2.103"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 paste = "1.0"
@@ -62,7 +62,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.10"
+version = "1.12"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -75,9 +75,9 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 bytes = "1.0.1"
-expectorate = "1.0.1"
+expectorate = "1.0.4"
 openapiv3 = "0.5.0"
-subprocess = "0.2.7"
+subprocess = "0.2.8"
 
 [dev-dependencies.oximeter]
 version = "0.1.0"
