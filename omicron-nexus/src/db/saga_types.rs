@@ -194,6 +194,23 @@ pub struct Saga {
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
+impl Saga {
+    pub fn new(id: SecId, params: steno::SagaCreateParams) -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            id: params.id.into(),
+            creator: id,
+            template_name: params.template_name,
+            time_created: now,
+            saga_params: params.saga_params,
+            saga_state: params.state.into(),
+            current_sec: Some(id),
+            adopt_generation: Generation::new(),
+            adopt_time: now,
+        }
+    }
+}
+
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug)]
 #[table_name = "saganodeevent"]
