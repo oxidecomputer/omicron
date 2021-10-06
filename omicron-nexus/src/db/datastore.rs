@@ -60,6 +60,66 @@ impl DataStore {
         self.pool.pool()
     }
 
+    /// Stores a new sled in the database.
+    pub async fn sled_upsert(
+        &self,
+        sled: db::model::Sled,
+    ) -> CreateResult<db::model::Sled> {
+        use db::schema::sled::dsl;
+        diesel::insert_into(dsl::sled)
+            .values(sled.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(sled.ip),
+                dsl::port.eq(sled.port),
+            ))
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Sled,
+                    &sled.id.to_string(),
+                )
+            })
+    }
+
+    pub async fn sled_list(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Sled> {
+        use db::schema::sled::dsl;
+        paginated(dsl::sled, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .load_async::<db::model::Sled>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Sled,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<db::model::Sled> {
+        use db::schema::sled::dsl;
+        dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(id))
+            .first_async::<db::model::Sled>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Sled,
+                    LookupType::ById(id),
+                )
+            })
+    }
+
     /// Create a project
     pub async fn project_create(
         &self,

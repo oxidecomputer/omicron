@@ -9,7 +9,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::future::ready;
-use futures::lock::Mutex;
 use futures::StreamExt;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -47,13 +46,10 @@ use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::bail_unless;
-use omicron_common::collection::collection_page;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use slog::Logger;
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -108,16 +104,6 @@ pub struct Nexus {
 
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
-
-    /**
-     * List of sled agents known by this nexus.
-     * TODO This ought to have some representation in the data store as well so
-     * that we don't simply forget about sleds that aren't currently up.  We'll
-     * need to think about the interface between this program and the sleds and
-     * how we discover them, both when they initially show up and when we come
-     * up.
-     */
-    sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
 }
 
 /*
@@ -166,7 +152,6 @@ impl Nexus {
             },
             db_datastore,
             sec_client: Arc::clone(&sec_client),
-            sled_agents: Mutex::new(BTreeMap::new()),
         };
 
         /*
@@ -191,11 +176,22 @@ impl Nexus {
      * TODO-robustness we should have a limit on how many sled agents there can
      * be (for graceful degradation at large scale).
      */
-    pub async fn upsert_sled_agent(&self, sa: Arc<SledAgentClient>) {
-        let mut scs = self.sled_agents.lock().await;
-        info!(self.log, "registered sled agent";
-            "sled_uuid" => sa.id.to_string());
-        scs.insert(sa.id, sa);
+    pub async fn upsert_sled(
+        &self,
+        id: Uuid,
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
+
+        // Insert the sled into the database.
+        let create_params = IdentityMetadataCreateParams {
+            name: Name::try_from("sled").unwrap(),
+            description: "Self-Identified Sled".to_string(),
+        };
+        let sled = db::model::Sled::new(id, address, create_params);
+        self.db_datastore.sled_upsert(sled).await?;
+
+        Ok(())
     }
 
     /**
@@ -544,16 +540,22 @@ impl Nexus {
      * SagaContext::alloc_server().
      */
     pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
-        let sleds = self.sled_agents.lock().await;
+        // TODO: replace this with a real allocation policy.
+        //
+        // This implementation always assigns the first sled (by ID order).
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(1).unwrap(),
+        };
+        let sleds = self.db_datastore.sled_list(&pagparams).await?;
 
-        /* TODO replace this with a real allocation policy. */
         sleds
-            .values()
-            .next()
+            .first()
             .ok_or_else(|| Error::ServiceUnavailable {
                 message: String::from("no sleds available for new Instance"),
             })
-            .map(|s| s.id)
+            .map(|s| *s.id())
     }
 
     pub async fn project_list_instances(
@@ -710,14 +712,19 @@ impl Nexus {
 
     pub async fn sled_client(
         &self,
-        sled_uuid: &Uuid,
+        id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let sled_agents = self.sled_agents.lock().await;
-        Ok(Arc::clone(sled_agents.get(sled_uuid).ok_or_else(|| {
-            let message =
-                format!("no sled agent for sled_uuid \"{}\"", sled_uuid);
-            Error::ServiceUnavailable { message }
-        })?))
+        // TODO: We should consider injecting connection pooling here,
+        // but for now, connections to sled agents are constructed
+        // on an "as requested" basis.
+        //
+        // Franky, returning an "Arc" here without a connection pool is a little
+        // silly; it's not actually used if each client connection exists as a
+        // one-shot.
+        let sled = self.sled_lookup(id).await?;
+
+        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
+        Ok(Arc::new(SledAgentClient::new(id, sled.address(), log)))
     }
 
     /**
@@ -1265,61 +1272,21 @@ impl Nexus {
     }
 
     /*
-     * Sleds.
-     * TODO-completeness: Eventually, we'll want sleds to be stored in the
-     * database, with a controlled process for adopting them, decommissioning
-     * them, etc.  For now, we expose an Sled for each SledAgentClient
-     * that we've got.
+     * Sleds
      */
+
     pub async fn sleds_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<db::model::Sled> {
-        let sled_agents = self.sled_agents.lock().await;
-        let sleds = collection_page(&sled_agents, pagparams)?
-            .filter(|maybe_object| ready(maybe_object.is_ok()))
-            .map(|sa| {
-                let sa = sa.unwrap();
-                Ok(db::model::Sled {
-                    identity: db::model::IdentityMetadata {
-                        /* TODO-correctness cons up real metadata here */
-                        id: sa.id,
-                        name: Name::try_from(format!("sled-{}", sa.id))
-                            .unwrap(),
-                        description: String::from(""),
-                        time_created: Utc::now(),
-                        time_modified: Utc::now(),
-                        time_deleted: None,
-                    },
-                    service_address: sa.service_address,
-                })
-            })
-            .collect::<Vec<Result<db::model::Sled, Error>>>()
-            .await;
-        Ok(futures::stream::iter(sleds).boxed())
+    ) -> ListResultVec<db::model::Sled> {
+        self.db_datastore.sled_list(pagparams).await
     }
 
     pub async fn sled_lookup(
         &self,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let nexuses = self.sled_agents.lock().await;
-        let sa = nexuses.get(sled_id).ok_or_else(|| {
-            Error::not_found_by_id(ResourceType::Sled, sled_id)
-        })?;
-
-        Ok(db::model::Sled {
-            identity: db::model::IdentityMetadata {
-                /* TODO-correctness cons up real metadata here */
-                id: sa.id,
-                name: Name::try_from(format!("sled-{}", sa.id)).unwrap(),
-                description: String::from(""),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-                time_deleted: None,
-            },
-            service_address: sa.service_address,
-        })
+        self.db_datastore.sled_fetch(*sled_id).await
     }
 
     /*

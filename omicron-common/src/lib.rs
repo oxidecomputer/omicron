@@ -23,7 +23,6 @@
 pub mod api;
 pub mod backoff;
 pub mod cmd;
-pub mod collection;
 pub mod config;
 pub mod dev;
 pub mod http_client;
