@@ -52,26 +52,53 @@ fn get_field_with_name<'a>(
     }
 }
 
-/// Generates a "StructNameIdentity" structure for the associated struct,
-/// and implements the Resource trait to provide accessor functions.
+// Describes which derive macro is being used; allows sharing common code.
+enum IdentityVariant {
+    Asset,
+    Resource,
+}
+
+/// Implements the "Resource" trait, and generates a bespoke Identity struct.
 ///
 /// Many tables within our database make use of common fields,
 /// including:
 /// - ID
 /// - Name
 /// - Description
-/// - Time Created, modified, and deleted.
+/// - Time Created
+/// - Time Modified
+/// - Time Deleted.
 ///
 /// Although these fields can be refactored into a common structure (to be used
 /// within the context of Diesel) they must be uniquely identified for a single
 /// table.
 #[proc_macro_derive(Resource)]
-pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    resource_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
+pub fn resource_target(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    derive_impl(input.into(), IdentityVariant::Resource)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
-// Implementation of `#[derive(Resource)]`
-fn resource_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
+/// Identical to [`macro@Resource`], but generates fewer fields.
+///
+/// Contains:
+/// - ID
+/// - Time Created
+/// - Time Modified
+#[proc_macro_derive(Asset)]
+pub fn asset_target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    derive_impl(input.into(), IdentityVariant::Asset)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+// Implementation of `#[derive(Resource)]` and `#[derive(Asset)]`.
+fn derive_impl(
+    tokens: TokenStream,
+    flavor: IdentityVariant,
+) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     let name = &item.ident;
 
@@ -112,29 +139,44 @@ fn resource_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
                 )
             })?;
 
-        return Ok(build_struct(name, table_name, &field.ty));
+        return Ok(build(name, table_name, &field.ty, flavor));
     }
 
     Err(Error::new(item.span(), "Resource can only be derived for structs"))
 }
 
-fn build_struct(
+// Emits generated structures, depending on the requested flavor of identity.
+fn build(
     struct_name: &Ident,
     table_name: &Lit,
-    observed_identity_type: &syn::Type,
+    observed_identity_ty: &syn::Type,
+    flavor: IdentityVariant,
 ) -> TokenStream {
-    let identity_struct = build_identity_struct(struct_name, table_name);
-    let resource_impl =
-        build_resource_implementation(struct_name, observed_identity_type);
+    let (identity_struct, resource_impl) = {
+        match flavor {
+            IdentityVariant::Resource => (
+                build_resource_identity(struct_name, table_name),
+                build_resource_impl(struct_name, observed_identity_ty),
+            ),
+            IdentityVariant::Asset => (
+                build_asset_identity(struct_name, table_name),
+                build_asset_impl(struct_name, observed_identity_ty),
+            ),
+        }
+    };
     quote! {
         #identity_struct
         #resource_impl
     }
 }
 
-fn build_identity_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
+// Builds an "Identity" structure for a resource.
+fn build_resource_identity(
+    struct_name: &Ident,
+    table_name: &Lit,
+) -> TokenStream {
     let identity_doc = format!(
-        "Auto-generated identity for [`{}`] from deriving [macro@Resource].",
+        "Auto-generated identity for [`{}`] from deriving [`macro@Resource`].",
         struct_name,
     );
     let identity_name = format_ident!("{}Identity", struct_name);
@@ -167,35 +209,43 @@ fn build_identity_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
                 }
             }
         }
+    }
+}
 
-        impl Into<::omicron_common::api::external::IdentityMetadata> for #identity_name {
-            fn into(self) -> ::omicron_common::api::external::IdentityMetadata {
-                ::omicron_common::api::external::IdentityMetadata {
-                    id: self.id,
-                    name: self.name,
-                    description: self.description,
-                    time_created: self.time_created,
-                    time_modified: self.time_modified,
-                }
-            }
+// Builds an "Identity" structure for an asset.
+fn build_asset_identity(struct_name: &Ident, table_name: &Lit) -> TokenStream {
+    let identity_doc = format!(
+        "Auto-generated identity for [`{}`] from deriving [`macro@Asset`].",
+        struct_name,
+    );
+    let identity_name = format_ident!("{}Identity", struct_name);
+    quote! {
+        #[doc = #identity_doc]
+        #[derive(Clone, Debug, Selectable, Queryable, Insertable)]
+        #[table_name = #table_name ]
+        pub struct #identity_name {
+            pub id: ::uuid::Uuid,
+            pub time_created: ::chrono::DateTime<::chrono::Utc>,
+            pub time_modified: ::chrono::DateTime<::chrono::Utc>,
         }
 
-        impl From<::omicron_common::api::external::IdentityMetadata> for #identity_name {
-            fn from(metadata: ::omicron_common::api::external::IdentityMetadata) -> Self {
+        impl #identity_name {
+            pub fn new(
+                id: ::uuid::Uuid,
+            ) -> Self {
+                let now = ::chrono::Utc::now();
                 Self {
-                    id: metadata.id,
-                    name: metadata.name,
-                    description: metadata.description,
-                    time_created: metadata.time_created,
-                    time_modified: metadata.time_modified,
-                    time_deleted: None,
+                    id,
+                    time_created: now,
+                    time_modified: now,
                 }
             }
         }
     }
 }
 
-fn build_resource_implementation(
+// Implements "Resource" for the requested structure.
+fn build_resource_impl(
     struct_name: &Ident,
     observed_identity_type: &syn::Type,
 ) -> TokenStream {
@@ -241,13 +291,48 @@ fn build_resource_implementation(
     }
 }
 
+// Implements "Asset" for the requested structure.
+fn build_asset_impl(
+    struct_name: &Ident,
+    observed_identity_type: &syn::Type,
+) -> TokenStream {
+    let identity_trait = format_ident!("__{}IdentityMarker", struct_name);
+    let identity_name = format_ident!("{}Identity", struct_name);
+    quote! {
+        // Verify that the field named "identity" is actually the generated
+        // type within the struct deriving Asset.
+        trait #identity_trait {}
+        impl #identity_trait for #identity_name {}
+        const _: () = {
+            fn assert_identity<T: #identity_trait>() {}
+            fn assert_all() {
+                assert_identity::<#observed_identity_type>();
+            }
+        };
+
+        impl crate::db::identity::Asset for #struct_name {
+            fn id(&self) -> ::uuid::Uuid {
+                self.identity.id
+            }
+
+            fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {
+                self.identity.time_created
+            }
+
+            fn time_modified(&self) -> ::chrono::DateTime<::chrono::Utc> {
+                self.identity.time_modified
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_derive_metadata_identity_fails_without_table_name() {
-        let out = resource_impl(
+        let out = derive_impl(
             quote! {
                 #[derive(Resource)]
                 struct MyTarget {
@@ -257,6 +342,7 @@ mod tests {
                 }
             }
             .into(),
+            IdentityVariant::Resource,
         );
         assert!(out.is_err());
         assert_eq!(
@@ -268,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_with_wrong_table_name_type() {
-        let out = resource_impl(
+        let out = derive_impl(
             quote! {
                 #[derive(Resource)]
                 #[table_name]
@@ -279,6 +365,7 @@ mod tests {
                 }
             }
             .into(),
+            IdentityVariant::Resource,
         );
         assert!(out.is_err());
         assert_eq!(
@@ -289,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_for_enums() {
-        let out = resource_impl(
+        let out = derive_impl(
             quote! {
                 #[derive(Resource)]
                 #[table_name = "foo"]
@@ -299,6 +386,7 @@ mod tests {
                 }
             }
             .into(),
+            IdentityVariant::Resource,
         );
         assert!(out.is_err());
         assert_eq!(
@@ -309,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_fails_without_embedded_identity() {
-        let out = resource_impl(
+        let out = derive_impl(
             quote! {
                 #[derive(Resource)]
                 #[table_name = "my_target"]
@@ -319,6 +407,7 @@ mod tests {
                 }
             }
             .into(),
+            IdentityVariant::Resource,
         );
         assert!(out.is_err());
         assert_eq!(
@@ -331,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_derive_metadata_identity_minimal_example_compiles() {
-        let out = resource_impl(
+        let out = derive_impl(
             quote! {
                 #[derive(Resource)]
                 #[table_name = "my_target"]
@@ -342,6 +431,7 @@ mod tests {
                 }
             }
             .into(),
+            IdentityVariant::Resource,
         );
         assert!(out.is_ok());
     }

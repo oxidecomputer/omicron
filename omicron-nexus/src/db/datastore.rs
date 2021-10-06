@@ -18,7 +18,7 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::identity::Resource;
+use super::identity::{Asset, Resource};
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -76,13 +76,14 @@ impl DataStore {
                 dsl::ip.eq(sled.ip),
                 dsl::port.eq(sled.port),
             ))
+            .returning(db::model::Sled::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Sled,
-                    &sled.id.to_string(),
+                    &sled.id().to_string(),
                 )
             })
     }
@@ -93,8 +94,8 @@ impl DataStore {
     ) -> ListResultVec<db::model::Sled> {
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Sled>(self.pool())
+            .select(db::model::Sled::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -108,9 +109,9 @@ impl DataStore {
     pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<db::model::Sled> {
         use db::schema::sled::dsl;
         dsl::sled
-            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(id))
-            .first_async::<db::model::Sled>(self.pool())
+            .select(db::model::Sled::as_select())
+            .first_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -804,7 +805,8 @@ impl DataStore {
         paginated(dsl::metricproducer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
-            .load_async::<db::model::ProducerEndpoint>(self.pool())
+            .select(db::model::ProducerEndpoint::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(

@@ -3,12 +3,11 @@
  */
 
 use crate::db;
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::future::ready;
 use futures::StreamExt;
 use omicron_common::api::external;
@@ -19,7 +18,6 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
@@ -98,7 +96,7 @@ pub struct Nexus {
     log: Logger,
 
     /** cached rack identity metadata */
-    api_rack_identity: IdentityMetadata,
+    api_rack_identity: db::model::RackIdentity,
 
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
@@ -144,13 +142,7 @@ impl Nexus {
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
-            api_rack_identity: IdentityMetadata {
-                id: *rack_id,
-                name: Name::try_from(format!("rack-{}", *rack_id)).unwrap(),
-                description: String::from(""),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
+            api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore,
             sec_client: Arc::clone(&sec_client),
         };
@@ -232,7 +224,7 @@ impl Nexus {
             );
             for producer in producers.into_iter() {
                 let producer_info = ProducerEndpoint {
-                    id: producer.id,
+                    id: producer.id(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -552,7 +544,7 @@ impl Nexus {
             .ok_or_else(|| Error::ServiceUnavailable {
                 message: String::from("no sleds available for new Instance"),
             })
-            .map(|s| *s.id())
+            .map(|s| s.id())
     }
 
     pub async fn project_list_instances(
@@ -1241,7 +1233,7 @@ impl Nexus {
      */
 
     fn as_rack(&self) -> db::model::Rack {
-        db::model::Rack { identity: self.api_rack_identity.clone().into() }
+        db::model::Rack { identity: self.api_rack_identity.clone() }
     }
 
     pub async fn racks_list(

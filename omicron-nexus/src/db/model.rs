@@ -1,12 +1,12 @@
 //! Structures stored to the database.
 
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    disk, instance, metricproducer, networkinterface, oximeter, project, sled,
-    vpc, vpcsubnet,
+    disk, instance, metricproducer, networkinterface, oximeter, project, rack,
+    sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
-use db_macros::Resource;
+use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
@@ -25,25 +25,25 @@ use uuid::Uuid;
 //
 // However, it likely will be in the future - for the single-rack
 // case, however, it is synthesized.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "rack"]
 pub struct Rack {
-    pub identity: IdentityMetadata,
+    #[diesel(embed)]
+    pub identity: RackIdentity,
 }
 
 impl Into<external::Rack> for Rack {
     fn into(self) -> external::Rack {
-        external::Rack { identity: self.identity.into() }
+        external::Rack { identity: self.identity() }
     }
 }
 
 /// Database representation of a Sled.
-#[derive(Queryable, Identifiable, Insertable, Debug, Clone)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "sled"]
 pub struct Sled {
-    // IdentityMetadata
-    pub id: Uuid,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    identity: SledIdentity,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
@@ -51,23 +51,12 @@ pub struct Sled {
 }
 
 impl Sled {
-    pub fn new(
-        id: Uuid,
-        addr: SocketAddr,
-    ) -> Self {
-        let now = Utc::now();
+    pub fn new(id: Uuid, addr: SocketAddr) -> Self {
         Self {
-            id,
-            time_created: now,
-            time_modified: now,
-            time_deleted: None,
+            identity: SledIdentity::new(id),
             ip: addr.ip().into(),
             port: addr.port().into(),
         }
-    }
-
-    pub fn id(&self) -> &Uuid {
-        &self.id
     }
 
     pub fn address(&self) -> SocketAddr {
@@ -79,52 +68,7 @@ impl Sled {
 impl Into<external::Sled> for Sled {
     fn into(self) -> external::Sled {
         let service_address = self.address();
-        external::Sled {
-            identity: external::IdentityMetadata {
-                id: self.id,
-                name: external::Name::try_from("sled").unwrap(),
-                description: "sled description".to_string(),
-                time_created: self.time_created,
-                time_modified: self.time_modified,
-            },
-            service_address,
-        }
-    }
-}
-
-// TODO: DELETE ME IN FAVOR OF THE DERIVED ONE
-#[derive(Clone, Debug)]
-pub struct IdentityMetadata {
-    pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
-}
-
-impl Into<external::IdentityMetadata> for IdentityMetadata {
-    fn into(self) -> external::IdentityMetadata {
-        external::IdentityMetadata {
-            id: self.id,
-            name: self.name,
-            description: self.description,
-            time_created: self.time_created,
-            time_modified: self.time_modified,
-        }
-    }
-}
-
-impl From<external::IdentityMetadata> for IdentityMetadata {
-    fn from(metadata: external::IdentityMetadata) -> Self {
-        Self {
-            id: metadata.id,
-            name: metadata.name,
-            description: metadata.description,
-            time_created: metadata.time_created,
-            time_modified: metadata.time_modified,
-            time_deleted: None,
-        }
+        external::Sled { identity: self.identity(), service_address }
     }
 }
 
@@ -145,14 +89,7 @@ impl Project {
 
 impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
-        external::Project { identity: self.identity.into() }
-    }
-}
-
-/// Conversion from the internal API type.
-impl From<external::Project> for Project {
-    fn from(project: external::Project) -> Self {
-        Self { identity: ProjectIdentity::from(project.identity) }
+        external::Project { identity: self.identity() }
     }
 }
 
@@ -211,7 +148,7 @@ impl Instance {
 impl Into<external::Instance> for Instance {
     fn into(self) -> external::Instance {
         external::Instance {
-            identity: self.identity.clone().into(),
+            identity: self.identity(),
             project_id: self.project_id,
             ncpus: self.runtime().ncpus,
             memory: self.runtime().memory,
@@ -399,7 +336,7 @@ impl Into<external::Disk> for Disk {
     fn into(self) -> external::Disk {
         let device_path = format!("/mnt/{}", self.name().as_str());
         external::Disk {
-            identity: self.identity.clone().into(),
+            identity: self.identity(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             size: self.size,
@@ -526,12 +463,12 @@ pub type DiskAttachment = external::DiskAttachment;
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "metricproducer"]
 pub struct ProducerEndpoint {
-    pub id: Uuid,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
+    #[diesel(embed)]
+    identity: ProducerEndpointIdentity,
+
     pub ip: ipnetwork::IpNetwork,
     pub port: i32,
     pub interval: f64,
@@ -546,11 +483,8 @@ impl ProducerEndpoint {
         endpoint: &internal::nexus::ProducerEndpoint,
         oximeter_id: Uuid,
     ) -> Self {
-        let now = Utc::now();
         Self {
-            id: endpoint.id,
-            time_created: now,
-            time_modified: now,
+            identity: ProducerEndpointIdentity::new(endpoint.id),
             ip: endpoint.address.ip().into(),
             port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),
@@ -561,7 +495,7 @@ impl ProducerEndpoint {
 
     /// Return the route that can be used to request metric data.
     pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, &self.id)
+        format!("{}/{}", &self.base_route, self.id())
     }
 }
 
@@ -617,7 +551,7 @@ impl Vpc {
 impl Into<external::Vpc> for Vpc {
     fn into(self) -> external::Vpc {
         external::Vpc {
-            identity: self.identity.clone().into(),
+            identity: self.identity(),
             project_id: self.project_id,
             dns_name: self.dns_name,
         }
@@ -674,7 +608,7 @@ impl VpcSubnet {
 impl Into<external::VpcSubnet> for VpcSubnet {
     fn into(self) -> external::VpcSubnet {
         external::VpcSubnet {
-            identity: self.identity.clone().into(),
+            identity: self.identity(),
             vpc_id: self.vpc_id,
             ipv4_block: self.ipv4_block,
             ipv6_block: self.ipv6_block,
@@ -704,31 +638,14 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug, Resource)]
 #[table_name = "networkinterface"]
 pub struct NetworkInterface {
-    pub id: Uuid,
-    pub name: external::Name,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    pub identity: NetworkInterfaceIdentity,
 
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: external::MacAddr,
     pub ip: ipnetwork::IpNetwork,
-}
-
-impl NetworkInterface {
-    pub fn identity(&self) -> IdentityMetadata {
-        IdentityMetadata {
-            id: self.id,
-            name: self.name.clone(),
-            description: self.description.clone(),
-            time_created: self.time_created,
-            time_modified: self.time_modified,
-            time_deleted: self.time_deleted,
-        }
-    }
 }
