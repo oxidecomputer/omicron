@@ -103,6 +103,9 @@ pub struct Nexus {
 
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
+
+    /** Task representing completion of recovered Sagas */
+    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 }
 
 /*
@@ -143,25 +146,23 @@ impl Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
-            db_datastore,
+            db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
+            recovery_task: std::sync::Mutex::new(None),
         };
 
-        /*
-         * TODO-design Would really like to store this recovery_task, but Nexus
-         * is immutable (behind the Arc) once we've done this.
-         */
         /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        db::recover(
+        let recovery_task = db::recover(
             log.new(o!("component" => "SagaRecoverer")),
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
-            Arc::clone(&pool),
+            db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
+        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
     }
 

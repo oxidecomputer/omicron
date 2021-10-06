@@ -384,7 +384,7 @@ mod test {
 
     #[tokio::test]
     async fn test_sim_instance_creating_to_stop() {
-        let logctx = test_setup_log("test_sim_instance_creating_to_stop").await;
+        let logctx = test_setup_log("test_sim_instance_creating_to_stop");
         let (mut instance, mut rx) = make_instance(&logctx);
         let r1 = instance.object.current().clone();
 
@@ -447,8 +447,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_sim_instance_running_then_destroyed() {
-        let logctx =
-            test_setup_log("test_sim_instance_running_then_destroyed").await;
+        let logctx = test_setup_log("test_sim_instance_running_then_destroyed");
         let (mut instance, mut rx) = make_instance(&logctx);
         let r1 = instance.object.current().clone();
 
@@ -556,8 +555,7 @@ mod test {
 
     #[tokio::test]
     async fn test_sim_instance_preempt_transition() {
-        let logctx =
-            test_setup_log("test_sim_instance_preempt_transition").await;
+        let logctx = test_setup_log("test_sim_instance_preempt_transition");
         let (mut instance, mut rx) = make_instance(&logctx);
         let r1 = instance.object.current().clone();
 
@@ -642,7 +640,7 @@ mod test {
      */
     #[tokio::test]
     async fn test_sim_instance_reboot() {
-        let logctx = test_setup_log("test_sim_instance_reboot").await;
+        let logctx = test_setup_log("test_sim_instance_reboot");
 
         /*
          * Get an initial instance up to "Running".
@@ -839,7 +837,7 @@ mod test {
     #[tokio::test]
     async fn test_sim_disk_transition_to_detached_states() {
         let logctx =
-            test_setup_log("test_sim_disk_transition_to_detached_states").await;
+            test_setup_log("test_sim_disk_transition_to_detached_states");
         let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 
@@ -869,7 +867,7 @@ mod test {
 
     #[tokio::test]
     async fn test_sim_disk_attach_then_destroy() {
-        let logctx = test_setup_log("test_sim_disk_attach_then_destroy").await;
+        let logctx = test_setup_log("test_sim_disk_attach_then_destroy");
         let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 
@@ -968,7 +966,7 @@ mod test {
 
     #[tokio::test]
     async fn test_sim_disk_attach_then_fault() {
-        let logctx = test_setup_log("test_sim_disk_attach_then_fault").await;
+        let logctx = test_setup_log("test_sim_disk_attach_then_fault");
         let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
         let r1 = disk.object.current().clone();
 

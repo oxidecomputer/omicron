@@ -36,6 +36,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -817,9 +818,7 @@ impl DataStore {
             })
     }
 
-    /*
-     * Saga management
-     */
+    // Sagas
 
     pub async fn saga_create(
         &self,
@@ -908,6 +907,52 @@ impl DataStore {
             }),
         }
     }
+
+    pub async fn saga_list_unfinished_by_id(
+        &self,
+        sec_id: &db::SecId,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::saga_types::Saga> {
+        use db::schema::saga::dsl;
+        paginated(dsl::saga, dsl::id, &pagparams)
+            .filter(
+                dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()),
+            )
+            .filter(dsl::current_sec.eq(*sec_id))
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(sec_id.0),
+                )
+            })
+    }
+
+    pub async fn saga_node_event_list_by_id(
+        &self,
+        id: db::saga_types::SagaId,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<steno::SagaNodeEvent> {
+        use db::schema::saganodeevent::dsl;
+        paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
+            .filter(dsl::saga_id.eq(id))
+            .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::SagaDbg,
+                    LookupType::ById(id.0 .0),
+                )
+            })?
+            .into_iter()
+            .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
+            .collect::<Result<_, Error>>()
+    }
+
+    // VPCs
 
     pub async fn project_list_vpcs(
         &self,
