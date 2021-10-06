@@ -97,9 +97,9 @@ fn resource_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     // Ensure that a field named "identity" exists within this struct.
     if let Data::Struct(ref data) = item.data {
-        // TODO: Admittedly, we aren't checking the type of the field named
-        // 'identity' at all.
-        get_field_with_name(data, "identity")
+        // We extract type of "identity" and enforce it is the expected type
+        // using injected traits.
+        let field = get_field_with_name(data, "identity")
             .ok_or_else(|| {
                 Error::new(
                     item.span(),
@@ -112,16 +112,27 @@ fn resource_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
                 )
             })?;
 
-        return Ok(build_struct(name, table_name));
+        return Ok(build_struct(name, table_name, &field.ty));
     }
 
-    Err(Error::new(
-        item.span(),
-        "Resource can only be derived for structs",
-    ))
+    Err(Error::new(item.span(), "Resource can only be derived for structs"))
 }
 
-fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
+fn build_struct(
+    struct_name: &Ident,
+    table_name: &Lit,
+    observed_identity_type: &syn::Type,
+) -> TokenStream {
+    let identity_struct = build_identity_struct(struct_name, table_name);
+    let resource_impl =
+        build_resource_implementation(struct_name, observed_identity_type);
+    quote! {
+        #identity_struct
+        #resource_impl
+    }
+}
+
+fn build_identity_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [macro@Resource].",
         struct_name,
@@ -181,6 +192,26 @@ fn build_struct(struct_name: &Ident, table_name: &Lit) -> TokenStream {
                 }
             }
         }
+    }
+}
+
+fn build_resource_implementation(
+    struct_name: &Ident,
+    observed_identity_type: &syn::Type,
+) -> TokenStream {
+    let identity_trait = format_ident!("__{}IdentityMarker", struct_name);
+    let identity_name = format_ident!("{}Identity", struct_name);
+    quote! {
+        // Verify that the field named "identity" is actually the generated
+        // type within the struct deriving Resource.
+        trait #identity_trait {}
+        impl #identity_trait for #identity_name {}
+        const _: () = {
+            fn assert_identity<T: #identity_trait>() {}
+            fn assert_all() {
+                assert_identity::<#observed_identity_type>();
+            }
+        };
 
         impl crate::db::identity::Resource for #struct_name {
             fn id(&self) -> ::uuid::Uuid {
