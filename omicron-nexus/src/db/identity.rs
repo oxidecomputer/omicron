@@ -49,7 +49,7 @@ pub trait Asset {
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
             id: self.id(),
-            name: Name::try_from("no name").unwrap(),
+            name: Name::try_from("no-name").unwrap(),
             description: "no description".to_string(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
