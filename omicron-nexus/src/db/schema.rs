@@ -118,7 +118,10 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        sled_agent_ip -> Nullable<Inet>,
+        time_deleted -> Nullable<Timestamptz>,
+
+        ip -> Inet,
+        port -> Int4,
     }
 }
 

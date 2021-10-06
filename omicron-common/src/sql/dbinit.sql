@@ -40,6 +40,22 @@ CREATE USER omicron;
 GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 
 /*
+ * Sleds
+ */
+
+CREATE TABLE omicron.public.Sled (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    ip INET NOT NULL,
+    port INT4 NOT NULL
+);
+
+/*
  * Projects
  */
 
@@ -196,19 +212,6 @@ CREATE INDEX ON omicron.public.Disk (
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
-
-/*
- * Sleds
- */
-
-CREATE TABLE omicron.public.Sled (
-    /* Identity metadata -- abbreviated for sleds */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    sled_agent_ip INET
-);
 
 /*
  * Oximeter collector servers.

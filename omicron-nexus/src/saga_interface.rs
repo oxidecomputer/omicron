@@ -38,9 +38,6 @@ impl SagaContext {
      * an undo action.  The only thing needed at this layer is a way to read and
      * write to the database, which we already have.
      *
-     * For now, sleds aren't in the database.  We rely on the fact that Nexus
-     * knows what sleds exist.
-     *
      * Note: the parameters appear here (unused) to make sure callers make sure
      * to have them available.  They're not used now, but they will be in a real
      * implementation.
