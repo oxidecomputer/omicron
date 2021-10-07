@@ -307,14 +307,14 @@ pub use crate::histogram::HistogramSupport;
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
 /// // The `Server` target identifies some HTTP service being monitored.
-/// #[derive(Clone, Target)]
+/// #[derive(Clone, Debug, Target)]
 /// pub struct Server {
 ///     pub name: String,
 /// }
 ///
 /// // The `RequestCount` metric describes the cumulative count of requests the server has
 /// // organized by their routes, the HTTP method, and the response code.
-/// #[derive(Clone, Metric)]
+/// #[derive(Clone, Debug, Metric)]
 /// pub struct RequestCount {
 ///     route: String,
 ///     method: String,
@@ -330,6 +330,7 @@ pub use crate::histogram::HistogramSupport;
 ///
 /// // The `RequestCounter` type implements the `Producer` trait, to generate samples of the
 /// // target/metric being monitored.
+/// #[derive(Debug, Clone)]
 /// pub struct RequestCounter {
 ///     target: Server,
 ///     metric: RequestCount,
@@ -389,7 +390,7 @@ pub use crate::histogram::HistogramSupport;
 ///     }
 /// }
 /// ```
-pub trait Producer {
+pub trait Producer: Send + Sync + std::fmt::Debug + 'static {
     /// Return the currently available samples from the monitored targets and metrics.
     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error>;
 }
@@ -403,19 +404,20 @@ mod tests {
     };
     use std::boxed::Box;
 
-    #[derive(Clone, Target)]
+    #[derive(Debug, Clone, Target)]
     struct Targ {
         pub good: bool,
         pub id: i64,
     }
 
-    #[derive(Clone, Metric)]
+    #[derive(Debug, Clone, Metric)]
     struct Met {
         good: bool,
         id: i64,
         datum: i64,
     }
 
+    #[derive(Debug, Clone)]
     struct Prod {
         pub target: Targ,
         pub metric: Met,
