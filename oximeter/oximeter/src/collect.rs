@@ -38,11 +38,11 @@ impl Collector {
     }
 
     /// Register a new [`Producer`] object with the collector.
-    pub fn register_producer(
-        &self,
-        producer: Box<dyn Producer>,
-    ) -> Result<(), Error> {
-        self.producers.lock().unwrap().push(producer);
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    where
+        P: Producer,
+    {
+        self.producers.lock().unwrap().push(Box::new(producer));
         Ok(())
     }
 
@@ -65,6 +65,3 @@ impl Collector {
         self.producer_id
     }
 }
-
-unsafe impl Sync for Collector {}
-unsafe impl Send for Collector {}
