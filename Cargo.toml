@@ -6,6 +6,7 @@ members = [
     "omicron-sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 
 default-members = [
@@ -15,6 +16,7 @@ default-members = [
     "omicron-sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 resolver = "2"
 

@@ -1,10 +1,10 @@
 //! Facilities for managing a local database for development
 
-use crate::config::PostgresConfigWithUrl;
 use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use omicron_common::config::PostgresConfigWithUrl;
 use std::ffi::OsStr;
 use std::fmt;
 use std::ops::Deref;
@@ -576,7 +576,7 @@ fn process_exited(child_process: &mut tokio::process::Child) -> bool {
 pub async fn populate(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../sql/dbinit.sql");
+    let sql = include_str!("../../../omicron-common/src/sql/dbinit.sql");
     client.batch_execute(sql).await.context("populating Omicron database")
 }
 
@@ -588,7 +588,7 @@ pub async fn populate(
 pub async fn wipe(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../sql/dbwipe.sql");
+    let sql = include_str!("../../../omicron-common/src/sql/dbwipe.sql");
     client.batch_execute(sql).await.context("wiping Omicron database")
 }
 

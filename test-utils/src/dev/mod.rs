@@ -1,12 +1,7 @@
 /*!
  * Facilities intended for development tools and the test suite.  These should
- * generally not be used in production code.
+ * not be used in production code.
  */
-
-/*
- * Dead code warnings are not meaningful here unless we're building for tests.
- */
-#![cfg_attr(not(test), allow(dead_code))]
 
 pub mod clickhouse;
 pub mod db;

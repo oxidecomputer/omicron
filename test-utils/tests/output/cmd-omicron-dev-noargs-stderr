@@ -1,4 +1,4 @@
-omicron-dev: parsing arguments: omicron-common 0.1.0
+omicron-dev: parsing arguments: omicron-test-utils 0.1.0
 Manage a local CockroachDB database for Omicron development
 
 USAGE:
