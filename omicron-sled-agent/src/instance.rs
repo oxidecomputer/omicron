@@ -47,7 +47,7 @@ async fn wait_for_http_server(
     let log_notification_failure = |error, delay| {
         warn!(
             log,
-            "failed to await http server, will retry in {:?}", delay;
+            "failed to await http server ({}), will retry in {:?}", error, delay;
             "error" => ?error
         );
     };
@@ -66,7 +66,6 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    warn!(log, "waiting for http server, saw error: {}", value);
                     return Err(backoff::BackoffError::Transient(value));
                 }
             }
