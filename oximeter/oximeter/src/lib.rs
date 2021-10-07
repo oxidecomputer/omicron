@@ -102,7 +102,6 @@ pub use oximeter_macro_impl::*;
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
-pub mod collect;
 pub mod db;
 pub mod histogram;
 pub mod oximeter_server;
