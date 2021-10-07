@@ -39,7 +39,7 @@ impl Client {
         &self,
         identity: Vec<u8>,
     ) -> Result<ShareResponse, Error> {
-        let path = "/bootstrap_request_share";
+        let path = "/request_share";
         let body = Body::from(
             serde_json::to_string(&ShareRequest { identity }).unwrap(),
         );

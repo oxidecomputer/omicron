@@ -19,7 +19,7 @@ use omicron_common::NexusClient;
 /// server wired up to the sled agent
 pub struct Server {
     /// Dropshot server for the API.
-    http_server: dropshot::HttpServer<Arc<SledAgent>>,
+    http_server: dropshot::HttpServer<SledAgent>,
 }
 
 impl Server {
@@ -40,21 +40,19 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = Arc::new(
-            SledAgent::new(
-                &config.id,
-                sa_log,
-                config.vlan,
-                nexus_client.clone(),
-            )
-            .map_err(|e| e.to_string())?,
-        );
+        let sled_agent = SledAgent::new(
+            &config.id,
+            sa_log,
+            config.vlan,
+            nexus_client.clone(),
+        )
+        .map_err(|e| e.to_string())?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),
-            sled_agent.clone(),
+            sled_agent,
             &dropshot_log,
         )
         .map_err(|error| format!("initializing server: {}", error))?

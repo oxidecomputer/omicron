@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-type SledApiDescription = ApiDescription<Arc<SledAgent>>;
+type SledApiDescription = ApiDescription<SledAgent>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
@@ -46,7 +46,7 @@ struct InstancePathParam {
     path = "/instances/{instance_id}",
 }]
 async fn instance_put(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: Arc<RequestContext<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
@@ -70,7 +70,7 @@ struct DiskPathParam {
     path = "/disks/{disk_id}",
 }]
 async fn disk_put(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: Arc<RequestContext<SledAgent>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
 ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
