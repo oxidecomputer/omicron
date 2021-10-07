@@ -14,7 +14,7 @@ type ProducerList = Vec<Box<dyn Producer>>;
 pub type ProducerResults = Vec<Result<BTreeSet<types::Sample>, Error>>;
 
 /// A central collection point for metrics within an application.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Collector {
     producers: Arc<Mutex<ProducerList>>,
     producer_id: Uuid,
@@ -38,11 +38,11 @@ impl Collector {
     }
 
     /// Register a new [`Producer`] object with the collector.
-    pub fn register_producer(
-        &self,
-        producer: Box<dyn Producer>,
-    ) -> Result<(), Error> {
-        self.producers.lock().unwrap().push(producer);
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    where
+        P: Producer,
+    {
+        self.producers.lock().unwrap().push(Box::new(producer));
         Ok(())
     }
 
@@ -65,6 +65,3 @@ impl Collector {
         self.producer_id
     }
 }
-
-unsafe impl Sync for Collector {}
-unsafe impl Send for Collector {}
