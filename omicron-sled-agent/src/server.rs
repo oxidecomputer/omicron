@@ -8,7 +8,6 @@ use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use slog::Logger;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -25,10 +24,12 @@ pub struct Server {
 
 impl Server {
     /// Starts a SledAgent server
-    pub async fn start(
-        config: &Config,
-        log: &Logger,
-    ) -> Result<Server, String> {
+    pub async fn start(config: &Config) -> Result<Server, String> {
+        let log = config
+            .log
+            .to_logger("sled-agent")
+            .map_err(|message| format!("initializing logger: {}", message))?;
+
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -58,14 +59,6 @@ impl Server {
         )
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
-
-        // Initialize bootstrapping after the server has started.
-        // This ordering allows the bootstrapping portion of the sled agent to
-        // communicate with other sled agents on the rack during the
-        // initialization process.
-        if let Err(e) = sled_agent.bootstrap_agent.initialize(vec![]).await {
-            return Err(e.to_string());
-        }
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential
@@ -106,18 +99,6 @@ impl Server {
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
-}
-
-/// Run an instance of the `Server`
-pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("sled-agent")
-        .map_err(|message| format!("initializing logger: {}", message))?;
-
-    let server = Server::start(config, &log).await?;
-    info!(log, "sled agent started successfully");
-    server.wait_for_finish().await
 }
 
 /// Runs the OpenAPI generator, emitting the spec to stdout.

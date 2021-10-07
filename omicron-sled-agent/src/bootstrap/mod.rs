@@ -1,6 +1,7 @@
 //! Bootstrap-related utilities
 
-mod agent;
+pub mod agent;
 mod client;
-
-pub use agent::Agent;
+pub mod config;
+mod http_entrypoints;
+pub mod server;
