@@ -20,7 +20,7 @@ use omicron_common::NexusClient;
 /// server wired up to the sled agent
 pub struct Server {
     /// Dropshot server for the API.
-    http_server: dropshot::HttpServer<SledAgent>,
+    http_server: dropshot::HttpServer<Arc<SledAgent>>,
 }
 
 impl Server {
@@ -39,23 +39,33 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = SledAgent::new(
-            &config.id,
-            sa_log,
-            config.vlan,
-            nexus_client.clone(),
-        )
-        .map_err(|e| e.to_string())?;
+        let sled_agent = Arc::new(
+            SledAgent::new(
+                &config.id,
+                sa_log,
+                config.vlan,
+                nexus_client.clone(),
+            )
+            .map_err(|e| e.to_string())?,
+        );
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),
-            sled_agent,
+            sled_agent.clone(),
             &dropshot_log,
         )
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
+
+        // Initialize bootstrapping after the server has started.
+        // This ordering allows the bootstrapping portion of the sled agent to
+        // communicate with other sled agents on the rack during the
+        // initialization process.
+        if let Err(e) = sled_agent.bootstrap_agent.initialize(vec![]).await {
+            return Err(e.to_string());
+        }
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential

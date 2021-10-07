@@ -1,4 +1,6 @@
-use crate::bootstrap_agent_client::Client as BootstrapClient;
+//! Bootstrap-related APIs.
+
+use super::client::Client as BootstrapClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::packaging::sha256_digest;
@@ -35,14 +37,14 @@ pub enum BootstrapError {
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub struct BootstrapAgent {
+pub struct Agent {
     /// Debug log
     log: Logger,
 }
 
-impl BootstrapAgent {
+impl Agent {
     pub fn new(log: Logger) -> Self {
-        BootstrapAgent { log }
+        Agent { log }
     }
 
     /// Implements the "request share" API.
@@ -61,9 +63,8 @@ impl BootstrapAgent {
 
     /// Performs device initialization:
     ///
-    /// - TODO: Communicates with other bootstrap services to establish
-    /// a trust quorum.
-    /// - Verifies, unpacks, and launches the sled agent and Nexus.
+    /// - TODO: Communicates with other sled agents to establish a trust quorum.
+    /// - Verifies, unpacks, and launches other services.
     pub async fn initialize(
         &self,
         other_agents: Vec<SocketAddr>,
@@ -74,7 +75,7 @@ impl BootstrapAgent {
         // - Once this is done, "unlock" local storage
         //
         // The current implementation sends a stub request to all known
-        // bootstrap agents, but does not actually create a quorum / unlock
+        // sled agents, but does not actually create a quorum / unlock
         // anything.
         let other_agents: Vec<BootstrapClient> = other_agents
             .into_iter()
@@ -98,8 +99,6 @@ impl BootstrapAgent {
         let digests: HashMap<String, Vec<u8>> = toml::from_str(
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
         )?;
-
-        self.launch(&digests, &tar_source, &destination, "sled-agent")?;
 
         // TODO-correctness: Nexus may not be enabled on all racks.
         // Some decision-making logic should be used here to make this
@@ -219,7 +218,7 @@ impl BootstrapAgent {
         //
         // This allows the service to remain "transient", which avoids
         // it being auto-initialized by SMF across reboots.
-        // Instead, the bootstrap agent remains responsible for verifying
+        // Instead, the sled agent remains responsible for verifying
         // and enabling the services on each access.
         smf::Config::import().run(manifest)?;
         smf::Adm::new()

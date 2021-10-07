@@ -1231,28 +1231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-bootstrap-agent"
-version = "0.1.0"
-dependencies = [
- "dropshot",
- "http",
- "hyper",
- "omicron-common",
- "omicron-rpaths",
- "pq-sys",
- "serde",
- "serde_json",
- "slog",
- "smf",
- "structopt",
- "tar",
- "thiserror",
- "tokio",
- "toml",
- "uuid",
-]
-
-[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -1373,7 +1351,10 @@ dependencies = [
  "smf",
  "structopt",
  "subprocess",
+ "tar",
+ "thiserror",
  "tokio",
+ "toml",
  "uuid",
  "zone",
 ]

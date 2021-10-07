@@ -7,9 +7,9 @@
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='bootstrap-agent' grouping='require_all' restart_on='none'
+  <dependency name='sled-agent' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/bootstrap-agent' />
+  <service_fmri value='svc:/system/illumos/sled-agent' />
   </dependency>
 
   <method_context>

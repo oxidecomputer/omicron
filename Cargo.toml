@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "omicron-bootstrap-agent",
     "omicron-common",
     "omicron-nexus",
     "omicron-rpaths",
@@ -10,7 +9,6 @@ members = [
 ]
 
 default-members = [
-    "omicron-bootstrap-agent",
     "omicron-common",
     "omicron-nexus",
     "omicron-rpaths",

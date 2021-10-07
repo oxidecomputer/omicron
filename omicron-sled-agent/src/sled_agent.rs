@@ -1,5 +1,6 @@
 //! Sled agent implementation
 
+use super::bootstrap;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
@@ -24,6 +25,7 @@ use crate::instance_manager::InstanceManager;
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
+    pub bootstrap_agent: bootstrap::Agent,
     instances: InstanceManager,
 }
 
@@ -37,9 +39,11 @@ impl SledAgent {
     ) -> Result<SledAgent, Error> {
         info!(&log, "created sled agent"; "id" => ?id);
 
-        Ok(SledAgent {
-            instances: InstanceManager::new(log.clone(), vlan, nexus_client)?,
-        })
+        let bootstrap_agent =
+            bootstrap::Agent::new(log.new(o!("component" => "BootstrapAgent")));
+        let instances = InstanceManager::new(log, vlan, nexus_client)?;
+
+        Ok(SledAgent { bootstrap_agent, instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.

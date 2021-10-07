@@ -7,6 +7,9 @@ use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::internal::bootstrap_agent::{
+    ShareRequest, ShareResponse,
+};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::DiskEnsureBody;
@@ -18,11 +21,12 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-type SledApiDescription = ApiDescription<SledAgent>;
+type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+        api.register(bootstrap_request_share)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
         Ok(())
@@ -33,6 +37,20 @@ pub fn api() -> SledApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[endpoint {
+    method = GET,
+    path = "/bootstrap_request_share",
+}]
+async fn bootstrap_request_share(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    request: TypedBody<ShareRequest>,
+) -> Result<HttpResponseOk<ShareResponse>, HttpError> {
+    let bootstrap_agent = &rqctx.context().bootstrap_agent;
+
+    let request = request.into_inner();
+    Ok(HttpResponseOk(bootstrap_agent.request_share(request.identity).await?))
 }
 
 /// Path parameters for Instance requests (sled agent API)
@@ -46,7 +64,7 @@ struct InstancePathParam {
     path = "/instances/{instance_id}",
 }]
 async fn instance_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
@@ -70,7 +88,7 @@ struct DiskPathParam {
     path = "/disks/{disk_id}",
 }]
 async fn disk_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
 ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
