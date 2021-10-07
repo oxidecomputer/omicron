@@ -105,6 +105,6 @@ async fn main() {
     };
     let server = ProducerServer::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
-    server.collector().register_producer(producer).unwrap();
+    server.registry().register_producer(producer).unwrap();
     server.serve_forever().await.unwrap();
 }

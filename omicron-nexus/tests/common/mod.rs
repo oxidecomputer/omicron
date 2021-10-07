@@ -258,10 +258,7 @@ pub async fn start_producer_server(
             datum: 0,
         },
     };
-    server
-        .collector()
-        .register_producer(producer)
-        .map_err(|e| e.to_string())?;
+    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
     Ok(server)
 }
 
