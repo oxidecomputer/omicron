@@ -14,7 +14,7 @@ type ProducerList = Vec<Box<dyn Producer>>;
 pub type ProducerResults = Vec<Result<BTreeSet<types::Sample>, Error>>;
 
 /// A central collection point for metrics within an application.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Collector {
     producers: Arc<Mutex<ProducerList>>,
     producer_id: Uuid,
