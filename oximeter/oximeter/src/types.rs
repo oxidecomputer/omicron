@@ -11,9 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -627,6 +629,62 @@ impl Sample {
     /// Return the fields of this sample's metric.
     pub fn metric_fields(&self) -> &Vec<Field> {
         &self.metric.fields
+    }
+}
+
+type ProducerList = Vec<Box<dyn crate::Producer>>;
+pub type ProducerResults = Vec<Result<BTreeSet<Sample>, Error>>;
+
+/// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
+#[derive(Debug, Clone)]
+pub struct ProducerRegistry {
+    producers: Arc<Mutex<ProducerList>>,
+    producer_id: Uuid,
+}
+
+impl Default for ProducerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProducerRegistry {
+    /// Construct a new `ProducerRegistry`.
+    pub fn new() -> Self {
+        Self::with_id(Uuid::new_v4())
+    }
+
+    /// Construct a new `ProducerRegistry` with the given producer ID.
+    pub fn with_id(producer_id: Uuid) -> Self {
+        Self { producers: Arc::new(Mutex::new(vec![])), producer_id }
+    }
+
+    /// Add a new [`Producer`] object to the registry.
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    where
+        P: crate::Producer,
+    {
+        self.producers.lock().unwrap().push(Box::new(producer));
+        Ok(())
+    }
+
+    /// Collect available samples from all registered producers.
+    ///
+    /// This method returns a vector of results, one from each producer. If the producer generates
+    /// an error, that's propagated here. Successfully produced samples are returned in a set,
+    /// ordered by the [`types::Sample::cmp`] method.
+    pub fn collect(&self) -> ProducerResults {
+        let mut producers = self.producers.lock().unwrap();
+        let mut results = Vec::with_capacity(producers.len());
+        for producer in producers.iter_mut() {
+            results.push(producer.produce().map(|samples| samples.collect()));
+        }
+        results
+    }
+
+    /// Return the producer ID associated with this registry.
+    pub fn producer_id(&self) -> Uuid {
+        self.producer_id
     }
 }
 
