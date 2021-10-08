@@ -7,7 +7,7 @@ members = [
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/export",
+    "oximeter/producer",
     "oximeter/oximeter-macro-impl",
     "test-utils",
 ]
@@ -20,7 +20,7 @@ default-members = [
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/export",
+    "oximeter/producer",
     "oximeter/oximeter-macro-impl",
     "test-utils",
 ]

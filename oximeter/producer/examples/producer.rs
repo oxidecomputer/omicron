@@ -8,7 +8,7 @@ use oximeter::{
     types::{Cumulative, Sample},
     Error, Metric, Producer, Target,
 };
-use oximeter_export::{ProducerServer, ProducerServerConfig};
+use oximeter_producer::{Config, Server};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -92,13 +92,13 @@ async fn main() {
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let config = ProducerServerConfig {
+    let config = Config {
         server_info,
         registration_address: "127.0.0.1:12221".parse().unwrap(),
         dropshot_config,
         logging_config,
     };
-    let server = ProducerServer::start(&config).await.unwrap();
+    let server = Server::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
     server.registry().register_producer(producer).unwrap();
     server.serve_forever().await.unwrap();

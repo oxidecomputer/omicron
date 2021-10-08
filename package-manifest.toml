@@ -22,11 +22,6 @@ binary_name = "nexus"
 service_name = "nexus"
 build = "rust"
 
-[package.omicron-sled-agent]
-binary_name = "sled-agent"
-service_name = "sled-agent"
-build = "rust"
-
 [package.oximeter-collector]
 binary_name = "oximeter"
 service_name = "oximeter"

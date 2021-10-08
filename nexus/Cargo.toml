@@ -86,9 +86,9 @@ path = "../oximeter/oximeter"
 version = "0.1.0"
 path = "../oximeter/collector"
 
-[dev-dependencies.oximeter-export]
+[dev-dependencies.oximeter-producer]
 version = "0.1.0"
-path = "../oximeter/export"
+path = "../oximeter/producer"
 
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"

@@ -11,7 +11,7 @@ use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
-use oximeter_export::ProducerServer;
+use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -222,8 +222,8 @@ pub async fn start_producer_server(
 ) -> Result<ProducerServer, String> {
     // Set up a producer server.
     //
-    // This listens on any available port, and the ProducerServer internally updates this to the
-    // actual bound port of the Dropshot HTTP server.
+    // This listens on any available port, and the server internally updates this to the actual
+    // bound port of the Dropshot HTTP server.
     let producer_address = SocketAddr::new("::1".parse().unwrap(), 0);
     let server_info = ProducerEndpoint {
         id,
@@ -231,7 +231,7 @@ pub async fn start_producer_server(
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let config = oximeter_export::ProducerServerConfig {
+    let config = oximeter_producer::Config {
         server_info,
         registration_address: nexus_address,
         dropshot_config: ConfigDropshot {

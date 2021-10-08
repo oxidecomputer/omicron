@@ -1,4 +1,5 @@
-//! Tools for interacting with the timeseries database.
+//! Tools for interacting with the control plane telemetry database.
+
 // Copyright 2021 Oxide Computer Company
 
 use oximeter::FieldType;
@@ -15,8 +16,8 @@ pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::Error),
 
-    /// An error interacting with the timeseries database
-    #[error("Error interacting with timeseries database: {0}")]
+    /// An error interacting with the telemetry database
+    #[error("Error interacting with telemetry database: {0}")]
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema

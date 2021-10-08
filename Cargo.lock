@@ -1302,7 +1302,7 @@ dependencies = [
  "openapiv3",
  "oximeter",
  "oximeter-collector",
- "oximeter-export",
+ "oximeter-producer",
  "pq-sys",
  "schemars",
  "serde",
@@ -1517,7 +1517,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "oximeter-export"
+name = "oximeter-macro-impl"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -1533,16 +1543,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "oximeter-macro-impl"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

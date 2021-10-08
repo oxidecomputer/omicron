@@ -2,6 +2,7 @@
 name = "oximeter-collector"
 version = "0.1.0"
 edition = "2021"
+description = "The oximeter metric collection server"
 
 [dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
