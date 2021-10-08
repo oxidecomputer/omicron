@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [build-dependencies.omicron-rpaths]
-path = "../omicron-rpaths"
+path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
@@ -38,10 +38,10 @@ git = "https://github.com/oxidecomputer/dropshot"
 branch = "main"
 
 [dependencies.omicron-common]
-path = "../omicron-common"
+path = "../common"
 
 [dependencies.omicron-sled-agent]
-path = "../omicron-sled-agent"
+path = "../sled-agent"
 
 [dependencies.schemars]
 version = "0.8"

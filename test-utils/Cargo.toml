@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2018"
 
 [build-dependencies.omicron-rpaths]
-path = "../omicron-rpaths"
+path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
 futures = "0.3.15"
 libc = "0.2.103"
-omicron-common = { path = "../omicron-common" }
+omicron-common = { path = "../common" }
 postgres-protocol = "0.6.2"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -48,4 +48,3 @@ expectorate = "1.0.4"
 [[bin]]
 name = "omicron-dev"
 doc = false
-
