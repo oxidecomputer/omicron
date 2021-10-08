@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [build-dependencies.omicron-rpaths]
-path = "../omicron-rpaths"
+path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
