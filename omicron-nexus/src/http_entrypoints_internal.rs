@@ -33,6 +33,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
+        api.register(cpapi_whoami_get)?;
         Ok(())
     }
 
@@ -172,4 +173,33 @@ async fn cpapi_collectors_post(
         "address" => oximeter_info.address
     );
     Ok(HttpResponseUpdatedNoContent())
+}
+
+// XXX Move this to a test-only API that's not on by default.
+// XXX add automated tests that use this
+#[endpoint {
+    method = GET,
+    path = "/whoami",
+}]
+async fn cpapi_whoami_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<dropshot::HttpResponseOk<Whoami>, HttpError> {
+    let apictx = rqctx.context();
+    let authn = apictx.http_authn.authn_request(&rqctx).await?;
+    let modes_tried = authn.modes_tried;
+    use crate::authn::*;
+    let (authenticated, actor) = match authn.kind {
+        Kind::Authenticated(AuthnDetails {
+            actor: Actor(id),
+        }) => (true, Some(id.to_string())),
+        Kind::Unauthenticated => (false, None),
+    };
+    Ok(dropshot::HttpResponseOk(Whoami { modes_tried, authenticated, actor }))
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct Whoami {
+    modes_tried: Vec<String>,
+    authenticated: bool,
+    actor: Option<String>,
 }

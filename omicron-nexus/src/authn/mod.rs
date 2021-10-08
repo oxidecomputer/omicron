@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub struct Context {
     /// Describes whether the user is authenticated and provides more
     /// information that's specific to whether they're authenticated or not
-    kind: Kind,
+    pub kind: Kind,
 
     /// List of authentication modes tried
     ///
@@ -22,7 +22,7 @@ pub struct Context {
     /// of these modes found any credentials to verify.  Otherwise, whether
     /// authentiation succeeded or failed, it was the last mode in this list
     /// that was responsible for the final determination.
-    modes_tried: Vec<String>,
+    pub modes_tried: Vec<String>,
 }
 
 /// Describes whether the user is authenticated and provides more information
@@ -40,13 +40,13 @@ pub enum Kind {
 #[derive(Debug)]
 pub struct AuthnDetails {
     /// the actor performing the request
-    actor: Actor,
+    pub actor: Actor,
 }
 
 /// Describes who is performing an operation
 // TODO: This will probably wind up being an enum of: user | service
 #[derive(Debug)]
-pub struct Actor(Uuid);
+pub struct Actor(pub Uuid);
 
 pub use self::http::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 pub use self::http::HttpAuthn;

@@ -57,17 +57,19 @@ impl HttpAuthn {
 
         let mut modes_tried = Vec::with_capacity(self.allowed_modes.len());
         for (mode_name, mode) in &self.all_modes {
+            // XXX Extra quotes here
+            let mode_name_str = serde_json::to_string(&mode_name).unwrap();
             if !self.allowed_modes.contains(mode_name) {
                 trace!(
                     log,
                     "authn_http: skipping {:?} (not allowed by config)",
-                    mode_name
+                    mode_name_str
                 );
                 continue;
             }
 
-            trace!(log, "authn_http: trying {:?}", mode_name);
-            modes_tried.push(format!("{:?}", mode_name));
+            trace!(log, "authn_http: trying {:?}", mode_name_str);
+            modes_tried.push(mode_name_str);
             let result = mode.authn(rqctx, &request);
             match result {
                 // TODO-security If the user explicitly failed one authentication
@@ -147,16 +149,16 @@ pub enum ErrorKind {
     },
 }
 
+// XXX need a test that we don't leak information
 impl From<Error> for dropshot::HttpError {
     fn from(authn_error: Error) -> Self {
-        let message = format!("{:#}", authn_error);
         match &authn_error.kind {
             // TODO-security Does this leak too much information, to say that
             // the header itself was malformed?  It doesn't feel like it, and as
             // a user it's _really_ helpful to know if you've just, like,
             // encoded it wrong.
-            ErrorKind::BadFormat { .. } => {
-                dropshot::HttpError::for_bad_request(None, message)
+            e @ ErrorKind::BadFormat { .. } => {
+                dropshot::HttpError::for_bad_request(None, format!("{:#}", e))
             }
             // The HTTP short summary of this status code is "Unauthorized", but
             // the code describes an authentication failure, not an
@@ -170,7 +172,7 @@ impl From<Error> for dropshot::HttpError {
                 status_code: http::StatusCode::UNAUTHORIZED,
                 error_code: None,
                 external_message: String::from("authentication failed"),
-                internal_message: message,
+                internal_message: format!("{:#}", authn_error),
             },
         }
     }
