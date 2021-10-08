@@ -25,7 +25,10 @@ serde_json = "1.0"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 smf = "0.2"
 structopt = "0.3"
+tar = "0.4"
+thiserror = "1.0"
 tokio = { version = "1.12", features = [ "full" ] }
+toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"
 

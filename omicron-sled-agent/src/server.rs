@@ -8,7 +8,6 @@ use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use slog::Logger;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -25,10 +24,12 @@ pub struct Server {
 
 impl Server {
     /// Starts a SledAgent server
-    pub async fn start(
-        config: &Config,
-        log: &Logger,
-    ) -> Result<Server, String> {
+    pub async fn start(config: &Config) -> Result<Server, String> {
+        let log = config
+            .log
+            .to_logger("sled-agent")
+            .map_err(|message| format!("initializing logger: {}", message))?;
+
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -96,18 +97,6 @@ impl Server {
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
-}
-
-/// Run an instance of the `Server`
-pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("sled-agent")
-        .map_err(|message| format!("initializing logger: {}", message))?;
-
-    let server = Server::start(config, &log).await?;
-    info!(log, "sled agent started successfully");
-    server.wait_for_finish().await
 }
 
 /// Runs the OpenAPI generator, emitting the spec to stdout.

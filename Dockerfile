@@ -32,7 +32,6 @@ RUN apt-get update && apt-get install -y \
 	&& rm -rf /var/lib/apt/lists/*
 
 
-COPY --from=cargo-build /usr/src/omicron/target/release/bootstrap-agent /usr/bin/bootstrap-agent
 COPY --from=cargo-build /usr/src/omicron/target/release/nexus /usr/bin/nexus
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-dev /usr/bin/omicron-dev
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-package /usr/bin/omicron-package

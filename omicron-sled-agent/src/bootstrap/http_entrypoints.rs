@@ -1,6 +1,4 @@
-/*!
- * HTTP entrypoint functions for the bootstrap agent's exposed API
- */
+//! HTTP entrypoint functions for the bootstrap agent's exposed API
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -13,14 +11,12 @@ use omicron_common::api::internal::bootstrap_agent::{
 };
 use std::sync::Arc;
 
-use crate::bootstrap_agent::BootstrapAgent;
+use super::agent::Agent;
 
-/**
- * Returns a description of the bootstrap agent API
- */
-pub fn ba_api() -> ApiDescription<Arc<BootstrapAgent>> {
+/// Returns a description of the bootstrap agent API
+pub fn ba_api() -> ApiDescription<Arc<Agent>> {
     fn register_endpoints(
-        api: &mut ApiDescription<Arc<BootstrapAgent>>,
+        api: &mut ApiDescription<Arc<Agent>>,
     ) -> Result<(), String> {
         api.register(api_request_share)?;
         Ok(())
@@ -38,7 +34,7 @@ pub fn ba_api() -> ApiDescription<Arc<BootstrapAgent>> {
     path = "/request_share",
 }]
 async fn api_request_share(
-    rqctx: Arc<RequestContext<Arc<BootstrapAgent>>>,
+    rqctx: Arc<RequestContext<Arc<Agent>>>,
     request: TypedBody<ShareRequest>,
 ) -> Result<HttpResponseOk<ShareResponse>, HttpError> {
     let bootstrap_agent = rqctx.context();

@@ -1,13 +1,15 @@
-use crate::bootstrap_agent::BootstrapAgent;
-use crate::config::Config;
-use crate::http_entrypoints;
+//! Server API for bootstrap-related functionality.
+
+use super::agent::Agent;
+use super::config::Config;
+use super::http_entrypoints::ba_api as http_api;
 use std::sync::Arc;
 
-/// Wraps a [BootstrapAgent] object, and provides helper methods for exposing it
+/// Wraps a [Agent] object, and provides helper methods for exposing it
 /// via an HTTP interface.
 pub struct Server {
-    bootstrap_agent: Arc<BootstrapAgent>,
-    http_server: dropshot::HttpServer<Arc<BootstrapAgent>>,
+    bootstrap_agent: Arc<Agent>,
+    http_server: dropshot::HttpServer<Arc<Agent>>,
 }
 
 impl Server {
@@ -19,16 +21,16 @@ impl Server {
         info!(log, "setting up bootstrap agent server");
 
         let ba_log = log.new(o!(
-            "component" => "BootstrapAgent",
+            "component" => "Agent",
             "server" => config.id.clone().to_string()
         ));
-        let bootstrap_agent = Arc::new(BootstrapAgent::new(ba_log));
+        let bootstrap_agent = Arc::new(Agent::new(ba_log));
 
         let ba = Arc::clone(&bootstrap_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
-            http_entrypoints::ba_api(),
+            http_api(),
             ba,
             &dropshot_log,
         )
@@ -59,7 +61,7 @@ impl Server {
 }
 
 pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::ba_api()
+    http_api()
         .openapi("Oxide Bootstrap Agent API", "0.0.1")
         .description("API for interacting with bootstrapping agents")
         .contact_url("https://oxide.computer")

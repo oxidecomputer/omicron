@@ -37,9 +37,9 @@ impl SledAgent {
     ) -> Result<SledAgent, Error> {
         info!(&log, "created sled agent"; "id" => ?id);
 
-        Ok(SledAgent {
-            instances: InstanceManager::new(log.clone(), vlan, nexus_client)?,
-        })
+        let instances = InstanceManager::new(log, vlan, nexus_client)?;
+
+        Ok(SledAgent { instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.
