@@ -3,7 +3,6 @@
  */
 
 use super::ServerContext;
-use crate::authn::http::authn_http;
 use crate::db;
 
 use dropshot::endpoint;
@@ -167,9 +166,9 @@ async fn projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
-    let _authn = authn_http(&rqctx).await?;
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let _authn = &apictx.http_authn.authn_request(&rqctx).await?;
     let query = query_params.into_inner();
     let params = ScanByNameOrId::from_query(&query)?;
     let field = pagination_field_for_scan_params(params);

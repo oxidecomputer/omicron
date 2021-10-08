@@ -27,6 +27,7 @@ use uuid::Uuid;
  */
 #[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
 pub enum Error {
+    // XXX Should this get removed, since it's actually an HTTP-level error?
     /**
      * Authentication failed
      *

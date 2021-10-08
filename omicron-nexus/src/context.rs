@@ -1,6 +1,7 @@
 /*!
  * Shared state used by API request handlers
  */
+use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
@@ -17,6 +18,8 @@ pub struct ServerContext {
     pub nexus: Arc<Nexus>,
     /** debug log */
     pub log: Logger,
+    /** authenticator for external HTTP requests */
+    pub http_authn: authn::HttpAuthn,
 }
 
 impl ServerContext {
@@ -30,6 +33,7 @@ impl ServerContext {
         pool: db::Pool,
         config: &config::Config,
     ) -> Arc<ServerContext> {
+        let http_authn = authn::HttpAuthn::new(&config.authn_modes_external);
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
@@ -38,6 +42,7 @@ impl ServerContext {
                 config,
             ),
             log,
+            http_authn,
         })
     }
 }

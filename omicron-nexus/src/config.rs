@@ -3,6 +3,7 @@
  * configuration
  */
 
+use crate::authn;
 use crate::db;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -13,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 /*
  * By design, we require that all config properties be specified (i.e., we don't
- * use `serde(default)` except for the "insecure" parameters).
+ * use `serde(default)`).
  */
 
 /**
@@ -31,27 +32,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
-    /** Parameters that compromise security (used for testing) */
-    #[serde(default)]
-    pub insecure: InsecureParams,
-}
-
-/** Parameters that compromise security (used for testing) */
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct InsecureParams {
-    ///
-    /// If enabled, any client request may specify a particular actor using the
-    /// "oxide-authn-spoof" header.  This is obviously grossly insecure in any
-    /// real deployment, which is why it's behind the "insecure" config block.
-    ///
-    pub allow_any_request_to_spoof_authn_header: bool,
-}
-
-impl Default for InsecureParams {
-    fn default() -> Self {
-        InsecureParams { allow_any_request_to_spoof_authn_header: false }
-    }
+    /** allowed authentication modes for external HTTP server */
+    pub authn_modes_external: Vec<authn::http::HttpAuthnModeName>,
 }
 
 #[derive(Debug)]
@@ -122,8 +104,8 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::Config;
-    use super::InsecureParams;
     use super::{LoadError, LoadErrorKind};
+    use crate::authn;
     use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -231,6 +213,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_modes_external = []
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -252,6 +235,7 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                authn_modes_external: Vec::new(),
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
@@ -274,9 +258,6 @@ mod test {
                         .parse()
                         .unwrap()
                 },
-                insecure: InsecureParams {
-                    allow_any_request_to_spoof_authn_header: false,
-                }
             }
         );
 
@@ -284,6 +265,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_modes_external [ "spoof" ]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -304,8 +286,44 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            config.insecure,
-            InsecureParams { allow_any_request_to_spoof_authn_header: true }
+            config.authn_modes_external,
+            vec![authn::http::HttpAuthnModeName::Spoof],
         );
+    }
+
+    #[test]
+    fn test_bad_authn_modes() {
+        let error = read_config(
+            "bad authn_modes_external",
+            r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_modes_external = ["trust-me"]
+            [dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            "##,
+        )
+        .expect_err("expected failure");
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert!(error.to_string().starts_with(
+                "unknown variant `trust-me`, expected `spoof` for key \
+                `authn_modes_external`"
+            ));
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
     }
 }

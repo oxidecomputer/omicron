@@ -4,6 +4,7 @@
 
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+authn_modes_external = []
 
 [database]
 # URL for connecting to the database
@@ -28,10 +29,3 @@ mode = "stderr-terminal"
 #mode = "file"
 #path = "logs/server.log"
 #if_exists = "append"
-
-# The options in the "insecure" block compromise the integrity of the server and
-# are only appropriate for local testing.
-#[insecure]
-# Allows any incoming request to specify a user that will be treated as
-# authenticated.
-#allow_any_request_to_spoof_authn_header = true

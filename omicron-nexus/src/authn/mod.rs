@@ -10,17 +10,35 @@ use uuid::Uuid;
 ///
 /// This is HTTP-agnostic.  Subsystems in Nexus could create contexts for
 /// purposes unrelated to HTTP (e.g., background jobs).
-pub enum Context {
-    /// This actor is not authenticated at all.
-    Unauthenticated,
-    /// The actor is authenticated.  Details in [`Details`].
-    Authenticated(Details),
+#[derive(Debug)]
+pub struct Context {
+    /// Describes whether the user is authenticated and provides more
+    /// information that's specific to whether they're authenticated or not
+    kind: Kind,
+
+    /// List of authentication modes tried
+    ///
+    /// If `kind` is `Unauthenticated(UnauthDetails::NotAttempted)`, then none
+    /// of these modes found any credentials to verify.  Otherwise, whether
+    /// authentiation succeeded or failed, it was the last mode in this list
+    /// that was responsible for the final determination.
+    modes_tried: Vec<String>,
 }
 
-/// Describes how the actor authenticated
+/// Describes whether the user is authenticated and provides more information
+/// that's specific to whether they're authenticated or not
+#[derive(Debug)]
+pub enum Kind {
+    /// Client successfully authenticated
+    Authenticated(AuthnDetails),
+    /// Client did not attempt to authenticate
+    Unauthenticated,
+}
+
+/// Describes how the client authenticated
 // TODO Might this want to have a list of active roles?
 #[derive(Debug)]
-pub struct Details {
+pub struct AuthnDetails {
     /// the actor performing the request
     actor: Actor,
 }
@@ -29,3 +47,6 @@ pub struct Details {
 // TODO: This will probably wind up being an enum of: user | service
 #[derive(Debug)]
 pub struct Actor(Uuid);
+
+pub use self::http::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+pub use self::http::HttpAuthn;

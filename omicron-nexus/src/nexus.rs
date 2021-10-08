@@ -117,9 +117,6 @@ pub struct Nexus {
      * up.
      */
     sled_agents: Mutex<BTreeMap<Uuid, Arc<SledAgentClient>>>,
-
-    /** insecure parts of config */
-    config_insecure: config::InsecureParams,
 }
 
 /*
@@ -156,6 +153,7 @@ impl Nexus {
             )),
             sec_store,
         ));
+
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),
@@ -169,7 +167,6 @@ impl Nexus {
             db_datastore,
             sec_client: Arc::clone(&sec_client),
             sled_agents: Mutex::new(BTreeMap::new()),
-            config_insecure: config.insecure.clone(),
         };
 
         /*
@@ -188,10 +185,6 @@ impl Nexus {
         );
 
         nexus_arc
-    }
-
-    pub fn config_insecure(&self) -> &config::InsecureParams {
-        &self.config_insecure
     }
 
     /*
