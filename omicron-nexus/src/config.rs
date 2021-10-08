@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 /*
  * By design, we require that all config properties be specified (i.e., we don't
- * use `serde(default)` except for the "insecure" parameters.
+ * use `serde(default)` except for the "insecure" parameters).
  */
 
 /**

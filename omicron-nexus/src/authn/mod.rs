@@ -17,11 +17,6 @@ pub enum Context {
     Authenticated(Details),
 }
 
-/// Describes who is performing an operation
-// TODO: This will probably wind up being an enum of: user | service
-#[derive(Debug)]
-pub struct Actor(Uuid);
-
 /// Describes how the actor authenticated
 // TODO Might this want to have a list of active roles?
 #[derive(Debug)]
@@ -29,3 +24,8 @@ pub struct Details {
     /// the actor performing the request
     actor: Actor,
 }
+
+/// Describes who is performing an operation
+// TODO: This will probably wind up being an enum of: user | service
+#[derive(Debug)]
+pub struct Actor(Uuid);

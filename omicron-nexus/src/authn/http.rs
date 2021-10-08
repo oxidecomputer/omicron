@@ -20,9 +20,9 @@ use uuid::Uuid;
 /// 2. To facilitate conversion to the appropriate [`dropshot::HttpError`] error
 ///    type.  This will generally have a lot less information to avoid leaking
 ///    information to attackers, but it's still useful to distinguish between
-///    400 and 401, for example.
+///    400 and 401/403, for example.
 ///
-/* TODO These specific values are pretty half-baked. */
+/* TODO These specific variants are pretty half-baked. */
 #[derive(Debug, Error)]
 pub enum Error {
     /// The authn header is structurally invalid
@@ -87,7 +87,8 @@ pub async fn authn_http(
     let request = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    // XXX Should happen at server setup time, not now.
+    // XXX Should happen at server setup time, not now.  How would this work?
+    // Is there like an HTTP-specific AuthnFactory?  Ugh...
     let nexus = &apictx.nexus;
     let allowed =
         nexus.config_insecure().allow_any_request_to_spoof_authn_header;
