@@ -1298,6 +1298,8 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "oximeter-collector",
+ "oximeter-producer",
  "pq-sys",
  "ref-cast",
  "schemars",
@@ -1450,15 +1452,49 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bytes",
  "chrono",
- "dropshot",
- "hyper",
  "num-traits",
  "omicron-common",
  "omicron-test-utils",
  "oximeter-macro-impl",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-collector"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "oximeter",
+ "oximeter-db",
+ "reqwest",
+ "serde",
+ "slog",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "omicron-test-utils",
+ "oximeter",
  "reqwest",
  "schemars",
  "serde",
@@ -1469,8 +1505,6 @@ dependencies = [
  "structopt",
  "thiserror",
  "tokio",
- "toml",
- "trybuild",
  "uuid",
 ]
 
@@ -1482,6 +1516,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "oximeter-producer"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-common",
+ "oximeter",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

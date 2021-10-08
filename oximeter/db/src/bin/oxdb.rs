@@ -4,10 +4,10 @@
 use anyhow::{bail, Context};
 use chrono::{DateTime, Utc};
 use oximeter::{
-    db::{query, Client},
     types::{Cumulative, Sample},
     Metric, Target,
 };
+use oximeter_db::{query, Client, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
 use std::net::SocketAddr;
 use structopt::StructOpt;

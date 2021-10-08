@@ -1,14 +1,11 @@
 //! Main entry point to run an `oximeter` server in the control plane.
 // Copyright 2021 Oxide Computer Company
 
-use structopt::StructOpt;
-
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use oximeter::{
-    oximeter_server::oximeter_api, oximeter_server::Config, Oximeter,
-};
+use oximeter_collector::{oximeter_api, Config, Oximeter};
 use std::path::PathBuf;
+use structopt::StructOpt;
 
 pub fn run_openapi() -> Result<(), String> {
     oximeter_api()
