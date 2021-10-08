@@ -5,7 +5,7 @@ authors = ["Benjamin Naecker <ben@oxide.computer>"]
 edition = "2018"
 
 [build-dependencies.omicron-rpaths]
-path = "../../omicron-rpaths"
+path = "../../rpaths"
 
 [dependencies]
 anyhow = "1.0"
@@ -15,7 +15,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" 
 num-traits = "0.2.14"
 hyper = "0.14.13"
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
-omicron-common = { path = "../../omicron-common" }
+omicron-common = { path = "../../common" }
 # See build.rs for more about the "pq-sys" dependency.
 pq-sys = "*"
 reqwest = { version = "0.11.4", features = [ "json" ] }
@@ -33,6 +33,7 @@ uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 trybuild = "1.0.44"
+omicron-test-utils = { path = "../../test-utils" }
 
 [[bin]]
 name = "oxdb"

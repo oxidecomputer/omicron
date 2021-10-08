@@ -1,0 +1,94 @@
+[package]
+name = "omicron-common"
+version = "0.1.0"
+edition = "2018"
+
+[build-dependencies.omicron-rpaths]
+path = "../rpaths"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1.51"
+# Tracking pending 2.0 version.
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "uuid"] }
+futures = "0.3.15"
+http = "0.2.5"
+hyper = "0.14"
+ipnetwork = "0.18"
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+rayon = "1.5"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+ring = "0.16"
+serde_derive = "1.0"
+serde_json = "1.0"
+smf = "0.2"
+structopt = "0.3"
+tar = "0.4"
+tempfile = "3.0"
+thiserror = "1.0"
+toml = "0.5.6"
+walkdir = "2.3"
+
+[dependencies.api_identity]
+path = "../api_identity"
+
+[dependencies.backoff]
+version = "0.3.0"
+features = [ "tokio" ]
+
+[dependencies.chrono]
+version = "0.4"
+features = [ "serde" ]
+
+[dependencies.dropshot]
+git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
+
+[dependencies.ipnet]
+version = "2.3.1"
+features = [ "serde" ]
+
+[dependencies.macaddr]
+version = "1.0.1"
+features = [ "serde_std" ]
+
+[dependencies.schemars]
+version = "0.8"
+features = [ "chrono", "uuid" ]
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.steno]
+git = "https://github.com/oxidecomputer/steno"
+branch = "main"
+
+[dependencies.tokio]
+version = "1.12"
+features = [ "full" ]
+
+[dependencies.tokio-postgres]
+version = "0.7"
+features = [ "with-chrono-0_4", "with-uuid-0_8" ]
+
+[dependencies.uuid]
+version = "0.8"
+features = [ "serde", "v4" ]
+
+[dev-dependencies]
+expectorate = "1.0.4"
+serde_urlencoded = "0.7.0"
+tokio = { version = "1.12", features = [ "test-util" ] }
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "omicron-package"
+doc = false
