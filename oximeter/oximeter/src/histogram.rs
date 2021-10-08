@@ -57,6 +57,10 @@ pub enum HistogramError {
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
     #[error("Neigboring bins {0} and {1} are not adjoining")]
     NonAdjoiningBins(String, String),
+
+    /// Bin and count arrays are of different sizes.
+    #[error("Bin and count arrays must have the same size, found {0} and {1}")]
+    ArraySizeMismatch(usize, usize),
 }
 
 /// A type storing a range over `T`.
@@ -405,12 +409,10 @@ where
         self.bins.iter()
     }
 
-    // An internal helper function to convert a histogram into a pair of arrays in the database.
-    //
-    // This converts the bins, which may be one or two elements, into just their left edges. These
-    // edges are always inclusive, by construction of the histogram. That is, they are guaranteed
-    // to consist of bins that are either `BinRange::Range` or `BinRange::RangeFrom`.
-    pub(crate) fn to_arrays(&self) -> (Vec<T>, Vec<u64>) {
+    /// Generate paired arrays with the left bin edges and the counts, for each bin.
+    ///
+    /// The returned edges are always left-inclusive, by construction of the histogram.
+    pub fn to_arrays(&self) -> (Vec<T>, Vec<u64>) {
         let mut bins = Vec::with_capacity(self.n_bins());
         let mut counts = Vec::with_capacity(self.n_bins());
 
@@ -430,14 +432,18 @@ where
         (bins, counts)
     }
 
-    // An internal helper function to deserialize a histogram from the database, including the
-    // start time of the cumulative data.
-    pub(crate) fn from_arrays(
+    /// Construct a histogram from a start time and paired arrays with the left bin-edge and counts.
+    pub fn from_arrays(
         start_time: DateTime<Utc>,
         bins: Vec<T>,
         counts: Vec<u64>,
     ) -> Result<Self, HistogramError> {
-        assert_eq!(bins.len(), counts.len());
+        if bins.len() != counts.len() {
+            return Err(HistogramError::ArraySizeMismatch(
+                bins.len(),
+                counts.len(),
+            ));
+        }
         let mut hist = Self::new(&bins)?;
         hist.start_time = start_time;
         let mut n_samples = 0;

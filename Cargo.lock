@@ -1301,6 +1301,8 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "oximeter-collector",
+ "oximeter-producer",
  "pq-sys",
  "schemars",
  "serde",
@@ -1456,16 +1458,50 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bytes",
  "chrono",
- "dropshot",
- "hyper",
  "num-traits",
- "omicron-common",
- "omicron-rpaths",
  "omicron-test-utils",
  "oximeter-macro-impl",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-collector"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-rpaths",
+ "oximeter",
+ "oximeter-db",
+ "pq-sys",
+ "reqwest",
+ "serde",
+ "slog",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "oximeter",
  "pq-sys",
  "reqwest",
  "schemars",
@@ -1477,8 +1513,6 @@ dependencies = [
  "structopt",
  "thiserror",
  "tokio",
- "toml",
- "trybuild",
  "uuid",
 ]
 
@@ -1490,6 +1524,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "oximeter-producer"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-common",
+ "omicron-rpaths",
+ "oximeter",
+ "pq-sys",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

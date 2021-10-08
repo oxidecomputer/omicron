@@ -256,7 +256,7 @@ impl Datum for types::Cumulative<f64> {
 
 impl Datum for Histogram<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Histogram::start_time(&self))
+        Some(self.start_time())
     }
     fn datum_type(&self) -> DatumType {
         DatumType::HistogramI64
@@ -265,7 +265,7 @@ impl Datum for Histogram<i64> {
 
 impl Datum for Histogram<f64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Histogram::start_time(&self))
+        Some(self.start_time())
     }
     fn datum_type(&self) -> DatumType {
         DatumType::HistogramF64

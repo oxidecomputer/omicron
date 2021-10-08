@@ -1,18 +1,15 @@
 //! Integration test running a producer that exports a few basic metrics.
 // Copyright 2021 Oxide Computer Company
 
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
 use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter::producer_server::{
-    ProducerServer, ProducerServerConfig, RegistrationInfo,
-};
 use oximeter::{
     types::{Cumulative, Sample},
     Error, Metric, Producer, Target,
 };
+use oximeter_producer::{Config, Server};
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Example target describing a virtual machine.
@@ -89,21 +86,19 @@ async fn main() {
         ConfigDropshot { bind_address: address, request_body_max_bytes: 2048 };
     let logging_config =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
-    let registration_info =
-        RegistrationInfo::new("127.0.0.1:12221", "/metrics/producers");
     let server_info = ProducerEndpoint {
         id: Uuid::new_v4().into(),
         address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let config = ProducerServerConfig {
+    let config = Config {
         server_info,
-        registration_info,
+        registration_address: "127.0.0.1:12221".parse().unwrap(),
         dropshot_config,
         logging_config,
     };
-    let server = ProducerServer::start(&config).await.unwrap();
+    let server = Server::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
     server.registry().register_producer(producer).unwrap();
     server.serve_forever().await.unwrap();
