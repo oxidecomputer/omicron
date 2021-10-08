@@ -870,9 +870,6 @@ impl Into<external::DiskState> for DiskState {
 }
 
 /// Type which describes the attachment status of a disk.
-///
-/// This happens to be the same as the type in the external API,
-/// but it is not required to be.
 #[derive(Clone, Debug)]
 pub struct DiskAttachment {
     pub instance_id: Uuid,

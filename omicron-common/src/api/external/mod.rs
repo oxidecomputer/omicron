@@ -103,6 +103,7 @@ pub struct DataPageParams<'a, NameType> {
 }
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
+    /// Maps the marker type to a new type.
     pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<'a, OtherName>
     where
         F: FnOnce(&'a NameType) -> &'a OtherName,
