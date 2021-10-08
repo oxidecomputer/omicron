@@ -12,6 +12,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use ref_cast::RefCast;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -20,9 +21,18 @@ use uuid::Uuid;
 
 /// Newtype wrapper around [external::Name].
 #[derive(
-    Clone, Debug, AsExpression, FromSqlRow, Eq, PartialEq, Ord, PartialOrd,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    RefCast,
 )]
 #[sql_type = "sql_types::Text"]
+#[repr(transparent)]
 pub struct Name(pub external::Name);
 
 NewtypeFrom! { () pub struct Name(external::Name); }
@@ -168,7 +178,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        IpNetwork::V4(self.0 .0).to_sql(out)
+        IpNetwork::V4(*self.0).to_sql(out)
     }
 }
 

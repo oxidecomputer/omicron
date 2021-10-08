@@ -164,7 +164,7 @@ where
 pub fn data_page_params_for<'a, S, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
-) -> Result<DataPageParams<S::MarkerValue>, HttpError>
+) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
 where
     S: ScanParams,
     C: dropshot::ServerContext,
@@ -187,9 +187,7 @@ where
 {
     let marker = match &pag_params.page {
         WhichPage::First(..) => None,
-        WhichPage::Next(PageSelector { last_seen, .. }) => {
-            Some(last_seen.clone())
-        }
+        WhichPage::Next(PageSelector { last_seen, .. }) => Some(last_seen),
     };
     let scan_params = S::from_query(pag_params)?;
     let direction = scan_params.direction();
@@ -423,7 +421,7 @@ impl ScanParams for ScanByNameOrId {
 pub fn data_page_params_nameid_name<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginatedByNameOrId,
-) -> Result<DataPageParams<Name>, HttpError>
+) -> Result<DataPageParams<'a, Name>, HttpError>
 where
     C: dropshot::ServerContext,
 {
@@ -456,7 +454,7 @@ fn data_page_params_nameid_name_limit(
 pub fn data_page_params_nameid_id<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginatedByNameOrId,
-) -> Result<DataPageParams<Uuid>, HttpError>
+) -> Result<DataPageParams<'a, Uuid>, HttpError>
 where
     C: dropshot::ServerContext,
 {

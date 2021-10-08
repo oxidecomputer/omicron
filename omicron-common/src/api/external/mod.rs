@@ -82,11 +82,11 @@ pub trait ObjectIdentity {
  * usually `Name`.
  */
 #[derive(Debug)]
-pub struct DataPageParams<NameType> {
+pub struct DataPageParams<'a, NameType> {
     /**
      * If present, this is the value of the sort field for the last object seen
      */
-    pub marker: Option<NameType>,
+    pub marker: Option<&'a NameType>,
 
     /**
      * Whether the sort is in ascending order
@@ -102,13 +102,13 @@ pub struct DataPageParams<NameType> {
     pub limit: NonZeroU32,
 }
 
-impl<NameType> DataPageParams<NameType> {
-    pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<OtherName>
+impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<'a, OtherName>
     where
-        F: FnOnce(&NameType) -> OtherName,
+        F: FnOnce(&'a NameType) -> &'a OtherName,
     {
         DataPageParams {
-            marker: self.marker.as_ref().map(f),
+            marker: self.marker.map(f),
             direction: self.direction,
             limit: self.limit,
         }

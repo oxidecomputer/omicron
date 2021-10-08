@@ -286,7 +286,7 @@ impl Nexus {
      */
     pub async fn oximeter_list(
         &self,
-        page_params: &DataPageParams<Uuid>,
+        page_params: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::OximeterInfo> {
         self.db_datastore.oximeter_list(page_params).await
     }
@@ -401,14 +401,14 @@ impl Nexus {
 
     pub async fn projects_list_by_name(
         &self,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
         self.db_datastore.projects_list_by_name(pagparams).await
     }
 
     pub async fn projects_list_by_id(
         &self,
-        pagparams: &DataPageParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
         self.db_datastore.projects_list_by_id(pagparams).await
     }
@@ -432,7 +432,7 @@ impl Nexus {
     pub async fn project_list_disks(
         &self,
         project_name: &Name,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
@@ -562,7 +562,7 @@ impl Nexus {
     pub async fn project_list_instances(
         &self,
         project_name: &Name,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
@@ -863,7 +863,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         instance_name: &Name,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
@@ -1102,7 +1102,7 @@ impl Nexus {
     pub async fn project_list_vpcs(
         &self,
         project_name: &Name,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Vpc> {
         let project_id =
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
@@ -1171,7 +1171,7 @@ impl Nexus {
         &self,
         project_name: &Name,
         vpc_name: &Name,
-        pagparams: &DataPageParams<Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
         let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
         let subnets = self
@@ -1250,10 +1250,10 @@ impl Nexus {
 
     pub async fn racks_list(
         &self,
-        pagparams: &DataPageParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<db::model::Rack> {
         if let Some(marker) = pagparams.marker {
-            if marker >= self.rack_id {
+            if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
             }
         }
@@ -1278,7 +1278,7 @@ impl Nexus {
 
     pub async fn sleds_list(
         &self,
-        pagparams: &DataPageParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore.sled_list(pagparams).await
     }
@@ -1296,7 +1296,7 @@ impl Nexus {
 
     pub async fn sagas_list(
         &self,
-        pagparams: &DataPageParams<Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<external::Saga> {
         /*
          * The endpoint we're serving only supports `ScanById`, which only
@@ -1305,7 +1305,7 @@ impl Nexus {
         bail_unless!(
             pagparams.direction == dropshot::PaginationOrder::Ascending
         );
-        let marker = pagparams.marker.map(|s| SagaId::from(s));
+        let marker = pagparams.marker.map(|s| SagaId::from(*s));
         let saga_list = self
             .sec_client
             .saga_list(marker, pagparams.limit)
