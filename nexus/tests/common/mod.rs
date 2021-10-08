@@ -183,18 +183,19 @@ pub async fn start_oximeter(
     oximeter::Oximeter::new(&config).await.map_err(|e| e.to_string())
 }
 
-#[derive(oximeter::Target)]
+#[derive(Debug, Clone, oximeter::Target)]
 struct IntegrationTarget {
     pub name: String,
 }
 
-#[derive(oximeter::Metric)]
+#[derive(Debug, Clone, oximeter::Metric)]
 struct IntegrationMetric {
     pub name: String,
     pub datum: i64,
 }
 
 // A producer of simple counter metrics used in the integration tests
+#[derive(Debug, Clone)]
 struct IntegrationProducer {
     pub target: IntegrationTarget,
     pub metric: IntegrationMetric,
@@ -257,10 +258,7 @@ pub async fn start_producer_server(
             datum: 0,
         },
     };
-    server
-        .collector()
-        .register_producer(Box::new(producer))
-        .map_err(|e| e.to_string())?;
+    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
     Ok(server)
 }
 

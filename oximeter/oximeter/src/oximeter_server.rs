@@ -20,7 +20,7 @@ use slog::{debug, info, o, trace, warn, Logger};
 use tokio::{sync::mpsc, sync::Mutex, task::JoinHandle, time::interval};
 use uuid::Uuid;
 
-use crate::{collect::ProducerResults, db, Error};
+use crate::{db, types::ProducerResults, Error};
 
 // Messages for controlling a collection task
 #[derive(Debug, Clone)]
