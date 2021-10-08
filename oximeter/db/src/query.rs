@@ -1,12 +1,12 @@
 //! Functions for querying the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-
-use crate::db::model::DATABASE_NAME;
-use crate::types::{DatumType, FieldValue};
+use crate::model::DATABASE_NAME;
 use crate::Error;
+use chrono::{DateTime, Utc};
+use oximeter::types::{DatumType, FieldValue};
+use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 /// Object used to filter timestamps, specifying a start and/or end time.
 ///
@@ -103,6 +103,41 @@ impl std::str::FromStr for Filter {
     }
 }
 
+// Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
+fn field_as_db_str(value: &FieldValue) -> String {
+    match value {
+        FieldValue::Bool(ref inner) => {
+            format!("{}", if *inner { 1 } else { 0 })
+        }
+        FieldValue::I64(ref inner) => format!("{}", inner),
+        FieldValue::IpAddr(ref inner) => {
+            let addr = match inner {
+                IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
+                IpAddr::V6(ref v6) => *v6,
+            };
+            format!("'{}'", addr)
+        }
+        FieldValue::String(ref inner) => format!("'{}'", inner),
+        FieldValue::Uuid(ref inner) => format!("'{}'", inner),
+    }
+}
+
+// Return the name of the type as it's referred to in the timeseries database. This is used
+// internally to build the table containing samples of the corresponding datum type.
+fn db_type_name_for_datum(ty: &DatumType) -> &str {
+    match ty {
+        DatumType::Bool => "bool",
+        DatumType::I64 => "i64",
+        DatumType::F64 => "f64",
+        DatumType::String => "string",
+        DatumType::Bytes => "bytes",
+        DatumType::CumulativeI64 => "cumulativei64",
+        DatumType::CumulativeF64 => "cumulativef64",
+        DatumType::HistogramI64 => "histogrami64",
+        DatumType::HistogramF64 => "histogramf64",
+    }
+}
+
 /// A `FieldFilter` specifies a field by name and one or more values to compare against by
 /// equality.
 #[derive(Debug, Clone)]
@@ -146,7 +181,7 @@ impl FieldFilter {
         let field_value_fragment = self
             .field_values
             .iter()
-            .map(|field| format!("(field_value = {})", field.as_db_str()))
+            .map(|field| format!("(field_value = {})", field_as_db_str(field)))
             .collect::<Vec<_>>()
             .join(" OR ");
         format!(
@@ -273,7 +308,7 @@ impl TimeseriesFilter {
             {query}\n\
             ){timestamp_filter} FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
-            data_type = datum_type.db_type_name(),
+            data_type = db_type_name_for_datum(&datum_type),
             query = indent(&query, 4),
             timestamp_filter = timestamp_filter,
         )
@@ -406,18 +441,17 @@ mod tests {
 
     #[test]
     fn test_field_value_as_db_str() {
-        assert_eq!(FieldValue::from(false).as_db_str(), "0");
-        assert_eq!(FieldValue::from(true).as_db_str(), "1");
-        assert_eq!(FieldValue::from(10i64).as_db_str(), "10");
+        assert_eq!(field_as_db_str(&FieldValue::from(false)), "0");
+        assert_eq!(field_as_db_str(&FieldValue::from(true)), "1");
+        assert_eq!(field_as_db_str(&FieldValue::from(10i64)), "10");
         assert_eq!(
-            FieldValue::IpAddr("127.0.0.1".parse().unwrap()).as_db_str(),
+            field_as_db_str(&FieldValue::IpAddr("127.0.0.1".parse().unwrap())),
             "'::ffff:127.0.0.1'"
         );
         assert_eq!(
-            FieldValue::Uuid(
+            field_as_db_str(&FieldValue::Uuid(
                 "563f0076-2c22-4510-8fd9-bed1ed8c9ae1".parse().unwrap()
-            )
-            .as_db_str(),
+            )),
             "'563f0076-2c22-4510-8fd9-bed1ed8c9ae1'"
         );
     }
