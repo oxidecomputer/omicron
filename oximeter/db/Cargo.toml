@@ -1,20 +1,33 @@
 [package]
-name = "oximeter"
+name = "oximeter-db"
 version = "0.1.0"
-authors = ["Benjamin Naecker <ben@oxide.computer>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+async-trait = "0.1.51"
 bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
-num-traits = "0.2.14"
-oximeter-macro-impl = { path = "../oximeter-macro-impl" }
+oximeter = { path = "../oximeter" }
+pq-sys = "*"
+reqwest = { version = "0.11.4", features = [ "json" ] }
 schemars = { version = "0.8.6", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
+serde_json = "1.0.68"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog-async = "2.6"
+slog-term = "2.8"
+structopt = "0.3"
 thiserror = "1.0.26"
+tokio = "1.12"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
-trybuild = "1.0.44"
 omicron-test-utils = { path = "../../test-utils" }
+
+[build-dependencies]
+omicron-rpaths = { path = "../../rpaths" }
+
+[[bin]]
+name = "oxdb"
+doc = false

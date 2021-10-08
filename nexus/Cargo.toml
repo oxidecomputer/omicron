@@ -82,6 +82,14 @@ subprocess = "0.2.8"
 version = "0.1.0"
 path = "../oximeter/oximeter"
 
+[dev-dependencies.oximeter-collector]
+version = "0.1.0"
+path = "../oximeter/collector"
+
+[dev-dependencies.oximeter-export]
+version = "0.1.0"
+path = "../oximeter/export"
+
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"
 branch = "main"

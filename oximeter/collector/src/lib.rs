@@ -1,11 +1,6 @@
 //! Implementation of the `oximeter` metric collection server.
-// Copyright 2021 Oxide Computer Company
 
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
+// Copyright 2021 Oxide Computer Company
 
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
@@ -14,13 +9,31 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::{OximeterInfo, ProducerEndpoint};
 use omicron_common::backoff;
-use reqwest::Client;
+use oximeter::types::ProducerResults;
+use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o, trace, warn, Logger};
+use std::collections::{btree_map::Entry, BTreeMap};
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+use thiserror::Error;
 use tokio::{sync::mpsc, sync::Mutex, task::JoinHandle, time::interval};
 use uuid::Uuid;
 
-use crate::{db, types::ProducerResults, Error};
+/// Errors collecting metric data
+#[derive(Debug, Clone, Error)]
+pub enum Error {
+    #[error("Error running Oximeter collector server: {0}")]
+    Server(String),
+
+    #[error("Error collecting metric data from collector id={:0}: {1}")]
+    CollectionError(Uuid, String),
+
+    #[error(transparent)]
+    Database(#[from] oximeter_db::Error),
+}
 
 // Messages for controlling a collection task
 #[derive(Debug, Clone)]
@@ -49,7 +62,7 @@ async fn collection_task(
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<ProducerResults>,
 ) {
-    let client = Client::new();
+    let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
     debug!(
@@ -161,7 +174,7 @@ struct CollectionTask {
 // Aggregation point for all results, from all collection tasks.
 async fn results_sink(
     log: Logger,
-    client: db::Client,
+    client: Client,
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<ProducerResults>,
@@ -268,7 +281,7 @@ impl OximeterAgent {
         let client_log = log.new(o!("component" => "clickhouse-client"));
 
         // Construct the ClickHouse client first, to propagate an error if needed.
-        let client = db::Client::new(db_config.address, client_log).await?;
+        let client = Client::new(db_config.address, client_log).await?;
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
@@ -356,9 +369,8 @@ impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
-            .map_err(|e| Error::OximeterServer(e.to_string()))?;
-        toml::from_str(&contents)
-            .map_err(|e| Error::OximeterServer(e.to_string()))
+            .map_err(|e| Error::Server(e.to_string()))?;
+        toml::from_str(&contents).map_err(|e| Error::Server(e.to_string()))
     }
 }
 
@@ -377,7 +389,7 @@ impl Oximeter {
         let log = config
             .log
             .to_logger("oximeter")
-            .map_err(|msg| Error::OximeterServer(msg.to_string()))?;
+            .map_err(|msg| Error::Server(msg.to_string()))?;
         info!(log, "starting oximeter server");
 
         // TODO-robustness Handle retries if the database is cannot be reached. This likely should
@@ -392,11 +404,11 @@ impl Oximeter {
             Arc::clone(&agent),
             &dropshot_log,
         )
-        .map_err(|msg| Error::OximeterServer(msg.to_string()))?
+        .map_err(|e| Error::Server(e.to_string()))?
         .start();
 
         // Notify Nexus that this oximeter instance is available.
-        let client = Client::new();
+        let client = reqwest::Client::new();
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
             client
@@ -435,12 +447,12 @@ impl Oximeter {
 
     /// Serve requests forever, consuming the server.
     pub async fn serve_forever(self) -> Result<(), Error> {
-        self.server.await.map_err(Error::OximeterServer)
+        self.server.await.map_err(Error::Server)
     }
 
     /// Shutdown the Oximeter server
     pub async fn close(self) -> Result<(), Error> {
-        self.server.close().await.map_err(Error::OximeterServer)
+        self.server.close().await.map_err(Error::Server)
     }
 }
 

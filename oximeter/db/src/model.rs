@@ -1,14 +1,14 @@
 //! Models for timeseries data in ClickHouse
 // Copyright 2021 Oxide Computer Company
 
-use crate::histogram::Histogram;
-use crate::traits;
-use crate::types::{
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use oximeter::histogram::Histogram;
+use oximeter::traits;
+use oximeter::types::{
     self, Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
     Sample,
 };
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -712,8 +712,8 @@ pub struct Timeseries {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util;
-    use crate::Datum;
+    use oximeter::test_util;
+    use oximeter::Datum;
 
     #[test]
     fn test_db_bool() {
@@ -881,5 +881,32 @@ mod tests {
         let (_, measurement) =
             parse_measurement_from_row(line, DatumType::String);
         assert_eq!(measurement.datum(), &Datum::from("/some/path"));
+    }
+
+    #[test]
+    fn test_histogram_to_arrays() {
+        let mut hist = Histogram::new(&[0, 10, 20]).unwrap();
+        hist.sample(1).unwrap();
+        hist.sample(11).unwrap();
+
+        let (bins, counts) = hist.to_arrays();
+        assert_eq!(
+            bins.len(),
+            counts.len(),
+            "Bins and counts should have the same size"
+        );
+        assert_eq!(
+            bins.len(),
+            hist.n_bins(),
+            "Paired-array bins should be of the same length as the histogram"
+        );
+        assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
+
+        let rebuilt =
+            Histogram::from_arrays(hist.start_time(), bins, counts).unwrap();
+        assert_eq!(
+            hist, rebuilt,
+            "Histogram reconstructed from paired arrays is not correct"
+        );
     }
 }

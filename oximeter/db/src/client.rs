@@ -1,15 +1,14 @@
 //! Rust client to ClickHouse database
 // Copyright 2021 Oxide Computer Company
 
+use crate::{model, query, Error};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use oximeter::{types::Sample, Field, FieldValue};
+use slog::{debug, error, trace, Logger};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Mutex;
-
-use chrono::{DateTime, Utc};
-use slog::{debug, error, trace, Logger};
-
-use crate::db::{model, query};
-use crate::{types::Sample, Error, Field, FieldValue};
 
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
@@ -61,101 +60,6 @@ impl Client {
         )
         .await?;
         debug!(self.log, "successful ping of ClickHouse server");
-        Ok(())
-    }
-
-    /// Insert the given samples into the database.
-    pub async fn insert_samples(
-        &self,
-        samples: &[Sample],
-    ) -> Result<(), Error> {
-        debug!(self.log, "unrolling {} total samples", samples.len());
-        let mut seen_timeseries = BTreeSet::new();
-        let mut rows = BTreeMap::new();
-        let mut new_schema = Vec::new();
-
-        for sample in samples.iter() {
-            match self.verify_sample_schema(sample) {
-                Err(_) => {
-                    // Skip the sample, but otherwise do nothing. The error is logged in the above
-                    // call.
-                    continue;
-                }
-                Ok(schema) => {
-                    if let Some(schema) = schema {
-                        debug!(self.log, "new timeseries schema: {}", schema);
-                        new_schema.push(schema);
-                    }
-                }
-            }
-
-            if !seen_timeseries.contains(sample.timeseries_key.as_str()) {
-                for (table_name, table_rows) in model::unroll_field_rows(sample)
-                {
-                    rows.entry(table_name)
-                        .or_insert_with(Vec::new)
-                        .extend(table_rows);
-                }
-            }
-
-            let (table_name, measurement_row) =
-                model::unroll_measurement_row(sample);
-
-            rows.entry(table_name)
-                .or_insert_with(Vec::new)
-                .push(measurement_row);
-
-            seen_timeseries.insert(sample.timeseries_key.as_str());
-        }
-
-        // Insert the new schema into the database
-        //
-        // TODO-robustness There's still a race possible here. If two distinct clients receive new
-        // but conflicting schema, they will both try to insert those at some point into the schema
-        // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
-        // This is unlikely to happen at this point, because the design is such that there will be
-        // a single `oximeter` instance, which has one client object, connected to a single
-        // ClickHouse server. But once we start replicating data, the window within which the race
-        // can occur is much larger, since it includes the time it takes ClickHouse to replicate
-        // data between nodes.
-        //
-        // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
-        // receive a sample with a new schema, and both would then try to insert that schema.
-        if !new_schema.is_empty() {
-            debug!(
-                self.log,
-                "inserting {} new timeseries schema",
-                new_schema.len()
-            );
-            let body = format!(
-                "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
-                db_name = model::DATABASE_NAME,
-                row_data = new_schema.join("\n")
-            );
-            self.execute(body).await?;
-        }
-
-        // Insert the actual target/metric field rows and measurement rows.
-        for (table_name, rows) in rows {
-            let body = format!(
-                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
-                table_name = table_name,
-                row_data = rows.join("\n")
-            );
-            // TODO-robustness We've verified the schema, so this is likely a transient failure.
-            // But we may want to check the actual error condition, and, if possible, continue
-            // inserting any remaining data.
-            self.execute(body).await?;
-            debug!(
-                self.log,
-                "inserted {} rows into table {}",
-                rows.len(),
-                table_name
-            );
-        }
-
-        // TODO-correctness We'd like to return all errors to clients here, and there may be as
-        // many as one per sample. It's not clear how to structure this in a way that's useful.
         Ok(())
     }
 
@@ -383,6 +287,113 @@ impl Client {
     }
 }
 
+/// A trait allowing a [`Client`] to write data into the timeseries database.
+///
+/// The vanilla [`Client`] object allows users to query the timeseries database, returning
+/// timeseries samples corresponding to various filtering criteria. This trait segregates the
+/// methods required for _writing_ new data into the database, and is intended only for use by the
+/// `oximeter-collector` crate.
+#[async_trait]
+pub trait DbWrite {
+    /// Insert the given samples into the database.
+    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
+}
+
+#[async_trait]
+impl DbWrite for Client {
+    /// Insert the given samples into the database.
+    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
+        debug!(self.log, "unrolling {} total samples", samples.len());
+        let mut seen_timeseries = BTreeSet::new();
+        let mut rows = BTreeMap::new();
+        let mut new_schema = Vec::new();
+
+        for sample in samples.iter() {
+            match self.verify_sample_schema(sample) {
+                Err(_) => {
+                    // Skip the sample, but otherwise do nothing. The error is logged in the above
+                    // call.
+                    continue;
+                }
+                Ok(schema) => {
+                    if let Some(schema) = schema {
+                        debug!(self.log, "new timeseries schema: {}", schema);
+                        new_schema.push(schema);
+                    }
+                }
+            }
+
+            if !seen_timeseries.contains(sample.timeseries_key.as_str()) {
+                for (table_name, table_rows) in model::unroll_field_rows(sample)
+                {
+                    rows.entry(table_name)
+                        .or_insert_with(Vec::new)
+                        .extend(table_rows);
+                }
+            }
+
+            let (table_name, measurement_row) =
+                model::unroll_measurement_row(sample);
+
+            rows.entry(table_name)
+                .or_insert_with(Vec::new)
+                .push(measurement_row);
+
+            seen_timeseries.insert(sample.timeseries_key.as_str());
+        }
+
+        // Insert the new schema into the database
+        //
+        // TODO-robustness There's still a race possible here. If two distinct clients receive new
+        // but conflicting schema, they will both try to insert those at some point into the schema
+        // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
+        // This is unlikely to happen at this point, because the design is such that there will be
+        // a single `oximeter` instance, which has one client object, connected to a single
+        // ClickHouse server. But once we start replicating data, the window within which the race
+        // can occur is much larger, since it includes the time it takes ClickHouse to replicate
+        // data between nodes.
+        //
+        // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
+        // receive a sample with a new schema, and both would then try to insert that schema.
+        if !new_schema.is_empty() {
+            debug!(
+                self.log,
+                "inserting {} new timeseries schema",
+                new_schema.len()
+            );
+            let body = format!(
+                "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
+                db_name = model::DATABASE_NAME,
+                row_data = new_schema.join("\n")
+            );
+            self.execute(body).await?;
+        }
+
+        // Insert the actual target/metric field rows and measurement rows.
+        for (table_name, rows) in rows {
+            let body = format!(
+                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
+                table_name = table_name,
+                row_data = rows.join("\n")
+            );
+            // TODO-robustness We've verified the schema, so this is likely a transient failure.
+            // But we may want to check the actual error condition, and, if possible, continue
+            // inserting any remaining data.
+            self.execute(body).await?;
+            debug!(
+                self.log,
+                "inserted {} rows into table {}",
+                rows.len(),
+                table_name
+            );
+        }
+
+        // TODO-correctness We'd like to return all errors to clients here, and there may be as
+        // many as one per sample. It's not clear how to structure this in a way that's useful.
+        Ok(())
+    }
+}
+
 // Return Ok if the response indicates success, otherwise return either the reqwest::Error, if this
 // is a client-side error, or the body of the actual error retrieved from ClickHouse if the error
 // was generated there.
@@ -461,11 +472,11 @@ fn reconstitute_from_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::query;
-    use crate::test_util;
-    use crate::types::{DatumType, FieldType};
+    use crate::query;
     use chrono::Utc;
     use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use oximeter::test_util;
+    use oximeter::types::{DatumType, FieldType};
     use slog::o;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
@@ -517,7 +528,7 @@ mod tests {
     // This is a target with the same name as that in `lib.rs` used for other tests, but with a
     // different set of fields. This is intentionally used to test schema mismatches.
     mod name_mismatch {
-        #[derive(crate::Target)]
+        #[derive(oximeter::Target)]
         pub struct TestTarget {
             pub name: String,
             pub name2: String,
@@ -526,7 +537,7 @@ mod tests {
     }
 
     mod type_mismatch {
-        #[derive(crate::Target)]
+        #[derive(oximeter::Target)]
         pub struct TestTarget {
             pub name1: uuid::Uuid,
             pub name2: String,

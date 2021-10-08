@@ -102,17 +102,15 @@ pub use oximeter_macro_impl::*;
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
-pub mod db;
 pub mod histogram;
-pub mod oximeter_server;
-pub mod producer_server;
-#[cfg(test)]
-pub(crate) mod test_util;
+//pub mod oximeter_server;
+//pub mod producer_server;
+pub mod test_util;
 pub mod traits;
 pub mod types;
 
-pub use oximeter_server::Oximeter;
-pub use producer_server::ProducerServer;
+//pub use oximeter_server::Oximeter;
+//pub use producer_server::ProducerServer;
 pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,

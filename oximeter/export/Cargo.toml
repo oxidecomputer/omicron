@@ -1,20 +1,21 @@
 [package]
-name = "oximeter"
+name = "oximeter-export"
 version = "0.1.0"
-authors = ["Benjamin Naecker <ben@oxide.computer>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
-num-traits = "0.2.14"
-oximeter-macro-impl = { path = "../oximeter-macro-impl" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+omicron-common = { path = "../../common" }
+oximeter = { path = "../oximeter" }
+pq-sys = "*"
+reqwest = { version = "0.11.4", features = [ "json" ] }
 schemars = { version = "0.8.6", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
+tokio = "1.12"
 thiserror = "1.0.26"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
-[dev-dependencies]
-trybuild = "1.0.44"
-omicron-test-utils = { path = "../../test-utils" }
+[build-dependencies]
+omicron-rpaths = { path = "../../rpaths" }

@@ -5,6 +5,9 @@ members = [
     "rpaths",
     "sled-agent",
     "oximeter/oximeter",
+    "oximeter/collector",
+    "oximeter/db",
+    "oximeter/export",
     "oximeter/oximeter-macro-impl",
     "test-utils",
 ]
@@ -15,6 +18,9 @@ default-members = [
     "rpaths",
     "sled-agent",
     "oximeter/oximeter",
+    "oximeter/collector",
+    "oximeter/db",
+    "oximeter/export",
     "oximeter/oximeter-macro-impl",
     "test-utils",
 ]
