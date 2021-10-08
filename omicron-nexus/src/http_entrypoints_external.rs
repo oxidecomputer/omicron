@@ -586,7 +586,10 @@ async fn instance_disks_get(
     };
     let disks = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
     Ok(HttpResponseOk(disks))
 }
 

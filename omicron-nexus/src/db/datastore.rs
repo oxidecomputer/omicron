@@ -89,7 +89,7 @@ impl DataStore {
 
     pub async fn sled_list(
         &self,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
@@ -150,7 +150,7 @@ impl DataStore {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::name.eq(db::model::Name(name.clone())))
             .first_async::<db::model::Project>(self.pool())
             .await
             .map_err(|e| {
@@ -173,7 +173,7 @@ impl DataStore {
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::name.eq(db::model::Name(name.clone())))
             .set(dsl::time_deleted.eq(now))
             .get_result_async::<db::model::Project>(self.pool())
             .await
@@ -195,7 +195,7 @@ impl DataStore {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::name.eq(db::model::Name(name.clone())))
             .select(dsl::id)
             .get_result_async::<Uuid>(self.pool())
             .await
@@ -210,7 +210,7 @@ impl DataStore {
 
     pub async fn projects_list_by_id(
         &self,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<Uuid>,
     ) -> ListResultVec<db::model::Project> {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
@@ -228,10 +228,12 @@ impl DataStore {
 
     pub async fn projects_list_by_name(
         &self,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::Project> {
         use db::schema::project::dsl;
-        paginated(dsl::project, dsl::name, pagparams)
+
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::project, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .load_async::<db::model::Project>(self.pool())
             .await
@@ -255,7 +257,7 @@ impl DataStore {
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::name.eq(db::model::Name(name.clone())))
             .set(updates)
             .get_result_async(self.pool())
             .await
@@ -343,11 +345,12 @@ impl DataStore {
     pub async fn project_list_instances(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::Instance> {
         use db::schema::instance::dsl;
 
-        paginated(dsl::instance, dsl::name, pagparams)
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::instance, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .select(db::model::Instance::as_select())
@@ -393,7 +396,7 @@ impl DataStore {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(instance_name.clone()))
+            .filter(dsl::name.eq(db::model::Name(instance_name.clone())))
             .select(db::model::Instance::as_select())
             .get_result_async(self.pool())
             .await
@@ -496,11 +499,12 @@ impl DataStore {
     pub async fn instance_list_disks(
         &self,
         instance_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::DiskAttachment> {
         use db::schema::disk::dsl;
 
-        paginated(dsl::disk, dsl::name, pagparams)
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::disk, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::attach_instance_id.eq(*instance_id))
             .select(db::model::Disk::as_select())
@@ -570,11 +574,12 @@ impl DataStore {
     pub async fn project_list_disks(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::Disk> {
         use db::schema::disk::dsl;
 
-        paginated(dsl::disk, dsl::name, pagparams)
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::disk, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .select(db::model::Disk::as_select())
@@ -650,7 +655,7 @@ impl DataStore {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(disk_name.clone()))
+            .filter(dsl::name.eq(db::model::Name(disk_name.clone())))
             .select(db::model::Disk::as_select())
             .get_result_async(self.pool())
             .await
@@ -752,7 +757,7 @@ impl DataStore {
     // List the oximeter collector instances
     pub async fn oximeter_list(
         &self,
-        page_params: &DataPageParams<'_, Uuid>,
+        page_params: &DataPageParams<Uuid>,
     ) -> ListResultVec<db::model::OximeterInfo> {
         use db::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
@@ -792,7 +797,7 @@ impl DataStore {
     pub async fn producers_list_by_oximeter_id(
         &self,
         oximeter_id: Uuid,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<Uuid>,
     ) -> ListResultVec<db::model::ProducerEndpoint> {
         use db::schema::metricproducer::dsl;
         paginated(dsl::metricproducer, dsl::id, &pagparams)
@@ -867,7 +872,10 @@ impl DataStore {
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
-            .filter(dsl::adopt_generation.eq(current_adopt_generation))
+            .filter(
+                dsl::adopt_generation
+                    .eq(db::model::Generation(current_adopt_generation)),
+            )
             .set(dsl::saga_state.eq(new_state.to_string()))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(self.pool())
@@ -902,7 +910,7 @@ impl DataStore {
     pub async fn saga_list_unfinished_by_id(
         &self,
         sec_id: &db::SecId,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<Uuid>,
     ) -> ListResultVec<db::saga_types::Saga> {
         use db::schema::saga::dsl;
         paginated(dsl::saga, dsl::id, &pagparams)
@@ -924,7 +932,7 @@ impl DataStore {
     pub async fn saga_node_event_list_by_id(
         &self,
         id: db::saga_types::SagaId,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<Uuid>,
     ) -> ListResultVec<steno::SagaNodeEvent> {
         use db::schema::saganodeevent::dsl;
         paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
@@ -948,11 +956,12 @@ impl DataStore {
     pub async fn project_list_vpcs(
         &self,
         project_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::Vpc> {
         use db::schema::vpc::dsl;
 
-        paginated(dsl::vpc, dsl::name, pagparams)
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::vpc, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .load_async::<db::model::Vpc>(self.pool())
@@ -1026,7 +1035,7 @@ impl DataStore {
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(vpc_name.clone()))
+            .filter(dsl::name.eq(db::model::Name(vpc_name.clone())))
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1061,11 +1070,12 @@ impl DataStore {
     pub async fn vpc_list_subnets(
         &self,
         vpc_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
         use db::schema::vpcsubnet::dsl;
 
-        paginated(dsl::vpcsubnet, dsl::name, pagparams)
+        let pagparams = pagparams.map_name(|n| db::model::Name(n.clone()));
+        paginated(dsl::vpcsubnet, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .load_async::<db::model::VpcSubnet>(self.pool())
@@ -1088,7 +1098,7 @@ impl DataStore {
         dsl::vpcsubnet
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
-            .filter(dsl::name.eq(subnet_name.clone()))
+            .filter(dsl::name.eq(db::model::Name(subnet_name.clone())))
             .get_result_async(self.pool())
             .await
             .map_err(|e| {

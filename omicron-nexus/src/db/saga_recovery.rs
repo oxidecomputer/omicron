@@ -165,9 +165,7 @@ where
 }
 
 // Creates new page params for querying sagas.
-fn new_page_params(
-    marker: Option<&uuid::Uuid>,
-) -> DataPageParams<'_, uuid::Uuid> {
+fn new_page_params(marker: Option<uuid::Uuid>) -> DataPageParams<uuid::Uuid> {
     DataPageParams {
         marker,
         direction: dropshot::PaginationOrder::Ascending,
@@ -204,7 +202,7 @@ async fn list_unfinished_sagas(
     let mut last_id = None;
     let mut sagas = vec![];
     loop {
-        let pagparams = new_page_params(last_id.as_ref());
+        let pagparams = new_page_params(last_id);
         let mut some_sagas =
             datastore.saga_list_unfinished_by_id(sec_id, &pagparams).await?;
         if some_sagas.is_empty() {
@@ -303,7 +301,7 @@ async fn load_saga_log(
     let mut last_id = None;
     let mut events = vec![];
     loop {
-        let pagparams = new_page_params(last_id.as_ref());
+        let pagparams = new_page_params(last_id);
         let mut some_events =
             datastore.saga_node_event_list_by_id(saga.id, &pagparams).await?;
         if some_events.is_empty() {

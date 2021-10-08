@@ -22,7 +22,7 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 pub fn paginated<T, C, M>(
     table: T,
     column: C,
-    pagparams: &DataPageParams<'_, M>,
+    pagparams: &DataPageParams<M>,
 ) -> BoxedQuery<T>
 where
     // T is a table which can create a BoxedQuery.
@@ -41,7 +41,7 @@ where
     BoxedQuery<T>: query_methods::FilterDsl<Lt<C, M>, Output = BoxedQuery<T>>,
 {
     let mut query = table.into_boxed().limit(pagparams.limit.get().into());
-    let marker = pagparams.marker.map(|m| m.clone());
+    let marker = pagparams.marker.as_ref().map(|m| m.clone());
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some(marker) = marker {
