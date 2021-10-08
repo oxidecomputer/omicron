@@ -727,7 +727,7 @@ impl Disk {
                 instance_id,
                 disk_id: self.id,
                 disk_name: self.name.clone(),
-                disk_state: self.state().into(),
+                disk_state: self.state(),
             })
         } else {
             None
