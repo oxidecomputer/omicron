@@ -48,4 +48,3 @@ expectorate = "1.0.4"
 [[bin]]
 name = "omicron-dev"
 doc = false
-
