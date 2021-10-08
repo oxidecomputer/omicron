@@ -16,14 +16,14 @@ use oximeter::{
 use uuid::Uuid;
 
 /// Example target describing a virtual machine.
-#[derive(Target)]
+#[derive(Debug, Clone, Target)]
 pub struct VirtualMachine {
     pub project_id: Uuid,
     pub instance_id: Uuid,
 }
 
 /// Example metric describing the cumulative time a vCPU is busy, by CPU ID.
-#[derive(Metric)]
+#[derive(Debug, Clone, Metric)]
 pub struct CpuBusy {
     pub cpu_id: i64,
     #[datum]
@@ -31,6 +31,7 @@ pub struct CpuBusy {
 }
 
 /// A simple struct for tracking busy time of a set of vCPUs, relative to a start time.
+#[derive(Debug, Clone)]
 pub struct CpuBusyProducer {
     start_time: DateTime<Utc>,
     vm: VirtualMachine,
@@ -104,6 +105,6 @@ async fn main() {
     };
     let server = ProducerServer::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);
-    server.collector().register_producer(Box::new(producer)).unwrap();
+    server.registry().register_producer(producer).unwrap();
     server.serve_forever().await.unwrap();
 }
