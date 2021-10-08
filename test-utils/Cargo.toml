@@ -7,7 +7,7 @@ edition = "2018"
 anyhow = "1.0"
 futures = "0.3.15"
 libc = "0.2.103"
-omicron-common = { path = "../omicron-common" }
+omicron-common = { path = "../common" }
 postgres-protocol = "0.6.2"
 signal-hook = "0.3"
 structopt = "0.3"
@@ -43,4 +43,3 @@ expectorate = "1.0.4"
 [[bin]]
 name = "omicron-dev"
 doc = false
-

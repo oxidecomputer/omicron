@@ -12,7 +12,7 @@ futures = "0.3.15"
 http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
-omicron-common = { path = "../omicron-common" }
+omicron-common = { path = "../common" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
