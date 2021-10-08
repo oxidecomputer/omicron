@@ -50,7 +50,7 @@ impl ControlPlaneTestContext {
     }
 }
 
-pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
+pub fn load_test_config() -> omicron_nexus::Config {
     /*
      * We load as much configuration as we can from the test suite configuration
      * file.  In practice, TestContext requires that:
@@ -63,7 +63,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
      *   others sagas and try to recover them
      *
      * (See LogContext::new() for details.)  Given these restrictions, it may
-     * seem barely worth reading a config file at all.  However, users can
+     * seem barely worth reading a config file at all.  However, developers can
      * change the logging level and local IP if they want, and as we add more
      * configuration options, we expect many of those can be usefully configured
      * (and reconfigured) for the test suite.
@@ -72,6 +72,18 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
     config.id = Uuid::new_v4();
+    config
+}
+
+pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
+    let mut config = load_test_config();
+    test_setup_with_config(test_name, &mut config).await
+}
+
+pub async fn test_setup_with_config(
+    test_name: &str,
+    config: &mut omicron_nexus::Config,
+) -> ControlPlaneTestContext {
     let logctx = LogContext::new(test_name, &config.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let log = &logctx.log;

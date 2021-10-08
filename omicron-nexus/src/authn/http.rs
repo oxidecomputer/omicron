@@ -3,6 +3,7 @@
 use crate::authn;
 use crate::ServerContext;
 use dropshot::RequestContext;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -134,9 +135,7 @@ struct HttpAuthnSpoof {
 
 impl HttpAuthnSpoof {
     fn new(allowed: bool) -> Self {
-        HttpAuthnSpoof {
-            allowed,
-        }
+        HttpAuthnSpoof { allowed }
     }
 }
 
@@ -153,45 +152,77 @@ impl HttpAuthnMode for HttpAuthnSpoof {
         let header_name = HTTP_HEADER_OXIDE_AUTHN_SPOOF;
         let spoof =
             extract_spoof_header(headers.get(header_name), self.allowed);
+        // Record a more specific message in the log for failures that would
+        // otherwise be difficult to diagnose from the generic message.
         match spoof {
-            SpoofHeader::NotPresent => {
-                trace!(log, "HttpAuthnSpoof: unauthenticated");
-                Ok(authn::Context::Unauthenticated)
-            }
-            SpoofHeader::PresentNotAllowed => {
-                trace!(
-                    log,
-                    "HttpAuthnSpoof: ignoring attempted spoof \
-                (not allowed by configuration)"
-                );
-                trace!(log, "authn_http: unauthenticated");
-                Ok(authn::Context::Unauthenticated)
-            }
-            SpoofHeader::PresentInvalid(error_message) => {
-                trace!(log, "HttpAuthnSpoof: failed authentication");
-                Err(Error::BadFormat(format!(
-                    "header {:?}: {}",
-                    header_name, error_message
-                )))
-            }
-            SpoofHeader::PresentValid(found_uuid) => {
-                let details = authn::Details { actor: authn::Actor(found_uuid) };
-                trace!(
-                    log,
-                    "HttpAuthnSpoof: spoofed authentication";
-                    "details" => ?details
-                );
-                Ok(authn::Context::Authenticated(details))
-            }
+            SpoofHeader::
         }
+        authn::Context::try_from(&spoof)
+        //        match spoof {
+        //            SpoofHeader::NotPresent => {
+        //                trace!(log, "HttpAuthnSpoof: unauthenticated");
+        //                Ok(authn::Context::Unauthenticated)
+        //            }
+        //            SpoofHeader::PresentNotAllowed => {
+        //                trace!(
+        //                    log,
+        //                    "HttpAuthnSpoof: ignoring attempted spoof \
+        //                (not allowed by configuration)"
+        //                );
+        //                trace!(log, "authn_http: unauthenticated");
+        //                Ok(authn::Context::Unauthenticated)
+        //            }
+        //            SpoofHeader::PresentInvalid(error_message) => {
+        //                trace!(log, "HttpAuthnSpoof: failed authentication");
+        //                Err(Error::BadFormat(format!(
+        //                    "header {:?}: {}",
+        //                    header_name, error_message
+        //                )))
+        //            }
+        //            SpoofHeader::PresentValid(found_uuid) => {
+        //                let details =
+        //                    authn::Details { actor: authn::Actor(found_uuid) };
+        //                trace!(
+        //                    log,
+        //                    "HttpAuthnSpoof: spoofed authentication";
+        //                    "details" => ?details
+        //                );
+        //                Ok(authn::Context::Authenticated(details))
+        //            }
+        //        }
     }
 }
 
+#[derive(Debug)]
 enum SpoofHeader {
     NotPresent,
     PresentNotAllowed,
     PresentInvalid(String),
     PresentValid(Uuid),
+}
+
+impl TryFrom<&SpoofHeader> for authn::Context {
+    type Error = Error;
+
+    fn try_from(spoof: &SpoofHeader) -> Result<Self, Self::Error> {
+        match spoof {
+            SpoofHeader::NotPresent => Ok(authn::Context::Unauthenticated),
+            SpoofHeader::PresentNotAllowed => {
+                Ok(authn::Context::Unauthenticated)
+            }
+            SpoofHeader::PresentInvalid(error_message) => {
+                Err(Error::BadFormat(format!(
+                    "header {:?}: {}",
+                    HTTP_HEADER_OXIDE_AUTHN_SPOOF, error_message
+                )))
+            }
+            SpoofHeader::PresentValid(found_uuid) => {
+                let details =
+                    authn::Details { actor: authn::Actor(*found_uuid) };
+                Ok(authn::Context::Authenticated(details))
+            }
+        }
+    }
 }
 
 fn extract_spoof_header(
@@ -214,5 +245,94 @@ fn extract_spoof_header(
                 Err(message) => SpoofHeader::PresentInvalid(message),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::extract_spoof_header;
+    use super::SpoofHeader;
+    use crate::authn;
+    use std::convert::TryFrom;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_spoof_header_valid() {
+        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
+        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
+        let test_header = http::HeaderValue::from_str(test_uuid_str).unwrap();
+
+        // Success case: the header is enabled by config and the client provided
+        // a valid uuid in the header.
+        let success_case = extract_spoof_header(Some(&test_header), true);
+        assert!(
+            matches!(success_case, SpoofHeader::PresentValid(u) if u == test_uuid)
+        );
+
+        // The client provided a valid uuid in the header, but the config does
+        // not allow the header.
+        let success_case = extract_spoof_header(Some(&test_header), false);
+        assert!(matches!(success_case, SpoofHeader::PresentNotAllowed));
+
+        // The client provided nothing (with header enabled and disabled)
+        assert!(matches!(
+            extract_spoof_header(None, true),
+            SpoofHeader::NotPresent
+        ));
+        assert!(matches!(
+            extract_spoof_header(None, false),
+            SpoofHeader::NotPresent
+        ));
+    }
+
+    #[test]
+    fn test_spoof_header_bad_uuids() {
+        // These inputs are all legal HTTP headers but not valid values for our
+        // "oxide-authn-spoof" header.
+        let bad_inputs: Vec<&[u8]> = vec![
+            b"garbage in garbage can -- makes sense", // not a uuid
+            b"foo\x80ar",                             // not UTF-8
+            b"",                                      // empty value
+        ];
+
+        for input in &bad_inputs {
+            // When the header is allowed, these values should all be rejected.
+            let test_header = http::HeaderValue::from_bytes(input)
+                .expect("test case header value was not a valid HTTP header");
+            let result = extract_spoof_header(Some(&test_header), true);
+            assert!(matches!(result, SpoofHeader::PresentInvalid(_)));
+
+            // When the header is disallowed, the contents are not looked at.
+            let result = extract_spoof_header(Some(&test_header), false);
+            assert!(matches!(result, SpoofHeader::PresentNotAllowed));
+        }
+    }
+
+    #[test]
+    fn test_spoof_header_to_context() {
+        use super::Error;
+        use authn::Actor;
+        use authn::Details;
+
+        assert!(matches!(
+            authn::Context::try_from(&SpoofHeader::NotPresent),
+            Ok(authn::Context::Unauthenticated),
+        ));
+        assert!(matches!(
+            authn::Context::try_from(&SpoofHeader::PresentNotAllowed),
+            Ok(authn::Context::Unauthenticated),
+        ));
+        assert!(matches!(
+            authn::Context::try_from(&SpoofHeader::PresentInvalid(
+                String::from("dummy message")
+            )),
+            Err(Error::BadFormat(_)),
+        ));
+        let test_uuid = Uuid::new_v4();
+        assert!(matches!(
+            authn::Context::try_from(&SpoofHeader::PresentValid(test_uuid)),
+            Ok(authn::Context::Authenticated(Details { actor: Actor(u)}))
+                if u == test_uuid
+        ));
     }
 }
