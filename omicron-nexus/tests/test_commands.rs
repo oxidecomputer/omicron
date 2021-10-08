@@ -9,14 +9,14 @@
  */
 
 use expectorate::assert_contents;
-use omicron_common::dev::test_cmds::assert_exit_code;
-use omicron_common::dev::test_cmds::error_for_enoent;
-use omicron_common::dev::test_cmds::path_to_executable;
-use omicron_common::dev::test_cmds::run_command;
-use omicron_common::dev::test_cmds::temp_file_path;
-use omicron_common::dev::test_cmds::EXIT_FAILURE;
-use omicron_common::dev::test_cmds::EXIT_SUCCESS;
-use omicron_common::dev::test_cmds::EXIT_USAGE;
+use omicron_test_utils::dev::test_cmds::assert_exit_code;
+use omicron_test_utils::dev::test_cmds::error_for_enoent;
+use omicron_test_utils::dev::test_cmds::path_to_executable;
+use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::temp_file_path;
+use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use openapiv3::OpenAPI;
 use std::fs;
 use std::path::PathBuf;

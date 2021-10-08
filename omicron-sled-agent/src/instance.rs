@@ -17,12 +17,11 @@ use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::dev::poll;
+use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -45,7 +44,16 @@ async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
 ) -> Result<(), Error> {
-    poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
+    let log_notification_failure = |error, delay| {
+        warn!(
+            log,
+            "failed to await http server ({}), will retry in {:?}", error, delay;
+            "error" => ?error
+        );
+    };
+
+    backoff::retry_notify(
+        backoff::internal_service_policy(),
         || async {
             // This request is nonsensical - we don't expect an instance to be
             // using the nil UUID - but getting a response that isn't a
@@ -58,13 +66,11 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    warn!(log, "waiting for http server, saw error: {}", value);
-                    return Err(poll::CondCheckError::NotYet);
+                    return Err(backoff::BackoffError::Transient(value));
                 }
             }
         },
-        &Duration::from_millis(50),
-        &Duration::from_secs(10),
+        log_notification_failure,
     )
     .await
     .map_err(|e| Error::InternalError {

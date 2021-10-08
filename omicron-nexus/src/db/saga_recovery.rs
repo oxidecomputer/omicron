@@ -320,7 +320,7 @@ mod test {
     use super::*;
     use crate::db::test_utils::UnpluggableCockroachDbSecStore;
     use lazy_static::lazy_static;
-    use omicron_common::dev;
+    use omicron_test_utils::dev;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
         new_action_noop_undo, ActionContext, ActionError, SagaId, SagaTemplate,

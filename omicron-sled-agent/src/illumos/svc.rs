@@ -3,8 +3,7 @@
 use cfg_if::cfg_if;
 
 use omicron_common::api::external::Error;
-use omicron_common::dev::poll;
-use std::time::Duration;
+use omicron_common::backoff;
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 mod inner {
@@ -27,7 +26,9 @@ mod inner {
     ) -> Result<(), Error> {
         let name = smf::PropertyName::new("restarter", "state").unwrap();
 
-        poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
+        let log_notification_failure = |_error, _delay| {};
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
             || async {
                 let mut p = smf::Properties::new();
                 let properties = {
@@ -44,10 +45,11 @@ mod inner {
                         return Ok(());
                     }
                 }
-                return Err(poll::CondCheckError::NotYet);
+                return Err(backoff::BackoffError::Transient(
+                    "Property not found",
+                ));
             },
-            &Duration::from_millis(500),
-            &Duration::from_secs(20),
+            log_notification_failure,
         )
         .await
         .map_err(|e| Error::InternalError {

@@ -347,7 +347,7 @@ mod test {
     use omicron_common::api::internal::sled_agent::DiskStateRequested;
     use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
     use omicron_common::api::internal::sled_agent::InstanceStateRequested;
-    use omicron_common::dev::test_setup_log;
+    use omicron_test_utils::dev::test_setup_log;
 
     fn make_instance(
         logctx: &LogContext,
