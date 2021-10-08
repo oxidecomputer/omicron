@@ -1,0 +1,95 @@
+[package]
+name = "omicron-nexus"
+version = "0.1.0"
+edition = "2018"
+
+[build-dependencies.omicron-rpaths]
+path = "../rpaths"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1.51"
+bb8 = "0.7.1"
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1a5c55d" }
+# Tracking pending 2.0 version.
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+futures = "0.3.15"
+http = "0.2.5"
+hyper = "0.14"
+ipnetwork = "0.18"
+lazy_static = "1.4.0"
+libc = "0.2.103"
+macaddr = { version = "1.0.1", features = [ "serde_std" ]}
+newtype_derive = "0.1.6"
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+serde_json = "1.0"
+serde_with = "1.9.4"
+structopt = "0.3"
+thiserror = "1.0"
+toml = "0.5.6"
+
+[dependencies.chrono]
+version = "0.4"
+features = [ "serde" ]
+
+[dependencies.dropshot]
+git = "https://github.com/oxidecomputer/dropshot"
+branch = "main"
+
+[dependencies.omicron-common]
+path = "../common"
+
+[dependencies.omicron-sled-agent]
+path = "../sled-agent"
+
+[dependencies.schemars]
+version = "0.8"
+features = [ "chrono", "uuid" ]
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.7"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.steno]
+git = "https://github.com/oxidecomputer/steno"
+branch = "main"
+
+[dependencies.tokio]
+version = "1.12"
+features = [ "full" ]
+
+[dependencies.tokio-postgres]
+version = "0.7"
+features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-0_8" ]
+
+[dependencies.uuid]
+version = "0.8"
+features = [ "serde", "v4" ]
+
+[dev-dependencies]
+bytes = "1.0.1"
+expectorate = "1.0.4"
+omicron-test-utils = { path = "../test-utils" }
+openapiv3 = "0.5.0"
+subprocess = "0.2.8"
+
+[dev-dependencies.oximeter]
+version = "0.1.0"
+path = "../oximeter/oximeter"
+
+[dev-dependencies.openapi-lint]
+git = "https://github.com/oxidecomputer/openapi-lint"
+branch = "main"
+
+#
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+#
+[[bin]]
+name = "nexus"
+doc = false

@@ -465,7 +465,7 @@ mod tests {
     use crate::test_util;
     use crate::types::{DatumType, FieldType};
     use chrono::Utc;
-    use omicron_common::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
     use slog::o;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.

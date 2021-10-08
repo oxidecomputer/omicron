@@ -1,22 +1,22 @@
 [workspace]
 members = [
-    "omicron-bootstrap-agent",
-    "omicron-common",
-    "omicron-nexus",
-    "omicron-rpaths",
-    "omicron-sled-agent",
+    "common",
+    "nexus",
+    "rpaths",
+    "sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 
 default-members = [
-    "omicron-bootstrap-agent",
-    "omicron-common",
-    "omicron-nexus",
-    "omicron-rpaths",
-    "omicron-sled-agent",
+    "common",
+    "nexus",
+    "rpaths",
+    "sled-agent",
     "oximeter/oximeter",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 resolver = "2"
 

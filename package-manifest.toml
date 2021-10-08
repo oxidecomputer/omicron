@@ -6,11 +6,11 @@
 smf = "smf"
 
 # Package name
-[package.omicron-bootstrap-agent]
+[package.omicron-sled-agent]
 # Binary name
-binary_name = "bootstrap-agent"
+binary_name = "sled-agent"
 # Service name (subdirectory within "smf")
-service_name = "bootstrap-agent"
+service_name = "sled-agent"
 # Information about how to build this package
 build = "rust"
 # (Optional) Indicates this is a bootstrapping service, and should be installed.
@@ -20,11 +20,6 @@ bootstrap = "manifest.xml"
 [package.omicron-nexus]
 binary_name = "nexus"
 service_name = "nexus"
-build = "rust"
-
-[package.omicron-sled-agent]
-binary_name = "sled-agent"
-service_name = "sled-agent"
 build = "rust"
 
 [package.oximeter]

@@ -564,9 +564,9 @@ dependencies = [
 
 [[package]]
 name = "fixedbitset"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37ab347416e802de484e4d03c7316c48f1ecb56574dfd4a46a80f173ce1de04d"
+checksum = "398ea4fabe40b9b0d885340a2a991a44c8a645624075ad966d21f88688e2b69e"
 
 [[package]]
 name = "float-cmp"
@@ -1231,28 +1231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-bootstrap-agent"
-version = "0.1.0"
-dependencies = [
- "dropshot",
- "http",
- "hyper",
- "omicron-common",
- "omicron-rpaths",
- "pq-sys",
- "serde",
- "serde_json",
- "slog",
- "smf",
- "structopt",
- "tar",
- "thiserror",
- "tokio",
- "toml",
- "uuid",
-]
-
-[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -1269,10 +1247,8 @@ dependencies = [
  "hyper",
  "ipnet",
  "ipnetwork",
- "libc 0.2.103",
  "macaddr",
  "omicron-rpaths",
- "postgres-protocol",
  "pq-sys",
  "propolis-server",
  "rayon",
@@ -1283,13 +1259,10 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
- "signal-hook",
- "signal-hook-tokio",
  "slog",
  "smf",
  "steno",
  "structopt",
- "subprocess",
  "tar",
  "tempfile",
  "thiserror",
@@ -1324,6 +1297,7 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-sled-agent",
+ "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
  "oximeter",
@@ -1363,6 +1337,7 @@ dependencies = [
  "mockall",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "pq-sys",
  "propolis-client",
  "schemars",
@@ -1373,9 +1348,36 @@ dependencies = [
  "smf",
  "structopt",
  "subprocess",
+ "tar",
+ "thiserror",
  "tokio",
+ "toml",
  "uuid",
  "zone",
+]
+
+[[package]]
+name = "omicron-test-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dropshot",
+ "expectorate",
+ "futures",
+ "libc 0.2.103",
+ "omicron-common",
+ "omicron-rpaths",
+ "postgres-protocol",
+ "pq-sys",
+ "signal-hook",
+ "signal-hook-tokio",
+ "slog",
+ "structopt",
+ "subprocess",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -1462,6 +1464,7 @@ dependencies = [
  "num-traits",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "oximeter-macro-impl",
  "pq-sys",
  "reqwest",
@@ -1571,9 +1574,9 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "467d164a6de56270bd7c4d070df81d07beace25012d5103ced4e9ff08d6afdb7"
+checksum = "4a13a2fa9d0b63e5f22328828741e523766fff0ee9e779316902290dff3f824f"
 dependencies = [
  "fixedbitset",
  "indexmap",
@@ -2431,7 +2434,7 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#7677fdd8f127b09341cca3dfa53564a4c9308e31"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#7e0ce7e01a839efeae40aa8fd51f6d277664ba2b"
 dependencies = [
  "anyhow",
  "async-trait",
