@@ -2,81 +2,60 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::Arc;
-
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use oximeter::types::{ProducerRegistry, ProducerResults};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    types::{ProducerRegistry, ProducerResults},
-    Error,
-};
+#[derive(Debug, Clone, Error)]
+pub enum Error {
+    #[error("Error running producer HTTP server: {0}")]
+    Server(String),
 
-/// Information describing how a [`ProducerServer`] registers itself for collection.
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct RegistrationInfo {
-    address: SocketAddr,
-    registration_route: String,
+    #[error("Error registering as metric producer: {0}")]
+    RegistrationError(String),
 }
 
-impl RegistrationInfo {
-    /// Construct `RegistrationInfo`, to register at the given address and route.
-    pub fn new<T>(address: T, route: &str) -> Self
-    where
-        T: ToSocketAddrs,
-    {
-        Self {
-            address: address.to_socket_addrs().unwrap().next().unwrap(),
-            registration_route: route.to_string(),
-        }
-    }
-
-    /// Return the address of the server to be registered with.
-    pub fn address(&self) -> SocketAddr {
-        self.address
-    }
-
-    /// Return the route at which the registration request will be sent.
-    pub fn registration_route(&self) -> &str {
-        &self.registration_route
-    }
-}
-
-/// Information used to configure a [`ProducerServer`]
+/// Information used to configure a [`Server`]
 #[derive(Debug, Clone)]
-pub struct ProducerServerConfig {
+pub struct Config {
     pub server_info: ProducerEndpoint,
-    pub registration_info: RegistrationInfo,
+    pub registration_address: SocketAddr,
     pub dropshot_config: ConfigDropshot,
     pub logging_config: ConfigLogging,
 }
 
 /// A Dropshot server used to expose metrics to be collected over the network.
-pub struct ProducerServer {
+///
+/// This is a "batteries-included" HTTP server, meant to be used in applications that don't
+/// otherwise run a server. The standalone functions [`register`] and [`collect`] can be used as
+/// part of an existing Dropshot server's API.
+pub struct Server {
     registry: ProducerRegistry,
     server: HttpServer<ProducerRegistry>,
 }
 
-impl ProducerServer {
+impl Server {
     /// Start a new metric server, registering it with the chosen endpoint, and listening for
     /// requests on the associated address and route.
-    pub async fn start(config: &ProducerServerConfig) -> Result<Self, Error> {
+    pub async fn start(config: &Config) -> Result<Self, Error> {
         // Clone mutably, as we may update the address after the server starts, see below.
         let mut config = config.clone();
 
         let log = config
             .logging_config
             .to_logger("metric-server")
-            .map_err(|msg| Error::ProducerServer(msg.to_string()))?;
+            .map_err(|msg| Error::Server(msg.to_string()))?;
         let registry = ProducerRegistry::with_id(config.server_info.id);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
@@ -85,12 +64,7 @@ impl ProducerServer {
             registry.clone(),
             &dropshot_log,
         )
-        .map_err(|msg| {
-            Error::ProducerServer(format!(
-                "failed to start Dropshot server: {}",
-                msg
-            ))
-        })?
+        .map_err(|e| Error::Server(e.to_string()))?
         .start();
 
         // Client code may decide to assign a specific address and/or port, or to listen on any
@@ -114,7 +88,7 @@ impl ProducerServer {
         debug!(log, "registering metric server as a producer");
         register(
             &Client::new(),
-            &config.registration_info,
+            config.registration_address,
             &config.server_info,
         )
         .await?;
@@ -130,20 +104,18 @@ impl ProducerServer {
 
     /// Serve requests for metrics.
     pub async fn serve_forever(self) -> Result<(), Error> {
-        Ok(self.server.await.map_err(|msg| {
-            Error::ProducerServer(format!("failed to start server: {}", msg))
-        })?)
+        self.server.await.map_err(Error::Server)
     }
 
     /// Close the server
     pub async fn close(self) -> Result<(), Error> {
-        self.server.close().await.map_err(Error::ProducerServer)
+        self.server.close().await.map_err(Error::Server)
     }
 
     /// Return the [`ProducerRegistry`] managed by this server.
     ///
     /// The registry is thread-safe and clonable, so the returned reference can be used throughout
-    /// an application to register types implementing the [Producer`](oximeter::traits::Producer)
+    /// an application to register types implementing the [`Producer`](oximeter::traits::Producer)
     /// trait. The samples generated by the registered producers will be included in response to a
     ///  request on the collection endpoint.
     pub fn registry(&self) -> &ProducerRegistry {
@@ -151,7 +123,7 @@ impl ProducerServer {
     }
 }
 
-// Register API endpoints of the `ProducerServer`.
+// Register API endpoints of the `Server`.
 fn metric_server_api() -> ApiDescription<ProducerRegistry> {
     let mut api = ApiDescription::new();
     api.register(collect_endpoint)
@@ -164,7 +136,7 @@ struct ProducerIdPathParams {
     pub producer_id: Uuid,
 }
 
-// Implementation of the actual collection routine used by the `ProducerServer`.
+// Implementation of the actual collection routine used by the `Server`.
 #[endpoint {
     method = GET,
     path = "/collect/{producer_id}",
@@ -181,24 +153,20 @@ async fn collect_endpoint(
 /// Register a metric server to be polled for metric data.
 ///
 /// This function is used to provide consumers the flexibility to define their own Dropshot
-/// servers, rather than using the `ProducerServer` provided by this crate (which starts a _new_
-/// server).
+/// servers, rather than using the `Server` provided by this crate (which starts a _new_ server).
 pub async fn register(
     client: &Client,
-    registration_info: &RegistrationInfo,
+    address: SocketAddr,
     server_info: &ProducerEndpoint,
 ) -> Result<(), Error> {
     client
-        .post(format!(
-            "http://{}{}",
-            registration_info.address, registration_info.registration_route
-        ))
+        .post(format!("http://{}/metrics/producers", address))
         .json(server_info)
         .send()
         .await
-        .map_err(|msg| Error::ProducerServer(msg.to_string()))?
+        .map_err(|msg| Error::RegistrationError(msg.to_string()))?
         .error_for_status()
-        .map_err(|msg| Error::ProducerServer(msg.to_string()))?;
+        .map_err(|msg| Error::RegistrationError(msg.to_string()))?;
     Ok(())
 }
 

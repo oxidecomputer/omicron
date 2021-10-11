@@ -10,7 +10,8 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_test_utils::dev;
-use oximeter::Metric;
+use oximeter_collector::Oximeter;
+use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -33,8 +34,8 @@ pub struct ControlPlaneTestContext {
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
     sled_agent: omicron_sled_agent::sim::Server,
-    oximeter: oximeter::Oximeter,
-    producer: oximeter::ProducerServer,
+    oximeter: Oximeter,
+    producer: ProducerServer,
 }
 
 impl ControlPlaneTestContext {
@@ -164,13 +165,13 @@ pub async fn start_oximeter(
     nexus_address: SocketAddr,
     db_port: u16,
     id: Uuid,
-) -> Result<oximeter::Oximeter, String> {
-    let db = oximeter::oximeter_server::DbConfig {
+) -> Result<Oximeter, String> {
+    let db = oximeter_collector::DbConfig {
         address: SocketAddr::new("::1".parse().unwrap(), db_port),
         batch_size: 10,
         batch_interval: 10,
     };
-    let config = oximeter::oximeter_server::Config {
+    let config = oximeter_collector::Config {
         id,
         nexus_address,
         db,
@@ -180,7 +181,7 @@ pub async fn start_oximeter(
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
-    oximeter::Oximeter::new(&config).await.map_err(|e| e.to_string())
+    Oximeter::new(&config).await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, oximeter::Target)]
@@ -208,6 +209,7 @@ impl oximeter::Producer for IntegrationProducer {
         Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
         oximeter::Error,
     > {
+        use oximeter::Metric;
         let sample = oximeter::types::Sample::new(&self.target, &self.metric);
         *self.metric.datum_mut() += 1;
         Ok(Box::new(vec![sample].into_iter()))
@@ -217,11 +219,11 @@ impl oximeter::Producer for IntegrationProducer {
 pub async fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
-) -> Result<oximeter::ProducerServer, String> {
+) -> Result<ProducerServer, String> {
     // Set up a producer server.
     //
-    // This listens on any available port, and the ProducerServer internally updates this to the
-    // actual bound port of the Dropshot HTTP server.
+    // This listens on any available port, and the server internally updates this to the actual
+    // bound port of the Dropshot HTTP server.
     let producer_address = SocketAddr::new("::1".parse().unwrap(), 0);
     let server_info = ProducerEndpoint {
         id,
@@ -229,13 +231,9 @@ pub async fn start_producer_server(
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let registration_info = oximeter::producer_server::RegistrationInfo::new(
-        nexus_address,
-        "/metrics/producers",
-    );
-    let config = oximeter::producer_server::ProducerServerConfig {
+    let config = oximeter_producer::Config {
         server_info,
-        registration_info,
+        registration_address: nexus_address,
         dropshot_config: ConfigDropshot {
             bind_address: producer_address,
             ..Default::default()
@@ -244,9 +242,8 @@ pub async fn start_producer_server(
             level: ConfigLoggingLevel::Error,
         },
     };
-    let server = oximeter::ProducerServer::start(&config)
-        .await
-        .map_err(|e| e.to_string())?;
+    let server =
+        ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
 
     // Create and register an actual metric producer.
     let producer = IntegrationProducer {
