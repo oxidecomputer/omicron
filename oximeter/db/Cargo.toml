@@ -19,7 +19,7 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 slog-async = "2.6"
 slog-term = "2.8"
 structopt = "0.3"
-thiserror = "1.0.26"
+thiserror = "1.0.30"
 tokio = "1.12"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
