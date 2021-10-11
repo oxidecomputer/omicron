@@ -110,7 +110,8 @@ async fn do_run() -> Result<(), CmdError> {
                 .await
                 .map_err(CmdError::Failure)?;
 
-            // Configure and run the Sled server.
+            // Configure and run the Sled server now that we've reached a
+            // quorum.
             let config = SledConfig {
                 id: uuid,
                 nexus_address: nexus_addr,

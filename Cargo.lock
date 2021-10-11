@@ -1340,6 +1340,8 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
  "pq-sys",
  "propolis-client",
  "schemars",
