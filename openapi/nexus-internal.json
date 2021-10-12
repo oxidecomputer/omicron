@@ -1,0 +1,456 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nexus internal API",
+    "description": "Nexus internal API",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/disks/{disk_id}": {
+      "put": {
+        "description": "Report updated state for a disk.",
+        "operationId": "cpapi_disks_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskRuntimeState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}": {
+      "put": {
+        "description": "Report updated state for an instance.",
+        "operationId": "cpapi_instances_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/metrics/collectors": {
+      "post": {
+        "description": "Accept a notification of a new oximeter collection server.",
+        "operationId": "cpapi_collectors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OximeterInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/metrics/producers": {
+      "post": {
+        "description": "Accept a registration from a new metric producer",
+        "operationId": "cpapi_producers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProducerEndpoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/sled_agents/{sled_id}": {
+      "post": {
+        "description": "Report that the sled agent for the specified sled has come online.",
+        "operationId": "cpapi_sled_agents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledAgentStartupInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ByteCount": {
+        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "DiskRuntimeState": {
+        "description": "Runtime state of the Disk, which includes its attach state and some minimal metadata",
+        "type": "object",
+        "properties": {
+          "disk_state": {
+            "$ref": "#/components/schemas/DiskState"
+          },
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "time_updated": {
+            "description": "timestamp for this information",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "disk_state",
+          "gen",
+          "time_updated"
+        ]
+      },
+      "DiskState": {
+        "description": "State of a Disk (primarily: attached or not)",
+        "oneOf": [
+          {
+            "description": "Disk is being initialized",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "creating"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready but detached from any Instance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attached"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being detached from the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk has been destroyed",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "destroyed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is unavailable",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "faulted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "InstanceCpuCount": {
+        "description": "The number of CPUs in an Instance",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
+      "InstanceRuntimeState": {
+        "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the Instance.",
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "sled_uuid": {
+            "description": "which sled is running this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_updated": {
+            "description": "timestamp for this information",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "hostname",
+          "memory",
+          "ncpus",
+          "run_state",
+          "sled_uuid",
+          "time_updated"
+        ]
+      },
+      "InstanceState": {
+        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "type": "string",
+        "enum": [
+          "creating",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "rebooting",
+          "repairing",
+          "failed",
+          "destroyed"
+        ]
+      },
+      "OximeterInfo": {
+        "description": "Message used to notify Nexus that this oximeter instance is up and running.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address on which this oximeter instance listens for requests",
+            "type": "string"
+          },
+          "collector_id": {
+            "description": "The ID for this oximeter instance.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "collector_id"
+        ]
+      },
+      "ProducerEndpoint": {
+        "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "base_route": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "$ref": "#/components/schemas/Duration"
+          }
+        },
+        "required": [
+          "address",
+          "base_route",
+          "id",
+          "interval"
+        ]
+      },
+      "SledAgentStartupInfo": {
+        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+        "type": "object",
+        "properties": {
+          "sa_address": {
+            "description": "the address of the sled agent's API endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sa_address"
+        ]
+      }
+    }
+  }
+}

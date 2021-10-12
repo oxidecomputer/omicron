@@ -1,0 +1,82 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Oximeter API",
+    "description": "API for interacting with oximeter",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/producers": {
+      "post": {
+        "operationId": "producers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProducerEndpoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "ProducerEndpoint": {
+        "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "base_route": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "$ref": "#/components/schemas/Duration"
+          }
+        },
+        "required": [
+          "address",
+          "base_route",
+          "id",
+          "interval"
+        ]
+      }
+    }
+  }
+}
