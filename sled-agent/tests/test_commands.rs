@@ -12,12 +12,35 @@ use expectorate::assert_contents;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
+use openapiv3::OpenAPI;
 use std::path::PathBuf;
 use subprocess::Exec;
 
+/** name of the "sled-agent-sim" executable */
+const CMD_SLED_AGENT_SIM: &str = env!("CARGO_BIN_EXE_sled-agent-sim");
+
+fn path_to_sled_agent_sim() -> PathBuf {
+    path_to_executable(CMD_SLED_AGENT_SIM)
+}
+
+#[test]
+fn test_sled_agent_sim_no_args() {
+    let exec = Exec::cmd(path_to_sled_agent_sim());
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_contents(
+        "tests/output/cmd-sled-agent-sim-noargs-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-sled-agent-sim-noargs-stderr",
+        &stderr_text,
+    );
+}
 /** name of the "sled-agent" executable */
-const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent-sim");
+const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 
 fn path_to_sled_agent() -> PathBuf {
     path_to_executable(CMD_SLED_AGENT)
@@ -30,4 +53,58 @@ fn test_sled_agent_no_args() {
     assert_exit_code(exit_status, EXIT_USAGE);
     assert_contents("tests/output/cmd-sled-agent-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-sled-agent-noargs-stderr", &stderr_text);
+}
+
+#[test]
+fn test_sled_agent_openapi_bootagent() {
+    let exec = Exec::cmd(path_to_sled_agent()).arg("openapi").arg("bootstrap");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_contents(
+        "tests/output/cmd-sled-agent-openapi-bootstrap-stderr",
+        &stderr_text,
+    );
+
+    let spec: OpenAPI = serde_json::from_str(&stdout_text)
+        .expect("stdout was not valid OpenAPI");
+
+    /*
+     * Check for lint errors.
+     */
+    let errors = openapi_lint::validate(&spec);
+    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
+
+    /*
+     * Confirm that the output hasn't changed. It's expected that we'll change
+     * this file as the API evolves, but pay attention to the diffs to ensure
+     * that the changes match your expectations.
+     */
+    assert_contents("../openapi/bootstrap-agent.json", &stdout_text);
+}
+
+#[test]
+fn test_sled_agent_openapi_sled() {
+    let exec = Exec::cmd(path_to_sled_agent()).arg("openapi").arg("sled");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_contents(
+        "tests/output/cmd-sled-agent-openapi-sled-stderr",
+        &stderr_text,
+    );
+
+    let spec: OpenAPI = serde_json::from_str(&stdout_text)
+        .expect("stdout was not valid OpenAPI");
+
+    /*
+     * Check for lint errors.
+     */
+    let errors = openapi_lint::validate(&spec);
+    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
+
+    /*
+     * Confirm that the output hasn't changed. It's expected that we'll change
+     * this file as the API evolves, but pay attention to the diffs to ensure
+     * that the changes match your expectations.
+     */
+    assert_contents("../openapi/sled-agent.json", &stdout_text);
 }

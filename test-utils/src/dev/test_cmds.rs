@@ -40,6 +40,7 @@ pub fn path_to_executable(cmd_name: &str) -> PathBuf {
     rv
 }
 
+#[track_caller]
 pub fn assert_exit_code(exit_status: ExitStatus, code: u32) {
     if let ExitStatus::Exited(exit_code) = exit_status {
         assert_eq!(exit_code, code as u32);

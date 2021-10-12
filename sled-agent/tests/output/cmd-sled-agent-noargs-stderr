@@ -1,9 +1,14 @@
-sled-agent-sim: parsing arguments: error: The following required arguments were not provided:
-    <SA_UUID>
-    <SA_IP:PORT>
-    <NEXUS_IP:PORT>
+sled-agent: parsing arguments: sled_agent 0.1.0
+See README.adoc for more information
 
 USAGE:
-    sled-agent-sim <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT> --sim-mode <sim-mode>
+    sled-agent <SUBCOMMAND>
 
-For more information try --help
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    help       Prints this message or the help of the given subcommand(s)
+    openapi    Generates the OpenAPI specification
+    run        Runs the Sled Agent server
