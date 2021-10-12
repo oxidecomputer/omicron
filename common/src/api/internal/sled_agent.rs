@@ -18,7 +18,7 @@ pub struct DiskEnsureBody {
 
 ///Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", tag = "state", content = "instance")]
 pub enum DiskStateRequested {
     Detached,
     Attached(Uuid),
