@@ -1,6 +1,6 @@
 use omicron_common::api::external::Organization;
 
-use dropshot::test_util::{object_get, objects_list_page};
+use dropshot::test_util::{object_delete, object_get, objects_list_page};
 
 pub mod common;
 use common::resource_helpers::create_organization;
@@ -46,6 +46,28 @@ async fn test_organizations() {
     // alphabetical order for now
     assert_eq!(organizations[0].identity.name, o2_name);
     assert_eq!(organizations[1].identity.name, o1_name);
+
+    // Verify DELETE /organization/{org} works
+    let o1_old_id = organizations[1].identity.id;
+    object_delete(&client, &o1_url).await;
+
+    // Verify the org now returns a 404
+    client
+        .make_request_error(Method::GET, &o1_url, StatusCode::NOT_FOUND)
+        .await;
+
+    // Verify the org is gone from the organizations list
+    let organizations =
+        objects_list_page::<Organization>(client, "/organizations").await.items;
+    assert_eq!(organizations.len(), 1);
+    assert_eq!(organizations[0].identity.name, o2_name);
+
+    // Verify the org's name can be reused
+    create_organization(&client, &o1_name).await;
+    let organization: Organization = object_get(&client, &o1_url).await;
+    assert_eq!(organization.identity.name, o1_name);
+    // It should have a different UUID now
+    assert_ne!(organization.identity.id, o1_old_id);
 
     cptestctx.teardown().await;
 }
