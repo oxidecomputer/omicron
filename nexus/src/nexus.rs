@@ -33,6 +33,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
@@ -1238,6 +1239,23 @@ impl Nexus {
             .db_datastore
             .vpc_update_subnet(&subnet.identity.id, params)
             .await?)
+    }
+
+    pub async fn vpc_list_routers(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcRouter> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let routers = self
+            .db_datastore
+            .vpc_list_routers(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|router| router.into())
+            .collect::<Vec<VpcRouter>>();
+        Ok(routers)
     }
 
     /*

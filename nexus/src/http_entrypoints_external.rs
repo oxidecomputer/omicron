@@ -46,6 +46,7 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
@@ -98,6 +99,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_post)?;
         api.register(vpc_subnets_delete_subnet)?;
         api.register(vpc_subnets_put_subnet)?;
+
+        api.register(vpc_routers_get)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -927,6 +930,36 @@ async fn vpc_subnets_put_subnet(
         )
         .await?;
     Ok(HttpResponseOk(()))
+}
+
+/*
+ * VPC Routers
+ */
+
+/**
+ * List VPC Custom and System Routers
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/routers",
+ }]
+async fn vpc_routers_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let routers = nexus
+        .vpc_list_routers(
+            &path.project_name,
+            &path.vpc_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
 }
 
 /*

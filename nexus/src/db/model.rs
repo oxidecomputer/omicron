@@ -2,7 +2,7 @@
 
 use super::schema::{
     disk, instance, metricproducer, networkinterface, oximeter, project, sled,
-    vpc, vpcsubnet,
+    vpc, vpcrouter, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use diesel::backend::{Backend, RawValue};
@@ -859,6 +859,56 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
+#[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
+#[table_name = "vpcrouter"]
+pub struct VpcRouter {
+    pub id: Uuid,
+    pub name: external::Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+    pub vpc_id: Uuid,
+}
+
+impl VpcRouter {
+    pub fn new(
+        vpc_id: Uuid,
+        project_id: Uuid,
+        params: external::VpcRouterCreateParams,
+    ) -> Self {
+        let identity = IdentityMetadata::new(vpc_id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+            vpc_id,
+        }
+    }
+
+    pub fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
+            id: self.id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            time_deleted: self.time_deleted,
+        }
+    }
+}
+
+impl Into<external::VpcRouter> for VpcRouter {
+    fn into(self) -> external::VpcRouter {
+        external::VpcRouter {
+            identity: self.identity().into(),
+            vpc_id: self.vpc_id,
+        }
+    }
+}
 #[derive(Queryable, Identifiable, Insertable, Clone, Debug)]
 #[table_name = "networkinterface"]
 pub struct NetworkInterface {

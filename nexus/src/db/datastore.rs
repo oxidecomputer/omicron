@@ -1170,4 +1170,25 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    pub async fn vpc_list_routers(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::VpcRouter> {
+        use db::schema::vpcrouter::dsl;
+
+        paginated(dsl::vpcrouter, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .load_async::<db::model::VpcRouter>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
 }
