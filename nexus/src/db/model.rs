@@ -196,7 +196,7 @@ impl Into<external::Organization> for Organization {
     }
 }
 
-/// Conversion from the internal API type.
+/// Conversion from the external API type.
 impl From<external::Organization> for Organization {
     fn from(organization: external::Organization) -> Self {
         Self {
