@@ -186,7 +186,7 @@ impl DataStore {
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(id.clone()))
+            .filter(dsl::id.eq(id))
             .filter(dsl::rcgen.eq(rcgen))
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool())

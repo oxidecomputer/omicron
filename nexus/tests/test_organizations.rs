@@ -5,6 +5,8 @@ use dropshot::test_util::{object_get, objects_list_page};
 pub mod common;
 use common::resource_helpers::create_organization;
 use common::test_setup;
+use http::method::Method;
+use http::StatusCode;
 
 extern crate slog;
 
@@ -29,14 +31,13 @@ async fn test_organizations() {
     assert_eq!(organization.identity.name, o2_name);
 
     // Verifying requesting a non-existent organization fails
-    let error = client
+    client
         .make_request_error(
             Method::GET,
             "/organizations/fake-org",
             StatusCode::NOT_FOUND,
         )
         .await;
-    assert_eq!("Not Found", error.message);
 
     // Verify GET /organizations works
     let organizations =
