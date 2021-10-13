@@ -1350,6 +1350,8 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
  "pq-sys",
  "propolis-client",
  "schemars",
@@ -1486,15 +1488,21 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "expectorate",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
  "oximeter",
  "oximeter-db",
  "pq-sys",
  "reqwest",
  "serde",
+ "serde_json",
  "slog",
  "structopt",
+ "subprocess",
  "thiserror",
  "tokio",
  "toml",
@@ -1889,9 +1897,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
+checksum = "38bc8cc6a5f2e3655e0899c1b848643b2562f853f114bfec7be120678e3ace05"
 dependencies = [
  "proc-macro2",
 ]
@@ -2019,9 +2027,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.4"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "246e9f61b9bb77df069a947682be06e31ac43ea37862e244a69f177694ea6d22"
+checksum = "51c732d463dd300362ffb44b7b125f299c23d2990411a4253824630ebc7467fb"
 dependencies = [
  "base64",
  "bytes",
@@ -2497,7 +2505,7 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#7e0ce7e01a839efeae40aa8fd51f6d277664ba2b"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#c6ea85cfd268668a5974741b308d89acfae76063"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2578,9 +2586,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.78"
+version = "1.0.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4eac2e6c19f5c3abc0c229bea31ff0b9b091c7b14990e8924b92902a303a0c0"
+checksum = "d010a1623fbd906d51d650a9916aaefc05ffa0e4053ff7fe601167f3e715d194"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2661,18 +2669,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "602eca064b2d83369e2b2f34b09c70b605402801927c65c11071ac911d299b88"
+checksum = "854babe52e4df1653706b98fcfc05843010039b406875930a70e4d9644e5c417"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad553cc2c78e8de258400763a647e80e6d1b31ee237275d756f6836d204494c"
+checksum = "aa32fd3f627f367fe16f893e2597ae3c05020f8bba2666a4e6ea73d377e5714b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2865,9 +2873,9 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "trybuild"
-version = "1.0.45"
+version = "1.0.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bdaf2a1d317f3d58b44b31c7f6436b9b9acafe7bddfeace50897c2b804d7792"
+checksum = "11b533b653278ed89f93da2508e324ce9c7ef4af686521ebe4e6516fc9f3fd8d"
 dependencies = [
  "glob",
  "lazy_static",
@@ -3075,8 +3083,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ce9b1b516211d33767048e5d47fa2a381ed8b76fc48d2ce4aa39877f9f183e0"
 dependencies = [
  "cfg-if",
- "serde",
- "serde_json",
  "wasm-bindgen-macro",
 ]
 

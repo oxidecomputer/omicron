@@ -1,0 +1,540 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Sled Agent API",
+    "description": "API for interacting with individual sleds",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/disks/{disk_id}": {
+      "put": {
+        "operationId": "disk_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskRuntimeState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}": {
+      "put": {
+        "operationId": "instance_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ByteCount": {
+        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "DiskEnsureBody": {
+        "description": "Sent from to a sled agent to establish the runtime state of a Disk",
+        "type": "object",
+        "properties": {
+          "initial_runtime": {
+            "$ref": "#/components/schemas/DiskRuntimeState"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DiskStateRequested"
+          }
+        },
+        "required": [
+          "initial_runtime",
+          "target"
+        ]
+      },
+      "DiskRuntimeState": {
+        "description": "Runtime state of the Disk, which includes its attach state and some minimal metadata",
+        "type": "object",
+        "properties": {
+          "disk_state": {
+            "$ref": "#/components/schemas/DiskState"
+          },
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "time_updated": {
+            "description": "timestamp for this information",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "disk_state",
+          "gen",
+          "time_updated"
+        ]
+      },
+      "DiskState": {
+        "description": "State of a Disk (primarily: attached or not)",
+        "oneOf": [
+          {
+            "description": "Disk is being initialized",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "creating"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready but detached from any Instance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is attached to the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attached"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being detached from the given Instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detaching"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "description": "Disk has been destroyed",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "destroyed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is unavailable",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "faulted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "DiskStateRequested": {
+        "description": "Used to request a Disk state change",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "attached"
+                ]
+              }
+            },
+            "required": [
+              "instance",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "destroyed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "faulted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "IdentityMetadata": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "timeCreated",
+          "timeModified"
+        ]
+      },
+      "InstanceCpuCount": {
+        "description": "The number of CPUs in an Instance",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
+      "InstanceEnsureBody": {
+        "description": "Sent to a sled agent to establish the runtime state of an Instance",
+        "type": "object",
+        "properties": {
+          "initial": {
+            "$ref": "#/components/schemas/InstanceHardware"
+          },
+          "target": {
+            "$ref": "#/components/schemas/InstanceRuntimeStateRequested"
+          }
+        },
+        "required": [
+          "initial",
+          "target"
+        ]
+      },
+      "InstanceHardware": {
+        "description": "Describes the instance hardware.",
+        "type": "object",
+        "properties": {
+          "nics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/InstanceRuntimeState"
+          }
+        },
+        "required": [
+          "nics",
+          "runtime"
+        ]
+      },
+      "InstanceRuntimeState": {
+        "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the Instance.",
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "sled_uuid": {
+            "description": "which sled is running this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_updated": {
+            "description": "timestamp for this information",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "hostname",
+          "memory",
+          "ncpus",
+          "run_state",
+          "sled_uuid",
+          "time_updated"
+        ]
+      },
+      "InstanceRuntimeStateRequested": {
+        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state that can be changed, though we might want to support changing properties like \"ncpus\" here.",
+        "type": "object",
+        "properties": {
+          "run_state": {
+            "$ref": "#/components/schemas/InstanceStateRequested"
+          }
+        },
+        "required": [
+          "run_state"
+        ]
+      },
+      "InstanceState": {
+        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "type": "string",
+        "enum": [
+          "creating",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "rebooting",
+          "repairing",
+          "failed",
+          "destroyed"
+        ]
+      },
+      "InstanceStateRequested": {
+        "description": "Requestable running state of an Instance.\n\nA subset of [`InstanceState`].",
+        "type": "string",
+        "enum": [
+          "running",
+          "stopped",
+          "reboot",
+          "destroyed"
+        ]
+      },
+      "MacAddr": {
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-8a-fA-F]{2}:){5}[0-8a-fA-F]{2}$",
+        "minLength": 17,
+        "maxLength": 17
+      },
+      "Name": {
+        "title": "A name used in the API",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
+        "type": "string",
+        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
+        "maxLength": 63
+      },
+      "NetworkInterface": {
+        "description": "A `NetworkInterface` represents a virtual network interface device.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/IdentityMetadata"
+          },
+          "ip": {
+            "description": "The IP address assigned to this interface.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "subnet_id": {
+            "description": "The subnet to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "identity",
+          "ip",
+          "mac",
+          "subnet_id",
+          "vpc_id"
+        ]
+      }
+    }
+  }
+}
