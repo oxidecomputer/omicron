@@ -25,7 +25,7 @@ toml = "0.5.6"
 walkdir = "2.3"
 
 [dependencies.api_identity]
-path = "../api_identity"
+path = "src/api/external/api_identity"
 
 [dependencies.backoff]
 version = "0.3.0"

@@ -44,7 +44,7 @@ impl std::str::FromStr for ApiRequest {
 )]
 enum Args {
     /// Generates the OpenAPI specification.
-    OpenApi {
+    Openapi {
         #[structopt(name = "api_type", parse(try_from_str))]
         api_requested: ApiRequest,
     },
@@ -80,7 +80,7 @@ async fn do_run() -> Result<(), CmdError> {
     })?;
 
     match args {
-        Args::OpenApi { api_requested } => match api_requested {
+        Args::Openapi { api_requested } => match api_requested {
             ApiRequest::Bootstrap => {
                 bootstrap_server::run_openapi().map_err(CmdError::Failure)
             }
@@ -110,7 +110,8 @@ async fn do_run() -> Result<(), CmdError> {
                 .await
                 .map_err(CmdError::Failure)?;
 
-            // Configure and run the Sled server.
+            // Configure and run the Sled server now that we've reached a
+            // quorum.
             let config = SledConfig {
                 id: uuid,
                 nexus_address: nexus_addr,
