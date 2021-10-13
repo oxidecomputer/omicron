@@ -151,7 +151,7 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
 
 
 /*
- * Disks
+ * Guest-Visible, Virtual Disks
  */
 
 /*

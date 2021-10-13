@@ -15,6 +15,7 @@ futures = "0.3.15"
 http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
+crucible = { git = "https://github.com/oxidecomputer/crucible", rev = "1dd216e8" }
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
