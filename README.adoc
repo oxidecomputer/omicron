@@ -191,11 +191,11 @@ omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server 
 omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
 ----
 
-. `nexus` requires a configuration file to run.  You can use `omicron-nexus/examples/config.toml` to start with.  Build and run it like this:
+. `nexus` requires a configuration file to run.  You can use `nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
-$ cargo run --bin=nexus -- omicron-nexus/examples/config.toml
+$ cargo run --bin=nexus -- nexus/examples/config.toml
 ...
 listening: http://127.0.0.1:12220
 ----
@@ -488,11 +488,11 @@ $ sudo ./target/debug/omicron-package uninstall
 == Configuration reference
 
 `nexus` requires a TOML configuration file.  There's an example in
-`omicron-nexus/examples/config.toml`:
+`nexus/examples/config.toml`:
 
 [source,toml]
 ----
-include::omicron-nexus/examples/config.toml[]
+include::nexus/examples/config.toml[]
 ----
 
 Supported config properties include:

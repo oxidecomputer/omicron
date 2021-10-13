@@ -86,8 +86,8 @@ fn test_nexus_invalid_config() {
     );
 }
 
-#[test]
-fn test_nexus_openapi() {
+#[track_caller]
+fn run_command_with_arg(arg: &str) -> (String, String) {
     /*
      * This is a little goofy: we need a config file for the program.
      * (Arguably, --openapi shouldn't require a config file, but it's
@@ -99,10 +99,17 @@ fn test_nexus_openapi() {
      */
     let config = include_str!("../examples/config.toml");
     let config_path = write_config(config);
-    let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg("--openapi");
+    let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg(arg);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS);
+
+    (stdout_text, stderr_text)
+}
+
+#[test]
+fn test_nexus_openapi() {
+    let (stdout_text, stderr_text) = run_command_with_arg("--openapi");
     assert_contents("tests/output/cmd-nexus-openapi-stderr", &stderr_text);
 
     /*
@@ -118,7 +125,7 @@ fn test_nexus_openapi() {
     /*
      * Spot check a couple of items.
      */
-    assert!(spec.paths.len() > 0);
+    assert!(!spec.paths.is_empty());
     assert!(spec.paths.get("/projects").is_some());
 
     /*
@@ -132,5 +139,25 @@ fn test_nexus_openapi() {
      * this file as the API evolves, but pay attention to the diffs to ensure
      * that the changes match your expectations.
      */
-    assert_contents("tests/output/nexus-openapi.json", &stdout_text);
+    assert_contents("../openapi/nexus.json", &stdout_text);
+}
+
+#[test]
+fn test_nexus_openapi_internal() {
+    let (stdout_text, _) = run_command_with_arg("--openapi-internal");
+    let spec: OpenAPI = serde_json::from_str(&stdout_text)
+        .expect("stdout was not valid OpenAPI");
+
+    /*
+     * Check for lint errors.
+     */
+    let errors = openapi_lint::validate(&spec);
+    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
+
+    /*
+     * Confirm that the output hasn't changed. It's expected that we'll change
+     * this file as the API evolves, but pay attention to the diffs to ensure
+     * that the changes match your expectations.
+     */
+    assert_contents("../openapi/nexus-internal.json", &stdout_text);
 }

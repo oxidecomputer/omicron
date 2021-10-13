@@ -1,0 +1,79 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Bootstrap Agent API",
+    "description": "API for interacting with bootstrapping agents",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/request_share": {
+      "get": {
+        "operationId": "api_request_share",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ShareRequest": {
+        "description": "Identity signed by local RoT and Oxide certificate chain.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
+      "ShareResponse": {
+        "description": "Sent between bootstrap agents to establish trust quorum.",
+        "type": "object",
+        "properties": {
+          "shared_secret": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "shared_secret"
+        ]
+      }
+    }
+  }
+}
