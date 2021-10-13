@@ -592,6 +592,7 @@ pub struct Project {
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub organization_id: Uuid,
 }
 
 /**
@@ -602,6 +603,7 @@ pub struct Project {
 pub struct ProjectCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    pub organization_id: Uuid,
 }
 
 /**

@@ -18,6 +18,8 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
+use super::collection_insert::{DatastoreCollection, InsertError};
+use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
@@ -170,6 +172,7 @@ impl DataStore {
     /// Delete a organization
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
         use db::schema::organization::dsl;
+        use db::schema::project;
 
         let (id, rcgen) = dsl::organization
             .filter(dsl::time_deleted.is_null())
@@ -185,8 +188,29 @@ impl DataStore {
                 )
             })?;
 
-        // TODO: Check Project table for current children once it is tracking
-        // that relationship
+        // Make sure there are no projects present within this organization.
+        let project_found = diesel_pool_result_optional(
+            project::dsl::project
+                .filter(project::dsl::organization_id.eq(id))
+                .filter(project::dsl::time_deleted.is_null())
+                .select(project::dsl::id)
+                .limit(1)
+                .first_async::<Uuid>(self.pool())
+                .await,
+        )
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ResourceType::Project,
+                LookupType::Other("by organization_id".to_string()),
+            )
+        })?;
+        if project_found.is_some() {
+            return Err(Error::InvalidRequest {
+                message: "organization to be deleted contains a project"
+                    .to_string(),
+            });
+        }
 
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::organization)
@@ -305,18 +329,26 @@ impl DataStore {
         use db::schema::project::dsl;
 
         let name = project.name().as_str().to_string();
-        diesel::insert_into(dsl::project)
-            .values(project)
-            .returning(Project::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+        let organization_id = project.organization_id;
+        Organization::insert_resource(
+            organization_id,
+            diesel::insert_into(dsl::project).values(project),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            InsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Organization,
+                lookup_type: LookupType::ById(organization_id),
+            },
+            InsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
-                    name.as_str(),
+                    &name,
                 )
-            })
+            }
+        })
     }
 
     /// Lookup a project by name.
