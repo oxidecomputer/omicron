@@ -265,7 +265,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_modes_external [ "spoof" ]
+            authn_modes_external = [ "spoof" ]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
