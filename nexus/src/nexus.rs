@@ -25,6 +25,8 @@ use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::OrganizationCreateParams;
+use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
@@ -340,6 +342,51 @@ impl Nexus {
                 Error::InternalError { message: e.to_string() }
             })
         })
+    }
+
+    /*
+     * Organizations
+     */
+
+    pub async fn organization_create(
+        &self,
+        new_organization: &OrganizationCreateParams,
+    ) -> CreateResult<db::model::Organization> {
+        let db_org = db::model::Organization::new(new_organization.clone());
+        self.db_datastore.organization_create(db_org).await
+    }
+
+    pub async fn organization_fetch(
+        &self,
+        name: &Name,
+    ) -> LookupResult<db::model::Organization> {
+        self.db_datastore.organization_fetch(name).await
+    }
+
+    pub async fn organizations_list_by_name(
+        &self,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Organization> {
+        self.db_datastore.organizations_list_by_name(pagparams).await
+    }
+
+    pub async fn organizations_list_by_id(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Organization> {
+        self.db_datastore.organizations_list_by_id(pagparams).await
+    }
+
+    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+        self.db_datastore.organization_delete(name).await
+    }
+
+    pub async fn organization_update(
+        &self,
+        name: &Name,
+        new_params: &OrganizationUpdateParams,
+    ) -> UpdateResult<db::model::Organization> {
+        self.db_datastore.organization_update(name, &new_params).await
     }
 
     /*

@@ -2,8 +2,8 @@
 
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    disk, instance, metricproducer, networkinterface, oximeter, project, rack,
-    sled, vpc, vpcsubnet,
+    disk, instance, metricproducer, networkinterface, organization, oximeter,
+    project, rack, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -69,6 +69,53 @@ impl Into<external::Sled> for Sled {
     fn into(self) -> external::Sled {
         let service_address = self.address();
         external::Sled { identity: self.identity(), service_address }
+    }
+}
+
+/// Describes an organization within the database.
+#[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+#[table_name = "organization"]
+pub struct Organization {
+    #[diesel(embed)]
+    identity: OrganizationIdentity,
+
+    /// child resource generation number, per RFD 192
+    pub rcgen: external::Generation,
+}
+
+impl Organization {
+    /// Creates a new database Organization object.
+    pub fn new(params: external::OrganizationCreateParams) -> Self {
+        let id = Uuid::new_v4();
+        Self {
+            identity: OrganizationIdentity::new(id, params.identity),
+            rcgen: external::Generation::new(),
+        }
+    }
+}
+
+impl Into<external::Organization> for Organization {
+    fn into(self) -> external::Organization {
+        external::Organization { identity: self.identity() }
+    }
+}
+
+/// Describes a set of updates for the [`Organization`] model.
+#[derive(AsChangeset)]
+#[table_name = "organization"]
+pub struct OrganizationUpdate {
+    pub name: Option<external::Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
+    fn from(params: external::OrganizationUpdateParams) -> Self {
+        Self {
+            name: params.identity.name,
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
     }
 }
 

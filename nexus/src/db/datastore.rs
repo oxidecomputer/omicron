@@ -45,6 +45,7 @@ use crate::db::{
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
+    model::{Organization, OrganizationUpdate},
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
@@ -119,6 +120,179 @@ impl DataStore {
                     e,
                     ResourceType::Sled,
                     LookupType::ById(id),
+                )
+            })
+    }
+
+    /// Create a organization
+    pub async fn organization_create(
+        &self,
+        organization: Organization,
+    ) -> CreateResult<Organization> {
+        use db::schema::organization::dsl;
+
+        let name = organization.name().as_str().to_string();
+        diesel::insert_into(dsl::organization)
+            .values(organization)
+            .returning(Organization::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Organization,
+                    name.as_str(),
+                )
+            })
+    }
+
+    /// Lookup a organization by name.
+    pub async fn organization_fetch(
+        &self,
+        name: &Name,
+    ) -> LookupResult<Organization> {
+        use db::schema::organization::dsl;
+        dsl::organization
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(name.clone()))
+            .select(Organization::as_select())
+            .first_async::<Organization>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
+    /// Delete a organization
+    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+        use db::schema::organization::dsl;
+
+        let (id, rcgen) = dsl::organization
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(name.clone()))
+            .select((dsl::id, dsl::rcgen))
+            .get_result_async::<(Uuid, Generation)>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })?;
+
+        // TODO: Check Project table for current children once it is tracking
+        // that relationship
+
+        let now = Utc::now();
+        let updated_rows = diesel::update(dsl::organization)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(id))
+            .filter(dsl::rcgen.eq(rcgen))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ById(id),
+                )
+            })?;
+
+        if updated_rows == 0 {
+            return Err(Error::InvalidRequest {
+                message: "deletion failed due to concurrent modification"
+                    .to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Look up the id for a organization based on its name
+    pub async fn organization_lookup_id_by_name(
+        &self,
+        name: &Name,
+    ) -> Result<Uuid, Error> {
+        use db::schema::organization::dsl;
+        dsl::organization
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(name.clone()))
+            .select(dsl::id)
+            .get_result_async::<Uuid>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
+    pub async fn organizations_list_by_id(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Organization> {
+        use db::schema::organization::dsl;
+        paginated(dsl::organization, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(Organization::as_select())
+            .load_async::<Organization>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn organizations_list_by_name(
+        &self,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<Organization> {
+        use db::schema::organization::dsl;
+        paginated(dsl::organization, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(Organization::as_select())
+            .load_async::<Organization>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    /// Updates a organization by name (clobbering update -- no etag)
+    pub async fn organization_update(
+        &self,
+        name: &Name,
+        update_params: &api::external::OrganizationUpdateParams,
+    ) -> UpdateResult<Organization> {
+        use db::schema::organization::dsl;
+        let updates: OrganizationUpdate = update_params.clone().into();
+
+        diesel::update(dsl::organization)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(name.clone()))
+            .set(updates)
+            .returning(Organization::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ByName(name.as_str().to_owned()),
                 )
             })
     }
