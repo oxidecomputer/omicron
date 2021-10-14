@@ -78,11 +78,12 @@
 //! --------------
 //!
 //! Data can be exported from a software component, and stored in the control plane's timeseries
-//! database. The easiest way to export data is to use a [`ProducerServer`]. Once running, any
-//! `Producer` may be registered with the server. The server will register itself for periodic data
-//! collection with the rest of the Oxide control plane. When its configurable API endpoint is hit,
-//! it will call the `produce` method of all registered producers, and submit the resulting data
-//! for storage in the timeseries database.
+//! database. The easiest way to export data is to use an
+//! [`oximeter_producer::Server`](../producer/struct.Server). Once running, any `Producer` may be
+//! registered with the server. The server will register itself for periodic data collection with
+//! the rest of the Oxide control plane. When its configurable API endpoint is hit, it will call
+//! `produce` method of all registered producers, and submit the resulting data for storage in the
+//! telemetry database.
 //!
 //! Keep in mind that, although the data may be collected on one interval, `Producer`s may opt to
 //! sample the data on any interval they choose. Consumers may wish to sample data every second,
@@ -102,18 +103,10 @@ pub use oximeter_macro_impl::*;
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
-pub mod collect;
-pub mod db;
 pub mod histogram;
-pub mod oximeter_server;
-pub mod producer_server;
-#[cfg(test)]
-pub(crate) mod test_util;
+pub mod test_util;
 pub mod traits;
 pub mod types;
-
-pub use oximeter_server::Oximeter;
-pub use producer_server::ProducerServer;
 pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,

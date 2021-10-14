@@ -1,23 +1,22 @@
 //! Types used to describe targets, metrics, and measurements.
 // Copyright 2021 Oxide Computer Company
 
+use crate::histogram;
+use crate::traits;
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use num_traits::{One, Zero};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
-
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::identities::{One, Zero};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
-
-use crate::histogram;
-use crate::traits;
 
 /// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
@@ -97,25 +96,6 @@ impl FieldValue {
             FieldType::Bool => {
                 Ok(FieldValue::Bool(s.parse().map_err(|_| make_err())?))
             }
-        }
-    }
-
-    // Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
-    pub(crate) fn as_db_str(&self) -> String {
-        match self {
-            FieldValue::Bool(ref inner) => {
-                format!("{}", if *inner { 1 } else { 0 })
-            }
-            FieldValue::I64(ref inner) => format!("{}", inner),
-            FieldValue::IpAddr(ref inner) => {
-                let addr = match inner {
-                    IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
-                    IpAddr::V6(ref v6) => *v6,
-                };
-                format!("'{}'", addr)
-            }
-            FieldValue::String(ref inner) => format!("'{}'", inner),
-            FieldValue::Uuid(ref inner) => format!("'{}'", inner),
         }
     }
 }
@@ -234,22 +214,6 @@ pub enum DatumType {
 }
 
 impl DatumType {
-    // Return the name of the type as it's referred to in the timeseries database. This is used
-    // internally to build the table containing samples of the corresponding datum type.
-    pub(crate) fn db_type_name(&self) -> &str {
-        match self {
-            DatumType::Bool => "bool",
-            DatumType::I64 => "i64",
-            DatumType::F64 => "f64",
-            DatumType::String => "string",
-            DatumType::Bytes => "bytes",
-            DatumType::CumulativeI64 => "cumulativei64",
-            DatumType::CumulativeF64 => "cumulativef64",
-            DatumType::HistogramI64 => "histogrami64",
-            DatumType::HistogramF64 => "histogramf64",
-        }
-    }
-
     /// Return `true` if this datum type is cumulative, and `false` otherwise.
     pub fn is_cumulative(&self) -> bool {
         matches!(
@@ -356,15 +320,12 @@ pub struct Measurement {
 }
 
 impl Measurement {
-    // Internal constructor. `timestamp` is assumed valid for `datum`.
-    pub(crate) fn with_timestamp(
-        timestamp: DateTime<Utc>,
-        datum: Datum,
-    ) -> Self {
+    /// Construct a `Measurement` with the given timestamp.
+    pub fn with_timestamp(timestamp: DateTime<Utc>, datum: Datum) -> Self {
         Self { timestamp, datum }
     }
 
-    /// Generate a new measurement from a `Datum`
+    /// Generate a new measurement from a `Datum`, using the current time as the timestamp
     pub fn new<D: Into<Datum>>(datum: D) -> Measurement {
         Measurement { timestamp: Utc::now(), datum: datum.into() }
     }
@@ -398,33 +359,13 @@ pub enum Error {
     #[error("Metric data error: {0}")]
     DatumError(String),
 
-    /// An error occured running a `ProducerServer`
-    #[error("Error running metric server: {0}")]
-    ProducerServer(String),
-
     /// An error running an `Oximeter` server
     #[error("Error running oximeter: {0}")]
     OximeterServer(String),
 
-    /// An error interacting with the timeseries database
-    #[error("Error interacting with timeseries database: {0}")]
-    Database(String),
-
-    /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
-    SchemaMismatch {
-        name: String,
-        expected: BTreeMap<String, FieldType>,
-        actual: BTreeMap<String, FieldType>,
-    },
-
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
-
-    /// An error querying or filtering data
-    #[error("Invalid query or data filter: {0}")]
-    QueryError(String),
 
     /// An error parsing a field or measurement from a string.
     #[error("String '{0}' could not be parsed as type '{1}'")]
@@ -438,23 +379,17 @@ pub struct Cumulative<T> {
     value: T,
 }
 
-pub trait CumulativeType:
-    traits::Datum + Add + AddAssign + Copy + One + Zero
-{
-}
-impl CumulativeType for i64 {}
-impl CumulativeType for f64 {}
-
 impl<T> Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
-    // Internal constructor
-    pub(crate) fn with_start_time(start_time: DateTime<Utc>, value: T) -> Self {
+    /// Construct a new counter with the given start time.
+    pub fn with_start_time(start_time: DateTime<Utc>, value: T) -> Self {
         Self { start_time, value }
     }
 
-    /// Construct a new counter with the given initial value.
+    /// Construct a new counter with the given initial value, using the current time as the start
+    /// time.
     pub fn new(value: T) -> Self {
         Self { start_time: Utc::now(), value }
     }
@@ -477,7 +412,7 @@ where
 
 impl<T> Add<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     type Output = Self;
 
@@ -488,7 +423,7 @@ where
 
 impl<T> AddAssign<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn add_assign(&mut self, other: T) {
         self.value += other;
@@ -497,7 +432,7 @@ where
 
 impl<T> Default for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn default() -> Self {
         Self { start_time: Utc::now(), value: Zero::zero() }
@@ -506,7 +441,7 @@ where
 
 impl<T> From<T> for Cumulative<T>
 where
-    T: CumulativeType,
+    T: traits::Cumulative,
 {
     fn from(value: T) -> Cumulative<T> {
         Cumulative::new(value)
@@ -600,7 +535,6 @@ impl Sample {
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
-        D: traits::Datum + Into<Datum>,
     {
         Self {
             timeseries_name: format!("{}:{}", target.name(), metric.name()),
@@ -637,6 +571,62 @@ impl Sample {
     /// Return the fields of this sample's metric.
     pub fn metric_fields(&self) -> &Vec<Field> {
         &self.metric.fields
+    }
+}
+
+type ProducerList = Vec<Box<dyn crate::Producer>>;
+pub type ProducerResults = Vec<Result<BTreeSet<Sample>, Error>>;
+
+/// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
+#[derive(Debug, Clone)]
+pub struct ProducerRegistry {
+    producers: Arc<Mutex<ProducerList>>,
+    producer_id: Uuid,
+}
+
+impl Default for ProducerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProducerRegistry {
+    /// Construct a new `ProducerRegistry`.
+    pub fn new() -> Self {
+        Self::with_id(Uuid::new_v4())
+    }
+
+    /// Construct a new `ProducerRegistry` with the given producer ID.
+    pub fn with_id(producer_id: Uuid) -> Self {
+        Self { producers: Arc::new(Mutex::new(vec![])), producer_id }
+    }
+
+    /// Add a new [`Producer`] object to the registry.
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    where
+        P: crate::Producer,
+    {
+        self.producers.lock().unwrap().push(Box::new(producer));
+        Ok(())
+    }
+
+    /// Collect available samples from all registered producers.
+    ///
+    /// This method returns a vector of results, one from each producer. If the producer generates
+    /// an error, that's propagated here. Successfully produced samples are returned in a set,
+    /// ordered by the [`types::Sample::cmp`] method.
+    pub fn collect(&self) -> ProducerResults {
+        let mut producers = self.producers.lock().unwrap();
+        let mut results = Vec::with_capacity(producers.len());
+        for producer in producers.iter_mut() {
+            results.push(producer.produce().map(|samples| samples.collect()));
+        }
+        results
+    }
+
+    /// Return the producer ID associated with this registry.
+    pub fn producer_id(&self) -> Uuid {
+        self.producer_id
     }
 }
 

@@ -2,10 +2,13 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::histogram::Histogram;
-use crate::types::{Cumulative, Measurement, Sample};
+use crate::types;
+use crate::types::{Measurement, Sample};
 use crate::{DatumType, Error, Field, FieldType, FieldValue};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use num_traits::{One, Zero};
+use std::ops::{Add, AddAssign};
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -233,18 +236,18 @@ impl Datum for Bytes {
     }
 }
 
-impl Datum for Cumulative<i64> {
+impl Datum for types::Cumulative<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Cumulative::start_time(&self))
+        Some(types::Cumulative::start_time(&self))
     }
     fn datum_type(&self) -> DatumType {
         DatumType::CumulativeI64
     }
 }
 
-impl Datum for Cumulative<f64> {
+impl Datum for types::Cumulative<f64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Cumulative::start_time(&self))
+        Some(types::Cumulative::start_time(&self))
     }
     fn datum_type(&self) -> DatumType {
         DatumType::CumulativeF64
@@ -253,7 +256,7 @@ impl Datum for Cumulative<f64> {
 
 impl Datum for Histogram<i64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Histogram::start_time(&self))
+        Some(self.start_time())
     }
     fn datum_type(&self) -> DatumType {
         DatumType::HistogramI64
@@ -262,12 +265,28 @@ impl Datum for Histogram<i64> {
 
 impl Datum for Histogram<f64> {
     fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(Histogram::start_time(&self))
+        Some(self.start_time())
     }
     fn datum_type(&self) -> DatumType {
         DatumType::HistogramF64
     }
 }
+
+/// A trait identifying types used in [`types::Cumulative`] data.
+pub trait Cumulative: Datum + Add + AddAssign + Copy + One + Zero {}
+
+impl Cumulative for i64 {}
+impl Cumulative for f64 {}
+
+/// A trait identifying types used as gauges
+pub trait Gauge: Datum {}
+
+impl Gauge for String {}
+impl Gauge for bool {}
+impl Gauge for i64 {}
+impl Gauge for f64 {}
+
+pub use crate::histogram::HistogramSupport;
 
 /// A trait for generating samples from a target and metric.
 ///
@@ -288,14 +307,14 @@ impl Datum for Histogram<f64> {
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
 /// // The `Server` target identifies some HTTP service being monitored.
-/// #[derive(Clone, Target)]
+/// #[derive(Clone, Debug, Target)]
 /// pub struct Server {
 ///     pub name: String,
 /// }
 ///
 /// // The `RequestCount` metric describes the cumulative count of requests the server has
 /// // organized by their routes, the HTTP method, and the response code.
-/// #[derive(Clone, Metric)]
+/// #[derive(Clone, Debug, Metric)]
 /// pub struct RequestCount {
 ///     route: String,
 ///     method: String,
@@ -311,6 +330,7 @@ impl Datum for Histogram<f64> {
 ///
 /// // The `RequestCounter` type implements the `Producer` trait, to generate samples of the
 /// // target/metric being monitored.
+/// #[derive(Debug, Clone)]
 /// pub struct RequestCounter {
 ///     target: Server,
 ///     metric: RequestCount,
@@ -370,7 +390,7 @@ impl Datum for Histogram<f64> {
 ///     }
 /// }
 /// ```
-pub trait Producer {
+pub trait Producer: Send + Sync + std::fmt::Debug + 'static {
     /// Return the currently available samples from the monitored targets and metrics.
     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error>;
 }
@@ -384,19 +404,20 @@ mod tests {
     };
     use std::boxed::Box;
 
-    #[derive(Clone, Target)]
+    #[derive(Debug, Clone, Target)]
     struct Targ {
         pub good: bool,
         pub id: i64,
     }
 
-    #[derive(Clone, Metric)]
+    #[derive(Debug, Clone, Metric)]
     struct Met {
         good: bool,
         id: i64,
         datum: i64,
     }
 
+    #[derive(Debug, Clone)]
     struct Prod {
         pub target: Targ,
         pub metric: Met,
