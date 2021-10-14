@@ -19,7 +19,7 @@ pub struct ServerContext {
     /** debug log */
     pub log: Logger,
     /** authenticator for external HTTP requests */
-    pub http_authn: authn::HttpAuthn,
+    pub external_authn: authn::external::Authenticator,
 }
 
 impl ServerContext {
@@ -33,7 +33,8 @@ impl ServerContext {
         pool: db::Pool,
         config: &config::Config,
     ) -> Arc<ServerContext> {
-        let http_authn = authn::HttpAuthn::new(&config.authn_modes_external);
+        let external_authn =
+            authn::external::Authenticator::new(&config.authn_modes_external);
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
@@ -42,7 +43,7 @@ impl ServerContext {
                 config,
             ),
             log,
-            http_authn,
+            external_authn,
         })
     }
 }

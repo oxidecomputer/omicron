@@ -1,9 +1,27 @@
+//! Authentication facilities
 //!
-//! Facilities related to external authentication
-//! XXX Explain the generic vs. HTTP-specific stuff.
+//! In the limit, we'll want all operations in Nexus to have an associated
+//! authentication/authorization context that describes who (or what) is doing
+//! the operation and what privileges they have.  
 //!
+//! This module includes generic, HTTP-agnostic facilities for representing who
+//! or what is authenticated and why an authentication attempt failed.
+//!
+//! The [`external`] submodule provides an [`external::Authenticator`] interface
+//! that will eventually authenticate requests using standard external
+//! authentication mechanisms like HTTP signatures or OAuth.
+//!
+//! In the future, we can add other submodules for other kinds of
+//! authentication.  For example, if we use macaroons for internal authn, we
+//! could have a different `InternalHttpnAuthenticator` that validates the
+//! macaroons.   Other operations may not be associated with HTTP requests at
+//! all (like saga recovery, health checking, or fault response), but we may
+//! still want them to carry information about what's authenticated and what
+//! privileges it has.  These submodules might provide different mechanisms for
+//! authentication, but they'd all produce the same [`Context`] struct.
 
-pub mod http;
+pub mod external;
+
 use uuid::Uuid;
 
 /// Describes how the actor performing the current operation is authenticated
@@ -14,39 +32,126 @@ use uuid::Uuid;
 pub struct Context {
     /// Describes whether the user is authenticated and provides more
     /// information that's specific to whether they're authenticated or not
-    pub kind: Kind,
+    kind: Kind,
 
     /// List of authentication modes tried
     ///
-    /// If `kind` is `Unauthenticated(UnauthDetails::NotAttempted)`, then none
-    /// of these modes found any credentials to verify.  Otherwise, whether
-    /// authentiation succeeded or failed, it was the last mode in this list
-    /// that was responsible for the final determination.
-    pub modes_tried: Vec<String>,
+    /// If `kind` is `Kind::Unauthenticated`, then none of these modes found any
+    /// credentials to verify.  Otherwise, whether authentiation succeeded or
+    /// failed, it was the last mode in this list that was responsible for the
+    /// final determination.
+    modes_tried: Vec<String>,
+}
+
+impl Context {
+    /// Returns the authenticated actor, if any
+    pub fn actor(&self) -> Option<&Actor> {
+        match &self.kind {
+            Kind::Unauthenticated => None,
+            Kind::Authenticated(Details { actor }) => Some(actor),
+        }
+    }
 }
 
 /// Describes whether the user is authenticated and provides more information
-/// that's specific to whether they're authenticated or not
+/// that's specific to whether they're authenticated (or not)
 #[derive(Debug)]
 pub enum Kind {
     /// Client successfully authenticated
-    Authenticated(AuthnDetails),
+    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
 }
 
-/// Describes how the client authenticated
-// TODO Might this want to have a list of active roles?
+/// Describes the actor that was authenticated
+///
+/// This could eventually include other information used during authorization,
+/// like a remote IP, the time of authentication, etc.
 #[derive(Debug)]
-pub struct AuthnDetails {
+pub struct Details {
     /// the actor performing the request
-    pub actor: Actor,
+    actor: Actor,
 }
 
-/// Describes who is performing an operation
-// TODO: This will probably wind up being an enum of: user | service
+/// Who is performing an operation
 #[derive(Debug)]
 pub struct Actor(pub Uuid);
 
-pub use self::http::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-pub use self::http::HttpAuthn;
+/// Describes why authentication failed
+///
+/// This should usually *not* be exposed to end users because it can leak
+/// information that makes it easier to exploit the system.  There are two
+/// purposes for these codes:
+///
+/// 1. So that we have specific information in the logs (and maybe in the future
+///    in user-visible diagnostic interfaces) for engineers or support to
+///    diagnose the authentication failure after it's happened.
+///
+/// 2. To facilitate conversion to the appropriate [`dropshot::HttpError`] error
+///    type.  This will generally have a lot less information to avoid leaking
+///    information to attackers, but it's still useful to distinguish between
+///    400 and 401/403, for example.
+///
+#[derive(Debug, thiserror::Error)]
+#[error("authentication failed (tried modes: {modes_tried:?})")]
+pub struct Error {
+    /// list of authentication modes that were tried
+    modes_tried: Vec<String>,
+    /// why authentication failed
+    #[source]
+    reason: Reason,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Reason {
+    /// The authn credentials are syntactically invalid
+    #[error("bad authentication credentials: {source:#}")]
+    BadFormat {
+        #[source]
+        source: anyhow::Error,
+    },
+
+    /// We did not find the actor that was attempting to authenticate
+    #[allow(dead_code)]
+    #[error("unknown actor {actor:?}")]
+    UnknownActor { actor: String },
+
+    /// The credentials were syntactically valid, but semantically invalid
+    /// (e.g., a cryptographic signature did not match)
+    #[allow(dead_code)]
+    #[error("bad credentials: {source:#}")]
+    BadCredentials {
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+// XXX need a test that we don't leak information
+impl From<Error> for dropshot::HttpError {
+    fn from(authn_error: Error) -> Self {
+        match &authn_error.reason {
+            // TODO-security Does this leak too much information, to say that
+            // the header itself was malformed?  It doesn't feel like it, and as
+            // a user it's _really_ helpful to know if you've just, like,
+            // encoded it wrong.
+            e @ Reason::BadFormat { .. } => {
+                dropshot::HttpError::for_bad_request(None, format!("{:#}", e))
+            }
+            // The HTTP short summary of this status code is "Unauthorized", but
+            // the code describes an authentication failure, not an
+            // authorization one.
+            // TODO But is that the right status code to use here?
+            // TODO-security Under what conditions should this be a 404
+            // instead?
+            // TODO Add a WWW-Authenticate header?
+            Reason::UnknownActor { .. } | Reason::BadCredentials { .. } => {
+                dropshot::HttpError {
+                    status_code: http::StatusCode::UNAUTHORIZED,
+                    error_code: None,
+                    external_message: String::from("authentication failed"),
+                    internal_message: format!("{:#}", authn_error),
+                }
+            }
+        }
+    }
+}

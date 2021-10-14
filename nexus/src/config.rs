@@ -33,7 +33,7 @@ pub struct Config {
     /** Database parameters */
     pub database: db::Config,
     /** allowed authentication modes for external HTTP server */
-    pub authn_modes_external: Vec<authn::http::HttpAuthnModeName>,
+    pub authn_modes_external: Vec<authn::external::AuthnModeId>,
 }
 
 #[derive(Debug)]
@@ -287,7 +287,7 @@ mod test {
 
         assert_eq!(
             config.authn_modes_external,
-            vec![authn::http::HttpAuthnModeName::Spoof],
+            vec![authn::external::AuthnModeId::Spoof],
         );
     }
 

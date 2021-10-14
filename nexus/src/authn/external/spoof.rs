@@ -1,28 +1,28 @@
-//! XXX
-
-use super::ErrorKind;
+use super::super::Details;
+use super::AuthnModeId;
 use super::HttpAuthnMode;
-use super::HttpAuthnModeName;
 use super::ModeResult;
+use super::Reason;
 use crate::authn::Actor;
-use crate::authn::AuthnDetails;
 use crate::ServerContext;
 use anyhow::Context;
 use dropshot::RequestContext;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Header used for "spoof" authentication
 pub const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &str = "oxide-authn-spoof";
 
 /// Implements a (test-only) authentication mode where the client simply
-/// provides the actor information in a custom header and we blindly trust it.
-/// This is (obviously) only used for testing.
+/// provides the actor information in a custom header
+/// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we blindly trust it.  This is
+/// (obviously) only used for testing.
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
 impl HttpAuthnMode for HttpAuthnSpoof {
-    fn name(&self) -> HttpAuthnModeName {
-        HttpAuthnModeName::Spoof
+    fn name(&self) -> AuthnModeId {
+        AuthnModeId::Spoof
     }
 
     fn authn(
@@ -47,10 +47,10 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> ModeResult {
                 });
             match r {
                 Ok(id) => {
-                    ModeResult::Authenticated(AuthnDetails { actor: Actor(id) })
+                    ModeResult::Authenticated(Details { actor: Actor(id) })
                 }
                 Err(error) => {
-                    ModeResult::Failed(ErrorKind::BadFormat { source: error })
+                    ModeResult::Failed(Reason::BadFormat { source: error })
                 }
             }
         }
@@ -59,11 +59,11 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> ModeResult {
 
 #[cfg(test)]
 mod test {
+    use super::super::super::Details;
     use super::super::ModeResult;
     use super::authn_spoof;
     use crate::authn;
     use authn::Actor;
-    use authn::AuthnDetails;
     use uuid::Uuid;
 
     #[test]
@@ -77,7 +77,7 @@ mod test {
         assert!(matches!(
             success_case,
             ModeResult::Authenticated(
-                AuthnDetails { actor: Actor(i) }
+                Details { actor: Actor(i) }
             ) if i == test_uuid
         ));
     }

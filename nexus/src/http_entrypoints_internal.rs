@@ -180,21 +180,16 @@ async fn cpapi_whoami_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<dropshot::HttpResponseOk<Whoami>, HttpError> {
     let apictx = rqctx.context();
-    let authn = apictx.http_authn.authn_request(&rqctx).await?;
-    let modes_tried = authn.modes_tried;
-    use crate::authn::*;
-    let (authenticated, actor) = match authn.kind {
-        Kind::Authenticated(AuthnDetails {
-            actor: Actor(id),
-        }) => (true, Some(id.to_string())),
-        Kind::Unauthenticated => (false, None),
-    };
-    Ok(dropshot::HttpResponseOk(Whoami { modes_tried, authenticated, actor }))
+    let authn = apictx.external_authn.authn_request(&rqctx).await?;
+    let actor = authn.actor().map(|a| a.0.to_string());
+    let authenticated = actor.is_some();
+    let details = format!("{:?}", authn);
+    Ok(dropshot::HttpResponseOk(Whoami { authenticated, actor, details }))
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
 struct Whoami {
-    modes_tried: Vec<String>,
     authenticated: bool,
     actor: Option<String>,
+    details: String,
 }
