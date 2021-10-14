@@ -104,6 +104,8 @@ pub struct DataPageParams<'a, NameType> {
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
     /// Maps the marker type to a new type.
+    ///
+    /// Equivalent to [std::option::Option::map], because that's what it calls.
     pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<'a, OtherName>
     where
         F: FnOnce(&'a NameType) -> &'a OtherName,
