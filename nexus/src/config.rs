@@ -32,8 +32,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
-    /** allowed authentication modes for external HTTP server */
-    pub authn_modes_external: Vec<authn::external::AuthnModeId>,
+    /** allowed authentication schemes for external HTTP server */
+    pub authn_schemes_external: Vec<authn::external::AuthnSchemeId>,
 }
 
 #[derive(Debug)]
@@ -213,7 +213,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_modes_external = []
+            authn_schemes_external = []
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -235,7 +235,7 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                authn_modes_external: Vec::new(),
+                authn_schemes_external: Vec::new(),
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
@@ -265,7 +265,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_modes_external = [ "spoof" ]
+            authn_schemes_external = [ "spoof" ]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -286,18 +286,18 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            config.authn_modes_external,
-            vec![authn::external::AuthnModeId::Spoof],
+            config.authn_schemes_external,
+            vec![authn::external::AuthnSchemeId::Spoof],
         );
     }
 
     #[test]
-    fn test_bad_authn_modes() {
+    fn test_bad_authn_schemes() {
         let error = read_config(
-            "bad authn_modes_external",
+            "bad authn_schemes_external",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_modes_external = ["trust-me"]
+            authn_schemes_external = ["trust-me"]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -317,7 +317,7 @@ mod test {
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert!(error.to_string().starts_with(
                 "unknown variant `trust-me`, expected `spoof` for key \
-                `authn_modes_external`"
+                `authn_schemes_external`"
             ));
         } else {
             panic!(

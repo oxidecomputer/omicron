@@ -34,7 +34,7 @@ impl ServerContext {
         config: &config::Config,
     ) -> Arc<ServerContext> {
         let external_authn =
-            authn::external::Authenticator::new(&config.authn_modes_external);
+            authn::external::Authenticator::new(&config.authn_schemes_external);
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,

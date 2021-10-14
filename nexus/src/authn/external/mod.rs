@@ -1,5 +1,4 @@
 //! Authentication for requests to the external HTTP API
-//! XXX mode -> scheme?
 
 use crate::authn;
 use crate::ServerContext;
@@ -17,30 +16,30 @@ pub use spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 
 lazy_static! {
     #[rustfmt::skip]
-    static ref EXTERNAL_AUTHN_MODES: Vec<(
-        AuthnModeId,
-        Arc<dyn HttpAuthnMode>
-    )> = vec![(AuthnModeId::Spoof, Arc::new(spoof::HttpAuthnSpoof)),];
+    static ref EXTERNAL_AUTHN_SCHEMES: Vec<(
+        AuthnSchemeId,
+        Arc<dyn HttpAuthnScheme>
+    )> = vec![(AuthnSchemeId::Spoof, Arc::new(spoof::HttpAuthnSpoof)),];
 }
 
-/// Authenticates incoming HTTP requests using modes intended for use by the
+/// Authenticates incoming HTTP requests using schemes intended for use by the
 /// external API
 ///
 /// (This will eventually support something like HTTP signatures and OAuth.  For
-/// now, only a dummy mode is supported.)
+/// now, only a dummy scheme is supported.)
 pub struct Authenticator {
-    all_modes: Vec<(AuthnModeId, Arc<dyn HttpAuthnMode>)>,
-    allowed_modes: BTreeSet<AuthnModeId>,
+    all_schemes: Vec<(AuthnSchemeId, Arc<dyn HttpAuthnScheme>)>,
+    allowed_schemes: BTreeSet<AuthnSchemeId>,
 }
 
 impl Authenticator {
-    /// Build a new authentiator that allows only the specified modes
-    pub fn new<'a, I: IntoIterator<Item = &'a AuthnModeId>>(
-        allowed_modes: I,
+    /// Build a new authentiator that allows only the specified schemes
+    pub fn new<'a, I: IntoIterator<Item = &'a AuthnSchemeId>>(
+        allowed_schemes: I,
     ) -> Authenticator {
         Authenticator {
-            all_modes: EXTERNAL_AUTHN_MODES.clone(),
-            allowed_modes: allowed_modes.into_iter().map(|n| *n).collect(),
+            all_schemes: EXTERNAL_AUTHN_SCHEMES.clone(),
+            allowed_schemes: allowed_schemes.into_iter().map(|n| *n).collect(),
         }
     }
 
@@ -65,49 +64,53 @@ impl Authenticator {
         let log = &rqctx.log;
         let request = rqctx.request.lock().await;
 
-        let mut modes_tried = Vec::with_capacity(self.allowed_modes.len());
-        for (mode_name, mode) in &self.all_modes {
-            // XXX Extra quotes here
-            let mode_name_str = serde_json::to_string(&mode_name).unwrap();
-            if !self.allowed_modes.contains(mode_name) {
+        let mut schemes_tried = Vec::with_capacity(self.allowed_schemes.len());
+        for (scheme_id, scheme_impl) in &self.all_schemes {
+            if !self.allowed_schemes.contains(scheme_id) {
                 trace!(
                     log,
-                    "authn_http: skipping {:?} (not allowed by config)",
-                    mode_name_str
+                    "authn: skipping scheme {:?} (not allowed by config)",
+                    scheme_id
                 );
                 continue;
             }
 
-            trace!(log, "authn_http: trying {:?}", mode_name_str);
-            modes_tried.push(mode_name_str);
-            let result = mode.authn(rqctx, &request);
+            trace!(log, "authn: trying {:?}", scheme_id);
+            schemes_tried.push(format!("{}", scheme_id));
+            let result = scheme_impl.authn(rqctx, &request);
             match result {
                 // TODO-security If the user explicitly failed one
-                // authentication mode (i.e., a signature that didn't match, NOT
-                // that they simply didn't try), should we try the others?
-                ModeResult::Failed(reason) => {
-                    return Err(authn::Error { reason, modes_tried })
-                }
-                ModeResult::Authenticated(details) => {
-                    return Ok(authn::Context {
-                        kind: authn::Kind::Authenticated(details),
-                        modes_tried,
+                // authentication scheme (i.e., a signature that didn't match,
+                // NOT that they simply didn't try), should we try the others?
+                SchemeResult::Failed(reason) => {
+                    return Err(authn::Error {
+                        reason,
+                        schemes_tried,
                     })
                 }
-                ModeResult::NotRequested => (),
+                SchemeResult::Authenticated(details) => {
+                    return Ok(authn::Context {
+                        kind: authn::Kind::Authenticated(details),
+                        schemes_tried,
+                    })
+                }
+                SchemeResult::NotRequested => (),
             }
         }
 
-        Ok(authn::Context { kind: authn::Kind::Unauthenticated, modes_tried })
+        Ok(authn::Context {
+            kind: authn::Kind::Unauthenticated,
+            schemes_tried,
+        })
     }
 }
 
-/// List of all supported external authn modes
+/// List of all supported external authn schemes
 ///
 /// Besides being useful in defining the configuration file, having a type that
-/// describes all the supported modes makes it easier for us to record log
-/// messages and other structured introspection describing which modes are
-/// enabled, which modes were attempted for a request, and so on.
+/// describes all the supported schemes makes it easier for us to record log
+/// messages and other structured introspection describing which schemes are
+/// enabled, which schemes were attempted for a request, and so on.
 #[derive(
     Clone,
     Copy,
@@ -119,34 +122,34 @@ impl Authenticator {
     PartialOrd,
     SerializeDisplay,
 )]
-pub enum AuthnModeId {
+pub enum AuthnSchemeId {
     /// See [`HttpAuthnSpoof'].
     Spoof,
 }
 
-impl std::str::FromStr for AuthnModeId {
+impl std::str::FromStr for AuthnSchemeId {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "spoof" => Ok(AuthnModeId::Spoof),
-            _ => Err(anyhow!("unsupported authn mode: {:?}", s)),
+            "spoof" => Ok(AuthnSchemeId::Spoof),
+            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
 }
 
-impl std::fmt::Display for AuthnModeId {
+impl std::fmt::Display for AuthnSchemeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            AuthnModeId::Spoof => "spoof",
+            AuthnSchemeId::Spoof => "spoof",
         })
     }
 }
 
-/// Result returned by a particular authentication mode
+/// Result returned by a particular authentication scheme
 #[derive(Debug)]
-enum ModeResult {
-    /// The client is not trying to use this authn mode
+enum SchemeResult {
+    /// The client is not trying to use this authn scheme
     NotRequested,
     /// The client successfully authenticated
     Authenticated(super::Details),
@@ -154,17 +157,17 @@ enum ModeResult {
     Failed(Reason),
 }
 
-/// Implements a particular HTTP authentication mode
-trait HttpAuthnMode: std::fmt::Debug + Send + Sync {
-    /// Returns the (unique) name for this mode (for observability)
-    fn name(&self) -> AuthnModeId;
+/// Implements a particular HTTP authentication scheme
+trait HttpAuthnScheme: std::fmt::Debug + Send + Sync {
+    /// Returns the (unique) name for this scheme (for observability)
+    fn name(&self) -> AuthnSchemeId;
 
     /// Locate credentials in the HTTP request and attempt to verify them
     fn authn(
         &self,
         rqctx: &RequestContext<Arc<ServerContext>>,
         request: &http::Request<hyper::Body>,
-    ) -> ModeResult;
+    ) -> SchemeResult;
 }
 
 #[cfg(test)]

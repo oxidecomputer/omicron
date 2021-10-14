@@ -92,15 +92,7 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
-
-        // XXX automated tests for all this.  Will need a way to override the
-        // "insecure" config for Nexus.
-        let apictx = ServerContext::new(
-            rack_id,
-            ctxlog,
-            pool,
-            &config
-        );
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(

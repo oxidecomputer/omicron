@@ -5,7 +5,7 @@
 # Identifier for this instance of Nexus.
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
-authn_modes_external = []
+authn_schemes_external = []
 
 #
 # NOTE: for the test suite, the database URL will be replaced with one

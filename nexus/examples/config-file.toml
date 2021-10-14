@@ -4,7 +4,7 @@
 
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
-authn_modes_external = []
+authn_schemes_external = []
 
 [database]
 # URL for connecting to the database

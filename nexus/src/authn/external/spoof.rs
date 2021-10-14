@@ -1,7 +1,7 @@
 use super::super::Details;
-use super::AuthnModeId;
-use super::HttpAuthnMode;
-use super::ModeResult;
+use super::AuthnSchemeId;
+use super::HttpAuthnScheme;
+use super::SchemeResult;
 use super::Reason;
 use crate::authn::Actor;
 use crate::ServerContext;
@@ -13,31 +13,31 @@ use uuid::Uuid;
 /// Header used for "spoof" authentication
 pub const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &str = "oxide-authn-spoof";
 
-/// Implements a (test-only) authentication mode where the client simply
+/// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom header
 /// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we blindly trust it.  This is
 /// (obviously) only used for testing.
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
-impl HttpAuthnMode for HttpAuthnSpoof {
-    fn name(&self) -> AuthnModeId {
-        AuthnModeId::Spoof
+impl HttpAuthnScheme for HttpAuthnSpoof {
+    fn name(&self) -> AuthnSchemeId {
+        AuthnSchemeId::Spoof
     }
 
     fn authn(
         &self,
         _rqctx: &RequestContext<Arc<ServerContext>>,
         request: &http::Request<hyper::Body>,
-    ) -> ModeResult {
+    ) -> SchemeResult {
         let headers = request.headers();
         authn_spoof(headers.get(HTTP_HEADER_OXIDE_AUTHN_SPOOF))
     }
 }
 
-fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> ModeResult {
+fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> SchemeResult {
     match raw_value {
-        None => ModeResult::NotRequested,
+        None => SchemeResult::NotRequested,
         Some(raw_value) => {
             let r = raw_value
                 .to_str()
@@ -47,10 +47,10 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> ModeResult {
                 });
             match r {
                 Ok(id) => {
-                    ModeResult::Authenticated(Details { actor: Actor(id) })
+                    SchemeResult::Authenticated(Details { actor: Actor(id) })
                 }
                 Err(error) => {
-                    ModeResult::Failed(Reason::BadFormat { source: error })
+                    SchemeResult::Failed(Reason::BadFormat { source: error })
                 }
             }
         }
@@ -60,7 +60,7 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> ModeResult {
 #[cfg(test)]
 mod test {
     use super::super::super::Details;
-    use super::super::ModeResult;
+    use super::super::SchemeResult;
     use super::authn_spoof;
     use crate::authn;
     use authn::Actor;
@@ -76,7 +76,7 @@ mod test {
         let success_case = authn_spoof(Some(&test_header));
         assert!(matches!(
             success_case,
-            ModeResult::Authenticated(
+            SchemeResult::Authenticated(
                 Details { actor: Actor(i) }
             ) if i == test_uuid
         ));
@@ -85,7 +85,7 @@ mod test {
     #[test]
     fn test_spoof_header_missing() {
         // The client provided nothing (with header enabled and disabled)
-        assert!(matches!(authn_spoof(None), ModeResult::NotRequested));
+        assert!(matches!(authn_spoof(None), SchemeResult::NotRequested));
     }
 
     #[test]
@@ -102,7 +102,7 @@ mod test {
             let test_header = http::HeaderValue::from_bytes(input)
                 .expect("test case header value was not a valid HTTP header");
             let result = authn_spoof(Some(&test_header));
-            if let ModeResult::Failed(error) = result {
+            if let SchemeResult::Failed(error) = result {
                 assert!(format!("{:#}", error).starts_with(
                     "bad authentication header: parsing header value"
                 ));

@@ -34,13 +34,13 @@ pub struct Context {
     /// information that's specific to whether they're authenticated or not
     kind: Kind,
 
-    /// List of authentication modes tried
+    /// List of authentication schemes tried
     ///
-    /// If `kind` is `Kind::Unauthenticated`, then none of these modes found any
-    /// credentials to verify.  Otherwise, whether authentiation succeeded or
-    /// failed, it was the last mode in this list that was responsible for the
-    /// final determination.
-    modes_tried: Vec<String>,
+    /// If `kind` is `Kind::Unauthenticated`, then none of these schemes found
+    /// any credentials to verify.  Otherwise, whether authentiation succeeded
+    /// or failed, it was the last scheme in this list that was responsible for
+    /// the final determination.
+    schemes_tried: Vec<String>,
 }
 
 impl Context {
@@ -93,10 +93,10 @@ pub struct Actor(pub Uuid);
 ///    400 and 401/403, for example.
 ///
 #[derive(Debug, thiserror::Error)]
-#[error("authentication failed (tried modes: {modes_tried:?})")]
+#[error("authentication failed (tried schemes: {schemes_tried:?})")]
 pub struct Error {
-    /// list of authentication modes that were tried
-    modes_tried: Vec<String>,
+    /// list of authentication schemes that were tried
+    schemes_tried: Vec<String>,
     /// why authentication failed
     #[source]
     reason: Reason,
