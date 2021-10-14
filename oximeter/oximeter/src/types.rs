@@ -1,25 +1,24 @@
 //! Types used to describe targets, metrics, and measurements.
 // Copyright 2021 Oxide Computer Company
 
+use crate::histogram;
+use crate::traits;
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use num_traits::{One, Zero};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
-
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::identities::{One, Zero};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::histogram;
-use crate::traits;
-
-/// The `FieldType` identifies the type of a target or metric field.
+/// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
@@ -36,6 +35,22 @@ impl std::fmt::Display for FieldType {
         write!(f, "{:?}", self)
     }
 }
+
+macro_rules! impl_field_type_from {
+    ($ty:ty, $variant:path) => {
+        impl From<&$ty> for FieldType {
+            fn from(_: &$ty) -> FieldType {
+                $variant
+            }
+        }
+    };
+}
+
+impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { i64, FieldType::I64 }
+impl_field_type_from! { IpAddr, FieldType::IpAddr }
+impl_field_type_from! { Uuid, FieldType::Uuid }
+impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
@@ -81,25 +96,6 @@ impl FieldValue {
             FieldType::Bool => {
                 Ok(FieldValue::Bool(s.parse().map_err(|_| make_err())?))
             }
-        }
-    }
-
-    // Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
-    pub(crate) fn as_db_str(&self) -> String {
-        match self {
-            FieldValue::Bool(ref inner) => {
-                format!("{}", if *inner { 1 } else { 0 })
-            }
-            FieldValue::I64(ref inner) => format!("{}", inner),
-            FieldValue::IpAddr(ref inner) => {
-                let addr = match inner {
-                    IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
-                    IpAddr::V6(ref v6) => *v6,
-                };
-                format!("'{}'", addr)
-            }
-            FieldValue::String(ref inner) => format!("'{}'", inner),
-            FieldValue::Uuid(ref inner) => format!("'{}'", inner),
         }
     }
 }
@@ -191,7 +187,7 @@ impl Field {
     }
 }
 
-/// The data type of an individual measurement of a metric.
+/// The type of an individual datum of a metric.
 #[derive(
     Clone,
     Copy,
@@ -205,7 +201,7 @@ impl Field {
     Serialize,
     Deserialize,
 )]
-pub enum MeasurementType {
+pub enum DatumType {
     Bool,
     I64,
     F64,
@@ -217,27 +213,22 @@ pub enum MeasurementType {
     HistogramF64,
 }
 
-impl MeasurementType {
-    // Return the name of the type as it's referred to in the timeseries database. This is used
-    // internally to build the table containing samples of the corresponding measurement type.
-    pub(crate) fn db_type_name(&self) -> &str {
-        match self {
-            MeasurementType::Bool => "bool",
-            MeasurementType::I64 => "i64",
-            MeasurementType::F64 => "f64",
-            MeasurementType::String => "string",
-            MeasurementType::Bytes => "bytes",
-            MeasurementType::CumulativeI64 => "cumulativei64",
-            MeasurementType::CumulativeF64 => "cumulativef64",
-            MeasurementType::HistogramI64 => "histogrami64",
-            MeasurementType::HistogramF64 => "histogramf64",
-        }
+impl DatumType {
+    /// Return `true` if this datum type is cumulative, and `false` otherwise.
+    pub fn is_cumulative(&self) -> bool {
+        matches!(
+            self,
+            DatumType::CumulativeI64
+                | DatumType::CumulativeF64
+                | DatumType::HistogramI64
+                | DatumType::HistogramF64
+        )
     }
 }
 
-/// A measurement is a single sampled data point from a metric.
+/// A `Datum` is a single sampled data point from a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
-pub enum Measurement {
+pub enum Datum {
     Bool(bool),
     I64(i64),
     F64(f64),
@@ -249,35 +240,55 @@ pub enum Measurement {
     HistogramF64(histogram::Histogram<f64>),
 }
 
-impl Measurement {
-    /// Return the [`MeasurementType`] for this measurement.
-    pub fn measurement_type(&self) -> MeasurementType {
+impl Datum {
+    /// Return the [`DatumType`] for this measurement.
+    pub fn datum_type(&self) -> DatumType {
         match self {
-            Measurement::Bool(_) => MeasurementType::Bool,
-            Measurement::I64(_) => MeasurementType::I64,
-            Measurement::F64(_) => MeasurementType::F64,
-            Measurement::String(_) => MeasurementType::String,
-            Measurement::Bytes(_) => MeasurementType::Bytes,
-            Measurement::CumulativeI64(_) => MeasurementType::CumulativeI64,
-            Measurement::CumulativeF64(_) => MeasurementType::CumulativeF64,
-            Measurement::HistogramI64(_) => MeasurementType::HistogramI64,
-            Measurement::HistogramF64(_) => MeasurementType::HistogramF64,
+            Datum::Bool(_) => DatumType::Bool,
+            Datum::I64(_) => DatumType::I64,
+            Datum::F64(_) => DatumType::F64,
+            Datum::String(_) => DatumType::String,
+            Datum::Bytes(_) => DatumType::Bytes,
+            Datum::CumulativeI64(_) => DatumType::CumulativeI64,
+            Datum::CumulativeF64(_) => DatumType::CumulativeF64,
+            Datum::HistogramI64(_) => DatumType::HistogramI64,
+            Datum::HistogramF64(_) => DatumType::HistogramF64,
+        }
+    }
+
+    /// Return `true` if this `Datum` is cumulative.
+    pub fn is_cumulative(&self) -> bool {
+        self.datum_type().is_cumulative()
+    }
+
+    /// Return the start time of the underlying data, if this is cumulative, or `None`
+    pub fn start_time(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Datum::Bool(_) => None,
+            Datum::I64(_) => None,
+            Datum::F64(_) => None,
+            Datum::String(_) => None,
+            Datum::Bytes(_) => None,
+            Datum::CumulativeI64(ref inner) => Some(inner.start_time()),
+            Datum::CumulativeF64(ref inner) => Some(inner.start_time()),
+            Datum::HistogramI64(ref inner) => Some(inner.start_time()),
+            Datum::HistogramF64(ref inner) => Some(inner.start_time()),
         }
     }
 }
 
-// Helper macro to generate `From<T>` and `From<&T>` for the measurement types.
+// Helper macro to generate `From<T>` and `From<&T>` for the datum types.
 macro_rules! impl_from {
     {$type_:ty, $variant:ident} => {
-        impl From<$type_> for Measurement {
+        impl From<$type_> for Datum {
             fn from(value: $type_) -> Self {
-                Measurement::$variant(value)
+                Datum::$variant(value)
             }
         }
 
-        impl From<&$type_> for Measurement where $type_: Clone {
+        impl From<&$type_> for Datum where $type_: Clone {
             fn from(value: &$type_) -> Self {
-                Measurement::$variant(value.clone())
+                Datum::$variant(value.clone())
             }
         }
     }
@@ -293,46 +304,68 @@ impl_from! { Cumulative<f64>, CumulativeF64 }
 impl_from! { histogram::Histogram<i64>, HistogramI64 }
 impl_from! { histogram::Histogram<f64>, HistogramF64 }
 
-impl From<&str> for Measurement {
+impl From<&str> for Datum {
     fn from(value: &str) -> Self {
-        Measurement::String(value.to_string())
+        Datum::String(value.to_string())
+    }
+}
+
+/// A `Measurement` is a timestamped datum from a single metric
+#[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct Measurement {
+    // The timestamp at which the measurement of the metric was taken.
+    timestamp: DateTime<Utc>,
+    // The underlying data point for the metric
+    datum: Datum,
+}
+
+impl Measurement {
+    /// Construct a `Measurement` with the given timestamp.
+    pub fn with_timestamp(timestamp: DateTime<Utc>, datum: Datum) -> Self {
+        Self { timestamp, datum }
+    }
+
+    /// Generate a new measurement from a `Datum`, using the current time as the timestamp
+    pub fn new<D: Into<Datum>>(datum: D) -> Measurement {
+        Measurement { timestamp: Utc::now(), datum: datum.into() }
+    }
+
+    /// Return the datum for this measurement
+    pub fn datum(&self) -> &Datum {
+        &self.datum
+    }
+
+    /// Return the timestamp for this measurement
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+
+    /// Return the start time for this measurement, if it is from a cumulative metric, or `None` if
+    /// a gauge.
+    pub fn start_time(&self) -> Option<DateTime<Utc>> {
+        self.datum.start_time()
+    }
+
+    /// Return the type of the underlying datum of a measurement
+    pub fn datum_type(&self) -> DatumType {
+        self.datum.datum_type()
     }
 }
 
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
 pub enum Error {
-    /// An error occurred during the production of metric samples.
-    #[error("Error during sample production: {0}")]
-    ProductionError(String),
-
-    /// An error occured running a `ProducerServer`
-    #[error("Error running metric server: {0}")]
-    ProducerServer(String),
+    /// An error related to generating metric data points
+    #[error("Metric data error: {0}")]
+    DatumError(String),
 
     /// An error running an `Oximeter` server
     #[error("Error running oximeter: {0}")]
     OximeterServer(String),
 
-    /// An error interacting with the timeseries database
-    #[error("Error interacting with timeseries database: {0}")]
-    Database(String),
-
-    /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
-    SchemaMismatch {
-        name: String,
-        expected: BTreeMap<String, FieldType>,
-        actual: BTreeMap<String, FieldType>,
-    },
-
     /// An error related to creating or sampling a [`histogram::Histogram`] metric.
     #[error("{0}")]
     HistogramError(#[from] histogram::HistogramError),
-
-    /// An error querying or filtering data
-    #[error("Invalid query or data filter: {0}")]
-    QueryError(String),
 
     /// An error parsing a field or measurement from a string.
     #[error("String '{0}' could not be parsed as type '{1}'")]
@@ -341,64 +374,77 @@ pub enum Error {
 
 /// A cumulative or counter data type.
 #[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Deserialize, Serialize)]
-pub struct Cumulative<T>(T);
+pub struct Cumulative<T> {
+    start_time: DateTime<Utc>,
+    value: T,
+}
 
 impl<T> Cumulative<T>
 where
-    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::Cumulative,
 {
-    /// Construct a new counter with the given initial value.
+    /// Construct a new counter with the given start time.
+    pub fn with_start_time(start_time: DateTime<Utc>, value: T) -> Self {
+        Self { start_time, value }
+    }
+
+    /// Construct a new counter with the given initial value, using the current time as the start
+    /// time.
     pub fn new(value: T) -> Self {
-        Self(value)
+        Self { start_time: Utc::now(), value }
     }
 
     /// Add 1 to the internal counter.
     pub fn increment(&mut self) {
-        self.0 += One::one();
+        self.value += One::one();
     }
 
     /// Return the current value of the counter.
     pub fn value(&self) -> T {
-        self.0
+        self.value
+    }
+
+    /// Return the start time of this cumulative counter.
+    pub fn start_time(&self) -> DateTime<Utc> {
+        self.start_time
     }
 }
 
 impl<T> Add<T> for Cumulative<T>
 where
-    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::Cumulative,
 {
     type Output = Self;
 
     fn add(self, other: T) -> Self {
-        Self(self.0 + other)
+        Self::new(self.value + other)
     }
 }
 
 impl<T> AddAssign<T> for Cumulative<T>
 where
-    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::Cumulative,
 {
     fn add_assign(&mut self, other: T) {
-        self.0 += other;
+        self.value += other;
     }
 }
 
 impl<T> Default for Cumulative<T>
 where
-    T: traits::DataPoint + Add + AddAssign + Copy + One + Zero,
+    T: traits::Cumulative,
 {
     fn default() -> Self {
-        Self(Zero::zero())
+        Self { start_time: Utc::now(), value: Zero::zero() }
     }
 }
 
-impl<T> Add for Cumulative<T>
+impl<T> From<T> for Cumulative<T>
 where
-    T: traits::DataPoint + Add<Output = T> + AddAssign + Copy,
+    T: traits::Cumulative,
 {
-    type Output = Self;
-    fn add(self, other: Cumulative<T>) -> Self {
-        Self(self.0 + other.0)
+    fn from(value: T) -> Cumulative<T> {
+        Cumulative::new(value)
     }
 }
 
@@ -419,82 +465,9 @@ impl FieldSet {
     }
 }
 
-/// A concrete type carrying information about a target.
-///
-/// This type is used to "materialize" the information from the [`Target`](crate::traits::Target)
-/// interface. It can only be constructed from a type that implements that trait, generally when a
-/// [`Producer`](traits::Producer) generates [`Sample`]s for its monitored resources.
-///
-/// See the [`Target`](crate::traits::Target) trait for more details on each field.
-#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
-pub struct Target {
-    /// The name of target.
-    pub name: String,
-
-    /// The fields for this target
-    pub fields: Vec<Field>,
-}
-
-impl<T> From<&T> for Target
-where
-    T: traits::Target,
-{
-    fn from(target: &T) -> Self {
-        Self { name: target.name().to_string(), fields: target.fields() }
-    }
-}
-
-/// A concrete type carrying information about a metric.
-///
-/// This type is used to "materialize" the information from the [`Metric`](crate::traits::Metric)
-/// interface. It can only be constructed from a type that implements that trait, generally when a
-/// [`Producer`](traits::Producer) generates [`Sample`]s for its monitored resources.
-///
-/// See the [`Metric`](crate::traits::Metric) trait for more details on each field.
-#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
-pub struct Metric {
-    /// The name of metric.
-    pub name: String,
-
-    /// The fields for this metric
-    pub fields: Vec<Field>,
-
-    /// The data type of a measurement from this metric.
-    pub measurement_type: MeasurementType,
-
-    /// The measured value of this metric
-    pub measurement: Measurement,
-}
-
-impl PartialEq for Metric {
-    fn eq(&self, other: &Metric) -> bool {
-        self.fields == other.fields
-            && self.measurement_type == other.measurement_type
-    }
-}
-
-impl Eq for Metric {}
-
-impl<M> From<&M> for Metric
-where
-    M: traits::Metric,
-{
-    fn from(metric: &M) -> Self {
-        Self {
-            name: metric.name().to_string(),
-            fields: metric.fields(),
-            measurement_type: metric.measurement_type(),
-            measurement: metric.measure(),
-        }
-    }
-}
-
 /// A concrete type representing a single, timestamped measurement from a timeseries.
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub struct Sample {
-    /// The timestamp for this sample
-    pub timestamp: DateTime<Utc>,
-
     /// The measured value of the metric at this sample
     pub measurement: Measurement,
 
@@ -519,7 +492,8 @@ impl PartialEq for Sample {
     fn eq(&self, other: &Sample) -> bool {
         self.target.eq(&other.target)
             && self.metric.eq(&other.metric)
-            && self.timestamp.eq(&other.timestamp)
+            && self.measurement.start_time().eq(&other.measurement.start_time())
+            && self.measurement.timestamp().eq(&other.measurement.timestamp())
     }
 }
 
@@ -533,7 +507,16 @@ impl Ord for Sample {
     fn cmp(&self, other: &Sample) -> Ordering {
         self.timeseries_key
             .cmp(&other.timeseries_key)
-            .then(self.timestamp.cmp(&other.timestamp))
+            .then(
+                self.measurement
+                    .timestamp()
+                    .cmp(&other.measurement.timestamp()),
+            )
+            .then(
+                self.measurement
+                    .start_time()
+                    .cmp(&other.measurement.start_time()),
+            )
     }
 }
 
@@ -547,20 +530,13 @@ impl Sample {
     /// Construct a new sample.
     ///
     /// This materializes the data from the target and metric, and stores that information along
-    /// with the measurement data itself. Users may optionally specify a timestamp, which defaults
-    /// to the current time if `None` is passed.
-    pub fn new<T, M, Meas>(
-        target: &T,
-        metric: &M,
-        timestamp: Option<DateTime<Utc>>,
-    ) -> Self
+    /// with the measurement data itself.
+    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
     where
         T: traits::Target,
-        M: traits::Metric<Measurement = Meas>,
-        Meas: traits::DataPoint + Into<Measurement>,
+        M: traits::Metric<Datum = D>,
     {
         Self {
-            timestamp: timestamp.unwrap_or_else(Utc::now),
             timeseries_name: format!("{}:{}", target.name(), metric.name()),
             timeseries_key: format!("{}:{}", target.key(), metric.key()),
             target: FieldSet::from_target(target),
@@ -598,30 +574,75 @@ impl Sample {
     }
 }
 
+type ProducerList = Vec<Box<dyn crate::Producer>>;
+pub type ProducerResults = Vec<Result<BTreeSet<Sample>, Error>>;
+
+/// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
+#[derive(Debug, Clone)]
+pub struct ProducerRegistry {
+    producers: Arc<Mutex<ProducerList>>,
+    producer_id: Uuid,
+}
+
+impl Default for ProducerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProducerRegistry {
+    /// Construct a new `ProducerRegistry`.
+    pub fn new() -> Self {
+        Self::with_id(Uuid::new_v4())
+    }
+
+    /// Construct a new `ProducerRegistry` with the given producer ID.
+    pub fn with_id(producer_id: Uuid) -> Self {
+        Self { producers: Arc::new(Mutex::new(vec![])), producer_id }
+    }
+
+    /// Add a new [`Producer`] object to the registry.
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    where
+        P: crate::Producer,
+    {
+        self.producers.lock().unwrap().push(Box::new(producer));
+        Ok(())
+    }
+
+    /// Collect available samples from all registered producers.
+    ///
+    /// This method returns a vector of results, one from each producer. If the producer generates
+    /// an error, that's propagated here. Successfully produced samples are returned in a set,
+    /// ordered by the [`types::Sample::cmp`] method.
+    pub fn collect(&self) -> ProducerResults {
+        let mut producers = self.producers.lock().unwrap();
+        let mut results = Vec::with_capacity(producers.len());
+        for producer in producers.iter_mut() {
+            results.push(producer.produce().map(|samples| samples.collect()));
+        }
+        results
+    }
+
+    /// Return the producer ID associated with this registry.
+    pub fn producer_id(&self) -> Uuid {
+        self.producer_id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use chrono::Utc;
     use std::net::IpAddr;
     use uuid::Uuid;
 
     use super::histogram::Histogram;
-    use super::{Cumulative, FieldType, FieldValue, Measurement};
+    use super::{
+        Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
+    };
+    use crate::test_util;
     use crate::types;
     use crate::{Metric, Target};
-
-    #[derive(Clone, Target)]
-    struct Targ {
-        pub good: bool,
-        pub id: i64,
-    }
-
-    #[derive(Clone, Metric)]
-    struct Met {
-        pub good: bool,
-        pub id: i64,
-        pub value: i64,
-    }
 
     #[test]
     fn test_cumulative_i64() {
@@ -648,63 +669,67 @@ mod tests {
     }
 
     #[test]
+    fn test_datum() {
+        assert!(matches!(Datum::from(false), Datum::Bool(_)));
+        assert!(matches!(Datum::from(0i64), Datum::I64(_)));
+        assert!(matches!(Datum::from(0f64), Datum::F64(_)));
+        assert!(matches!(Datum::from("foo"), Datum::String(_)));
+        assert!(matches!(Datum::from(Bytes::new()), Datum::Bytes(_)));
+        assert!(matches!(
+            Datum::from(Cumulative::new(0i64)),
+            Datum::CumulativeI64(_)
+        ));
+        assert!(matches!(
+            Datum::from(Cumulative::new(0f64)),
+            Datum::CumulativeF64(_)
+        ));
+        assert!(matches!(
+            Datum::from(Histogram::new(&[0i64, 10]).unwrap()),
+            Datum::HistogramI64(_)
+        ));
+        assert!(matches!(
+            Datum::from(Histogram::new(&[0f64, 10.0]).unwrap()),
+            Datum::HistogramF64(_)
+        ));
+    }
+
+    #[test]
     fn test_measurement() {
-        assert!(matches!(Measurement::from(false), Measurement::Bool(_)));
-        assert!(matches!(Measurement::from(0i64), Measurement::I64(_)));
-        assert!(matches!(Measurement::from(0f64), Measurement::F64(_)));
-        assert!(matches!(Measurement::from("foo"), Measurement::String(_)));
-        assert!(matches!(
-            Measurement::from(Bytes::new()),
-            Measurement::Bytes(_)
-        ));
-        assert!(matches!(
-            Measurement::from(Cumulative::new(0i64)),
-            Measurement::CumulativeI64(_)
-        ));
-        assert!(matches!(
-            Measurement::from(Cumulative::new(0f64)),
-            Measurement::CumulativeF64(_)
-        ));
-        assert!(matches!(
-            Measurement::from(Histogram::new(&[0i64, 10]).unwrap()),
-            Measurement::HistogramI64(_)
-        ));
-        assert!(matches!(
-            Measurement::from(Histogram::new(&[0f64, 10.0]).unwrap()),
-            Measurement::HistogramF64(_)
-        ));
-    }
+        let measurement = Measurement::new(0i64);
+        assert_eq!(measurement.datum_type(), DatumType::I64);
+        assert_eq!(measurement.start_time(), None);
 
-    #[test]
-    fn test_target_struct() {
-        let t = Targ { good: false, id: 2 };
-        let t2 = types::Target::from(&t);
-        assert_eq!(t.name(), t2.name);
-        assert_eq!(t.fields(), t2.fields);
-    }
-
-    #[test]
-    fn test_metric_struct() {
-        let m = Met { good: false, id: 2, value: 0 };
-        let m2 = types::Metric::from(&m);
-        assert_eq!(m.name(), m2.name);
-        assert_eq!(m.fields(), m2.fields);
-        assert_eq!(m.measurement_type(), m2.measurement_type);
+        let datum = Cumulative::new(0i64);
+        let measurement = Measurement::new(datum.clone());
+        assert_eq!(measurement.datum(), &Datum::from(datum));
+        assert!(measurement.start_time().is_some());
+        assert!(measurement.timestamp() >= measurement.start_time().unwrap());
     }
 
     #[test]
     fn test_sample_struct() {
-        let t = Targ { good: false, id: 2 };
-        let m = Met { good: false, id: 2, value: 1 };
-        let timestamp = Utc::now();
-        let sample = types::Sample::new(&t, &m, Some(timestamp));
+        let t = test_util::TestTarget::default();
+        let m = test_util::TestMetric {
+            id: Uuid::new_v4(),
+            good: true,
+            datum: 1i64,
+        };
+        let sample = types::Sample::new(&t, &m);
         assert_eq!(
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
         assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
-        assert_eq!(sample.timestamp, timestamp);
-        assert_eq!(sample.measurement, Measurement::I64(m.value));
+        assert!(sample.measurement.start_time().is_none());
+        assert_eq!(sample.measurement.datum(), &Datum::from(1i64));
+
+        let m = test_util::TestCumulativeMetric {
+            id: Uuid::new_v4(),
+            good: true,
+            datum: 1i64.into(),
+        };
+        let sample = types::Sample::new(&t, &m);
+        assert!(sample.measurement.start_time().is_some());
     }
 
     #[test]

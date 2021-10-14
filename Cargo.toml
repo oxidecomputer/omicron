@@ -1,20 +1,28 @@
 [workspace]
 members = [
-    "omicron-bootstrap-agent",
-    "omicron-common",
-    "omicron-nexus",
-    "omicron-sled-agent",
+    "common",
+    "nexus",
+    "rpaths",
+    "sled-agent",
     "oximeter/oximeter",
+    "oximeter/collector",
+    "oximeter/db",
+    "oximeter/producer",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 
 default-members = [
-    "omicron-bootstrap-agent",
-    "omicron-common",
-    "omicron-nexus",
-    "omicron-sled-agent",
+    "common",
+    "nexus",
+    "rpaths",
+    "sled-agent",
     "oximeter/oximeter",
+    "oximeter/collector",
+    "oximeter/db",
+    "oximeter/producer",
     "oximeter/oximeter-macro-impl",
+    "test-utils",
 ]
 resolver = "2"
 
@@ -32,3 +40,11 @@ panic = "abort"
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
+
+#
+# We maintain a fork of pq-sys to address upstream issues.  See the
+# README.md.oxide in the "oxide" branch of our fork for details.
+#
+[patch.crates-io.pq-sys]
+git = 'https://github.com/oxidecomputer/pq-sys'
+branch = "omicron"

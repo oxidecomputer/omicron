@@ -1,0 +1,204 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Nexus Database
+
+This directory contains functionality relating to Nexus' database
+implementation. This implementation makes use of https://diesel.rs/[Diesel], a
+rust query builder.
+
+NOTE: Diesel's last released stable branch is 1.4.x, but there is ongoing
+development on the not-yet-released 2.0 branch.  **We are currently using the
+2.0 branch**, as this branch includes necessary support for using Diesel in an
+async context.  Additionally, there are other miscellanous features (such as
+"Selectable") which are nice-to-have. Futhermore,this gives us an opportunity
+to more easily contribute upstream.
+
+== Why use Diesel?
+
+Diesel provides a strongly-typed, extensible framework for creating queries.
+Instead of parsing SQL as raw strings, this provides additional layers of
+validation through the type system, ensuring:
+
+- Operations only are issued to tables with corresponding columns.
+- Complex queries can be chained together and validated at compile-time.
+- Code generation avoids boilerplate, by autogenerating the translation of
+  structs to/from SQL.
+- Escape hatches exist for writing raw SQL and CTEs.
+
+== How do I use Diesel?
+
+Although there are high-quality https://diesel.rs/guides/[guides for Diesel],
+the following will be a brief overview of features as they appear within
+Omicron.
+
+=== Tables
+
+Diesel auto-generates types which allow callers to construct SQL expressions.
+These types, however, must map to the underlying database to be useful.
+
+We make use of the https://docs.diesel.rs/master/diesel/macro.table.html[table macro]
+within link:schema.rs[schema.rs] to define these tables and their
+corresponding SQL types. These types are then accessible within the `schema`
+module.
+
+=== Creating Queries
+
+For performing queries on a database - insertions, queries, updates, and
+deletions - Diesel can operate on explicit columns or a structure which maps to
+a group of columns.
+
+Many of these structures - representing the data model - are stored within
+link:model.rs[model.rs], where they also have helper conversions from/into types
+which are used outside the database (such as in the HTTP API).
+
+Diesel provides some derive macros worth knowing about:
+
+https://docs.diesel.rs/master/diesel/prelude/derive.Insertable.html[Insertable] indicates
+that a structure may be inserted into a table.
+[source,rust]
+----
+#[derive(Insertable)]
+#[table_name = "instance"]
+struct Instance {
+  ...
+}
+
+use db::schema::instance::dsl;
+let insert_query = diesel::insert_into(dsl::instance)
+  .values(Instance::new());
+----
+
+https://docs.diesel.rs/master/diesel/prelude/derive.Queryable.html[Queryable] indicates
+that a structure may be queried from a table.
+[source,rust]
+----
+#[derive(Queryable)]
+struct Instance {
+  ...
+}
+
+use db::schema::instance::dsl;
+let lookup_query = dsl::instance.filter(dsl::id.eq(id_to_lookup));
+----
+
+https://docs.diesel.rs/master/diesel/prelude/derive.AsChangeset.html[AsChangeset] indicates
+that a structure can be used to update a table.
+[source,rust]
+----
+#[derive(AsChangeset)]
+struct InstanceUpdate {
+  ...
+}
+
+use db::schema::instance::dsl;
+let update_query = diesel::update(dsl::instance).set(InstanceUpdate::new());
+----
+
+=== Issuing Queries
+
+To issue these queries to the actual database, we make use of
+https://github.com/oxidecomputer/async-bb8-diesel[async-bb8-diesel], which
+provides an async wrapper above a threaded connection pool.
+
+In the prior section, we showed how to construct queries, but never actually
+issued the database.
+
+Assuming we have access to a link:pool.rs[database pool object], queries take
+the following form:
+
+[source,rust]
+----
+let pool = ...; // See: pool.rs
+let query = ...; // See: prior section on constructing queries.
+
+query.execute_async(&pool).await
+----
+
+Additional examples of issuing queries can be found within the
+https://github.com/oxidecomputer/async-bb8-diesel/blob/master/examples/usage.rs[examples section]
+of the `async-bb8-diesel` repository.
+
+NOTE: At the time of writing, Diesel supports exclusively
+https://docs.diesel.rs/master/diesel/prelude/trait.RunQueryDsl.html[synchronous queries]
+to the database. The `async-bb8-diesel` crate provides an adapter trait
+called https://github.com/oxidecomputer/async-bb8-diesel/blob/0a6d535f8ac21b407879e6d7dc5214186a187e08/src/lib.rs#L232-L260[AsyncRunQueryDsl] which provides the same functionality, but asynchronously
+dispatching work to a thread pool. The goal of this trait it to fairly aligned
+with the Diesel API for issuing requests, but (1) async, and (2) operating
+on a thread pool.
+
+=== Transactions
+
+https://docs.diesel.rs/master/diesel/connection/trait.Connection.html#method.transaction[Transactions in Diesel] are issued as closures. Diesel automatically commits or rolls back the operation,
+depending on the return value of the contained closure.
+
+Using the async adapter, diesel transactions may be issued as follows:
+
+[source,rust]
+----
+// Note that the transaction is async, but the operations
+// within the transaction are not. This is okay - they'll be
+// moved to a thread where blocking is acceptible before
+// being executed.
+let result = pool.transaction(|conn| {
+    diesel::insert_into(...)
+      .values(...)
+      .execute(conn)?;
+    diesel::update(...)
+      .set(...)
+      .execute(conn)?;
+    Ok(result)
+}).await?;
+----
+
+=== Helper Functions
+
+As with any style of programming, when operations are repeated, it can be
+useful to refactor them. As one example, we make use of link:pagination.rs[pagination]
+while accessing the database.
+
+As many of the Diesel structures are strongly typed - tables, columns, etc - the
+magic sauce for making helper functions work correctly is *generics*. This typically
+meanings using https://docs.diesel.rs/master/diesel/query_dsl/methods/index.html[trait bounds
+indicating which methods should be accessible], and then performing regular Diesel operations.
+
+=== CTEs
+
+Diesel support for CTEs is still underway, though the entrypoints for injecting raw SQL
+are either:
+- https://docs.diesel.rs/master/diesel/fn.sql_query.html[sql_query]: An entrypoint for
+a full SQL query, if you want mostly dodge Diesel's query builder, or...
+- https://diesel.rs/guides/extending-diesel.html[Extending the DSL], which may involve
+a custom implementation of https://docs.diesel.rs/master/diesel/query_builder/trait.QueryFragment.html[QueryFragment].
+
+An link:update_and_check.rs[example CTE exists within Omicron], which extends the Diesel
+DSL to issue a "select" and "update" query simultaneously, performing a conditional update
+that allows callers to distinguish between "object found and updated", "object found and
+NOT updated", and "object not found".
+
+This is just one example of a CTE which extends diesel, but it fits in with the
+typical Diesel pattern of "fully construct a query, then execute it".
+
+[source,rust]
+----
+let updated = diesel::update(dsl::instance)
+  .filter(dsl::time_deleted.is_null())
+  .filter(dsl::id.eq(instance_id))
+  .set(new_runtime)
+  // New query method: blanket implemented as an extension for update queries.
+  .check_if_exists::<db::model::Instance>(instance_id)
+  // New execution method: only callable after "check_if_exists".
+  .execute_and_check(pool)
+  .await?;
+----
+
+== Areas for Improvement
+
+- **Selectable for embedded structures**: Many of our database model structures -
+which map to a SQL table - are "flattened" for usage in diesel. We
+could potentially avoid this with "Selectable".
+- **Native Async Support**: The `async-bb8-diesel` respository provides a mechanism for
+offloading Diesel requests to a Tokio-controlled synchronous thread pool, but ideally
+we'd use a native Diesel API that never requires blocking threads. This improvement
+would require contribution to upstream Diesel.

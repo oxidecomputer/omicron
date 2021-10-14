@@ -1,0 +1,1224 @@
+/*!
+ * Handler functions (entrypoints) for external HTTP APIs
+ */
+
+use super::ServerContext;
+use crate::db;
+
+use dropshot::endpoint;
+use dropshot::ApiDescription;
+use dropshot::HttpError;
+use dropshot::HttpResponseAccepted;
+use dropshot::HttpResponseCreated;
+use dropshot::HttpResponseDeleted;
+use dropshot::HttpResponseOk;
+use dropshot::Path;
+use dropshot::Query;
+use dropshot::RequestContext;
+use dropshot::ResultsPage;
+use dropshot::TypedBody;
+use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
+use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
+use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
+use omicron_common::api::external::http_pagination::PagField;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::PaginatedByName;
+use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanByName;
+use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::to_list;
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Disk;
+use omicron_common::api::external::DiskAttachment;
+use omicron_common::api::external::DiskCreateParams;
+use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceCreateParams;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::Organization;
+use omicron_common::api::external::OrganizationCreateParams;
+use omicron_common::api::external::OrganizationUpdateParams;
+use omicron_common::api::external::PaginationOrder;
+use omicron_common::api::external::Project;
+use omicron_common::api::external::ProjectCreateParams;
+use omicron_common::api::external::ProjectUpdateParams;
+use omicron_common::api::external::Rack;
+use omicron_common::api::external::Saga;
+use omicron_common::api::external::Sled;
+use omicron_common::api::external::Vpc;
+use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcSubnet;
+use omicron_common::api::external::VpcSubnetCreateParams;
+use omicron_common::api::external::VpcSubnetUpdateParams;
+use omicron_common::api::external::VpcUpdateParams;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use uuid::Uuid;
+
+type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
+
+/**
+ * Returns a description of the external nexus API
+ */
+pub fn external_api() -> NexusApiDescription {
+    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(organizations_get)?;
+        api.register(organizations_post)?;
+        api.register(organizations_get_organization)?;
+        api.register(organizations_delete_organization)?;
+        api.register(organizations_put_organization)?;
+
+        api.register(projects_get)?;
+        api.register(projects_post)?;
+        api.register(projects_get_project)?;
+        api.register(projects_delete_project)?;
+        api.register(projects_put_project)?;
+
+        api.register(project_disks_get)?;
+        api.register(project_disks_post)?;
+        api.register(project_disks_get_disk)?;
+        api.register(project_disks_delete_disk)?;
+
+        api.register(project_instances_get)?;
+        api.register(project_instances_post)?;
+        api.register(project_instances_get_instance)?;
+        api.register(project_instances_delete_instance)?;
+        api.register(project_instances_instance_reboot)?;
+        api.register(project_instances_instance_start)?;
+        api.register(project_instances_instance_stop)?;
+
+        api.register(instance_disks_get)?;
+        api.register(instance_disks_get_disk)?;
+        api.register(instance_disks_put_disk)?;
+        api.register(instance_disks_delete_disk)?;
+
+        api.register(project_vpcs_get)?;
+        api.register(project_vpcs_post)?;
+        api.register(project_vpcs_get_vpc)?;
+        api.register(project_vpcs_put_vpc)?;
+        api.register(project_vpcs_delete_vpc)?;
+
+        api.register(vpc_subnets_get)?;
+        api.register(vpc_subnets_get_subnet)?;
+        api.register(vpc_subnets_post)?;
+        api.register(vpc_subnets_delete_subnet)?;
+        api.register(vpc_subnets_put_subnet)?;
+
+        api.register(hardware_racks_get)?;
+        api.register(hardware_racks_get_rack)?;
+        api.register(hardware_sleds_get)?;
+        api.register(hardware_sleds_get_sled)?;
+
+        api.register(sagas_get)?;
+        api.register(sagas_get_saga)?;
+
+        Ok(())
+    }
+
+    let mut api = NexusApiDescription::new();
+    if let Err(err) = register_endpoints(&mut api) {
+        panic!("failed to register entrypoints: {}", err);
+    }
+    api
+}
+
+/*
+ * API ENDPOINT FUNCTION NAMING CONVENTIONS
+ *
+ * Generally, HTTP resources are grouped within some collection.  For a
+ * relatively simple example:
+ *
+ *   GET    /projects                 (list the projects in the collection)
+ *   POST   /projects                 (create a project in the collection)
+ *   GET    /projects/{project_name}  (look up a project in the collection)
+ *   DELETE /projects/{project_name}  (delete a project in the collection)
+ *   PUT    /projects/{project_name}  (update a project in the collection)
+ *
+ * There's a naming convention for the functions that implement these API entry
+ * points.  When operating on the collection itself, we use:
+ *
+ *    {collection_path}_{verb}
+ *
+ * For examples:
+ *
+ *    GET  /projects                    -> projects_get()
+ *    POST /projects                    -> projects_post()
+ *
+ * For operations on items within the collection, we use:
+ *
+ *    {collection_path}_{verb}_{object}
+ *
+ * For examples:
+ *
+ *    DELETE /projects/{project_name}   -> projects_delete_project()
+ *    GET    /projects/{project_name}   -> projects_get_project()
+ *    PUT    /projects/{project_name}   -> projects_put_project()
+ *
+ * Note that these function names end up in generated OpenAPI spec as the
+ * operationId for each endpoint, and therefore represent a contract with
+ * clients. Client generators use operationId to name API methods, so changing
+ * a function name is a breaking change from a client perspective.
+ */
+
+/**
+ * List all organizations.
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations",
+ }]
+async fn organizations_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let params = ScanByNameOrId::from_query(&query)?;
+    let field = pagination_field_for_scan_params(params);
+
+    let organizations = match field {
+        PagField::Id => {
+            let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+            nexus.organizations_list_by_id(&page_selector).await?
+        }
+
+        PagField::Name => {
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
+            nexus.organizations_list_by_name(&page_selector).await?
+        }
+    }
+    .into_iter()
+    .map(|p| p.into())
+    .collect();
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, organizations)?))
+}
+
+/**
+ * Create a new organization.
+ */
+#[endpoint {
+    method = POST,
+    path = "/organizations"
+}]
+async fn organizations_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_organization: TypedBody<OrganizationCreateParams>,
+) -> Result<HttpResponseCreated<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let organization =
+        nexus.organization_create(&new_organization.into_inner()).await?;
+    Ok(HttpResponseCreated(organization.into()))
+}
+
+/**
+ * Path parameters for Organization requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct OrganizationPathParam {
+    /// The organization's unique name.
+    organization_name: Name,
+}
+
+/**
+ * Fetch a specific organization
+ */
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}",
+}]
+async fn organizations_get_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let organization = nexus.organization_fetch(&organization_name).await?;
+    Ok(HttpResponseOk(organization.into()))
+}
+
+/**
+ * Delete a specific organization.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/organizations/{organization_name}",
+ }]
+async fn organizations_delete_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let params = path_params.into_inner();
+    let organization_name = &params.organization_name;
+    nexus.organization_delete(&organization_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a specific organization.
+ *
+ * TODO-correctness: Is it valid for PUT to accept application/json that's a
+ * subset of what the resource actually represents?  If not, is that a problem?
+ * (HTTP may require that this be idempotent.)  If so, can we get around that
+ * having this be a slightly different content-type (e.g.,
+ * "application/json-patch")?  We should see what other APIs do.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/organizations/{organization_name}",
+ }]
+async fn organizations_put_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+    updated_organization: TypedBody<OrganizationUpdateParams>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let new_organization = nexus
+        .organization_update(
+            &organization_name,
+            &updated_organization.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(new_organization.into()))
+}
+
+/**
+ * List all projects.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects",
+ }]
+async fn projects_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let params = ScanByNameOrId::from_query(&query)?;
+    let field = pagination_field_for_scan_params(params);
+
+    let projects = match field {
+        PagField::Id => {
+            let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+            nexus.projects_list_by_id(&page_selector).await?
+        }
+
+        PagField::Name => {
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
+            nexus.projects_list_by_name(&page_selector).await?
+        }
+    }
+    .into_iter()
+    .map(|p| p.into())
+    .collect();
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
+}
+
+/**
+ * Create a new project.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects"
+}]
+async fn projects_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_project: TypedBody<ProjectCreateParams>,
+) -> Result<HttpResponseCreated<Project>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let project = nexus.project_create(&new_project.into_inner()).await?;
+    Ok(HttpResponseCreated(project.into()))
+}
+
+/**
+ * Path parameters for Project requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct ProjectPathParam {
+    /// The project's unique ID.
+    project_name: Name,
+}
+
+/**
+ * Fetch a specific project
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}",
+}]
+async fn projects_get_project(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<Project>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let project = nexus.project_fetch(&project_name).await?;
+    Ok(HttpResponseOk(project.into()))
+}
+
+/**
+ * Delete a specific project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}",
+ }]
+async fn projects_delete_project(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let params = path_params.into_inner();
+    let project_name = &params.project_name;
+    nexus.project_delete(&project_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a specific project.
+ *
+ * TODO-correctness: Is it valid for PUT to accept application/json that's a
+ * subset of what the resource actually represents?  If not, is that a problem?
+ * (HTTP may require that this be idempotent.)  If so, can we get around that
+ * having this be a slightly different content-type (e.g.,
+ * "application/json-patch")?  We should see what other APIs do.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_name}",
+ }]
+async fn projects_put_project(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    updated_project: TypedBody<ProjectUpdateParams>,
+) -> Result<HttpResponseOk<Project>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let newproject = nexus
+        .project_update(&project_name, &updated_project.into_inner())
+        .await?;
+    Ok(HttpResponseOk(newproject.into()))
+}
+
+/*
+ * Disks
+ */
+
+/**
+ * List disks in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn project_disks_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disks = nexus
+        .project_list_disks(
+            project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
+    Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
+}
+
+/**
+ * Create a disk in a project.
+ *
+ * TODO-correctness See note about instance create.  This should be async.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/disks",
+ }]
+async fn project_disks_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_disk: TypedBody<DiskCreateParams>,
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_disk_params = &new_disk.into_inner();
+    let disk =
+        nexus.project_create_disk(&project_name, &new_disk_params).await?;
+    Ok(HttpResponseCreated(disk.into()))
+}
+
+/**
+ * Path parameters for Disk requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct DiskPathParam {
+    project_name: Name,
+    disk_name: Name,
+}
+
+/**
+ * Fetch a single disk in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/disks/{disk_name}",
+ }]
+async fn project_disks_get_disk(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_name = &path.disk_name;
+    let disk = nexus.project_lookup_disk(&project_name, &disk_name).await?;
+    Ok(HttpResponseOk(disk.into()))
+}
+
+/**
+ * Delete a disk from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/disks/{disk_name}",
+ }]
+async fn project_disks_delete_disk(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let disk_name = &path.disk_name;
+    nexus.project_delete_disk(&project_name, &disk_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/*
+ * Instances
+ */
+
+/**
+ * List instances in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/instances",
+ }]
+async fn project_instances_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instances = nexus
+        .project_list_instances(
+            &project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?
+        .into_iter()
+        .map(|i| i.into())
+        .collect();
+    Ok(HttpResponseOk(ScanByName::results_page(&query, instances)?))
+}
+
+/**
+ * Create an instance in a project.
+ *
+ * TODO-correctness This is supposed to be async.  Is that right?  We can create
+ * the instance immediately -- it's just not booted yet.  Maybe the boot
+ * operation is what's a separate operation_id.  What about the response code
+ * (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a
+ * useful response, including an operation id, with either response code.  Maybe
+ * a "reboot" operation would return a 202 Accepted because there's no actual
+ * resource created?
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/instances",
+ }]
+async fn project_instances_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_instance: TypedBody<InstanceCreateParams>,
+) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_instance_params = &new_instance.into_inner();
+    let instance = nexus
+        .project_create_instance(&project_name, &new_instance_params)
+        .await?;
+    Ok(HttpResponseCreated(instance.into()))
+}
+
+/**
+ * Path parameters for Instance requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct InstancePathParam {
+    project_name: Name,
+    instance_name: Name,
+}
+
+/**
+ * Get an instance in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/instances/{instance_name}",
+ }]
+async fn project_instances_get_instance(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance =
+        nexus.project_lookup_instance(&project_name, &instance_name).await?;
+    Ok(HttpResponseOk(instance.into()))
+}
+
+/**
+ * Delete an instance from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/instances/{instance_name}",
+ }]
+async fn project_instances_delete_instance(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    nexus.project_destroy_instance(&project_name, &instance_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Reboot an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/reboot",
+}]
+async fn project_instances_instance_reboot(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance = nexus.instance_reboot(&project_name, &instance_name).await?;
+    Ok(HttpResponseAccepted(instance.into()))
+}
+
+/**
+ * Boot an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/start",
+}]
+async fn project_instances_instance_start(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance = nexus.instance_start(&project_name, &instance_name).await?;
+    Ok(HttpResponseAccepted(instance.into()))
+}
+
+/**
+ * Halt an instance.
+ */
+#[endpoint {
+    method = POST,
+    path = "/projects/{project_name}/instances/{instance_name}/stop",
+}]
+/* Our naming convention kind of falls apart here. */
+async fn project_instances_instance_stop(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let instance = nexus.instance_stop(&project_name, &instance_name).await?;
+    Ok(HttpResponseAccepted(instance.into()))
+}
+
+/**
+ * List disks attached to this instance.
+ */
+/* TODO-scalability needs to be paginated */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/disks"
+}]
+async fn instance_disks_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<Vec<DiskAttachment>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let fake_query = DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
+    };
+    let disks = nexus
+        .instance_list_disks(&project_name, &instance_name, &fake_query)
+        .await?;
+    Ok(HttpResponseOk(disks))
+}
+
+/**
+ * Path parameters for requests that access Disks attached to an Instance
+ */
+#[derive(Deserialize, JsonSchema)]
+struct InstanceDiskPathParam {
+    project_name: Name,
+    instance_name: Name,
+    disk_name: Name,
+}
+
+/**
+ * Fetch a description of the attachment of this disk to this instance.
+ */
+#[endpoint {
+    method = GET,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn instance_disks_get_disk(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseOk<DiskAttachment>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    let attachment = nexus
+        .instance_get_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseOk(attachment))
+}
+
+/**
+ * Attach a disk to this instance.
+ */
+#[endpoint {
+    method = PUT,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn instance_disks_put_disk(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseCreated<DiskAttachment>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    let attachment = nexus
+        .instance_attach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseCreated(attachment))
+}
+
+/**
+ * Detach a disk from this instance.
+ */
+#[endpoint {
+    method = DELETE,
+    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+}]
+async fn instance_disks_delete_disk(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstanceDiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let disk_name = &path.disk_name;
+    nexus
+        .instance_detach_disk(&project_name, &instance_name, &disk_name)
+        .await?;
+    Ok(HttpResponseDeleted())
+}
+
+/*
+ * VPCs
+ */
+
+/**
+ * List VPCs in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpcs = nexus
+        .project_list_vpcs(
+            &project_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+}
+
+/**
+ * Path parameters for VPC requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    project_name: Name,
+    vpc_name: Name,
+}
+
+/**
+ * Get a VPC in a project.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_get_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
+    Ok(HttpResponseOk(vpc))
+}
+
+/**
+ * Create a VPC in a project.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs",
+ }]
+async fn project_vpcs_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_vpc: TypedBody<VpcCreateParams>,
+) -> Result<HttpResponseCreated<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let new_vpc_params = &new_vpc.into_inner();
+    let vpc = nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
+    Ok(HttpResponseCreated(vpc))
+}
+
+/**
+ * Update a VPC.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_put_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    updated_vpc: TypedBody<VpcUpdateParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .project_update_vpc(
+            &path.project_name,
+            &path.vpc_name,
+            &updated_vpc.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(()))
+}
+
+/**
+ * Delete a vpc from a project.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}",
+ }]
+async fn project_vpcs_delete_vpc(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let project_name = &path.project_name;
+    let vpc_name = &path.vpc_name;
+    nexus.project_delete_vpc(&project_name, &vpc_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * List subnets in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let vpcs = nexus
+        .vpc_list_subnets(
+            &path.project_name,
+            &path.vpc_name,
+            &data_page_params_for(&rqctx, &query)?,
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+}
+
+/**
+ * Path parameters for VPC Subnet requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct VpcSubnetPathParam {
+    project_name: Name,
+    vpc_name: Name,
+    subnet_name: Name,
+}
+
+/**
+ * Get subnet in a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_get_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_lookup_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseOk(subnet))
+}
+
+/**
+ * Create a subnet in a VPC.
+ */
+#[endpoint {
+     method = POST,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+ }]
+async fn vpc_subnets_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<VpcSubnetCreateParams>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let subnet = nexus
+        .vpc_create_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &create_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseCreated(subnet))
+}
+
+/**
+ * Delete a subnet from a VPC.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_delete_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .vpc_delete_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+        )
+        .await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a VPC Subnet.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+ }]
+async fn vpc_subnets_put_subnet(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcSubnetPathParam>,
+    subnet_params: TypedBody<VpcSubnetUpdateParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .vpc_update_subnet(
+            &path.project_name,
+            &path.vpc_name,
+            &path.subnet_name,
+            &subnet_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(()))
+}
+
+/*
+ * Racks
+ */
+
+/**
+ * List racks in the system.
+ */
+#[endpoint {
+     method = GET,
+     path = "/hardware/racks",
+ }]
+async fn hardware_racks_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let rack_stream =
+        nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
+    let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+}
+
+/**
+ * Path parameters for Rack requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct RackPathParam {
+    /** The rack's unique ID. */
+    rack_id: Uuid,
+}
+
+/**
+ * Fetch information about a particular rack.
+ */
+#[endpoint {
+    method = GET,
+    path = "/hardware/racks/{rack_id}",
+}]
+async fn hardware_racks_get_rack(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RackPathParam>,
+) -> Result<HttpResponseOk<Rack>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let rack_info = nexus.rack_lookup(&path.rack_id).await?;
+    Ok(HttpResponseOk(rack_info.into()))
+}
+
+/*
+ * Sleds
+ */
+
+/**
+ * List sleds in the system.
+ */
+#[endpoint {
+     method = GET,
+     path = "/hardware/sleds",
+ }]
+async fn hardware_sleds_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let sleds = nexus
+        .sleds_list(&data_page_params_for(&rqctx, &query)?)
+        .await?
+        .into_iter()
+        .map(|s| s.into())
+        .collect();
+    Ok(HttpResponseOk(ScanById::results_page(&query, sleds)?))
+}
+
+/**
+ * Path parameters for Sled requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct SledPathParam {
+    /** The sled's unique ID. */
+    sled_id: Uuid,
+}
+
+/**
+ * Fetch information about a sled in the system.
+ */
+#[endpoint {
+     method = GET,
+     path = "/hardware/sleds/{sled_id}",
+ }]
+async fn hardware_sleds_get_sled(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SledPathParam>,
+) -> Result<HttpResponseOk<Sled>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let sled_info = nexus.sled_lookup(&path.sled_id).await?;
+    Ok(HttpResponseOk(sled_info.into()))
+}
+
+/*
+ * Sagas
+ */
+
+/**
+ * List all sagas (for debugging)
+ */
+#[endpoint {
+     method = GET,
+     path = "/sagas",
+ }]
+async fn sagas_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let saga_stream = nexus.sagas_list(&pagparams).await?;
+    let view_list = to_list(saga_stream).await;
+    Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+}
+
+/**
+ * Path parameters for Saga requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct SagaPathParam {
+    saga_id: Uuid,
+}
+
+/**
+ * Fetch information about a single saga (for debugging)
+ */
+#[endpoint {
+     method = GET,
+     path = "/sagas/{saga_id}",
+ }]
+async fn sagas_get_saga(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<Saga>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let saga = nexus.saga_get(path.saga_id).await?;
+    Ok(HttpResponseOk(saga))
+}
