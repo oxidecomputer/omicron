@@ -36,6 +36,7 @@ use uuid::Uuid;
     JsonSchema,
 )]
 #[sql_type = "sql_types::Text"]
+#[serde(transparent)]
 #[repr(transparent)]
 pub struct Name(pub external::Name);
 
