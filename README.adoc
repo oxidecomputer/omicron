@@ -72,7 +72,7 @@ After doing this, you should have the `pg_config` command on your PATH.  For exa
 
 See the note about setting RUSTFLAGS and RUSTDOCFLAGS at build time below.
 --
-. CockroachDB v20.2.5.
+. CockroachDB v21.1.10.
 +
 The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
 On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
