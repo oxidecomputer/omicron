@@ -1,8 +1,8 @@
 //! Structures stored to the database.
 
 use super::schema::{
-    disk, instance, metricproducer, networkinterface, oximeter, project, sled,
-    vpc, vpcsubnet,
+    disk, instance, metricproducer, networkinterface, organization, oximeter,
+    project, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use diesel::backend::{Backend, RawValue};
@@ -392,6 +392,94 @@ impl From<external::IdentityMetadata> for IdentityMetadata {
             time_created: metadata.time_created,
             time_modified: metadata.time_modified,
             time_deleted: None,
+        }
+    }
+}
+
+/// Describes an organization within the database.
+#[derive(Queryable, Identifiable, Insertable, Debug)]
+#[table_name = "organization"]
+pub struct Organization {
+    pub id: Uuid,
+    pub name: Name,
+    pub description: String,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+
+    /// child resource generation number, per RFD 192
+    pub rcgen: Generation,
+}
+
+impl Organization {
+    /// Creates a new database Organization object.
+    pub fn new(params: external::OrganizationCreateParams) -> Self {
+        let id = Uuid::new_v4();
+        let identity = IdentityMetadata::new(id, params.identity);
+        Self {
+            id: identity.id,
+            name: identity.name,
+            description: identity.description,
+            time_created: identity.time_created,
+            time_modified: identity.time_modified,
+            time_deleted: identity.time_deleted,
+            rcgen: Generation::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+}
+
+impl Into<external::Organization> for Organization {
+    fn into(self) -> external::Organization {
+        external::Organization {
+            identity: external::IdentityMetadata {
+                id: self.id,
+                name: self.name.into(),
+                description: self.description,
+                time_created: self.time_created,
+                time_modified: self.time_modified,
+            },
+        }
+    }
+}
+
+/// Conversion from the external API type.
+impl From<external::Organization> for Organization {
+    fn from(organization: external::Organization) -> Self {
+        Self {
+            id: organization.identity.id,
+            name: organization.identity.name.into(),
+            description: organization.identity.description,
+            time_created: organization.identity.time_created,
+            time_modified: organization.identity.time_modified,
+            time_deleted: None,
+            rcgen: Generation::new(),
+        }
+    }
+}
+
+/// Describes a set of updates for the [`Organization`] model.
+#[derive(AsChangeset)]
+#[table_name = "organization"]
+pub struct OrganizationUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
+    fn from(params: external::OrganizationUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(|n| n.into()),
+            description: params.identity.description,
+            time_modified: Utc::now(),
         }
     }
 }

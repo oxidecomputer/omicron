@@ -7,10 +7,29 @@ use std::convert::TryFrom;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Organization;
+use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+
+pub async fn create_organization(
+    client: &ClientTestContext,
+    organization_name: &str,
+) -> Organization {
+    objects_post(
+        &client,
+        "/organizations",
+        OrganizationCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from(organization_name).unwrap(),
+                description: "an org".to_string(),
+            },
+        },
+    )
+    .await
+}
 
 pub async fn create_project(
     client: &ClientTestContext,
