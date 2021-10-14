@@ -527,6 +527,7 @@ impl TryFrom<i64> for Generation {
  */
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum ResourceType {
+    Organization,
     Project,
     Disk,
     DiskAttachment,
@@ -546,6 +547,7 @@ impl Display for ResourceType {
             f,
             "{}",
             match self {
+                ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
@@ -618,6 +620,40 @@ pub struct IdentityMetadataUpdateParams {
 /*
  * Specific API resources
  */
+
+/*
+ * ORGANIZATIONS
+ */
+
+/**
+ * Client view of an [`Organization`]
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Organization {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/**
+ * Create-time parameters for an [`Organization`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/**
+ * Updateable properties of an [`Organization`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
 
 /*
  * PROJECTS

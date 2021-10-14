@@ -56,6 +56,29 @@ CREATE TABLE omicron.public.Sled (
 );
 
 /*
+ * Organizations
+ */
+
+CREATE TABLE omicron.public.Organization (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.Organization (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Projects
  */
 
