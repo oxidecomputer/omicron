@@ -13,6 +13,8 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
 use ref_cast::RefCast;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -30,6 +32,8 @@ use uuid::Uuid;
     Ord,
     PartialOrd,
     RefCast,
+    Deserialize,
+    JsonSchema,
 )]
 #[sql_type = "sql_types::Text"]
 #[repr(transparent)]
@@ -100,10 +104,17 @@ where
     Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
 )]
 #[sql_type = "sql_types::BigInt"]
+#[repr(transparent)]
 pub struct Generation(pub external::Generation);
 
 NewtypeFrom! { () pub struct Generation(external::Generation); }
 NewtypeDeref! { () pub struct Generation(external::Generation); }
+
+impl Generation {
+    pub fn new() -> Self {
+        Self(external::Generation::new())
+    }
+}
 
 impl<DB> ToSql<sql_types::BigInt, DB> for Generation
 where

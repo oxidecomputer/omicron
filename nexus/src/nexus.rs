@@ -3,6 +3,7 @@
  */
 
 use crate::db;
+use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -25,7 +26,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
@@ -148,7 +148,8 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: IdentityMetadata {
                 id: *rack_id,
-                name: Name::try_from(format!("rack-{}", *rack_id)).unwrap(),
+                name: external::Name::try_from(format!("rack-{}", *rack_id))
+                    .unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -186,7 +187,7 @@ impl Nexus {
 
         // Insert the sled into the database.
         let create_params = IdentityMetadataCreateParams {
-            name: Name::try_from("sled").unwrap(),
+            name: external::Name::try_from("sled").unwrap(),
             description: "Self-Identified Sled".to_string(),
         };
         let sled = db::model::Sled::new(id, address, create_params);
@@ -379,12 +380,12 @@ impl Nexus {
                 db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: Name::try_from("default").unwrap(),
+                        name: external::Name::try_from("default").unwrap(),
                         description: "Default VPC".to_string(),
                     },
                     // TODO-robustness this will need to be None if we decide to handle
                     // the logic around name and dns_name by making dns_name optional
-                    dns_name: Name::try_from("default").unwrap(),
+                    dns_name: external::Name::try_from("default").unwrap(),
                 },
             )
             .await?;

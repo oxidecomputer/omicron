@@ -4,6 +4,7 @@
 
 use super::ServerContext;
 use crate::db;
+use crate::db::model::Name;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -36,7 +37,6 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
@@ -50,6 +50,7 @@ use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
+use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -179,7 +180,8 @@ async fn projects_get(
         }
 
         PagField::Name => {
-            let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n));
             nexus.projects_list_by_name(&page_selector).await?
         }
     }
@@ -305,7 +307,8 @@ async fn project_disks_get(
     let disks = nexus
         .project_list_disks(
             project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?
         .into_iter()
@@ -411,7 +414,8 @@ async fn project_instances_get(
     let instances = nexus
         .project_list_instances(
             &project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?
         .into_iter()
@@ -696,7 +700,8 @@ async fn project_vpcs_get(
     let vpcs = nexus
         .project_list_vpcs(
             &project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?;
     Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
@@ -817,7 +822,8 @@ async fn vpc_subnets_get(
         .vpc_list_subnets(
             &path.project_name,
             &path.vpc_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?;
     Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
