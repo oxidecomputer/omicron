@@ -2,6 +2,7 @@
  * Facilities for working with the Omicron database
  */
 
+mod collection_insert;
 mod config;
 mod datastore;
 mod error;
