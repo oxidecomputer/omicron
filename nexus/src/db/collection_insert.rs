@@ -14,6 +14,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
+use diesel::sql_types::SingleValue;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
@@ -51,9 +52,12 @@ impl<T, U, Op, Ret> InsertStatementExt for InsertStatement<T, U, Op, Ret> {
 /// For example, since Organizations have a one-to-many relationship with
 /// Projects, the Organization datatype should implement this trait.
 pub trait DatastoreCollection {
-    /// The type of the collection
+    /// The Rust type of the collection id (typically Uuid for us)
+    type CollectionId: Copy + Debug;
+
+    /// The diesel SQL table of the collection
     type CollectionTable: Table;
-    /// The type of the collection
+    /// The diesel SQL table of the resources
     type ResourceTable: Table;
 
     /// The column in the CollectionTable that acts as a generation number.
@@ -66,8 +70,7 @@ pub trait DatastoreCollection {
 }
 
 /// Utility type to make trait bounds below easier to read.
-type CollectionTableId<C> =
-    <<C as DatastoreCollection>::CollectionTable as Identifiable>::Id;
+type CollectionId<C> = <C as DatastoreCollection>::CollectionId;
 
 /// Wrapper around [`diesel::insert`] for a Table, which creates the CTE
 /// described in the module docs.
@@ -78,13 +81,12 @@ pub trait InsertIntoCollection<IS, C>
 where
     IS: InsertStatementExt,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
     /// Nests the existing insert statement in a CTE which
     /// identifies if the containing collection exists (by ID),
     fn insert_into_collection<Q>(
         self,
-        key: CollectionTableId<C>,
+        key: CollectionId<C>,
     ) -> InsertIntoCollectionStatement<IS, C, Q>;
 }
 
@@ -92,11 +94,10 @@ impl<IS, C> InsertIntoCollection<IS, C> for IS
 where
     IS: InsertStatementExt,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
     fn insert_into_collection<Q>(
         self,
-        key: <C::CollectionTable as Identifiable>::Id,
+        key: CollectionId<C>,
     ) -> InsertIntoCollectionStatement<IS, C, Q> {
         InsertIntoCollectionStatement {
             insert_statement: self.statement(),
@@ -113,19 +114,26 @@ pub struct InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: InsertStatementExt,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
     insert_statement:
         InsertStatement<IS::Table, IS::Records, IS::Operator, IS::Returning>,
-    key: CollectionTableId<C>,
+    key: CollectionId<C>,
     query_type: PhantomData<Q>,
+}
+
+// TODO: REMOVE; this is in place for now so I can work through a different
+// trait issue
+unsafe impl<IS, C, Q> Send for InsertIntoCollectionStatement<IS, C, Q>
+where
+    IS: InsertStatementExt,
+    C: DatastoreCollection,
+{
 }
 
 impl<IS, C, Q> QueryId for InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: InsertStatementExt,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -147,7 +155,7 @@ impl<IS, C, Q> InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: 'static + InsertStatementExt + Send,
     C: 'static + DatastoreCollection + Send,
-    CollectionTableId<C>: 'static + PartialEq + Send + Debug + Copy,
+    CollectionId<C>: 'static + PartialEq + Send,
     IS::Table: 'static + Table + Send,
     IS::Records: 'static + Send,
     Q: 'static + Debug + Send,
@@ -188,7 +196,6 @@ where
     IS: InsertStatementExt,
     Q: Selectable<Pg>,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
     type SqlType = SelectableSqlType<Q>;
 }
@@ -199,7 +206,6 @@ where
     IS: InsertStatementExt,
     IS::Table: Table,
     C: DatastoreCollection,
-    CollectionTableId<C>: Copy + Debug,
 {
 }
 
@@ -232,16 +238,21 @@ where
     C: DatastoreCollection,
     CollectionTable<C>: HasTable<Table = CollectionTable<C>>
         + Table
-        + diesel::query_dsl::methods::FindDsl<CollectionTableId<C>>,
-    CollectionTableId<C>: Copy + Debug,
-    Find<CollectionTable<C>, CollectionTableId<C>>: QueryFragment<Pg>,
+        + diesel::query_dsl::methods::FilterDsl<
+            Eq<CollectionPrimaryKey<C>, CollectionId<C>>,
+        >,
+    Filter<CollectionTable<C>, CollectionId<C>>: QueryFragment<Pg>,
     InsertStatement<IS::Table, IS::Records, IS::Operator, IS::Returning>:
         QueryFragment<Pg>,
+    <CollectionPrimaryKey<C> as Expression>::SqlType: SingleValue,
+    CollectionPrimaryKey<C>: diesel::Column,
+    CollectionId<C>:
+        diesel::expression::AsExpression<SerializedCollectionPrimaryKey<C>>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.push_sql("WITH found_row AS (");
         let subquery = C::CollectionTable::table()
-            .find(self.key)
+            .filter(C::CollectionTable::table().primary_key().eq(self.key))
             // TODO: Lift time_deleted out of here
             .filter(C::CollectionTable::time_deleted.is_null())
             .for_update();
@@ -257,8 +268,9 @@ where
             .for_update();
 
         out.push_sql("), inserted_row AS (");
+        // TODO: Check that IS::Table is the same as ResourceTable
         // TODO: Check or force the insert_statement to have
-        // C::CollectionIdColumn set
+        //       C::CollectionIdColumn set
         self.insert_statement.walk_ast(out.reborrow())?;
         out.push_sql(") ");
 
