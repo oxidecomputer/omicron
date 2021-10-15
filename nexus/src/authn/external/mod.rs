@@ -118,11 +118,9 @@ mod test {
         /// unique name for this grunt
         name: authn::SchemeName,
 
-        /// specifies what to do with the next authn request that we get
+        /// Specifies what to do with the next authn request that we get
         ///
-        /// * 0 => unauthenticated
-        /// * 1 => authenticated
-        /// * 2 => authn error
+        /// See "SKIP", "OK", and "FAIL" below.
         next: Arc<AtomicU8>,
 
         /// number of times we've been asked to authn a request
