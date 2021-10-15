@@ -4,6 +4,7 @@
 
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -24,7 +25,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
@@ -415,12 +415,12 @@ impl Nexus {
                 &db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: Name::try_from("default").unwrap(),
+                        name: external::Name::try_from("default").unwrap(),
                         description: "Default VPC".to_string(),
                     },
                     // TODO-robustness this will need to be None if we decide to handle
                     // the logic around name and dns_name by making dns_name optional
-                    dns_name: Name::try_from("default").unwrap(),
+                    dns_name: external::Name::try_from("default").unwrap(),
                 },
             )
             .await?;
@@ -922,7 +922,7 @@ impl Nexus {
             if instance_id == instance.id() {
                 return Ok(DiskAttachment {
                     instance_id: instance.id(),
-                    disk_name: disk.name().clone(),
+                    disk_name: disk.name().clone().into(),
                     disk_id: disk.id(),
                     disk_state: disk.state().into(),
                 });
@@ -964,7 +964,7 @@ impl Nexus {
             Ok(DiskAttachment {
                 instance_id: instance.id(),
                 disk_id: disk.id(),
-                disk_name: disk.name().clone(),
+                disk_name: disk.name().clone().into(),
                 disk_state: disk.runtime().state().into(),
             })
         }

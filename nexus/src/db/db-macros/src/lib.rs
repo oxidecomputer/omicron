@@ -186,7 +186,7 @@ fn build_resource_identity(
         #[table_name = #table_name ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,
-            pub name: ::omicron_common::api::external::Name,
+            pub name: crate::db::model::Name,
             pub description: ::std::string::String,
             pub time_created: ::chrono::DateTime<::chrono::Utc>,
             pub time_modified: ::chrono::DateTime<::chrono::Utc>,
@@ -201,7 +201,7 @@ fn build_resource_identity(
                 let now = ::chrono::Utc::now();
                 Self {
                     id,
-                    name: params.name,
+                    name: params.name.into(),
                     description: params.description,
                     time_created: now,
                     time_modified: now,
@@ -268,7 +268,7 @@ fn build_resource_impl(
                 self.identity.id
             }
 
-            fn name(&self) -> &::omicron_common::api::external::Name {
+            fn name(&self) -> &crate::db::model::Name {
                 &self.identity.name
             }
 

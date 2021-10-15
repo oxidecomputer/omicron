@@ -24,6 +24,7 @@ macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+ref-cast = "1.0"
 serde_json = "1.0"
 serde_with = "1.9.4"
 structopt = "0.3"

@@ -2,10 +2,9 @@
  * Implementation of [`steno::SecStore`] backed by Omicron's database
  */
 
-use crate::db;
+use crate::db::{self, model::Generation};
 use anyhow::Context;
 use async_trait::async_trait;
-use omicron_common::api::external::Generation;
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;

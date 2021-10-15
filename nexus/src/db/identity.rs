@@ -2,8 +2,9 @@
 
 // Copyright 2021 Oxide Computer Company
 
+use super::model::Name;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::{self, Name};
+use omicron_common::api::external;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ pub trait Resource {
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
             id: self.id(),
-            name: self.name().clone(),
+            name: self.name().clone().into(),
             description: self.description().to_string(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
@@ -49,7 +50,7 @@ pub trait Asset {
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
             id: self.id(),
-            name: Name::try_from("no-name").unwrap(),
+            name: external::Name::try_from("no-name").unwrap(),
             description: "no description".to_string(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
