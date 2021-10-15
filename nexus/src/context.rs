@@ -5,13 +5,11 @@ use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
-
+use authn::external::spoof::HttpAuthnSpoof;
+use authn::external::HttpAuthnScheme;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use authn::external::spoof::HttpAuthnSpoof;
-use authn::external::HttpAuthnScheme;
 
 /**
  * Shared state available to all API request handlers
@@ -36,13 +34,16 @@ impl ServerContext {
         pool: db::Pool,
         config: &config::Config,
     ) -> Arc<ServerContext> {
-        let all_nexus_schemes: Vec<
-            Arc<dyn HttpAuthnScheme<Arc<ServerContext>> + 'static>,
-        > = vec![Arc::new(HttpAuthnSpoof)];
-        let external_authn = authn::external::Authenticator::new(
-            &all_nexus_schemes,
-            &config.authn_schemes_external,
-        );
+        let nexus_schemes = config
+            .authn_schemes_external
+            .iter()
+            .map(|name| match name {
+                config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
+            }
+                as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
+            .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
+        let external_authn =
+            authn::external::Authenticator::new(nexus_schemes);
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,

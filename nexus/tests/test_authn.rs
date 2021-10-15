@@ -17,7 +17,7 @@ use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR;
 use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS;
-use omicron_nexus::authn::external::AuthnSchemeId;
+use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
 use std::sync::Arc;
 
@@ -33,16 +33,11 @@ extern crate slog;
 async fn test_authn_spoof_allowed() {
     let test_name = "test_authn_spoof_allowed";
     let authn_schemes_configured: Vec<
-        Arc<dyn HttpAuthnScheme<Arc<WhoamiServerState>> + 'static>,
-    > = vec![Arc::new(HttpAuthnSpoof)];
-    let authn_schemes_allowed = vec![AuthnSchemeId::Spoof];
-    let testctx = start_whoami_server(
-        test_name,
-        &authn_schemes_configured,
-        &authn_schemes_allowed,
-    )
-    .await;
-    let tried_spoof = authn_schemes_allowed
+        Box<dyn HttpAuthnScheme<Arc<WhoamiServerState>> + 'static>,
+    > = vec![Box::new(HttpAuthnSpoof)];
+    let testctx =
+        start_whoami_server(test_name, authn_schemes_configured).await;
+    let tried_spoof = vec![SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
@@ -94,48 +89,12 @@ async fn test_authn_spoof_allowed() {
     testctx.teardown().await;
 }
 
-/// Like test_authn_spoof_allowed(), but tests the authenticator when the
-/// "spoof" scheme is disallowed.  In this mode, we should not even try to parse
-/// the header.
-#[tokio::test]
-async fn test_authn_spoof_disallowed() {
-    let test_name = "test_authn_spoof_disallowed";
-    let authn_schemes_configured: Vec<
-        Arc<dyn HttpAuthnScheme<Arc<WhoamiServerState>> + 'static>,
-    > = vec![Arc::new(HttpAuthnSpoof)];
-    let testctx =
-        start_whoami_server(test_name, &authn_schemes_configured, &Vec::new())
-            .await;
-
-    let values = [
-        None,
-        Some(HeaderValue::from_static("7f927c86-3371-4295-c34a-e3246a4b9c02")),
-        Some(HeaderValue::from_static("not-a-uuid")),
-        Some(HeaderValue::from_static(SPOOF_RESERVED_BAD_ACTOR)),
-        Some(HeaderValue::from_static(SPOOF_RESERVED_BAD_CREDS)),
-    ];
-
-    for v in values {
-        assert_eq!(
-            whoami_request(v, &testctx).await.unwrap(),
-            WhoamiResponse {
-                authenticated: false,
-                actor: None,
-                schemes_tried: Vec::new(),
-            }
-        );
-    }
-
-    testctx.teardown().await;
-}
-
-/// Like the other test_authn_spoof_* tests, but tests against a server which
-/// has no schemes configured at all.
+/// Like test_authn_spoof_allowed(), but tests against a server which has no
+/// schemes configured.
 #[tokio::test]
 async fn test_authn_spoof_unconfigured() {
     let test_name = "test_authn_spoof_disallowed";
-    let testctx =
-        start_whoami_server(test_name, &Vec::new(), &Vec::new()).await;
+    let testctx = start_whoami_server(test_name, Vec::new()).await;
 
     let values = [
         None,
@@ -206,10 +165,9 @@ fn assert_authn_failed(
 
 async fn start_whoami_server(
     test_name: &str,
-    authn_schemes_configured: &[Arc<
-        dyn HttpAuthnScheme<Arc<WhoamiServerState>> + 'static,
-    >],
-    authn_schemes_allowed: &[AuthnSchemeId],
+    authn_schemes_configured: Vec<
+        Box<dyn HttpAuthnScheme<Arc<WhoamiServerState>>>,
+    >,
 ) -> TestContext<Arc<WhoamiServerState>> {
     let config = common::load_test_config();
     let logctx = LogContext::new(test_name, &config.log);
@@ -225,7 +183,6 @@ async fn start_whoami_server(
     let server_state = {
         let authn = omicron_nexus::authn::external::Authenticator::new(
             authn_schemes_configured,
-            authn_schemes_allowed,
         );
         Arc::new(WhoamiServerState { authn })
     };
@@ -270,7 +227,8 @@ async fn whoami_get(
     let authn = whoami_state.authn.authn_request(&rqctx).await?;
     let actor = authn.actor().map(|a| a.0.to_string());
     let authenticated = actor.is_some();
-    let schemes_tried = authn.schemes_tried().to_owned();
+    let schemes_tried =
+        authn.schemes_tried().iter().map(|s| s.to_string()).collect();
     Ok(dropshot::HttpResponseOk(WhoamiResponse {
         authenticated,
         actor,

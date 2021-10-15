@@ -40,7 +40,7 @@ pub struct Context {
     /// any credentials to verify.  Otherwise, whether authentiation succeeded
     /// or failed, it was the last scheme in this list that was responsible for
     /// the final determination.
-    schemes_tried: Vec<String>,
+    schemes_tried: Vec<SchemeName>,
 }
 
 impl Context {
@@ -55,7 +55,7 @@ impl Context {
     /// Returns the list of schemes tried, in order
     ///
     /// This should generally *not* be exposed to clients.
-    pub fn schemes_tried(&self) -> &[String] {
+    pub fn schemes_tried(&self) -> &[SchemeName] {
         &self.schemes_tried
     }
 }
@@ -84,6 +84,12 @@ pub struct Details {
 #[derive(Debug)]
 pub struct Actor(pub Uuid);
 
+/// Label for a particular authentication scheme (used in log messages and
+/// internal error messages)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SchemeName(&'static str);
+NewtypeDisplay! { () pub struct SchemeName(&'static str); }
+
 /// Describes why authentication failed
 ///
 /// This should usually *not* be exposed to end users because it can leak
@@ -103,7 +109,7 @@ pub struct Actor(pub Uuid);
 #[error("authentication failed (tried schemes: {schemes_tried:?})")]
 pub struct Error {
     /// list of authentication schemes that were tried
-    schemes_tried: Vec<String>,
+    schemes_tried: Vec<SchemeName>,
     /// why authentication failed
     #[source]
     reason: Reason,

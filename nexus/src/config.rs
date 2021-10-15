@@ -3,12 +3,14 @@
  * configuration
  */
 
-use crate::authn;
 use crate::db;
+use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::DeserializeFromStr;
+use serde_with::SerializeDisplay;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -33,7 +35,7 @@ pub struct Config {
     /** Database parameters */
     pub database: db::Config,
     /** allowed authentication schemes for external HTTP server */
-    pub authn_schemes_external: Vec<authn::external::AuthnSchemeId>,
+    pub authn_schemes_external: Vec<SchemeName>,
 }
 
 #[derive(Debug)]
@@ -84,6 +86,37 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
     }
 }
 
+/// List of supported external authn schemes
+///
+/// Note that the authn subsystem doesn't know about this type.  It allows
+/// schemes to be called whatever they want.  This is just to provide a set of
+/// allowed values for configuration.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
+)]
+pub enum SchemeName {
+    Spoof,
+}
+
+impl std::str::FromStr for SchemeName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "spoof" => Ok(SchemeName::Spoof),
+            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for SchemeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SchemeName::Spoof => "spoof",
+        })
+    }
+}
+
 impl Config {
     /**
      * Load a `Config` from the given TOML file
@@ -104,8 +137,8 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::Config;
+    use super::SchemeName;
     use super::{LoadError, LoadErrorKind};
-    use crate::authn;
     use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -285,10 +318,7 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(
-            config.authn_schemes_external,
-            vec![authn::external::AuthnSchemeId::Spoof],
-        );
+        assert_eq!(config.authn_schemes_external, vec![SchemeName::Spoof],);
     }
 
     #[test]

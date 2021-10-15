@@ -1,10 +1,10 @@
 //! Implements a custom, test-only authn scheme that blindly trusts the client
 
 use super::super::Details;
-use super::AuthnSchemeId;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
+use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
 use anyhow::Context;
@@ -18,6 +18,7 @@ pub const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack Donaghy";
 /// Magic header value to produce a "bad credentials" error
 pub const SPOOF_RESERVED_BAD_CREDS: &str =
     "this fake I.D., it is truly excellent";
+pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
 
 /// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom header
@@ -31,8 +32,8 @@ impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
     T: Send + Sync + 'static,
 {
-    fn name(&self) -> AuthnSchemeId {
-        AuthnSchemeId::Spoof
+    fn name(&self) -> authn::SchemeName {
+        SPOOF_SCHEME_NAME
     }
 
     fn authn(
