@@ -172,7 +172,6 @@ mod test {
         //   second scheme and use its result
         // - when both schemes return "unauthenticated", we get back an
         //   unauthenticated context
-        //
 
         // Set up the Authenticator with two GruntSchemes.
         let flag1 = Arc::new(AtomicU8::new(SKIP));
