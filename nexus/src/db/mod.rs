@@ -16,6 +16,7 @@ mod update_and_check;
 #[cfg(test)]
 mod test_utils;
 
+pub mod identity;
 pub mod model;
 pub mod schema;
 

@@ -4,6 +4,7 @@
 
 use super::ServerContext;
 use crate::db;
+use crate::db::model::Name;
 
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -36,7 +37,9 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::Name;
+use omicron_common::api::external::Organization;
+use omicron_common::api::external::OrganizationCreateParams;
+use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
@@ -50,6 +53,7 @@ use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
+use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::num::NonZeroU32;
@@ -63,6 +67,12 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
  */
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(organizations_get)?;
+        api.register(organizations_post)?;
+        api.register(organizations_get_organization)?;
+        api.register(organizations_delete_organization)?;
+        api.register(organizations_put_organization)?;
+
         api.register(projects_get)?;
         api.register(projects_post)?;
         api.register(projects_get_project)?;
@@ -156,6 +166,137 @@ pub fn external_api() -> NexusApiDescription {
  */
 
 /**
+ * List all organizations.
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations",
+ }]
+async fn organizations_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let params = ScanByNameOrId::from_query(&query)?;
+    let field = pagination_field_for_scan_params(params);
+
+    let organizations = match field {
+        PagField::Id => {
+            let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+            nexus.organizations_list_by_id(&page_selector).await?
+        }
+
+        PagField::Name => {
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n));
+            nexus.organizations_list_by_name(&page_selector).await?
+        }
+    }
+    .into_iter()
+    .map(|p| p.into())
+    .collect();
+    Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, organizations)?))
+}
+
+/**
+ * Create a new organization.
+ */
+#[endpoint {
+    method = POST,
+    path = "/organizations"
+}]
+async fn organizations_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_organization: TypedBody<OrganizationCreateParams>,
+) -> Result<HttpResponseCreated<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let organization =
+        nexus.organization_create(&new_organization.into_inner()).await?;
+    Ok(HttpResponseCreated(organization.into()))
+}
+
+/**
+ * Path parameters for Organization requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct OrganizationPathParam {
+    /// The organization's unique name.
+    organization_name: Name,
+}
+
+/**
+ * Fetch a specific organization
+ */
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}",
+}]
+async fn organizations_get_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let organization = nexus.organization_fetch(&organization_name).await?;
+    Ok(HttpResponseOk(organization.into()))
+}
+
+/**
+ * Delete a specific organization.
+ */
+#[endpoint {
+     method = DELETE,
+     path = "/organizations/{organization_name}",
+ }]
+async fn organizations_delete_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let params = path_params.into_inner();
+    let organization_name = &params.organization_name;
+    nexus.organization_delete(&organization_name).await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a specific organization.
+ *
+ * TODO-correctness: Is it valid for PUT to accept application/json that's a
+ * subset of what the resource actually represents?  If not, is that a problem?
+ * (HTTP may require that this be idempotent.)  If so, can we get around that
+ * having this be a slightly different content-type (e.g.,
+ * "application/json-patch")?  We should see what other APIs do.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/organizations/{organization_name}",
+ }]
+async fn organizations_put_organization(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+    updated_organization: TypedBody<OrganizationUpdateParams>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let new_organization = nexus
+        .organization_update(
+            &organization_name,
+            &updated_organization.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(new_organization.into()))
+}
+
+/**
  * List all projects.
  */
 #[endpoint {
@@ -179,7 +320,8 @@ async fn projects_get(
         }
 
         PagField::Name => {
-            let page_selector = data_page_params_nameid_name(&rqctx, &query)?;
+            let page_selector = data_page_params_nameid_name(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n));
             nexus.projects_list_by_name(&page_selector).await?
         }
     }
@@ -305,7 +447,8 @@ async fn project_disks_get(
     let disks = nexus
         .project_list_disks(
             project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?
         .into_iter()
@@ -411,7 +554,8 @@ async fn project_instances_get(
     let instances = nexus
         .project_list_instances(
             &project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?
         .into_iter()
@@ -586,7 +730,10 @@ async fn instance_disks_get(
     };
     let disks = nexus
         .instance_list_disks(&project_name, &instance_name, &fake_query)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
     Ok(HttpResponseOk(disks))
 }
 
@@ -693,7 +840,8 @@ async fn project_vpcs_get(
     let vpcs = nexus
         .project_list_vpcs(
             &project_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?;
     Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
@@ -814,7 +962,8 @@ async fn vpc_subnets_get(
         .vpc_list_subnets(
             &path.project_name,
             &path.vpc_name,
-            &data_page_params_for(&rqctx, &query)?,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
         )
         .await?;
     Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))

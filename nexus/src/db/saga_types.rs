@@ -190,7 +190,7 @@ pub struct Saga {
     pub saga_params: serde_json::Value,
     pub saga_state: SagaCachedState,
     pub current_sec: Option<SecId>,
-    pub adopt_generation: Generation,
+    pub adopt_generation: super::model::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 }
 
@@ -205,7 +205,7 @@ impl Saga {
             saga_params: params.saga_params,
             saga_state: params.state.into(),
             current_sec: Some(id),
-            adopt_generation: Generation::new(),
+            adopt_generation: Generation::new().into(),
             adopt_time: now,
         }
     }
