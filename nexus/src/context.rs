@@ -42,8 +42,7 @@ impl ServerContext {
             }
                 as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
             .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
-        let external_authn =
-            authn::external::Authenticator::new(nexus_schemes);
+        let external_authn = authn::external::Authenticator::new(nexus_schemes);
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
