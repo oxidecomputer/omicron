@@ -8,7 +8,6 @@ use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
 use anyhow::Context;
-use dropshot::RequestContext;
 use uuid::Uuid;
 
 /// Header used for "spoof" authentication
@@ -38,7 +37,8 @@ where
 
     fn authn(
         &self,
-        _rqctx: &RequestContext<T>,
+        _ctx: &T,
+        _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();

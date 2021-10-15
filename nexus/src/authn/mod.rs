@@ -81,7 +81,7 @@ pub struct Details {
 }
 
 /// Who is performing an operation
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Actor(pub Uuid);
 
 /// Label for a particular authentication scheme (used in log messages and
