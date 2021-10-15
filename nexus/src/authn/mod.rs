@@ -119,13 +119,11 @@ pub enum Reason {
     },
 
     /// We did not find the actor that was attempting to authenticate
-    #[allow(dead_code)]
     #[error("unknown actor {actor:?}")]
     UnknownActor { actor: String },
 
     /// The credentials were syntactically valid, but semantically invalid
     /// (e.g., a cryptographic signature did not match)
-    #[allow(dead_code)]
     #[error("bad credentials: {source:#}")]
     BadCredentials {
         #[source]
@@ -146,10 +144,11 @@ impl From<Error> for dropshot::HttpError {
             // The HTTP short summary of this status code is "Unauthorized", but
             // the code describes an authentication failure, not an
             // authorization one.
-            // TODO But is that the right status code to use here?
             // TODO-security Under what conditions should this be a 404
             // instead?
-            // TODO Add a WWW-Authenticate header?
+            // TODO Add a WWW-Authenticate header.  We probably want to provide
+            // this on all requests, since different creds can always change the
+            // behavior.
             Reason::UnknownActor { .. } | Reason::BadCredentials { .. } => {
                 dropshot::HttpError {
                     status_code: http::StatusCode::UNAUTHORIZED,

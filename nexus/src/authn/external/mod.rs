@@ -45,19 +45,9 @@ where
     }
 
     /// Authenticate an incoming HTTP request
-    //
-    // TODO-security If the client is attempting to authenticate and fails for
-    // whatever reason, we produce an error here.  It might be reasonable to
-    // instead produce [`authn::Context::Unauthenticated`].  Does either of
-    // these introduce a security problem?
-    //
-    // TODO-cleanup: Do we want to consume the whole RequestContext here so that
-    // we can get to headers?  Or do we instead want to require that every
-    // external API endpoint have an extractor that grabs the appropriate Authn
-    // header(s)?  Is it customary to include the auth header(s) in the OpenAPI
-    // spec for every endpoint?  Or do they go in some separate section of
-    // headers that apply to many endpoints?
-    //
+    // TODO-openapi: At some point, the authentication headers need to get into
+    // the OpenAPI spec.  We probably don't want to have every endpoint function
+    // accept them via an extractor, though.
     pub async fn authn_request(
         &self,
         rqctx: &RequestContext<T>,
@@ -65,8 +55,16 @@ where
         let log = &rqctx.log;
         let request = rqctx.request.lock().await;
 
+        // Keep track of the schemes tried for debuggability.
         let mut schemes_tried = Vec::with_capacity(self.allowed_schemes.len());
+
         for (scheme_id, scheme_impl) in &self.all_schemes {
+            // Rather than keeping a list of configured schemes and trying
+            // those, we keep a list of all schemes and try only the ones that
+            // have been configured.  This is a little more circuitous, but it
+            // allows us to report an explicit log message when we're skipping a
+            // scheme.  This way, people can (hopefully) more quickly debug a
+            // case where some header seemed to be ignored.
             if !self.allowed_schemes.contains(scheme_id) {
                 trace!(
                     log,
@@ -82,7 +80,8 @@ where
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
-                // NOT that they simply didn't try), should we try the others?
+                // NOT that they simply didn't try), should we try the others
+                // instead of returning the failure here?
                 SchemeResult::Failed(reason) => {
                     return Err(authn::Error { reason, schemes_tried })
                 }
@@ -100,6 +99,7 @@ where
     }
 }
 
+// XXX Can we get rid of this?  Use a newtype around a String?
 /// List of all supported external authn schemes
 ///
 /// Besides being useful in defining the configuration file, having a type that
@@ -141,17 +141,6 @@ impl std::fmt::Display for AuthnSchemeId {
     }
 }
 
-/// Result returned by a particular authentication scheme
-#[derive(Debug)]
-pub enum SchemeResult {
-    /// The client is not trying to use this authn scheme
-    NotRequested,
-    /// The client successfully authenticated
-    Authenticated(super::Details),
-    /// The client tried and failed to authenticate
-    Failed(Reason),
-}
-
 /// Implements a particular HTTP authentication scheme
 pub trait HttpAuthnScheme<T>: std::fmt::Debug + Send + Sync
 where
@@ -168,7 +157,24 @@ where
     ) -> SchemeResult;
 }
 
+/// Result returned by each authentication scheme when trying to authenticate a
+/// request
+#[derive(Debug)]
+pub enum SchemeResult {
+    /// The client is not trying to use this authn scheme
+    NotRequested,
+    /// The client successfully authenticated
+    Authenticated(super::Details),
+    /// The client tried and failed to authenticate
+    Failed(Reason),
+}
+
 #[cfg(test)]
 mod test {
-    // XXX
+    // XXX What tests do we want here?
+    // The end-to-end tests are covered by an integration test.  That makes sure
+    // that we get the right information at the level of endpoint handlers,
+    // based on whatever headers were provided in the request.  Here, we might
+    // try to test the behavior of authn_request() itself, with a variety of
+    // configurations.
 }

@@ -13,10 +13,8 @@ use uuid::Uuid;
 
 /// Header used for "spoof" authentication
 pub const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &str = "oxide-authn-spoof";
-
 /// Magic header value to produce a "no such actor" error
 pub const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack Donaghy";
-
 /// Magic header value to produce a "bad credentials" error
 pub const SPOOF_RESERVED_BAD_CREDS: &str =
     "this fake I.D., it is truly excellent";
@@ -24,8 +22,8 @@ pub const SPOOF_RESERVED_BAD_CREDS: &str =
 /// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom header
 /// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we blindly trust it.  This is
-/// (obviously) only used for testing.  It's useful for testing the rest of the
-/// authn mechanism.
+/// useful for testing the rest of the authn facilities since we can very easily
+/// and precisely control its output.
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
@@ -105,7 +103,7 @@ mod test {
 
     #[test]
     fn test_spoof_header_missing() {
-        // The client provided nothing (with header enabled and disabled)
+        // The client provided no credentials.
         assert!(matches!(authn_spoof(None), SchemeResult::NotRequested));
     }
 

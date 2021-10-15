@@ -4,6 +4,12 @@
 
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+
+# List of authentication schemes to support.
+#
+# This is not fleshed out yet and the only reason to change it now is for
+# working on authentication or authorization.  Neither is really implemented
+# yet.
 authn_schemes_external = []
 
 [database]
