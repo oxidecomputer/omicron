@@ -133,7 +133,6 @@ pub enum Reason {
     },
 }
 
-// XXX need a test that we don't leak information
 impl From<Error> for dropshot::HttpError {
     fn from(authn_error: Error) -> Self {
         match &authn_error.reason {
