@@ -143,8 +143,8 @@ mod test {
                 .expect("test case header value was not a valid HTTP header");
             let result = authn_spoof(Some(&test_header));
             if let SchemeResult::Failed(error) = result {
-                assert!(format!("{:#}", error).starts_with(
-                    "bad authentication header: parsing header value"
+                assert!(error.to_string().starts_with(
+                    "bad authentication credentials: parsing header value"
                 ));
             } else {
                 panic!(

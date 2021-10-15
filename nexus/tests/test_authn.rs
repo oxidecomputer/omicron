@@ -4,8 +4,6 @@
 // a lower-level interface, since our hyper Client will not allow us to send
 // such invalid requests.
 
-// XXX add a test for a server that has no schemes configured at all
-
 pub mod common;
 
 use dropshot::endpoint;

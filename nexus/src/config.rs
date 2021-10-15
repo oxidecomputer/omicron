@@ -316,8 +316,8 @@ mod test {
         .expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert!(error.to_string().starts_with(
-                "unknown variant `trust-me`, expected `spoof` for key \
-                `authn_schemes_external`"
+                "unsupported authn scheme: \"trust-me\" \
+                for key `authn_schemes_external`"
             ));
         } else {
             panic!(
