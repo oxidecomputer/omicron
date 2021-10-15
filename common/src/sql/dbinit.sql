@@ -40,16 +40,24 @@ CREATE USER omicron;
 GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 
 /*
+ * Racks
+ */
+CREATE TABLE omicron.public.Rack (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL
+);
+
+/*
  * Sleds
  */
 
 CREATE TABLE omicron.public.Sled (
-    /* Identity metadata */
+    /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
 
     ip INET NOT NULL,
     port INT4 NOT NULL
@@ -83,7 +91,7 @@ CREATE UNIQUE INDEX ON omicron.public.Organization (
  */
 
 CREATE TABLE omicron.public.Project (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -129,7 +137,7 @@ CREATE UNIQUE INDEX ON omicron.public.Project (
  * like.  Or changing # of CPUs or memory size.
  */
 CREATE TABLE omicron.public.Instance (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -191,7 +199,7 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
 -- );
 
 CREATE TABLE omicron.public.Disk (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -274,7 +282,7 @@ CREATE INDEX ON omicron.public.MetricProducer (
 
 
 CREATE TABLE omicron.public.Vpc (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -293,7 +301,7 @@ CREATE UNIQUE INDEX ON omicron.public.Vpc (
     time_deleted IS NULL;
 
 CREATE TABLE omicron.public.VpcSubnet (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -314,7 +322,7 @@ CREATE UNIQUE INDEX ON omicron.public.VpcSubnet (
     time_deleted IS NULL;
 
 CREATE TABLE omicron.public.NetworkInterface (
-    /* Identity metadata */
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,

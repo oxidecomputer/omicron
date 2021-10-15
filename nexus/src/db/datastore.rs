@@ -18,6 +18,7 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
+use super::identity::{Asset, Resource};
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -44,8 +45,9 @@ use crate::db::{
     },
     model::{
         Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
-        InstanceRuntimeState, Name, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Sled, Vpc, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        InstanceRuntimeState, Name, Organization, OrganizationUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -76,13 +78,14 @@ impl DataStore {
                 dsl::ip.eq(sled.ip),
                 dsl::port.eq(sled.port),
             ))
+            .returning(Sled::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Sled,
-                    &sled.id.to_string(),
+                    &sled.id().to_string(),
                 )
             })
     }
@@ -93,7 +96,7 @@ impl DataStore {
     ) -> ListResultVec<Sled> {
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
+            .select(Sled::as_select())
             .load_async(self.pool())
             .await
             .map_err(|e| {
@@ -108,8 +111,8 @@ impl DataStore {
     pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<Sled> {
         use db::schema::sled::dsl;
         dsl::sled
-            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(id))
+            .select(Sled::as_select())
             .first_async(self.pool())
             .await
             .map_err(|e| {
@@ -124,13 +127,14 @@ impl DataStore {
     /// Create a organization
     pub async fn organization_create(
         &self,
-        organization: db::model::Organization,
-    ) -> CreateResult<db::model::Organization> {
+        organization: Organization,
+    ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        let name = organization.name().to_string();
+        let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
             .values(organization)
+            .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -146,12 +150,13 @@ impl DataStore {
     pub async fn organization_fetch(
         &self,
         name: &Name,
-    ) -> LookupResult<db::model::Organization> {
+    ) -> LookupResult<Organization> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
-            .first_async::<db::model::Organization>(self.pool())
+            .select(Organization::as_select())
+            .first_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -232,11 +237,12 @@ impl DataStore {
     pub async fn organizations_list_by_id(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Organization> {
+    ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Organization>(self.pool())
+            .select(Organization::as_select())
+            .load_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -250,11 +256,12 @@ impl DataStore {
     pub async fn organizations_list_by_name(
         &self,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Organization> {
+    ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<db::model::Organization>(self.pool())
+            .select(Organization::as_select())
+            .load_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -270,15 +277,15 @@ impl DataStore {
         &self,
         name: &Name,
         update_params: &api::external::OrganizationUpdateParams,
-    ) -> UpdateResult<db::model::Organization> {
+    ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
-        let updates: db::model::OrganizationUpdate =
-            update_params.clone().into();
+        let updates: OrganizationUpdate = update_params.clone().into();
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
+            .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -297,9 +304,10 @@ impl DataStore {
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
 
-        let name = project.name().to_string();
+        let name = project.name().as_str().to_string();
         diesel::insert_into(dsl::project)
             .values(project)
+            .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -317,6 +325,7 @@ impl DataStore {
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
+            .select(Project::as_select())
             .first_async(self.pool())
             .await
             .map_err(|e| {
@@ -341,7 +350,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<Project>(self.pool())
+            .returning(Project::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -381,7 +391,8 @@ impl DataStore {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<Project>(self.pool())
+            .select(Project::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -400,7 +411,8 @@ impl DataStore {
 
         paginated(dsl::project, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .load_async::<Project>(self.pool())
+            .select(Project::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -424,6 +436,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
+            .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -477,7 +490,7 @@ impl DataStore {
             params,
             runtime_initial.clone(),
         );
-        let name = instance.name.clone();
+        let name = instance.name().clone();
         let instance: Instance = diesel::insert_into(dsl::instance)
             .values(instance)
             .on_conflict(dsl::id)
@@ -704,7 +717,7 @@ impl DataStore {
             params.clone(),
             runtime_initial.clone(),
         );
-        let name = disk.name.clone();
+        let name = disk.name().clone();
         let disk: Disk = diesel::insert_into(dsl::disk)
             .values(disk)
             .on_conflict(dsl::id)
@@ -962,7 +975,8 @@ impl DataStore {
         paginated(dsl::metricproducer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
-            .load_async::<ProducerEndpoint>(self.pool())
+            .select(ProducerEndpoint::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
@@ -1119,7 +1133,8 @@ impl DataStore {
         paginated(dsl::vpc, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
-            .load_async::<Vpc>(self.pool())
+            .select(Vpc::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1139,11 +1154,12 @@ impl DataStore {
         use db::schema::vpc::dsl;
 
         let vpc = Vpc::new(*vpc_id, *project_id, params.clone());
-        let name = vpc.name.clone();
+        let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(Vpc::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1191,6 +1207,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(*project_id))
             .filter(dsl::name.eq(vpc_name.clone()))
+            .select(Vpc::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1210,7 +1227,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<Vpc>(self.pool())
+            .returning(Vpc::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1232,7 +1250,8 @@ impl DataStore {
         paginated(dsl::vpcsubnet, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
-            .load_async::<VpcSubnet>(self.pool())
+            .select(VpcSubnet::as_select())
+            .load_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1253,6 +1272,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(subnet_name.clone()))
+            .select(VpcSubnet::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1273,11 +1293,12 @@ impl DataStore {
         use db::schema::vpcsubnet::dsl;
 
         let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
-        let name = subnet.name.clone();
+        let name = subnet.name().clone();
         let subnet = diesel::insert_into(dsl::vpcsubnet)
             .values(subnet)
             .on_conflict(dsl::id)
             .do_nothing()
+            .returning(VpcSubnet::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1298,7 +1319,8 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(dsl::time_deleted.eq(now))
-            .get_result_async::<VpcSubnet>(self.pool())
+            .returning(VpcSubnet::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
