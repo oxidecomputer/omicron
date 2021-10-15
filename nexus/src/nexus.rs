@@ -3,6 +3,7 @@
  */
 
 use crate::db;
+use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -25,7 +26,8 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::Name;
+use omicron_common::api::external::OrganizationCreateParams;
+use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
@@ -148,7 +150,8 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: IdentityMetadata {
                 id: *rack_id,
-                name: Name::try_from(format!("rack-{}", *rack_id)).unwrap(),
+                name: external::Name::try_from(format!("rack-{}", *rack_id))
+                    .unwrap(),
                 description: String::from(""),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -186,7 +189,7 @@ impl Nexus {
 
         // Insert the sled into the database.
         let create_params = IdentityMetadataCreateParams {
-            name: Name::try_from("sled").unwrap(),
+            name: external::Name::try_from("sled").unwrap(),
             description: "Self-Identified Sled".to_string(),
         };
         let sled = db::model::Sled::new(id, address, create_params);
@@ -354,6 +357,51 @@ impl Nexus {
     }
 
     /*
+     * Organizations
+     */
+
+    pub async fn organization_create(
+        &self,
+        new_organization: &OrganizationCreateParams,
+    ) -> CreateResult<db::model::Organization> {
+        let db_org = db::model::Organization::new(new_organization.clone());
+        self.db_datastore.organization_create(db_org).await
+    }
+
+    pub async fn organization_fetch(
+        &self,
+        name: &Name,
+    ) -> LookupResult<db::model::Organization> {
+        self.db_datastore.organization_fetch(name).await
+    }
+
+    pub async fn organizations_list_by_name(
+        &self,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Organization> {
+        self.db_datastore.organizations_list_by_name(pagparams).await
+    }
+
+    pub async fn organizations_list_by_id(
+        &self,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Organization> {
+        self.db_datastore.organizations_list_by_id(pagparams).await
+    }
+
+    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+        self.db_datastore.organization_delete(name).await
+    }
+
+    pub async fn organization_update(
+        &self,
+        name: &Name,
+        new_params: &OrganizationUpdateParams,
+    ) -> UpdateResult<db::model::Organization> {
+        self.db_datastore.organization_update(name, &new_params).await
+    }
+
+    /*
      * Projects
      */
 
@@ -379,12 +427,12 @@ impl Nexus {
                 db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: Name::try_from("default").unwrap(),
+                        name: external::Name::try_from("default").unwrap(),
                         description: "Default VPC".to_string(),
                     },
                     // TODO-robustness this will need to be None if we decide to handle
                     // the logic around name and dns_name by making dns_name optional
-                    dns_name: Name::try_from("default").unwrap(),
+                    dns_name: external::Name::try_from("default").unwrap(),
                 },
             )
             .await?;
@@ -886,7 +934,7 @@ impl Nexus {
             if instance_id == instance.id {
                 return Ok(DiskAttachment {
                     instance_id: instance.id,
-                    disk_name: disk.name.clone(),
+                    disk_name: disk.name.clone().into(),
                     disk_id: disk.id,
                     disk_state: disk.state().into(),
                 });
@@ -928,7 +976,7 @@ impl Nexus {
             Ok(DiskAttachment {
                 instance_id: instance.id,
                 disk_id: disk.id,
-                disk_name: disk.name.clone(),
+                disk_name: disk.name.clone().into(),
                 disk_state: disk.runtime().state().into(),
             })
         }

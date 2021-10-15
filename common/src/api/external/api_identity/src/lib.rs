@@ -43,8 +43,8 @@ fn do_object_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     };
 
     let stream = quote! {
-        impl ObjectIdentity for #name {
-            fn identity(&self) -> &IdentityMetadata {
+        impl crate::api::external::ObjectIdentity for #name {
+            fn identity(&self) -> &crate::api::external::IdentityMetadata {
                 &self.identity
             }
         }
