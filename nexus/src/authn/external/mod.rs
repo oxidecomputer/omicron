@@ -104,12 +104,6 @@ pub enum SchemeResult {
     Failed(Reason),
 }
 
-// TODO-coverage The end-to-end tests are covered by an integration test.  That
-// makes sure that we get the right information at the level of endpoint
-// handlers, based on whatever headers were provided in the request.  Here, we
-// might try to test the behavior of authn_request() itself with a variety of
-// configurations.
-
 #[cfg(test)]
 mod test {
     use super::*;
