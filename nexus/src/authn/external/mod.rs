@@ -1,44 +1,45 @@
 //! Authentication for requests to the external HTTP API
 
 use crate::authn;
-use crate::ServerContext;
 use anyhow::anyhow;
 use authn::Reason;
 use dropshot::RequestContext;
-use lazy_static::lazy_static;
 use serde_with::DeserializeFromStr;
 use serde_with::SerializeDisplay;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-mod spoof;
-pub use spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-
-lazy_static! {
-    #[rustfmt::skip]
-    static ref EXTERNAL_AUTHN_SCHEMES: Vec<(
-        AuthnSchemeId,
-        Arc<dyn HttpAuthnScheme>
-    )> = vec![(AuthnSchemeId::Spoof, Arc::new(spoof::HttpAuthnSpoof)),];
-}
+pub mod spoof;
 
 /// Authenticates incoming HTTP requests using schemes intended for use by the
 /// external API
 ///
 /// (This will eventually support something like HTTP signatures and OAuth.  For
 /// now, only a dummy scheme is supported.)
-pub struct Authenticator {
-    all_schemes: Vec<(AuthnSchemeId, Arc<dyn HttpAuthnScheme>)>,
+pub struct Authenticator<T> {
+    all_schemes: Vec<(AuthnSchemeId, Arc<dyn HttpAuthnScheme<T>>)>,
     allowed_schemes: BTreeSet<AuthnSchemeId>,
 }
 
-impl Authenticator {
+impl<T> Authenticator<T>
+where
+    T: Send + Sync + 'static,
+{
     /// Build a new authentiator that allows only the specified schemes
-    pub fn new<'a, I: IntoIterator<Item = &'a AuthnSchemeId>>(
-        allowed_schemes: I,
-    ) -> Authenticator {
+    pub fn new<'i1, 'i2, I1, I2>(
+        all_schemes: I1,
+        allowed_schemes: I2,
+    ) -> Authenticator<T>
+    where
+        I1: IntoIterator<Item = &'i1 Arc<dyn HttpAuthnScheme<T>>>,
+        I2: IntoIterator<Item = &'i2 AuthnSchemeId>,
+    {
         Authenticator {
-            all_schemes: EXTERNAL_AUTHN_SCHEMES.clone(),
+            all_schemes: all_schemes
+                .into_iter()
+                .cloned()
+                .map(|s| (s.name(), s))
+                .collect(),
             allowed_schemes: allowed_schemes.into_iter().map(|n| *n).collect(),
         }
     }
@@ -59,7 +60,7 @@ impl Authenticator {
     //
     pub async fn authn_request(
         &self,
-        rqctx: &RequestContext<Arc<ServerContext>>,
+        rqctx: &RequestContext<T>,
     ) -> Result<authn::Context, authn::Error> {
         let log = &rqctx.log;
         let request = rqctx.request.lock().await;
@@ -83,10 +84,7 @@ impl Authenticator {
                 // authentication scheme (i.e., a signature that didn't match,
                 // NOT that they simply didn't try), should we try the others?
                 SchemeResult::Failed(reason) => {
-                    return Err(authn::Error {
-                        reason,
-                        schemes_tried,
-                    })
+                    return Err(authn::Error { reason, schemes_tried })
                 }
                 SchemeResult::Authenticated(details) => {
                     return Ok(authn::Context {
@@ -98,10 +96,7 @@ impl Authenticator {
             }
         }
 
-        Ok(authn::Context {
-            kind: authn::Kind::Unauthenticated,
-            schemes_tried,
-        })
+        Ok(authn::Context { kind: authn::Kind::Unauthenticated, schemes_tried })
     }
 }
 
@@ -148,7 +143,7 @@ impl std::fmt::Display for AuthnSchemeId {
 
 /// Result returned by a particular authentication scheme
 #[derive(Debug)]
-enum SchemeResult {
+pub enum SchemeResult {
     /// The client is not trying to use this authn scheme
     NotRequested,
     /// The client successfully authenticated
@@ -158,14 +153,17 @@ enum SchemeResult {
 }
 
 /// Implements a particular HTTP authentication scheme
-trait HttpAuthnScheme: std::fmt::Debug + Send + Sync {
+pub trait HttpAuthnScheme<T>: std::fmt::Debug + Send + Sync
+where
+    T: Send + Sync + 'static,
+{
     /// Returns the (unique) name for this scheme (for observability)
     fn name(&self) -> AuthnSchemeId;
 
     /// Locate credentials in the HTTP request and attempt to verify them
     fn authn(
         &self,
-        rqctx: &RequestContext<Arc<ServerContext>>,
+        rqctx: &RequestContext<T>,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult;
 }

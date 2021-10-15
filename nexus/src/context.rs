@@ -10,6 +10,9 @@ use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use authn::external::spoof::HttpAuthnSpoof;
+use authn::external::HttpAuthnScheme;
+
 /**
  * Shared state available to all API request handlers
  */
@@ -19,7 +22,7 @@ pub struct ServerContext {
     /** debug log */
     pub log: Logger,
     /** authenticator for external HTTP requests */
-    pub external_authn: authn::external::Authenticator,
+    pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
 }
 
 impl ServerContext {
@@ -33,8 +36,13 @@ impl ServerContext {
         pool: db::Pool,
         config: &config::Config,
     ) -> Arc<ServerContext> {
-        let external_authn =
-            authn::external::Authenticator::new(&config.authn_schemes_external);
+        let all_nexus_schemes: Vec<
+            Arc<dyn HttpAuthnScheme<Arc<ServerContext>> + 'static>,
+        > = vec![Arc::new(HttpAuthnSpoof)];
+        let external_authn = authn::external::Authenticator::new(
+            &all_nexus_schemes,
+            &config.authn_schemes_external,
+        );
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,

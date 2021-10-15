@@ -12,7 +12,7 @@
 /* Clippy's style lints are useful, but not worth running automatically. */
 #![allow(clippy::style)]
 
-mod authn;
+pub mod authn; // Public only for testing
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples

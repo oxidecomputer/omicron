@@ -146,7 +146,6 @@ impl Nexus {
             )),
             sec_store,
         ));
-
         let nexus = Nexus {
             rack_id: *rack_id,
             log: log.new(o!()),

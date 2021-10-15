@@ -2,7 +2,7 @@
 //!
 //! In the limit, we'll want all operations in Nexus to have an associated
 //! authentication/authorization context that describes who (or what) is doing
-//! the operation and what privileges they have.  
+//! the operation and what privileges they have.
 //!
 //! This module includes generic, HTTP-agnostic facilities for representing who
 //! or what is authenticated and why an authentication attempt failed.
@@ -50,6 +50,13 @@ impl Context {
             Kind::Unauthenticated => None,
             Kind::Authenticated(Details { actor }) => Some(actor),
         }
+    }
+
+    /// Returns the list of schemes tried, in order
+    ///
+    /// This should generally *not* be exposed to clients.
+    pub fn schemes_tried(&self) -> &[String] {
+        &self.schemes_tried
     }
 }
 
