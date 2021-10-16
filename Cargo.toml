@@ -2,6 +2,7 @@
 members = [
     "common",
     "nexus",
+    "nexus/src/db/db-macros",
     "rpaths",
     "sled-agent",
     "oximeter/oximeter",
@@ -15,6 +16,7 @@ members = [
 default-members = [
     "common",
     "nexus",
+    "nexus/src/db/db-macros",
     "rpaths",
     "sled-agent",
     "oximeter/oximeter",
