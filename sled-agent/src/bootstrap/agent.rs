@@ -1,5 +1,6 @@
 //! Bootstrap-related APIs.
 
+use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::bootstrap_agent::ShareResponse;
@@ -33,7 +34,7 @@ pub enum BootstrapError {
     SmfAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
-    Api(#[from] Error),
+    Api(#[from] anyhow::Error),
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
@@ -82,7 +83,7 @@ impl Agent {
             .map(|addr| {
                 let addr_str = addr.to_string();
                 BootstrapClient::new(
-                    addr,
+                    &format!("http://{}", addr_str,),
                     self.log.new(o!(
                         "Address" => addr_str,
                     )),
@@ -90,7 +91,11 @@ impl Agent {
             })
             .collect();
         for agent in &other_agents {
-            agent.request_share(vec![]).await?;
+            agent
+                .api_request_share(&bootstrap_types::ShareRequest {
+                    identity: vec![],
+                })
+                .await?;
         }
 
         let tar_source = Path::new("/opt/oxide");

@@ -1,17 +1,20 @@
 //! Interface for API requests to an Oximeter metric collection server
 // Copyright 2021 Oxide Computer Company
 
-use std::net::SocketAddr;
+// use std::net::SocketAddr;
 
-use http::Method;
-use hyper::Body;
-use slog::Logger;
-use uuid::Uuid;
+// use http::Method;
+// use hyper::Body;
+// use slog::Logger;
+// use uuid::Uuid;
 
-use crate::api::external::Error;
-use crate::api::internal::nexus::ProducerEndpoint;
-use crate::http_client::HttpClient;
+// use crate::api::external::Error;
+// use crate::api::internal::nexus::ProducerEndpoint;
+//use crate::http_client::HttpClient;
 
+generate_logging_api!("../openapi/oximeter.json");
+
+/*
 /// Client of an oximeter server
 pub struct Client {
     /// The oximeter server's unique ID
@@ -46,3 +49,5 @@ impl Client {
         Ok(())
     }
 }
+
+*/

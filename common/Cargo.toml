@@ -23,6 +23,8 @@ tempfile = "3.0"
 thiserror = "1.0"
 toml = "0.5.6"
 walkdir = "2.3"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+percent-encoding = "2.1.0"
 
 [dependencies.api_identity]
 path = "src/api/external/api_identity"

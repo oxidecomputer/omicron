@@ -24,15 +24,33 @@ pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod config;
-pub mod http_client;
 pub mod packaging;
 
-mod sled_agent_client;
+macro_rules! generate_logging_api {
+    ($path:literal) => {
+        progenitor::generate_api!(
+            $path,
+            slog::Logger,
+            |log: &slog::Logger, request: &reqwest::Request| {
+                debug!(log, "client request";
+                    "method" => %request.method(),
+                    "uri" => %request.url(),
+                    "body" => ?&request.body(),
+                );
+            },
+            |log: &slog::Logger, result: &Result<_, _>| {
+                debug!(log, "client response"; "result" => ?result);
+            },
+        );
+	};
+}
+
+pub mod sled_agent_client;
 pub use sled_agent_client::Client as SledAgentClient;
 pub use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
-mod nexus_client;
+pub mod nexus_client;
 pub use nexus_client::Client as NexusClient;
-mod oximeter_client;
+pub mod oximeter_client;
 pub use oximeter_client::Client as OximeterClient;
 
 #[macro_use]
