@@ -68,8 +68,8 @@ mod test {
         );
 
         let expected = quote! {
-            impl ApiObjectIdentity for Foo {
-                fn identity(&self) -> &IdentityMetadata {
+            impl crate::api::external::ObjectIdentity for Foo {
+                fn identity(&self) -> &crate::api::external::IdentityMetadata {
                     &self.identity
                 }
             }
@@ -88,6 +88,6 @@ mod test {
         );
 
         let error = ret.unwrap_err();
-        assert!(error.to_string().starts_with("deriving ApiObjectIdentity"));
+        assert!(error.to_string().starts_with("deriving ObjectIdentity"));
     }
 }
