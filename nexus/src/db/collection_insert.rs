@@ -32,22 +32,21 @@ pub trait InsertStatementExt<C: DatastoreCollection> {
         self,
     ) -> InsertStatement<
         // Force the insert statement to have the appropriate target table
-        C::ResourceTable,
+        ResourceTable<C>,
         Self::Records,
         Self::Operator,
         Self::Returning,
     >;
 }
 
-impl<C, T, U, Op, Ret> InsertStatementExt<C> for InsertStatement<T, U, Op, Ret>
-where
-    C: DatastoreCollection<ResourceTable = T>,
+impl<C: DatastoreCollection, U, Op, Ret> InsertStatementExt<C>
+    for InsertStatement<ResourceTable<C>, U, Op, Ret>
 {
     type Records = U;
     type Operator = Op;
     type Returning = Ret;
 
-    fn statement(self) -> InsertStatement<C::ResourceTable, U, Op, Ret> {
+    fn statement(self) -> InsertStatement<ResourceTable<C>, U, Op, Ret> {
         self
     }
 }
@@ -59,11 +58,6 @@ pub trait DatastoreCollection {
     /// The Rust type of the collection id (typically Uuid for us)
     type CollectionId: Copy + Debug;
 
-    /// The diesel SQL table of the collection
-    type CollectionTable: Table;
-    /// The diesel SQL table of the resources
-    type ResourceTable: Table;
-
     /// The column in the CollectionTable that acts as a generation number.
     /// This is the "child-resource-generation-number" in RFD 192.
     type GenerationNumberColumn: Column;
@@ -73,6 +67,8 @@ pub trait DatastoreCollection {
     type CollectionIdColumn: Column;
 
     /// The time deleted column in the CollectionTable
+    // We enforce that this column comes from the same table as
+    // GenerationNumberColumn when defining insert_into_collection() below.
     type CollectionTimeDeletedColumn: Column;
 
     /// The generation number column in the CollectionTable
@@ -84,6 +80,18 @@ pub trait DatastoreCollection {
 
 /// Utility type to make trait bounds below easier to read.
 type CollectionId<C> = <C as DatastoreCollection>::CollectionId;
+type CollectionTable<C> =
+    <<C as DatastoreCollection>::GenerationNumberColumn as Column>::Table;
+type ResourceTable<C> =
+    <<C as DatastoreCollection>::CollectionIdColumn as Column>::Table;
+type CollectionTimeDeletedColumn<C> =
+    <C as DatastoreCollection>::CollectionTimeDeletedColumn;
+type GenerationNumberColumn<C> =
+    <C as DatastoreCollection>::GenerationNumberColumn;
+
+// Trick to check that columns come from the same table below
+pub trait TypesAreSame {}
+impl<T> TypesAreSame for (T, T) {}
 
 /// Wrapper around [`diesel::insert`] for a Table, which creates the CTE
 /// described in the module docs.
@@ -98,7 +106,12 @@ pub trait InsertIntoCollection<IS> {
         key: CollectionId<C>,
     ) -> InsertIntoCollectionStatement<IS, C, Q>
     where
+        (
+            <GenerationNumberColumn<C> as Column>::Table,
+            <CollectionTimeDeletedColumn<C> as Column>::Table,
+        ): TypesAreSame,
         IS: InsertStatementExt<C>,
+        ResourceTable<C>: Copy + Debug,
         Q: FromSqlRow<
                 <InsertIntoCollectionStatement<IS, C, Q> as AsQuery>::SqlType,
                 Pg,
@@ -112,6 +125,7 @@ impl<IS> InsertIntoCollection<IS> for IS {
     ) -> InsertIntoCollectionStatement<IS, C, Q>
     where
         IS: InsertStatementExt<C>,
+        ResourceTable<C>: Copy + Debug,
         Q: FromSqlRow<
                 <InsertIntoCollectionStatement<IS, C, Q> as AsQuery>::SqlType,
                 Pg,
@@ -132,9 +146,10 @@ pub struct InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: InsertStatementExt<C>,
     C: DatastoreCollection,
+    ResourceTable<C>: Copy + Debug,
 {
     insert_statement: InsertStatement<
-        C::ResourceTable,
+        ResourceTable<C>,
         IS::Records,
         IS::Operator,
         IS::Returning,
@@ -147,6 +162,7 @@ impl<IS, C, Q> QueryId for InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: InsertStatementExt<C>,
     C: DatastoreCollection,
+    ResourceTable<C>: Copy + Debug,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -169,7 +185,7 @@ where
     IS: 'static + InsertStatementExt<C> + Send,
     C: 'static + DatastoreCollection + Send,
     CollectionId<C>: 'static + PartialEq + Send,
-    ResourceTable<C>: 'static + Table + Send,
+    ResourceTable<C>: 'static + Table + Send + Copy + Debug,
     IS::Records: 'static + Send,
     Q: 'static + Debug + Send,
     InsertIntoCollectionStatement<IS, C, Q>: Send,
@@ -180,6 +196,10 @@ where
     /// - Ok(Row was inserted)
     /// - Error(collection not found)
     /// - Error(other diesel error)
+    // TODO: Remove this allow(dead_code) once we have a caller. Since it and
+    // several types it uses are only used in tests right now, the compiler
+    // produces a bunch of warnings here.
+    #[allow(dead_code)]
     pub async fn insert_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<PgConnection>>,
@@ -211,6 +231,7 @@ where
     IS: InsertStatementExt<C>,
     Q: Selectable<Pg>,
     C: DatastoreCollection,
+    ResourceTable<C>: Copy + Debug,
 {
     type SqlType = SelectableSqlType<Q>;
 }
@@ -219,28 +240,16 @@ impl<IS, C, Q> RunQueryDsl<PgConnection>
     for InsertIntoCollectionStatement<IS, C, Q>
 where
     IS: InsertStatementExt<C>,
-    ResourceTable<C>: Table,
+    ResourceTable<C>: Table + Copy + Debug,
     C: DatastoreCollection,
 {
 }
 
-type CollectionTable<C> = <C as DatastoreCollection>::CollectionTable;
-type ResourceTable<C> = <C as DatastoreCollection>::ResourceTable;
 // Representation of Primary Key in Rust.
 type CollectionPrimaryKey<C> = <CollectionTable<C> as Table>::PrimaryKey;
-type ResourcePrimaryKey<C> = <ResourceTable<C> as Table>::PrimaryKey;
 // Representation of Primary Key in SQL.
 type SerializedCollectionPrimaryKey<C> =
     <CollectionPrimaryKey<C> as diesel::Expression>::SqlType;
-type SerializedResourcePrimaryKey<C> =
-    <ResourcePrimaryKey<C> as diesel::Expression>::SqlType;
-
-type CollectionTimeDeletedColumn<C> =
-    <C as DatastoreCollection>::CollectionTimeDeletedColumn;
-type GenerationNumberColumn<C> =
-    <C as DatastoreCollection>::GenerationNumberColumn;
-type SerializedGenerationNumberColumn<C> =
-    <GenerationNumberColumn<C> as diesel::Expression>::SqlType;
 
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
@@ -268,13 +277,14 @@ where
             Pg,
             Output = BoxedQuery<CollectionTable<C>>,
         >,
+    ResourceTable<C>: Copy + Debug,
     InsertStatement<ResourceTable<C>, IS::Records, IS::Operator, IS::Returning>:
         QueryFragment<Pg>,
     <CollectionPrimaryKey<C> as Expression>::SqlType: SingleValue,
     CollectionPrimaryKey<C>: diesel::Column,
     CollectionTimeDeletedColumn<C>: ExpressionMethods,
-    CollectionId<C>:
-        diesel::expression::AsExpression<SerializedCollectionPrimaryKey<C>>,
+    CollectionId<C>: diesel::expression::AsExpression<SerializedCollectionPrimaryKey<C>>
+        + diesel::serialize::ToSql<SerializedCollectionPrimaryKey<C>, Pg>,
     <CollectionTable<C> as diesel::QuerySource>::FromClause: QueryFragment<Pg>,
     BoxedQuery<CollectionTable<C>>: query_methods::FilterDsl<
         Eq<CollectionPrimaryKey<C>, CollectionId<C>>,
@@ -286,15 +296,13 @@ where
     >,
     BoxedQuery<CollectionTable<C>>: QueryFragment<Pg>,
     Pg: diesel::sql_types::HasSqlType<SerializedCollectionPrimaryKey<C>>,
-    CollectionId<C>:
-        diesel::serialize::ToSql<SerializedCollectionPrimaryKey<C>, Pg>,
     <ResourceTable<C> as Table>::AllColumns: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.push_sql("WITH dummy AS (SELECT IF(EXISTS(");
-        let subquery = C::CollectionTable::table()
+        let subquery = CollectionTable::<C>::table()
             .into_boxed()
-            .filter(C::CollectionTable::table().primary_key().eq(self.key))
+            .filter(CollectionTable::<C>::table().primary_key().eq(self.key))
             .filter(C::collection_time_deleted_column().is_null());
         subquery.walk_ast(out.reborrow())?;
         // Manually add the FOR_UPDATE, since .for_update() is incompatible with
@@ -304,7 +312,7 @@ where
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
         out.push_sql("updated_row AS (UPDATE ");
-        C::CollectionTable::table().from_clause().walk_ast(out.reborrow())?;
+        CollectionTable::<C>::table().from_clause().walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(GenerationNumberColumn::<C>::NAME)?;
         out.push_sql(" = ");
@@ -418,8 +426,6 @@ mod test {
     struct Collection;
     impl DatastoreCollection for Collection {
         type CollectionId = uuid::Uuid;
-        type CollectionTable = collection::table;
-        type ResourceTable = resource::table;
         type GenerationNumberColumn = collection::dsl::rcgen;
         type CollectionIdColumn = resource::dsl::collection_id;
         type CollectionTimeDeletedColumn = collection::dsl::time_deleted;
