@@ -19,4 +19,6 @@ pub struct Config {
     pub log: ConfigLogging,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
+    /// Optional list of zpools to be used as "discovered disks".
+    pub zpools: Option<Vec<String>>,
 }

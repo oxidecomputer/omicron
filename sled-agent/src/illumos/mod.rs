@@ -4,6 +4,7 @@ pub mod dladm;
 pub mod svc;
 pub mod zfs;
 pub mod zone;
+pub mod zpool;
 
 use omicron_common::api::external::Error;
 
