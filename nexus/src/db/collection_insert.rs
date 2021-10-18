@@ -23,7 +23,7 @@ use std::marker::PhantomData;
 /// A simple wrapper type for Diesel's [`InsertStatement`], which
 /// allows referencing generics with names (and extending usage
 /// without re-stating those generic parameters everywhere).
-pub trait InsertStatementExt<C: DatastoreCollection> {
+pub trait InsertStatementExt<ResType, C: DatastoreCollection<ResType>> {
     type Records;
     type Operator;
     type Returning;
@@ -32,21 +32,24 @@ pub trait InsertStatementExt<C: DatastoreCollection> {
         self,
     ) -> InsertStatement<
         // Force the insert statement to have the appropriate target table
-        ResourceTable<C>,
+        ResourceTable<ResType, C>,
         Self::Records,
         Self::Operator,
         Self::Returning,
     >;
 }
 
-impl<C: DatastoreCollection, U, Op, Ret> InsertStatementExt<C>
-    for InsertStatement<ResourceTable<C>, U, Op, Ret>
+impl<ResType, C: DatastoreCollection<ResType>, U, Op, Ret>
+    InsertStatementExt<ResType, C>
+    for InsertStatement<ResourceTable<ResType, C>, U, Op, Ret>
 {
     type Records = U;
     type Operator = Op;
     type Returning = Ret;
 
-    fn statement(self) -> InsertStatement<ResourceTable<C>, U, Op, Ret> {
+    fn statement(
+        self,
+    ) -> InsertStatement<ResourceTable<ResType, C>, U, Op, Ret> {
         self
     }
 }
@@ -54,7 +57,7 @@ impl<C: DatastoreCollection, U, Op, Ret> InsertStatementExt<C>
 /// Trait to be implemented by any structs representing a collection.
 /// For example, since Organizations have a one-to-many relationship with
 /// Projects, the Organization datatype should implement this trait.
-pub trait DatastoreCollection {
+pub trait DatastoreCollection<ResourceType> {
     /// The Rust type of the collection id (typically Uuid for us)
     type CollectionId: Copy + Debug;
 
@@ -68,7 +71,7 @@ pub trait DatastoreCollection {
 
     /// The time deleted column in the CollectionTable
     // We enforce that this column comes from the same table as
-    // GenerationNumberColumn when defining insert_into_collection() below.
+    // GenerationNumberColumn when defining insert_resource() below.
     type CollectionTimeDeletedColumn: Column;
 
     /// The generation number column in the CollectionTable
@@ -76,93 +79,73 @@ pub trait DatastoreCollection {
 
     /// The time deleted column in the CollectionTable
     fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn;
-}
 
-/// Utility type to make trait bounds below easier to read.
-type CollectionId<C> = <C as DatastoreCollection>::CollectionId;
-type CollectionTable<C> =
-    <<C as DatastoreCollection>::GenerationNumberColumn as Column>::Table;
-type ResourceTable<C> =
-    <<C as DatastoreCollection>::CollectionIdColumn as Column>::Table;
-type CollectionTimeDeletedColumn<C> =
-    <C as DatastoreCollection>::CollectionTimeDeletedColumn;
-type GenerationNumberColumn<C> =
-    <C as DatastoreCollection>::GenerationNumberColumn;
-
-// Trick to check that columns come from the same table below
-pub trait TypesAreSame {}
-impl<T> TypesAreSame for (T, T) {}
-
-/// Wrapper around [`diesel::insert`] for a Table, which creates the CTE
-/// described in the module docs.
-///
-/// IS: [`InsertStatement`] which we are extending.
-/// C: Collection type.
-pub trait InsertIntoCollection<IS> {
-    /// Nests the existing insert statement in a CTE which
-    /// acts as described in the module docs.
-    fn insert_into_collection<C: DatastoreCollection, Q>(
-        self,
-        key: CollectionId<C>,
-    ) -> InsertIntoCollectionStatement<IS, C, Q>
+    fn insert_resource<Q, IS>(
+        key: Self::CollectionId,
+        insert: IS,
+    ) -> InsertIntoCollectionStatement<ResourceType, IS, Self, Q>
     where
         (
-            <GenerationNumberColumn<C> as Column>::Table,
-            <CollectionTimeDeletedColumn<C> as Column>::Table,
+            <Self::GenerationNumberColumn as Column>::Table,
+            <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
-        IS: InsertStatementExt<C>,
-        ResourceTable<C>: Copy + Debug,
+        Self: Sized,
+        IS: InsertStatementExt<ResourceType, Self>,
+        ResourceTable<ResourceType, Self>: Copy + Debug,
         Q: FromSqlRow<
-                <InsertIntoCollectionStatement<IS, C, Q> as AsQuery>::SqlType,
-                Pg,
-            > + Selectable<Pg>;
-}
-
-impl<IS> InsertIntoCollection<IS> for IS {
-    fn insert_into_collection<C: DatastoreCollection, Q>(
-        self,
-        key: CollectionId<C>,
-    ) -> InsertIntoCollectionStatement<IS, C, Q>
-    where
-        IS: InsertStatementExt<C>,
-        ResourceTable<C>: Copy + Debug,
-        Q: FromSqlRow<
-                <InsertIntoCollectionStatement<IS, C, Q> as AsQuery>::SqlType,
+                <InsertIntoCollectionStatement<ResourceType, IS, Self, Q> as AsQuery>::SqlType,
                 Pg,
             > + Selectable<Pg>,
     {
         InsertIntoCollectionStatement {
-            insert_statement: self.statement(),
+            insert_statement: insert.statement(),
             key,
             query_type: PhantomData,
         }
     }
 }
 
+/// Utility type to make trait bounds below easier to read.
+type CollectionId<ResType, C> =
+    <C as DatastoreCollection<ResType>>::CollectionId;
+type CollectionTable<ResType, C> =
+    <<C as DatastoreCollection<ResType>>::GenerationNumberColumn as Column>::Table;
+type ResourceTable<ResType, C> =
+    <<C as DatastoreCollection<ResType>>::CollectionIdColumn as Column>::Table;
+type CollectionTimeDeletedColumn<ResType, C> =
+    <C as DatastoreCollection<ResType>>::CollectionTimeDeletedColumn;
+type GenerationNumberColumn<ResType, C> =
+    <C as DatastoreCollection<ResType>>::GenerationNumberColumn;
+
+// Trick to check that columns come from the same table
+pub trait TypesAreSame {}
+impl<T> TypesAreSame for (T, T) {}
+
 /// The CTE described in the module docs
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
-pub struct InsertIntoCollectionStatement<IS, C, Q>
+pub struct InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: InsertStatementExt<C>,
-    C: DatastoreCollection,
-    ResourceTable<C>: Copy + Debug,
+    IS: InsertStatementExt<ResType, C>,
+    C: DatastoreCollection<ResType>,
+    ResourceTable<ResType, C>: Copy + Debug,
 {
     insert_statement: InsertStatement<
-        ResourceTable<C>,
+        ResourceTable<ResType, C>,
         IS::Records,
         IS::Operator,
         IS::Returning,
     >,
-    key: CollectionId<C>,
+    key: CollectionId<ResType, C>,
     query_type: PhantomData<Q>,
 }
 
-impl<IS, C, Q> QueryId for InsertIntoCollectionStatement<IS, C, Q>
+impl<ResType, IS, C, Q> QueryId
+    for InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: InsertStatementExt<C>,
-    C: DatastoreCollection,
-    ResourceTable<C>: Copy + Debug,
+    IS: InsertStatementExt<ResType, C>,
+    C: DatastoreCollection<ResType>,
+    ResourceTable<ResType, C>: Copy + Debug,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -180,15 +163,16 @@ pub enum InsertError {
     DatabaseError(PoolError),
 }
 
-impl<IS, C, Q> InsertIntoCollectionStatement<IS, C, Q>
+impl<ResType, IS, C, Q> InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: 'static + InsertStatementExt<C> + Send,
-    C: 'static + DatastoreCollection + Send,
-    CollectionId<C>: 'static + PartialEq + Send,
-    ResourceTable<C>: 'static + Table + Send + Copy + Debug,
+    ResType: 'static + Send,
+    IS: 'static + InsertStatementExt<ResType, C> + Send,
+    C: 'static + DatastoreCollection<ResType> + Send,
+    CollectionId<ResType, C>: 'static + PartialEq + Send,
+    ResourceTable<ResType, C>: 'static + Table + Send + Copy + Debug,
     IS::Records: 'static + Send,
     Q: 'static + Debug + Send,
-    InsertIntoCollectionStatement<IS, C, Q>: Send,
+    InsertIntoCollectionStatement<ResType, IS, C, Q>: Send,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -226,30 +210,32 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<IS, C, Q> Query for InsertIntoCollectionStatement<IS, C, Q>
+impl<ResType, IS, C, Q> Query
+    for InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: InsertStatementExt<C>,
+    IS: InsertStatementExt<ResType, C>,
     Q: Selectable<Pg>,
-    C: DatastoreCollection,
-    ResourceTable<C>: Copy + Debug,
+    C: DatastoreCollection<ResType>,
+    ResourceTable<ResType, C>: Copy + Debug,
 {
     type SqlType = SelectableSqlType<Q>;
 }
 
-impl<IS, C, Q> RunQueryDsl<PgConnection>
-    for InsertIntoCollectionStatement<IS, C, Q>
+impl<ResType, IS, C, Q> RunQueryDsl<PgConnection>
+    for InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: InsertStatementExt<C>,
-    ResourceTable<C>: Table + Copy + Debug,
-    C: DatastoreCollection,
+    IS: InsertStatementExt<ResType, C>,
+    ResourceTable<ResType, C>: Table + Copy + Debug,
+    C: DatastoreCollection<ResType>,
 {
 }
 
 // Representation of Primary Key in Rust.
-type CollectionPrimaryKey<C> = <CollectionTable<C> as Table>::PrimaryKey;
+type CollectionPrimaryKey<ResType, C> =
+    <CollectionTable<ResType, C> as Table>::PrimaryKey;
 // Representation of Primary Key in SQL.
-type SerializedCollectionPrimaryKey<C> =
-    <CollectionPrimaryKey<C> as diesel::Expression>::SqlType;
+type SerializedCollectionPrimaryKey<ResType, C> =
+    <CollectionPrimaryKey<ResType, C> as diesel::Expression>::SqlType;
 
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
@@ -265,44 +251,57 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// //                      time_deleted IS NULL RETURNING 1),
 /// // <user provided insert statement>
 /// ```
-impl<IS, C, Q> QueryFragment<Pg> for InsertIntoCollectionStatement<IS, C, Q>
+impl<ResType, IS, C, Q> QueryFragment<Pg>
+    for InsertIntoCollectionStatement<ResType, IS, C, Q>
 where
-    IS: InsertStatementExt<C>,
-    C: DatastoreCollection,
-    CollectionTable<C>: HasTable<Table = CollectionTable<C>>
+    IS: InsertStatementExt<ResType, C>,
+    C: DatastoreCollection<ResType>,
+    CollectionTable<ResType, C>: HasTable<Table = CollectionTable<ResType, C>>
         + Table
         + IntoUpdateTarget
         + query_methods::BoxedDsl<
             'static,
             Pg,
-            Output = BoxedQuery<CollectionTable<C>>,
+            Output = BoxedQuery<CollectionTable<ResType, C>>,
         >,
-    ResourceTable<C>: Copy + Debug,
-    InsertStatement<ResourceTable<C>, IS::Records, IS::Operator, IS::Returning>:
+    ResourceTable<ResType, C>: Copy + Debug,
+    InsertStatement<
+        ResourceTable<ResType, C>,
+        IS::Records,
+        IS::Operator,
+        IS::Returning,
+    >: QueryFragment<Pg>,
+    <CollectionPrimaryKey<ResType, C> as Expression>::SqlType: SingleValue,
+    CollectionPrimaryKey<ResType, C>: diesel::Column,
+    CollectionTimeDeletedColumn<ResType, C>: ExpressionMethods,
+    CollectionId<ResType, C>: diesel::expression::AsExpression<
+            SerializedCollectionPrimaryKey<ResType, C>,
+        > + diesel::serialize::ToSql<SerializedCollectionPrimaryKey<ResType, C>, Pg>,
+    <CollectionTable<ResType, C> as diesel::QuerySource>::FromClause:
         QueryFragment<Pg>,
-    <CollectionPrimaryKey<C> as Expression>::SqlType: SingleValue,
-    CollectionPrimaryKey<C>: diesel::Column,
-    CollectionTimeDeletedColumn<C>: ExpressionMethods,
-    CollectionId<C>: diesel::expression::AsExpression<SerializedCollectionPrimaryKey<C>>
-        + diesel::serialize::ToSql<SerializedCollectionPrimaryKey<C>, Pg>,
-    <CollectionTable<C> as diesel::QuerySource>::FromClause: QueryFragment<Pg>,
-    BoxedQuery<CollectionTable<C>>: query_methods::FilterDsl<
-        Eq<CollectionPrimaryKey<C>, CollectionId<C>>,
-        Output = BoxedQuery<CollectionTable<C>>,
+    BoxedQuery<CollectionTable<ResType, C>>: query_methods::FilterDsl<
+        Eq<CollectionPrimaryKey<ResType, C>, CollectionId<ResType, C>>,
+        Output = BoxedQuery<CollectionTable<ResType, C>>,
     >,
-    BoxedQuery<CollectionTable<C>>: query_methods::FilterDsl<
-        IsNull<CollectionTimeDeletedColumn<C>>,
-        Output = BoxedQuery<CollectionTable<C>>,
+    BoxedQuery<CollectionTable<ResType, C>>: query_methods::FilterDsl<
+        IsNull<CollectionTimeDeletedColumn<ResType, C>>,
+        Output = BoxedQuery<CollectionTable<ResType, C>>,
     >,
-    BoxedQuery<CollectionTable<C>>: QueryFragment<Pg>,
-    Pg: diesel::sql_types::HasSqlType<SerializedCollectionPrimaryKey<C>>,
-    <ResourceTable<C> as Table>::AllColumns: QueryFragment<Pg>,
+    BoxedQuery<CollectionTable<ResType, C>>: QueryFragment<Pg>,
+    Pg: diesel::sql_types::HasSqlType<
+        SerializedCollectionPrimaryKey<ResType, C>,
+    >,
+    <ResourceTable<ResType, C> as Table>::AllColumns: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.push_sql("WITH dummy AS (SELECT IF(EXISTS(");
-        let subquery = CollectionTable::<C>::table()
+        let subquery = CollectionTable::<ResType, C>::table()
             .into_boxed()
-            .filter(CollectionTable::<C>::table().primary_key().eq(self.key))
+            .filter(
+                CollectionTable::<ResType, C>::table()
+                    .primary_key()
+                    .eq(self.key),
+            )
             .filter(C::collection_time_deleted_column().is_null());
         subquery.walk_ast(out.reborrow())?;
         // Manually add the FOR_UPDATE, since .for_update() is incompatible with
@@ -312,17 +311,21 @@ where
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
         out.push_sql("updated_row AS (UPDATE ");
-        CollectionTable::<C>::table().from_clause().walk_ast(out.reborrow())?;
+        CollectionTable::<ResType, C>::table()
+            .from_clause()
+            .walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
-        out.push_identifier(GenerationNumberColumn::<C>::NAME)?;
+        out.push_identifier(GenerationNumberColumn::<ResType, C>::NAME)?;
         out.push_sql(" = ");
-        out.push_identifier(GenerationNumberColumn::<C>::NAME)?;
+        out.push_identifier(GenerationNumberColumn::<ResType, C>::NAME)?;
         out.push_sql(" + 1 WHERE ");
-        out.push_identifier(CollectionPrimaryKey::<C>::NAME)?;
+        out.push_identifier(CollectionPrimaryKey::<ResType, C>::NAME)?;
         out.push_sql(" = ");
-        out.push_bind_param::<SerializedCollectionPrimaryKey<C>, _>(&self.key)?;
+        out.push_bind_param::<SerializedCollectionPrimaryKey<ResType, C>, _>(
+            &self.key,
+        )?;
         out.push_sql(" AND ");
-        out.push_identifier(CollectionTimeDeletedColumn::<C>::NAME)?;
+        out.push_identifier(CollectionTimeDeletedColumn::<ResType, C>::NAME)?;
         out.push_sql(" IS NULL RETURNING 1)");
 
         // TODO: Check or force the insert_statement to have
@@ -334,7 +337,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreCollection, InsertError, InsertIntoCollection};
+    use super::{DatastoreCollection, InsertError};
     use crate::db;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::{DateTime, NaiveDateTime, Utc};
@@ -424,7 +427,7 @@ mod test {
     }
 
     struct Collection;
-    impl DatastoreCollection for Collection {
+    impl DatastoreCollection<Resource> for Collection {
         type CollectionId = uuid::Uuid;
         type GenerationNumberColumn = collection::dsl::rcgen;
         type CollectionIdColumn = resource::dsl::collection_id;
@@ -450,17 +453,19 @@ mod test {
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
         let modify_time =
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
-        let insert = diesel::insert_into(resource::table)
-            .values(vec![(
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(create_time),
-                resource::dsl::time_modified.eq(modify_time),
-                resource::dsl::collection_id.eq(collection_id),
-            )])
-            .returning(resource::all_columns)
-            .insert_into_collection::<Collection, Resource>(collection_id);
+        let insert = Collection::insert_resource::<Resource, _>(
+            collection_id,
+            diesel::insert_into(resource::table)
+                .values(vec![(
+                    resource::dsl::id.eq(resource_id),
+                    resource::dsl::name.eq("test"),
+                    resource::dsl::description.eq("desc"),
+                    resource::dsl::time_created.eq(create_time),
+                    resource::dsl::time_modified.eq(modify_time),
+                    resource::dsl::collection_id.eq(collection_id),
+                )])
+                .returning(resource::all_columns),
+        );
         let query = diesel::debug_query::<Pg, _>(&insert).to_string();
 
         let expected_query = "WITH dummy AS (SELECT IF(EXISTS(SELECT \"test_schema\".\"collection\".\"id\", \"test_schema\".\"collection\".\"name\", \"test_schema\".\"collection\".\"description\", \"test_schema\".\"collection\".\"time_created\", \"test_schema\".\"collection\".\"time_modified\", \"test_schema\".\"collection\".\"time_deleted\", \"test_schema\".\"collection\".\"rcgen\" FROM \"test_schema\".\"collection\" WHERE ((\"test_schema\".\"collection\".\"id\" = $1) AND (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)) FOR UPDATE), TRUE, CAST(1/0 AS BOOL))),updated_row AS (UPDATE \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1)INSERT INTO \"test_schema\".\"resource\" (\"id\", \"name\", \"description\", \"time_created\", \"time_modified\", \"collection_id\") VALUES ($3, $4, $5, $6, $7, $8) RETURNING \"test_schema\".\"resource\".\"id\", \"test_schema\".\"resource\".\"name\", \"test_schema\".\"resource\".\"description\", \"test_schema\".\"resource\".\"time_created\", \"test_schema\".\"resource\".\"time_modified\", \"test_schema\".\"resource\".\"time_deleted\", \"test_schema\".\"resource\".\"collection_id\" -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \"test\", \"desc\", 1970-01-01T00:00:00Z, 1970-01-01T00:00:01Z, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0]";
@@ -479,19 +484,21 @@ mod test {
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
-        let insert = diesel::insert_into(resource::table)
-            .values((
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
-                resource::dsl::collection_id.eq(collection_id),
-            ))
-            .returning(resource::all_columns)
-            .insert_into_collection::<Collection, Resource>(collection_id)
-            .insert_and_get_result_async(pool.pool())
-            .await;
+        let insert = Collection::insert_resource::<Resource, _>(
+            collection_id,
+            diesel::insert_into(resource::table)
+                .values((
+                    resource::dsl::id.eq(resource_id),
+                    resource::dsl::name.eq("test"),
+                    resource::dsl::description.eq("desc"),
+                    resource::dsl::time_created.eq(Utc::now()),
+                    resource::dsl::time_modified.eq(Utc::now()),
+                    resource::dsl::collection_id.eq(collection_id),
+                ))
+                .returning(resource::all_columns),
+        )
+        .insert_and_get_result_async(pool.pool())
+        .await;
         assert!(matches!(insert, Err(InsertError::CollectionNotFound)));
 
         db.cleanup().await.unwrap();
@@ -523,20 +530,22 @@ mod test {
             .await
             .unwrap();
 
-        diesel::insert_into(resource::table)
-            .values(vec![(
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
-                resource::dsl::collection_id.eq(collection_id),
-            )])
-            .returning(resource::all_columns)
-            .insert_into_collection::<Collection, Resource>(collection_id)
-            .insert_and_get_result_async(pool.pool())
-            .await
-            .unwrap();
+        Collection::insert_resource::<Resource, _>(
+            collection_id,
+            diesel::insert_into(resource::table)
+                .values(vec![(
+                    resource::dsl::id.eq(resource_id),
+                    resource::dsl::name.eq("test"),
+                    resource::dsl::description.eq("desc"),
+                    resource::dsl::time_created.eq(Utc::now()),
+                    resource::dsl::time_modified.eq(Utc::now()),
+                    resource::dsl::collection_id.eq(collection_id),
+                )])
+                .returning(resource::all_columns),
+        )
+        .insert_and_get_result_async(pool.pool())
+        .await
+        .unwrap();
 
         let collection_rcgen = collection::table
             .find(collection_id)
