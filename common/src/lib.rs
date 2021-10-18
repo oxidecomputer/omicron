@@ -37,5 +37,3 @@ pub use oximeter_client::Client as OximeterClient;
 
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate diesel;

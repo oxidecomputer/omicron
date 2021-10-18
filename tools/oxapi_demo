@@ -7,6 +7,13 @@ OXAPI_URL='http://127.0.0.1:12220'
 ARG0="$(basename "${BASH_SOURCE[0]}")"
 HELP="$(cat <<EOF
 
+ORGANIZATIONS
+
+    organizations_list
+    organization_create_demo ORGANIZATION_NAME
+    organization_delete      ORGANIZATION_NAME
+    organization_get         ORGANIZATION_NAME
+
 PROJECTS
 
     projects_list
@@ -126,6 +133,31 @@ function mkjson
 #
 # API commands
 #
+
+function cmd_organizations_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl /organizations
+}
+
+function cmd_organization_create_demo
+{
+	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
+	mkjson name="$1" description="an organization called $1" |
+		do_curl "/organizations" -X POST -T -
+}
+
+function cmd_organization_delete
+{
+	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
+	do_curl "/organizations/$1" -X DELETE
+}
+
+function cmd_organization_get
+{
+	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
+	do_curl "/organizations/$1"
+}
 
 function cmd_projects_list
 {

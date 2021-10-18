@@ -1,7 +1,7 @@
 [package]
 name = "oximeter-producer"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
 description = "Crate for producing metric data to be collected by the Oxide control plane"
 
 [dependencies]
@@ -9,7 +9,6 @@ chrono = { version = "0.4.19", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
-pq-sys = "*"
 reqwest = { version = "0.11.5", features = [ "json" ] }
 schemars = { version = "0.8.6", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
@@ -17,6 +16,3 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 tokio = "1.12"
 thiserror = "1.0.30"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
-
-[build-dependencies]
-omicron-rpaths = { path = "../../rpaths" }
