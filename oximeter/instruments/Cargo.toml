@@ -1,0 +1,16 @@
+[package]
+name = "oximeter-instruments"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { version = "0.4", features = [ "serde" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+futures = "0.3.15"
+oximeter = { path = "../oximeter" }
+http = { version = "0.2.5", optional = true }
+uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
+
+[features]
+default = ["http-instruments"]
+http-instruments = ["http"]

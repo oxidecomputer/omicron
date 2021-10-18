@@ -48,7 +48,7 @@ fn test_oximeter_openapi() {
      * purpose.  However, it's not clear how to reliably locate it at runtime.
      * But we do know where it is at compile time, so we load it then.
      */
-    let config = include_str!("../../producer/examples/config.toml");
+    let config = include_str!("../../collector/config.toml");
     let config_path = write_config(config);
     let exec = Exec::cmd(path_to_oximeter()).arg(&config_path).arg("--openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);

@@ -6,6 +6,7 @@ use super::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
+use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
@@ -15,6 +16,8 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
+use oximeter::types::ProducerResults;
+use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -32,6 +35,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
+        api.register(cpapi_metrics_collect)?;
         Ok(())
     }
 
@@ -67,8 +71,11 @@ async fn cpapi_sled_agents_post(
     let path = path_params.into_inner();
     let si = sled_info.into_inner();
     let sled_id = &path.sled_id;
-    nexus.upsert_sled(*sled_id, si.sa_address).await?;
-    Ok(HttpResponseUpdatedNoContent())
+    let handler = async {
+        nexus.upsert_sled(*sled_id, si.sa_address).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -95,8 +102,11 @@ async fn cpapi_instances_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    nexus.notify_instance_updated(&path.instance_id, &new_state).await?;
-    Ok(HttpResponseUpdatedNoContent())
+    let handler = async {
+        nexus.notify_instance_updated(&path.instance_id, &new_state).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -123,8 +133,11 @@ async fn cpapi_disks_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
-    nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
-    Ok(HttpResponseUpdatedNoContent())
+    let handler = async {
+        nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -141,8 +154,14 @@ async fn cpapi_producers_post(
     let context = request_context.context();
     let nexus = &context.nexus;
     let producer_info = producer_info.into_inner();
-    nexus.assign_producer(producer_info).await?;
-    Ok(HttpResponseUpdatedNoContent())
+    let handler = async {
+        nexus.assign_producer(producer_info).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
 }
 
 /**
@@ -159,12 +178,33 @@ async fn cpapi_collectors_post(
     let context = request_context.context();
     let nexus = &context.nexus;
     let oximeter_info = oximeter_info.into_inner();
-    nexus.upsert_oximeter_collector(&oximeter_info).await?;
-    info!(
-        context.log,
-        "registered new oximeter metric collection server";
-        "collector_id" => ?oximeter_info.collector_id,
-        "address" => oximeter_info.address
-    );
-    Ok(HttpResponseUpdatedNoContent())
+    let handler = async {
+        nexus.upsert_oximeter_collector(&oximeter_info).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
+}
+
+/**
+ * Endpoint for oximeter to collect nexus server metrics.
+ */
+#[endpoint {
+    method = GET,
+    path = "/metrics/collect/{producer_id}",
+}]
+async fn cpapi_metrics_collect(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProducerIdPathParams>,
+) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+    let context = request_context.context();
+    let producer_id = path_params.into_inner().producer_id;
+    let handler =
+        async { collect(&context.producer_registry, producer_id).await };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
 }

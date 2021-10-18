@@ -951,8 +951,20 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::metricproducer::dsl;
 
+        // TODO: Need to handle the case where a producer is assigned to a _new_
+        // collector, but this requires APIs for un-assigning a producer from
+        // a collector, which doesn't yet exist.
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(producer.ip),
+                dsl::port.eq(producer.port),
+                dsl::interval.eq(producer.interval),
+                dsl::base_route.eq(producer.base_route.clone()),
+            ))
             .execute_async(self.pool())
             .await
             .map_err(|e| {
