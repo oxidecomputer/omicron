@@ -100,7 +100,7 @@ impl<T> TypesAreSame for (T, T) {}
 /// C: Collection type.
 pub trait InsertIntoCollection<IS> {
     /// Nests the existing insert statement in a CTE which
-    /// checks if the containing collection exists (by ID),
+    /// acts as described in the module docs.
     fn insert_into_collection<C: DatastoreCollection, Q>(
         self,
         key: CollectionId<C>,
@@ -493,10 +493,6 @@ mod test {
             .insert_and_get_result_async(pool.pool())
             .await;
         assert!(matches!(insert, Err(InsertError::CollectionNotFound)));
-        match insert.unwrap_err() {
-            InsertError::CollectionNotFound => (),
-            err => panic!("Unexpected error: {:?}", err),
-        }
 
         db.cleanup().await.unwrap();
     }
