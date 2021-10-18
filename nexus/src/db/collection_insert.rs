@@ -1,6 +1,7 @@
 //! CTE implementation for inserting a row representing a child resource of a
 //! collection. This atomically
-//! 1) checks if the collection exists, and fails otherwise
+//! 1) checks if the collection exists and is not soft deleted, and fails
+//!    otherwise
 //! 2) updates the collection's child resource generation number
 //! 3) inserts the child resource row
 
@@ -74,7 +75,7 @@ pub trait DatastoreCollection {
     /// The time deleted column in the CollectionTable
     type CollectionTimeDeletedColumn: Column;
 
-    /// The time deleted column in the CollectionTable
+    /// The generation number column in the CollectionTable
     fn generation_number_column() -> Self::GenerationNumberColumn;
 
     /// The time deleted column in the CollectionTable
@@ -473,18 +474,19 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
         let insert = diesel::insert_into(resource::table)
-            .values(vec![(
+            .values((
                 resource::dsl::id.eq(resource_id),
                 resource::dsl::name.eq("test"),
                 resource::dsl::description.eq("desc"),
                 resource::dsl::time_created.eq(Utc::now()),
                 resource::dsl::time_modified.eq(Utc::now()),
                 resource::dsl::collection_id.eq(collection_id),
-            )])
+            ))
             .returning(resource::all_columns)
             .insert_into_collection::<Collection, Resource>(collection_id)
             .insert_and_get_result_async(pool.pool())
             .await;
+        assert!(matches!(insert, Err(InsertError::CollectionNotFound)));
         match insert.unwrap_err() {
             InsertError::CollectionNotFound => (),
             err => panic!("Unexpected error: {:?}", err),
