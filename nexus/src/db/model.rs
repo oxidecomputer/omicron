@@ -965,11 +965,11 @@ pub struct VpcRouter {
 
 impl VpcRouter {
     pub fn new(
+        router_id: Uuid,
         vpc_id: Uuid,
-        project_id: Uuid,
         params: external::VpcRouterCreateParams,
     ) -> Self {
-        let identity = VpcRouterIdentity::new(vpc_id, params.identity);
+        let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self { identity, vpc_id }
     }
 }
@@ -979,6 +979,24 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity().into(),
             vpc_id: self.vpc_id,
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "vpcrouter"]
+pub struct VpcRouterUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
+    fn from(params: external::VpcRouterUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
         }
     }
 }

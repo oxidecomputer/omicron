@@ -1289,8 +1289,8 @@ pub struct VpcSubnetUpdateParams {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-/// A VPC router defines a series of rules that indicate where
-/// them, within a IPv4 subnetwork or optional an IPv6 subnetwork.
+/// A VPC router defines a series of rules that indicate where traffic
+/// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
