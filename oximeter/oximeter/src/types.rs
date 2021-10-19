@@ -81,7 +81,7 @@ impl FieldValue {
         field_type: FieldType,
     ) -> Result<Self, Error> {
         let make_err =
-            || Error::ParseError(s.to_string(), field_type.to_string());
+            || Error::ParseError { src: s.to_string(), typ: field_type.to_string() };
         match field_type {
             FieldType::String => Ok(FieldValue::String(s.to_string())),
             FieldType::I64 => {
@@ -354,6 +354,7 @@ impl Measurement {
 
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", content = "content")]
 pub enum Error {
     /// An error related to generating metric data points
     #[error("Metric data error: {0}")]
@@ -368,8 +369,11 @@ pub enum Error {
     HistogramError(#[from] histogram::HistogramError),
 
     /// An error parsing a field or measurement from a string.
-    #[error("String '{0}' could not be parsed as type '{1}'")]
-    ParseError(String, String),
+    #[error("String '{src}' could not be parsed as type '{typ}'")]
+    ParseError {
+        src: String,
+        typ: String
+    },
 }
 
 /// A cumulative or counter data type.
