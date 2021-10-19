@@ -19,6 +19,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -30,6 +31,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -99,6 +101,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -110,6 +113,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -179,6 +183,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -190,6 +195,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -340,6 +346,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -351,6 +358,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -501,6 +509,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -512,6 +521,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -663,6 +673,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -674,6 +685,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -1111,6 +1123,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -1122,6 +1135,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -1312,6 +1326,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -1323,6 +1338,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -1558,6 +1574,7 @@
             "in": "query",
             "name": "limit",
             "schema": {
+              "nullable": true,
               "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
@@ -1569,6 +1586,7 @@
             "in": "query",
             "name": "page_token",
             "schema": {
+              "nullable": true,
               "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
@@ -1654,7 +1672,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "projectId": {
             "type": "string",
@@ -1664,6 +1687,7 @@
             "$ref": "#/components/schemas/ByteCount"
           },
           "snapshotId": {
+            "nullable": true,
             "type": "string",
             "format": "uuid"
           },
@@ -1730,9 +1754,15 @@
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "size of the Disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "snapshotId": {
+            "nullable": true,
             "description": "id for snapshot from which the Disk should be created, if any",
             "type": "string",
             "format": "uuid"
@@ -1756,6 +1786,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -1903,7 +1934,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "timeCreated": {
             "description": "timestamp when this resource was created",
@@ -1942,13 +1978,28 @@
             "format": "uuid"
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "memory allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
+            "description": "number of CPUs allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           },
           "projectId": {
             "description": "id for the project containing this Instance",
@@ -2033,6 +2084,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2091,7 +2143,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "timeCreated": {
             "description": "timestamp when this resource was created",
@@ -2140,6 +2197,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2153,10 +2211,16 @@
         "type": "object",
         "properties": {
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         }
       },
@@ -2174,7 +2238,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "timeCreated": {
             "description": "timestamp when this resource was created",
@@ -2223,6 +2292,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2236,10 +2306,16 @@
         "type": "object",
         "properties": {
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         }
       },
@@ -2267,6 +2343,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2391,6 +2468,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2467,7 +2545,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "serviceAddress": {
             "type": "string"
@@ -2504,6 +2587,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2521,7 +2605,12 @@
             "type": "string"
           },
           "dnsName": {
-            "$ref": "#/components/schemas/Name"
+            "description": "The name used for the VPC in DNS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -2529,7 +2618,12 @@
             "format": "uuid"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "projectId": {
             "description": "id for the project containing this VPC",
@@ -2589,6 +2683,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2602,13 +2697,30 @@
         "type": "object",
         "properties": {
           "identity": {
-            "$ref": "#/components/schemas/IdentityMetadata"
+            "description": "common identifying metadata",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdentityMetadata"
+              }
+            ]
           },
           "ipv4_block": {
-            "$ref": "#/components/schemas/Ipv4Net"
+            "nullable": true,
+            "description": "The IPv4 subnet CIDR block.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
           },
           "ipv6_block": {
-            "$ref": "#/components/schemas/Ipv6Net"
+            "nullable": true,
+            "description": "The IPv6 subnet CIDR block.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           },
           "vpc_id": {
             "description": "The VPC to which the subnet belongs.",
@@ -2629,10 +2741,20 @@
             "type": "string"
           },
           "ipv4Block": {
-            "$ref": "#/components/schemas/Ipv4Net"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
           },
           "ipv6Block": {
-            "$ref": "#/components/schemas/Ipv6Net"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -2655,6 +2777,7 @@
             }
           },
           "next_page": {
+            "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
@@ -2668,16 +2791,32 @@
         "type": "object",
         "properties": {
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "ipv4Block": {
-            "$ref": "#/components/schemas/Ipv4Net"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
           },
           "ipv6Block": {
-            "$ref": "#/components/schemas/Ipv6Net"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         }
       },
@@ -2686,13 +2825,24 @@
         "type": "object",
         "properties": {
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "dnsName": {
-            "$ref": "#/components/schemas/Name"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         }
       },
