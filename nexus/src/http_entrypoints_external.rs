@@ -1294,7 +1294,7 @@ async fn vpc_routers_post(
  */
 #[endpoint {
     method = DELETE,
-    path = "/projects{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    path = "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
 }]
 async fn vpc_routers_delete_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
