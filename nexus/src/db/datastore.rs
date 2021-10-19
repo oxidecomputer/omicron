@@ -951,8 +951,18 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::metricproducer::dsl;
 
+        // TODO: see https://github.com/oxidecomputer/omicron/issues/323
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(producer.ip),
+                dsl::port.eq(producer.port),
+                dsl::interval.eq(producer.interval),
+                dsl::base_route.eq(producer.base_route.clone()),
+            ))
             .execute_async(self.pool())
             .await
             .map_err(|e| {

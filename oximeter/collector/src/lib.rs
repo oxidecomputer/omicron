@@ -56,7 +56,6 @@ enum CollectionMessage {
 // also send a `CollectionMessage`, for example to update the collection interval. This is not
 // currently used, but will likely be exposed via control plane interfaces in the future.
 async fn collection_task(
-    id: Uuid,
     log: Logger,
     mut producer: ProducerEndpoint,
     mut inbox: mpsc::Receiver<CollectionMessage>,
@@ -68,7 +67,6 @@ async fn collection_task(
     debug!(
         log,
         "starting oximeter collection task";
-        "collector_id" => ?id,
         "interval" => ?producer.interval,
     );
     loop {
@@ -76,33 +74,19 @@ async fn collection_task(
             message = inbox.recv() => {
                 match message {
                     None => {
-                        debug!(
-                            log,
-                            "collection task inbox closed, shutting down";
-                            "collector_id" => ?id
-                        );
+                        debug!(log, "collection task inbox closed, shutting down");
                     }
                     Some(CollectionMessage::Shutdown) => {
-                        debug!(
-                            log,
-                            "collection task received shutdown request";
-                            "collector_id" => ?id
-                        );
+                        debug!(log, "collection task received shutdown request");
                     },
                     Some(CollectionMessage::Collect) => {
-                        debug!(
-                            log,
-                            "collection task received request to collect";
-                            "collector_id" => ?id
-                        );
+                        debug!(log, "collection task received request to collect");
                     },
                     Some(CollectionMessage::Update(new_info)) => {
                         producer = new_info;
                         debug!(
                             log,
                             "collection task received request to update its producer information";
-                            "collector_id" => ?id,
-                            "producer_id" => ?producer.id,
                             "interval" => ?producer.interval,
                             "address" => producer.address,
                         );
@@ -112,37 +96,36 @@ async fn collection_task(
                 }
             }
             _ = collection_timer.tick() => {
-                info!(
-                    log,
-                    "collecting from producer";
-                    "collector_id" => ?id,
-                    "producer_id" => ?producer.id,
-                );
+                info!(log, "collecting from producer");
                 let res = client.get(format!("http://{}{}", producer.address, producer.collection_route()))
                     .send()
                     .await;
                 match res {
                     Ok(res) => {
-                        match res.json::<ProducerResults>().await {
-                            Ok(results) => {
-                                debug!(
-                                    log,
-                                    "collected {} total results",
-                                    results.len();
-                                    "collector_id" => ?id,
-                                    "producer_id" => ?producer.id,
-                                );
-                                outbox.send(results).await.unwrap();
-                            },
-                            Err(e) => {
-                                warn!(
-                                    log,
-                                    "failed to collect results from producer: {}",
-                                    e.to_string();
-                                    "collector_id" => ?id,
-                                    "producer_id" => ?producer.id,
-                                );
+                        if res.status().is_success() {
+                            match res.json::<ProducerResults>().await {
+                                Ok(results) => {
+                                    debug!(
+                                        log,
+                                        "collected {} total results",
+                                        results.len();
+                                    );
+                                    outbox.send(results).await.unwrap();
+                                },
+                                Err(e) => {
+                                    warn!(
+                                        log,
+                                        "failed to collect results from producer: {}",
+                                        e.to_string();
+                                    );
+                                }
                             }
+                        } else {
+                            warn!(
+                                log,
+                                "failed to receive metric results from producer";
+                                "status_code" => res.status().as_u16(),
+                            );
                         }
                     },
                     Err(e) => {
@@ -150,8 +133,6 @@ async fn collection_task(
                             log,
                             "failed to send collection request to producer: {}",
                             e.to_string();
-                            "collector_id" => ?id,
-                            "producer_id" => ?producer.id,
                         );
                     }
                 }
@@ -276,7 +257,7 @@ impl OximeterAgent {
         log: &Logger,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
-        let log = log.new(o!("component" => "oximeter-agent"));
+        let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
         let insertion_log = log.new(o!("component" => "results-sink"));
         let client_log = log.new(o!("component" => "clickhouse-client"));
 
@@ -318,10 +299,9 @@ impl OximeterAgent {
                 // Build channel to control the task and receive results.
                 let (tx, rx) = mpsc::channel(4);
                 let q = self.result_sender.clone();
-                let id = self.id;
-                let log = self.log.new(o!("component" => "collection-task"));
+                let log = self.log.new(o!("component" => "collection-task", "producer_id" => id.to_string()));
                 let task = tokio::spawn(async move {
-                    collection_task(id, log, info, rx, q).await;
+                    collection_task(log, info, rx, q).await;
                 });
                 value.insert(CollectionTask { inbox: tx, task });
             }

@@ -86,12 +86,7 @@ impl Server {
         }
 
         debug!(log, "registering metric server as a producer");
-        register(
-            &Client::new(),
-            config.registration_address,
-            &config.server_info,
-        )
-        .await?;
+        register(config.registration_address, &config.server_info).await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -132,7 +127,7 @@ fn metric_server_api() -> ApiDescription<ProducerRegistry> {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-struct ProducerIdPathParams {
+pub struct ProducerIdPathParams {
     pub producer_id: Uuid,
 }
 
@@ -155,11 +150,10 @@ async fn collect_endpoint(
 /// This function is used to provide consumers the flexibility to define their own Dropshot
 /// servers, rather than using the `Server` provided by this crate (which starts a _new_ server).
 pub async fn register(
-    client: &Client,
     address: SocketAddr,
     server_info: &ProducerEndpoint,
 ) -> Result<(), Error> {
-    client
+    Client::new()
         .post(format!("http://{}/metrics/producers", address))
         .json(server_info)
         .send()

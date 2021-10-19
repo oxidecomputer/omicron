@@ -46,9 +46,11 @@ use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
+use omicron_common::backoff;
 use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
+use oximeter_producer::register;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -91,6 +93,9 @@ pub trait TestInterfaces {
  * Manages an Oxide fleet -- the heart of the control plane
  */
 pub struct Nexus {
+    /** uuid for this nexus instance. */
+    id: Uuid,
+
     /** uuid for this rack (TODO should also be in persistent storage) */
     rack_id: Uuid,
 
@@ -145,6 +150,7 @@ impl Nexus {
             sec_store,
         ));
         let nexus = Nexus {
+            id: *nexus_id,
             rack_id: *rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
@@ -198,6 +204,12 @@ impl Nexus {
         // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
         self.db_datastore.oximeter_create(&db_info).await?;
+        info!(
+            self.log,
+            "registered new oximeter metric collection server";
+            "collector_id" => ?oximeter_info.collector_id,
+            "address" => oximeter_info.address,
+        );
 
         // Regardless, notify the collector of any assigned metric producers. This should be empty
         // if this Oximeter collector is registering for the first time, but may not be if the
@@ -239,6 +251,35 @@ impl Nexus {
             }
         }
         Ok(())
+    }
+
+    /// Register as a metric producer with the oximeter metric collection server.
+    pub async fn register_as_producer(&self, address: SocketAddr) {
+        let producer_endpoint = ProducerEndpoint {
+            id: self.id,
+            address,
+            base_route: String::from("/metrics/collect"),
+            interval: Duration::from_secs(10),
+        };
+        let register = || async {
+            debug!(self.log, "registering nexus as metric producer");
+            register(address, &producer_endpoint)
+                .await
+                .map_err(backoff::BackoffError::Transient)
+        };
+        let log_registration_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to register nexus as a metric producer, will retry in {:?}", delay;
+                "error_message" => ?error,
+            );
+        };
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            register,
+            log_registration_failure,
+        ).await
+        .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
     /// Return a client to the Oximeter instance with the given ID.
