@@ -9,7 +9,6 @@ use async_bb8_diesel::{
     AsyncRunQueryDsl, ConnectionError, ConnectionManager, PoolError,
 };
 use diesel::associations::HasTable;
-use diesel::deserialize::FromSqlRow;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -23,10 +22,9 @@ use std::marker::PhantomData;
 /// A simple wrapper type for Diesel's [`InsertStatement`], which
 /// allows referencing generics with names (and extending usage
 /// without re-stating those generic parameters everywhere).
+/// NOTE: This only waraps insert statements without a returning clause.
 pub trait InsertStatementExt<ResType, C: DatastoreCollection<ResType>> {
     type Records;
-    type Operator;
-    type Returning;
 
     fn statement(
         self,
@@ -34,22 +32,15 @@ pub trait InsertStatementExt<ResType, C: DatastoreCollection<ResType>> {
         // Force the insert statement to have the appropriate target table
         ResourceTable<ResType, C>,
         Self::Records,
-        Self::Operator,
-        Self::Returning,
     >;
 }
 
-impl<ResType, C: DatastoreCollection<ResType>, U, Op, Ret>
-    InsertStatementExt<ResType, C>
-    for InsertStatement<ResourceTable<ResType, C>, U, Op, Ret>
+impl<ResType, C: DatastoreCollection<ResType>, U> InsertStatementExt<ResType, C>
+    for InsertStatement<ResourceTable<ResType, C>, U>
 {
     type Records = U;
-    type Operator = Op;
-    type Returning = Ret;
 
-    fn statement(
-        self,
-    ) -> InsertStatement<ResourceTable<ResType, C>, U, Op, Ret> {
+    fn statement(self) -> InsertStatement<ResourceTable<ResType, C>, U> {
         self
     }
 }
@@ -80,10 +71,10 @@ pub trait DatastoreCollection<ResourceType> {
     /// The time deleted column in the CollectionTable
     fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn;
 
-    fn insert_resource<Q, IS>(
+    fn insert_resource<IS>(
         key: Self::CollectionId,
         insert: IS,
-    ) -> InsertIntoCollectionStatement<ResourceType, IS, Self, Q>
+    ) -> InsertIntoCollectionStatement<ResourceType, IS, Self>
     where
         (
             <Self::GenerationNumberColumn as Column>::Table,
@@ -92,10 +83,7 @@ pub trait DatastoreCollection<ResourceType> {
         Self: Sized,
         IS: InsertStatementExt<ResourceType, Self>,
         ResourceTable<ResourceType, Self>: Copy + Debug,
-        Q: FromSqlRow<
-                <InsertIntoCollectionStatement<ResourceType, IS, Self, Q> as AsQuery>::SqlType,
-                Pg,
-            > + Selectable<Pg>,
+        ResourceType: Selectable<Pg>,
     {
         InsertIntoCollectionStatement {
             insert_statement: insert.statement(),
@@ -124,24 +112,18 @@ impl<T> TypesAreSame for (T, T) {}
 /// The CTE described in the module docs
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
-pub struct InsertIntoCollectionStatement<ResType, IS, C, Q>
+pub struct InsertIntoCollectionStatement<ResType, IS, C>
 where
     IS: InsertStatementExt<ResType, C>,
     C: DatastoreCollection<ResType>,
     ResourceTable<ResType, C>: Copy + Debug,
 {
-    insert_statement: InsertStatement<
-        ResourceTable<ResType, C>,
-        IS::Records,
-        IS::Operator,
-        IS::Returning,
-    >,
+    insert_statement: InsertStatement<ResourceTable<ResType, C>, IS::Records>,
     key: CollectionId<ResType, C>,
-    query_type: PhantomData<Q>,
+    query_type: PhantomData<ResType>,
 }
 
-impl<ResType, IS, C, Q> QueryId
-    for InsertIntoCollectionStatement<ResType, IS, C, Q>
+impl<ResType, IS, C> QueryId for InsertIntoCollectionStatement<ResType, IS, C>
 where
     IS: InsertStatementExt<ResType, C>,
     C: DatastoreCollection<ResType>,
@@ -163,16 +145,15 @@ pub enum InsertError {
     DatabaseError(PoolError),
 }
 
-impl<ResType, IS, C, Q> InsertIntoCollectionStatement<ResType, IS, C, Q>
+impl<ResType, IS, C> InsertIntoCollectionStatement<ResType, IS, C>
 where
-    ResType: 'static + Send,
+    ResType: 'static + Debug + Send,
     IS: 'static + InsertStatementExt<ResType, C> + Send,
     C: 'static + DatastoreCollection<ResType> + Send,
     CollectionId<ResType, C>: 'static + PartialEq + Send,
     ResourceTable<ResType, C>: 'static + Table + Send + Copy + Debug,
     IS::Records: 'static + Send,
-    Q: 'static + Debug + Send,
-    InsertIntoCollectionStatement<ResType, IS, C, Q>: Send,
+    InsertIntoCollectionStatement<ResType, IS, C>: Send,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -187,12 +168,12 @@ where
     pub async fn insert_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<PgConnection>>,
-    ) -> InsertIntoCollectionResult<Q>
+    ) -> InsertIntoCollectionResult<ResType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<PgConnection, Q>,
+        Self: query_methods::LoadQuery<PgConnection, ResType>,
     {
-        match self.get_result_async::<Q>(pool).await {
+        match self.get_result_async::<ResType>(pool).await {
             Ok(row) => Ok(row),
             Err(PoolError::Connection(ConnectionError::Query(
                 diesel::result::Error::DatabaseError(
@@ -210,19 +191,18 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<ResType, IS, C, Q> Query
-    for InsertIntoCollectionStatement<ResType, IS, C, Q>
+impl<ResType, IS, C> Query for InsertIntoCollectionStatement<ResType, IS, C>
 where
     IS: InsertStatementExt<ResType, C>,
-    Q: Selectable<Pg>,
+    ResType: Selectable<Pg>,
     C: DatastoreCollection<ResType>,
     ResourceTable<ResType, C>: Copy + Debug,
 {
-    type SqlType = SelectableSqlType<Q>;
+    type SqlType = SelectableSqlType<ResType>;
 }
 
-impl<ResType, IS, C, Q> RunQueryDsl<PgConnection>
-    for InsertIntoCollectionStatement<ResType, IS, C, Q>
+impl<ResType, IS, C> RunQueryDsl<PgConnection>
+    for InsertIntoCollectionStatement<ResType, IS, C>
 where
     IS: InsertStatementExt<ResType, C>,
     ResourceTable<ResType, C>: Table + Copy + Debug,
@@ -251,9 +231,11 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// //                      time_deleted IS NULL RETURNING 1),
 /// // <user provided insert statement>
 /// ```
-impl<ResType, IS, C, Q> QueryFragment<Pg>
-    for InsertIntoCollectionStatement<ResType, IS, C, Q>
+impl<ResType, IS, C> QueryFragment<Pg>
+    for InsertIntoCollectionStatement<ResType, IS, C>
 where
+    ResType: Selectable<Pg>,
+    <ResType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
     IS: InsertStatementExt<ResType, C>,
     C: DatastoreCollection<ResType>,
     CollectionTable<ResType, C>: HasTable<Table = CollectionTable<ResType, C>>
@@ -265,12 +247,6 @@ where
             Output = BoxedQuery<CollectionTable<ResType, C>>,
         >,
     ResourceTable<ResType, C>: Copy + Debug,
-    InsertStatement<
-        ResourceTable<ResType, C>,
-        IS::Records,
-        IS::Operator,
-        IS::Returning,
-    >: QueryFragment<Pg>,
     <CollectionPrimaryKey<ResType, C> as Expression>::SqlType: SingleValue,
     CollectionPrimaryKey<ResType, C>: diesel::Column,
     CollectionTimeDeletedColumn<ResType, C>: ExpressionMethods,
@@ -279,6 +255,7 @@ where
         > + diesel::serialize::ToSql<SerializedCollectionPrimaryKey<ResType, C>, Pg>,
     <CollectionTable<ResType, C> as diesel::QuerySource>::FromClause:
         QueryFragment<Pg>,
+    InsertStatement<ResourceTable<ResType, C>, IS::Records>: QueryFragment<Pg>,
     BoxedQuery<CollectionTable<ResType, C>>: query_methods::FilterDsl<
         Eq<CollectionPrimaryKey<ResType, C>, CollectionId<ResType, C>>,
         Output = BoxedQuery<CollectionTable<ResType, C>>,
@@ -331,6 +308,11 @@ where
         // TODO: Check or force the insert_statement to have
         //       C::CollectionIdColumn set
         self.insert_statement.walk_ast(out.reborrow())?;
+        out.push_sql(" RETURNING ");
+        // We manually write the RETURNING clause here because the wrapper type
+        // used for InsertStatement's Ret generic is private to diesel and so we
+        // cannot express it.
+        ResType::as_returning().walk_ast(out.reborrow())?;
         Ok(())
     }
 }
@@ -453,18 +435,16 @@ mod test {
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
         let modify_time =
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
-        let insert = Collection::insert_resource::<Resource, _>(
+        let insert = Collection::insert_resource(
             collection_id,
-            diesel::insert_into(resource::table)
-                .values(vec![(
-                    resource::dsl::id.eq(resource_id),
-                    resource::dsl::name.eq("test"),
-                    resource::dsl::description.eq("desc"),
-                    resource::dsl::time_created.eq(create_time),
-                    resource::dsl::time_modified.eq(modify_time),
-                    resource::dsl::collection_id.eq(collection_id),
-                )])
-                .returning(resource::all_columns),
+            diesel::insert_into(resource::table).values(vec![(
+                resource::dsl::id.eq(resource_id),
+                resource::dsl::name.eq("test"),
+                resource::dsl::description.eq("desc"),
+                resource::dsl::time_created.eq(create_time),
+                resource::dsl::time_modified.eq(modify_time),
+                resource::dsl::collection_id.eq(collection_id),
+            )]),
         );
         let query = diesel::debug_query::<Pg, _>(&insert).to_string();
 
@@ -484,18 +464,16 @@ mod test {
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
-        let insert = Collection::insert_resource::<Resource, _>(
+        let insert = Collection::insert_resource(
             collection_id,
-            diesel::insert_into(resource::table)
-                .values((
-                    resource::dsl::id.eq(resource_id),
-                    resource::dsl::name.eq("test"),
-                    resource::dsl::description.eq("desc"),
-                    resource::dsl::time_created.eq(Utc::now()),
-                    resource::dsl::time_modified.eq(Utc::now()),
-                    resource::dsl::collection_id.eq(collection_id),
-                ))
-                .returning(resource::all_columns),
+            diesel::insert_into(resource::table).values((
+                resource::dsl::id.eq(resource_id),
+                resource::dsl::name.eq("test"),
+                resource::dsl::description.eq("desc"),
+                resource::dsl::time_created.eq(Utc::now()),
+                resource::dsl::time_modified.eq(Utc::now()),
+                resource::dsl::collection_id.eq(collection_id),
+            )),
         )
         .insert_and_get_result_async(pool.pool())
         .await;
@@ -530,18 +508,16 @@ mod test {
             .await
             .unwrap();
 
-        Collection::insert_resource::<Resource, _>(
+        Collection::insert_resource(
             collection_id,
-            diesel::insert_into(resource::table)
-                .values(vec![(
-                    resource::dsl::id.eq(resource_id),
-                    resource::dsl::name.eq("test"),
-                    resource::dsl::description.eq("desc"),
-                    resource::dsl::time_created.eq(Utc::now()),
-                    resource::dsl::time_modified.eq(Utc::now()),
-                    resource::dsl::collection_id.eq(collection_id),
-                )])
-                .returning(resource::all_columns),
+            diesel::insert_into(resource::table).values(vec![(
+                resource::dsl::id.eq(resource_id),
+                resource::dsl::name.eq("test"),
+                resource::dsl::description.eq("desc"),
+                resource::dsl::time_created.eq(Utc::now()),
+                resource::dsl::time_modified.eq(Utc::now()),
+                resource::dsl::collection_id.eq(collection_id),
+            )]),
         )
         .insert_and_get_result_async(pool.pool())
         .await
