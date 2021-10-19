@@ -4,11 +4,12 @@
 
 use crate::config;
 use crate::db;
+use crate::db::identity::{Asset, Resource};
+use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::future::ready;
 use futures::StreamExt;
 use omicron_common::api::external;
@@ -19,14 +20,12 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
@@ -48,9 +47,11 @@ use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
+use omicron_common::backoff;
 use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
+use oximeter_producer::register;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -93,6 +94,9 @@ pub trait TestInterfaces {
  * Manages an Oxide fleet -- the heart of the control plane
  */
 pub struct Nexus {
+    /** uuid for this nexus instance. */
+    id: Uuid,
+
     /** uuid for this rack (TODO should also be in persistent storage) */
     rack_id: Uuid,
 
@@ -100,7 +104,7 @@ pub struct Nexus {
     log: Logger,
 
     /** cached rack identity metadata */
-    api_rack_identity: IdentityMetadata,
+    api_rack_identity: db::model::RackIdentity,
 
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
@@ -147,15 +151,10 @@ impl Nexus {
             sec_store,
         ));
         let nexus = Nexus {
+            id: config.id,
             rack_id: *rack_id,
             log: log.new(o!()),
-            api_rack_identity: IdentityMetadata {
-                id: *rack_id,
-                name: Name::try_from(format!("rack-{}", *rack_id)).unwrap(),
-                description: String::from(""),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
+            api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
@@ -188,11 +187,7 @@ impl Nexus {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
 
         // Insert the sled into the database.
-        let create_params = IdentityMetadataCreateParams {
-            name: Name::try_from("sled").unwrap(),
-            description: "Self-Identified Sled".to_string(),
-        };
-        let sled = db::model::Sled::new(id, address, create_params);
+        let sled = db::model::Sled::new(id, address);
         self.db_datastore.sled_upsert(sled).await?;
 
         Ok(())
@@ -210,6 +205,12 @@ impl Nexus {
         // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
         self.db_datastore.oximeter_create(&db_info).await?;
+        info!(
+            self.log,
+            "registered new oximeter metric collection server";
+            "collector_id" => ?oximeter_info.collector_id,
+            "address" => oximeter_info.address,
+        );
 
         // Regardless, notify the collector of any assigned metric producers. This should be empty
         // if this Oximeter collector is registering for the first time, but may not be if the
@@ -239,7 +240,7 @@ impl Nexus {
             );
             for producer in producers.into_iter() {
                 let producer_info = ProducerEndpoint {
-                    id: producer.id,
+                    id: producer.id(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -251,6 +252,35 @@ impl Nexus {
             }
         }
         Ok(())
+    }
+
+    /// Register as a metric producer with the oximeter metric collection server.
+    pub async fn register_as_producer(&self, address: SocketAddr) {
+        let producer_endpoint = ProducerEndpoint {
+            id: self.id,
+            address,
+            base_route: String::from("/metrics/collect"),
+            interval: Duration::from_secs(10),
+        };
+        let register = || async {
+            debug!(self.log, "registering nexus as metric producer");
+            register(address, &producer_endpoint)
+                .await
+                .map_err(backoff::BackoffError::Transient)
+        };
+        let log_registration_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to register nexus as a metric producer, will retry in {:?}", delay;
+                "error_message" => ?error,
+            );
+        };
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            register,
+            log_registration_failure,
+        ).await
+        .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
     /// Return a client to the Oximeter instance with the given ID.
@@ -424,15 +454,15 @@ impl Nexus {
             .db_datastore
             .project_create_vpc(
                 &id,
-                db_project.id(),
+                &db_project.id(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: Name::try_from("default").unwrap(),
+                        name: external::Name::try_from("default").unwrap(),
                         description: "Default VPC".to_string(),
                     },
                     // TODO-robustness this will need to be None if we decide to handle
                     // the logic around name and dns_name by making dns_name optional
-                    dns_name: Name::try_from("default").unwrap(),
+                    dns_name: external::Name::try_from("default").unwrap(),
                 },
             )
             .await?;
@@ -510,7 +540,7 @@ impl Nexus {
             .db_datastore
             .project_create_disk(
                 &disk_id,
-                project.id(),
+                &project.id(),
                 params,
                 &db::model::DiskRuntimeState::new(),
             )
@@ -577,7 +607,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.id).await
+        self.db_datastore.project_delete_disk(&disk.id()).await
     }
 
     /*
@@ -604,7 +634,7 @@ impl Nexus {
             .ok_or_else(|| Error::ServiceUnavailable {
                 message: String::from("no sleds available for new Instance"),
             })
-            .map(|s| *s.id())
+            .map(|s| s.id())
     }
 
     pub async fn project_list_instances(
@@ -708,7 +738,7 @@ impl Nexus {
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
-        self.db_datastore.project_delete_instance(&instance.id).await
+        self.db_datastore.project_delete_instance(&instance.id()).await
     }
 
     pub async fn project_lookup_instance(
@@ -820,7 +850,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -843,7 +873,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -866,7 +896,7 @@ impl Nexus {
             },
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id).await
+        self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
@@ -895,11 +925,11 @@ impl Nexus {
         };
 
         let new_runtime = sa
-            .instance_ensure(instance.id, instance_hardware, requested)
+            .instance_ensure(instance.id(), instance_hardware, requested)
             .await?;
 
         self.db_datastore
-            .instance_update_runtime(&instance.id, &new_runtime.into())
+            .instance_update_runtime(&instance.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -915,7 +945,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::DiskAttachment> {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
-        self.db_datastore.instance_list_disks(&instance.id, pagparams).await
+        self.db_datastore.instance_list_disks(&instance.id(), pagparams).await
     }
 
     /**
@@ -931,11 +961,11 @@ impl Nexus {
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
-            if instance_id == instance.id {
+            if instance_id == instance.id() {
                 return Ok(DiskAttachment {
-                    instance_id: instance.id,
-                    disk_name: disk.name.clone(),
-                    disk_id: disk.id,
+                    instance_id: instance.id(),
+                    disk_name: disk.name().clone().into(),
+                    disk_id: disk.id(),
                     disk_state: disk.state().into(),
                 });
             }
@@ -963,20 +993,20 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.id;
+        let instance_id = &instance.id();
 
         fn disk_attachment_for(
             instance: &db::model::Instance,
             disk: &db::model::Disk,
         ) -> CreateResult<DiskAttachment> {
             assert_eq!(
-                instance.id,
+                instance.id(),
                 disk.runtime_state.attach_instance_id.unwrap()
             );
             Ok(DiskAttachment {
-                instance_id: instance.id,
-                disk_id: disk.id,
-                disk_name: disk.name.clone(),
+                instance_id: instance.id(),
+                disk_id: disk.id(),
+                disk_name: disk.name().clone().into(),
                 disk_state: disk.runtime().state().into(),
             })
         }
@@ -1008,7 +1038,7 @@ impl Nexus {
             };
             let message = format!(
                 "cannot attach disk \"{}\": {}",
-                disk.name.as_str(),
+                disk.name().as_str(),
                 disk_status
             );
             Err(Error::InvalidRequest { message })
@@ -1062,7 +1092,7 @@ impl Nexus {
             DiskStateRequested::Attached(*instance_id),
         )
         .await?;
-        let disk = self.db_datastore.disk_fetch(&disk.id).await?;
+        let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
         disk_attachment_for(&instance, &disk)
     }
 
@@ -1078,7 +1108,7 @@ impl Nexus {
         let instance =
             self.project_lookup_instance(project_name, instance_name).await?;
         let disk = self.project_lookup_disk(project_name, disk_name).await?;
-        let instance_id = &instance.id;
+        let instance_id = &instance.id();
 
         match &disk.state().into() {
             /*
@@ -1140,9 +1170,9 @@ impl Nexus {
          * reflect the new intermediate state.
          */
         let new_runtime =
-            sa.disk_ensure(disk.id, disk.runtime().into(), requested).await?;
+            sa.disk_ensure(disk.id(), disk.runtime().into(), requested).await?;
         self.db_datastore
-            .disk_update_runtime(&disk.id, &new_runtime.into())
+            .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -1203,7 +1233,7 @@ impl Nexus {
             self.db_datastore.project_lookup_id_by_name(project_name).await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self.db_datastore.project_update_vpc(&vpc.id, params).await?)
+        Ok(self.db_datastore.project_update_vpc(&vpc.id(), params).await?)
     }
 
     pub async fn project_delete_vpc(
@@ -1293,7 +1323,7 @@ impl Nexus {
      */
 
     fn as_rack(&self) -> db::model::Rack {
-        db::model::Rack { identity: self.api_rack_identity.clone().into() }
+        db::model::Rack { identity: self.api_rack_identity.clone() }
     }
 
     pub async fn racks_list(

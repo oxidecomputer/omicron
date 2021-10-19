@@ -14,15 +14,10 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::backend::{Backend, RawValue};
-use diesel::deserialize::{self, FromSql};
-use diesel::serialize::{self, ToSql};
-use diesel::sql_types;
 pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
-use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -107,6 +102,22 @@ pub struct DataPageParams<'a, NameType> {
     pub limit: NonZeroU32,
 }
 
+impl<'a, NameType> DataPageParams<'a, NameType> {
+    /// Maps the marker type to a new type.
+    ///
+    /// Equivalent to [std::option::Option::map], because that's what it calls.
+    pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<'a, OtherName>
+    where
+        F: FnOnce(&'a NameType) -> &'a OtherName,
+    {
+        DataPageParams {
+            marker: self.marker.map(f),
+            direction: self.direction,
+            limit: self.limit,
+        }
+    }
+}
+
 /**
  * A name used in the API
  *
@@ -118,38 +129,7 @@ pub struct DataPageParams<'a, NameType> {
     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
-// Diesel-specific derives:
-//
-// - Types which implement "ToSql" should implement "AsExpression".
-// - Types which implement "FromSql" should implement "FromSqlRow".
-#[derive(AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
 pub struct Name(String);
-
-// Serialize the "Name" object to SQL as TEXT.
-impl<DB> ToSql<sql_types::Text, DB> for Name
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        (&self.0 as &String).to_sql(out)
-    }
-}
-
-// Deserialize the "Name" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for Name
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        Name::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
-    }
-}
 
 /**
  * `Name::try_from(String)` is the primary method for constructing an Name
@@ -316,41 +296,8 @@ impl Name {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    AsExpression,
-    FromSqlRow,
-)]
-#[sql_type = "sql_types::BigInt"]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ByteCount(u64);
-
-impl<DB> ToSql<sql_types::BigInt, DB> for ByteCount
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        i64::from(self).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::BigInt, DB> for ByteCount
-where
-    DB: Backend,
-    i64: FromSql<sql_types::BigInt, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        ByteCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
-    }
-}
 
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
@@ -444,34 +391,8 @@ impl From<&ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
-    AsExpression,
-    FromSqlRow,
 )]
-#[sql_type = "sql_types::BigInt"]
 pub struct Generation(u64);
-
-impl<DB> ToSql<sql_types::BigInt, DB> for Generation
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        (self.0 as i64).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::BigInt, DB> for Generation
-where
-    DB: Backend,
-    i64: FromSql<sql_types::BigInt, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        Generation::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
-    }
-}
 
 impl Generation {
     pub fn new() -> Generation {
@@ -801,41 +722,8 @@ impl InstanceState {
 }
 
 /** The number of CPUs in an Instance */
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    AsExpression,
-    FromSqlRow,
-)]
-#[sql_type = "sql_types::BigInt"]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCpuCount(pub u16);
-
-impl<DB> ToSql<sql_types::BigInt, DB> for InstanceCpuCount
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        (self.0 as i64).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::BigInt, DB> for InstanceCpuCount
-where
-    DB: Backend,
-    i64: FromSql<sql_types::BigInt, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        InstanceCpuCount::try_from(i64::from_sql(bytes)?).map_err(|e| e.into())
-    }
-}
 
 impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;
@@ -1244,17 +1132,7 @@ pub struct VpcUpdateParams {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    AsExpression,
-    FromSqlRow,
-)]
-#[sql_type = "sql_types::Inet"]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl std::ops::Deref for Ipv4Net {
@@ -1267,36 +1145,6 @@ impl std::ops::Deref for Ipv4Net {
 impl std::fmt::Display for Ipv4Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
-// all we have to do is wrap in the container and call to/from on that
-
-impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
-where
-    DB: Backend,
-    IpNetwork: ToSql<sql_types::Inet, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        IpNetwork::V4(self.0).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::Inet, DB> for Ipv4Net
-where
-    DB: Backend,
-    IpNetwork: FromSql<sql_types::Inet, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let inet = IpNetwork::from_sql(bytes)?;
-        match inet {
-            IpNetwork::V4(net) => Ok(Ipv4Net(net)),
-            _ => Err("Expected IPV4".into()),
-        }
     }
 }
 
@@ -1340,17 +1188,7 @@ impl JsonSchema for Ipv4Net {
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    AsExpression,
-    FromSqlRow,
-)]
-#[sql_type = "sql_types::Inet"]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl std::ops::Deref for Ipv6Net {
@@ -1363,36 +1201,6 @@ impl std::ops::Deref for Ipv6Net {
 impl std::fmt::Display for Ipv6Net {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-// ToSql and FromSql are defined by Diesel for the container IpNetwork struct, so
-// all we have to do is wrap in the container and call to/from on that
-
-impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
-where
-    DB: Backend,
-    IpNetwork: ToSql<sql_types::Inet, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        IpNetwork::V6(self.0).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::Inet, DB> for Ipv6Net
-where
-    DB: Backend,
-    IpNetwork: FromSql<sql_types::Inet, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let inet = IpNetwork::from_sql(bytes)?;
-        match inet {
-            IpNetwork::V6(net) => Ok(Ipv6Net(net)),
-            _ => Err("expected IPV6".into()),
-        }
     }
 }
 
@@ -1483,17 +1291,7 @@ pub struct VpcSubnetUpdateParams {
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    AsExpression,
-    FromSqlRow,
-)]
-#[sql_type = "sql_types::Text"]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
 impl TryFrom<String> for MacAddr {
@@ -1501,29 +1299,6 @@ impl TryFrom<String> for MacAddr {
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
         s.parse().map(|addr| MacAddr(addr))
-    }
-}
-
-impl<DB> ToSql<sql_types::Text, DB> for MacAddr
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::Text, DB> for MacAddr
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        MacAddr::try_from(String::from_sql(bytes)?).map_err(|e| e.into())
     }
 }
 

@@ -16,13 +16,15 @@ diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", feature
 futures = "0.3.15"
 http = "0.2.5"
 hyper = "0.14"
+db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.103"
+libc = "0.2.104"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+ref-cast = "1.0"
 serde_json = "1.0"
 serde_with = "1.9.4"
 structopt = "0.3"
@@ -42,6 +44,19 @@ path = "../common"
 
 [dependencies.omicron-sled-agent]
 path = "../sled-agent"
+
+[dependencies.oximeter]
+version = "0.1.0"
+path = "../oximeter/oximeter"
+
+[dependencies.oximeter-instruments]
+version = "0.1.0"
+path = "../oximeter/instruments"
+features = [ "http-instruments" ]
+
+[dependencies.oximeter-producer]
+version = "0.1.0"
+path = "../oximeter/producer"
 
 [dependencies.schemars]
 version = "0.8"
@@ -78,21 +93,13 @@ omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"
 subprocess = "0.2.8"
 
-[dev-dependencies.oximeter]
-version = "0.1.0"
-path = "../oximeter/oximeter"
+[dev-dependencies.openapi-lint]
+git = "https://github.com/oxidecomputer/openapi-lint"
+branch = "main"
 
 [dev-dependencies.oximeter-collector]
 version = "0.1.0"
 path = "../oximeter/collector"
-
-[dev-dependencies.oximeter-producer]
-version = "0.1.0"
-path = "../oximeter/producer"
-
-[dev-dependencies.openapi-lint]
-git = "https://github.com/oxidecomputer/openapi-lint"
-branch = "main"
 
 #
 # Disable doc builds by default for our binaries to work around issue

@@ -24,12 +24,10 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
-pub use nexus::Nexus;
-pub use nexus::TestInterfaces;
-
 use http_entrypoints_external::external_api;
 use http_entrypoints_internal::internal_api;
-
+pub use nexus::Nexus;
+pub use nexus::TestInterfaces;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -144,6 +142,16 @@ impl Server {
             }
         }
     }
+
+    /**
+     * Register the Nexus server as a metric producer with `oximeter.
+     */
+    pub async fn register_as_producer(&self) {
+        self.apictx
+            .nexus
+            .register_as_producer(self.http_server_internal.local_addr())
+            .await;
+    }
 }
 
 /**
@@ -156,5 +164,6 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         .map_err(|message| format!("initializing logger: {}", message))?;
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;
+    server.register_as_producer().await;
     server.wait_for_finish().await
 }

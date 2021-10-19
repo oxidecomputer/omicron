@@ -52,4 +52,4 @@ export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-09-03' test --locked --verbose
+ptime -m cargo +'nightly-2021-09-03' test --workspace --locked --verbose

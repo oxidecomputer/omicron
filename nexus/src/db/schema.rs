@@ -126,11 +126,18 @@ table! {
 }
 
 table! {
+    rack (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+    }
+}
+
+table! {
     sled (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
 
         ip -> Inet,
         port -> Int4,
