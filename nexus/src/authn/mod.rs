@@ -130,8 +130,9 @@ pub enum Reason {
 
     /// The credentials were syntactically valid, but semantically invalid
     /// (e.g., a cryptographic signature did not match)
-    #[error("bad credentials: {source:#}")]
+    #[error("bad credentials for actor {actor:?}: {source:#}")]
     BadCredentials {
+        actor: Actor,
         #[source]
         source: anyhow::Error,
     },

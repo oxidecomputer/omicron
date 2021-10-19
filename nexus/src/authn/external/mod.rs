@@ -153,6 +153,7 @@ mod test {
                     actor: self.actor,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
+                    actor: self.actor,
                     source: anyhow!("grunt error"),
                 }),
                 _ => panic!("unrecognized grunt instruction"),

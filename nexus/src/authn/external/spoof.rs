@@ -1,4 +1,4 @@
-//! Implements a custom, test-only authn scheme that blindly trusts the client
+//! Custom, test-only authn scheme that trusts whatever the client says
 
 use super::super::Details;
 use super::HttpAuthnScheme;
@@ -8,6 +8,7 @@ use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
 use anyhow::Context;
+use lazy_static::lazy_static;
 use uuid::Uuid;
 
 /// Header used for "spoof" authentication
@@ -19,11 +20,16 @@ pub const SPOOF_RESERVED_BAD_CREDS: &str =
     "this fake I.D., it is truly excellent";
 pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
 
+lazy_static! {
+    static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor =
+        Actor("22222222-2222-2222-2222-222222222222".parse().unwrap());
+}
+
 /// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom header
-/// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we blindly trust it.  This is
-/// useful for testing the rest of the authn facilities since we can very easily
-/// and precisely control its output.
+/// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we always trust it.  This is useful
+/// for testing the rest of the authn facilities since we can very easily and
+/// precisely control its output.
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
@@ -57,6 +63,7 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> SchemeResult {
             }
             Ok(str_value) if str_value == SPOOF_RESERVED_BAD_CREDS => {
                 SchemeResult::Failed(Reason::BadCredentials {
+                    actor: *SPOOF_RESERVED_BAD_CREDS_ACTOR,
                     source: anyhow!("do not sell to the people on this list"),
                 })
             }
@@ -122,8 +129,12 @@ mod test {
         let header = http::HeaderValue::from_static(bad_creds);
         assert!(matches!(
             authn_spoof(Some(&header)),
-            SchemeResult::Failed(Reason::BadCredentials{ source })
-                if source.to_string() == "do not sell to the people on this list"
+            SchemeResult::Failed(Reason::BadCredentials{
+                actor,
+                source
+            }) if actor == *super::SPOOF_RESERVED_BAD_CREDS_ACTOR &&
+                    source.to_string() ==
+                    "do not sell to the people on this list"
         ));
     }
 
