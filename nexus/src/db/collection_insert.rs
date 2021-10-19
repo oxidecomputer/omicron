@@ -139,10 +139,6 @@ where
     /// - Ok(Row was inserted)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    // TODO: Remove this allow(dead_code) once we have a caller. Since it and
-    // several types it uses are only used in tests right now, the compiler
-    // produces a bunch of warnings here.
-    #[allow(dead_code)]
     pub async fn insert_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<PgConnection>>,
