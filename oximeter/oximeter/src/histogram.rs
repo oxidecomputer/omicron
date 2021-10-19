@@ -41,6 +41,7 @@ impl HistogramSupport for f64 {
 
 /// Errors related to constructing histograms or adding samples into them.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", content = "content")]
 pub enum HistogramError {
     /// An attempt to construct a histogram with an empty set of bins.
     #[error("Bins may not be empty")]
@@ -55,12 +56,12 @@ pub enum HistogramError {
     NonFiniteValue(String),
 
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
-    #[error("Neigboring bins {0} and {1} are not adjoining")]
-    NonAdjoiningBins(String, String),
+    #[error("Neigboring bins {left} and {right} are not adjoining")]
+    NonAdjoiningBins { left: String, right: String },
 
     /// Bin and count arrays are of different sizes.
-    #[error("Bin and count arrays must have the same size, found {0} and {1}")]
-    ArraySizeMismatch(usize, usize),
+    #[error("Bin and count arrays must have the same size, found {n_bins} and {n_counts}")]
+    ArraySizeMismatch { n_bins: usize, n_counts: usize },
 }
 
 /// A type storing a range over `T`.
@@ -73,7 +74,7 @@ pub enum BinRange<T> {
     RangeTo(T),
 
     /// A range bounded inclusively below and exclusively above, `start..end`.
-    Range(T, T),
+    Range { start: T, end: T },
 
     /// A range bounded inclusively below and unbouned above, `start..`.
     RangeFrom(T),
@@ -90,7 +91,7 @@ where
 
     /// Construct a range bounded inclusively from below and exclusively from above.
     pub fn range(start: T, end: T) -> Self {
-        BinRange::Range(start, end)
+        BinRange::Range { start, end }
     }
 
     /// Construct a range bounded inclusively from below and unbounded from above.
@@ -113,7 +114,7 @@ where
                 // If the bin doesn't contain the value but is unbounded above, the value must be
                 // less than the bin.
                 BinRange::RangeFrom(_) => Ordering::Less,
-                BinRange::Range(start, _) => {
+                BinRange::Range { start, .. } => {
                     if value < start {
                         Ordering::Less
                     } else {
@@ -130,7 +131,7 @@ where
     T: HistogramSupport,
 {
     fn from(range: Range<T>) -> Self {
-        BinRange::Range(range.start, range.end)
+        BinRange::range(range.start, range.end)
     }
 }
 
@@ -159,7 +160,7 @@ where
     fn start_bound(&self) -> Bound<&T> {
         match self {
             BinRange::RangeTo(_) => Bound::Unbounded,
-            BinRange::Range(start, _) => Bound::Included(start),
+            BinRange::Range { start, .. } => Bound::Included(start),
             BinRange::RangeFrom(start) => Bound::Included(start),
         }
     }
@@ -167,7 +168,7 @@ where
     fn end_bound(&self) -> Bound<&T> {
         match self {
             BinRange::RangeTo(end) => Bound::Excluded(end),
-            BinRange::Range(_, end) => Bound::Excluded(end),
+            BinRange::Range { end, .. } => Bound::Excluded(end),
             BinRange::RangeFrom(_) => Bound::Unbounded,
         }
     }
@@ -319,10 +320,10 @@ where
                     ensure_finite(*end).and(ensure_finite(*start))?;
                     if end != start {
                         return Err(
-                            HistogramError::NonAdjoiningBins(
-                                format!("{:?}", first),
-                                format!("{:?}", second)
-                        ));
+                            HistogramError::NonAdjoiningBins {
+                                left: format!("{:?}", first),
+                                right: format!("{:?}", second),
+                            });
                     }
                 }
                 _ => unreachable!("Bin ranges should always be excluded above and included below: {:#?}", (first, second))
@@ -419,7 +420,7 @@ where
         // The first bin may either be BinRange::To or BinRange::Range.
         for bin in self.bins.iter() {
             match bin.range {
-                BinRange::Range(start, _) => {
+                BinRange::Range { start, .. } => {
                     bins.push(start);
                 },
                 BinRange::RangeFrom(start) => {
@@ -439,10 +440,10 @@ where
         counts: Vec<u64>,
     ) -> Result<Self, HistogramError> {
         if bins.len() != counts.len() {
-            return Err(HistogramError::ArraySizeMismatch(
-                bins.len(),
-                counts.len(),
-            ));
+            return Err(HistogramError::ArraySizeMismatch {
+                n_bins: bins.len(),
+                n_counts: counts.len(),
+            });
         }
         let mut hist = Self::new(&bins)?;
         hist.start_time = start_time;
@@ -682,8 +683,8 @@ mod tests {
         let hist = Histogram::with_bins(bins).unwrap();
         assert_eq!(hist.n_bins(), 3);
         let data = hist.iter().collect::<Vec<_>>();
-        assert_eq!(data[0].range, BinRange::Range(i64::MIN, 0));
-        assert_eq!(data[1].range, BinRange::Range(0, 10));
+        assert_eq!(data[0].range, BinRange::range(i64::MIN, 0));
+        assert_eq!(data[1].range, BinRange::range(0, 10));
         assert_eq!(data[2].range, BinRange::RangeFrom(10));
     }
 
