@@ -976,10 +976,7 @@ impl VpcRouter {
 
 impl Into<external::VpcRouter> for VpcRouter {
     fn into(self) -> external::VpcRouter {
-        external::VpcRouter {
-            identity: self.identity().into(),
-            vpc_id: self.vpc_id,
-        }
+        external::VpcRouter { identity: self.identity(), vpc_id: self.vpc_id }
     }
 }
 
