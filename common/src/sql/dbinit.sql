@@ -64,6 +64,43 @@ CREATE TABLE omicron.public.Sled (
 );
 
 /*
+ * Pools of Storage, attached to Sleds.
+ * Typically these are backed by a single physical disk.
+ */
+CREATE TABLE omicron.public.Pool (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* Contact information for the Crucible Storage Agent */
+    ip INET NOT NULL,
+    port INT4 NOT NULL
+);
+
+/*
+ * A region of allocated space within a pool.
+ */
+CREATE TABLE omicron.public.Region (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* Pool to which this Region belongs */
+    pool_id UUID NOT NULL,
+
+    /* Contact information for the downstairs region */
+    ip INET NOT NULL,
+    port INT4 NOT NULL,
+
+    /* Metadata describing the region */
+    block_size INT NOT NULL,
+    extent_size INT NOT NULL,
+    extent_count INT NOT NULL
+);
+
+/*
  * Organizations
  */
 

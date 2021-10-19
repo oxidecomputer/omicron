@@ -145,6 +145,34 @@ table! {
 }
 
 table! {
+    pool (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        ip -> Inet,
+        port -> Int4,
+    }
+}
+
+table! {
+    region (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        pool_id -> Uuid,
+
+        ip -> Inet,
+        port -> Int4,
+
+        block_size -> Int8,
+        extent_size -> Int8,
+        extent_count -> Int8,
+    }
+}
+
+table! {
     vpc (id) {
         id -> Uuid,
         name -> Text,

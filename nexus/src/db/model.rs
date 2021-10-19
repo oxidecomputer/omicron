@@ -3,7 +3,7 @@
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, sled, vpc, vpcsubnet,
+    pool, region, project, rack, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -325,6 +325,36 @@ impl Into<external::Sled> for Sled {
         let service_address = self.address();
         external::Sled { identity: self.identity(), service_address }
     }
+}
+
+/// Database representation of a Pool
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "pool"]
+pub struct Pool {
+    #[diesel(embed)]
+    identity: PoolIdentity,
+
+    // Service address.
+    ip: ipnetwork::IpNetwork,
+    port: i32,
+}
+
+/// Database representation of a Region
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "region"]
+pub struct Region {
+    #[diesel(embed)]
+    identity: RegionIdentity,
+
+    pool_id: Uuid,
+
+    // Service address.
+    ip: ipnetwork::IpNetwork,
+    port: i32,
+
+    block_size: i64,
+    extent_size: i64,
+    extent_count: i64,
 }
 
 /// Describes an organization within the database.
