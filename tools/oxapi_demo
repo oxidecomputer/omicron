@@ -16,40 +16,40 @@ ORGANIZATIONS
 
 PROJECTS
 
-    projects_list
-    project_create_demo    PROJECT_NAME
-    project_delete         PROJECT_NAME
-    project_get            PROJECT_NAME
-    project_list_instances PROJECT_NAME
-    project_list_disks     PROJECT_NAME
-    project_list_vpcs      PROJECT_NAME
+    projects_list          ORGANIZATION_NAME
+    project_create_demo    ORGANIZATION_NAME PROJECT_NAME
+    project_delete         ORGANIZATION_NAME PROJECT_NAME
+    project_get            ORGANIZATION_NAME PROJECT_NAME
+    project_list_instances ORGANIZATION_NAME PROJECT_NAME
+    project_list_disks     ORGANIZATION_NAME PROJECT_NAME
+    project_list_vpcs      ORGANIZATION_NAME PROJECT_NAME
 
 INSTANCES
 
-    instance_create_demo PROJECT_NAME INSTANCE_NAME
-    instance_get         PROJECT_NAME INSTANCE_NAME
-    instance_delete      PROJECT_NAME INSTANCE_NAME
+    instance_create_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_get         ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_delete      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
-    instance_stop        PROJECT_NAME INSTANCE_NAME
-    instance_start       PROJECT_NAME INSTANCE_NAME
-    instance_reboot      PROJECT_NAME INSTANCE_NAME
+    instance_stop        ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_start       ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_reboot      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
-    instance_attach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_detach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_list_disks  PROJECT_NAME INSTANCE_NAME
-    instance_get_disk    PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_attach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_get_disk    ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
 
 DISKS
 
-    disk_create_demo PROJECT_NAME DISK_NAME
-    disk_get         PROJECT_NAME DISK_NAME
-    disk_delete      PROJECT_NAME DISK_NAME
+    disk_create_demo ORGANIZATION_NAME PROJECT_NAME DISK_NAME
+    disk_get         ORGANIZATION_NAME PROJECT_NAME DISK_NAME
+    disk_delete      ORGANIZATION_NAME PROJECT_NAME DISK_NAME
 
 VPCS
 
-    vpc_create_demo PROJECT_NAME VPC_NAME
-    vpc_get         PROJECT_NAME VPC_NAME
-    vpc_delete      PROJECT_NAME VPC_NAME
+    vpc_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME
+    vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+    vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
 
 HARDWARE
 
@@ -161,84 +161,84 @@ function cmd_organization_get
 
 function cmd_projects_list
 {
-	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /projects
+	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
+	do_curl "/organizations/$1/projects"
 }
 
 function cmd_project_create_demo
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	mkjson name="$1" description="a project called $1" |
-		do_curl "/projects" -X POST -T -
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	mkjson name="$2" description="a project called $2" |
+		do_curl "/organizations/$1/projects" -X POST -T -
 }
 
 function cmd_project_delete
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	do_curl "/projects/$1" -X DELETE
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	do_curl "/organizations/$1/projects/$2" -X DELETE
 }
 
 function cmd_project_get
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	do_curl "/projects/$1"
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	do_curl "/organizations/$1/projects/$2"
 }
 
 function cmd_project_list_instances
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	do_curl "/projects/$1/instances"
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	do_curl "/organizations/$1/projects/$2/instances"
 }
 
 function cmd_project_list_disks
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	do_curl "/projects/$1/disks"
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	do_curl "/organizations/$1/projects/$2/disks"
 }
 
 function cmd_project_list_vpcs
 {
-	[[ $# != 1 ]] && usage "expected PROJECT_NAME"
-	do_curl "/projects/$1/vpcs"
+	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs"
 }
 
 function cmd_instance_create_demo
 {
 	# memory is 1024 * 1024 * 256
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	mkjson name="$2" description="an instance called $2" ncpus=1 \
-	    memory=268435456 bootDiskSize=1 hostname="$1" |
-		do_curl "/projects/$1/instances" -X POST -T -
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	mkjson name="$3" description="an instance called $3" ncpus=1 \
+	    memory=268435456 bootDiskSize=1 hostname="$2" |
+		do_curl "/organizations/$1/projects/$2/instances" -X POST -T -
 }
 
 function cmd_instance_get
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3"
 }
 
 function cmd_instance_delete
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2" -X DELETE
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3" -X DELETE
 }
 
 function cmd_instance_stop
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2/stop" -X POST
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/stop" -X POST
 }
 
 function cmd_instance_start
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2/start" -X POST
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/start" -X POST
 }
 
 function cmd_instance_reboot
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2/reboot" -X POST
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/reboot" -X POST
 }
 
 function cmd_instance_attach_disk
@@ -255,52 +255,52 @@ function cmd_instance_detach_disk
 
 function cmd_instance_list_disks
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME INSTANCE_NAME"
-	do_curl "/projects/$1/instances/$2/disks"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/disks"
 }
 
 function cmd_instance_get_disk
 {
-	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/projects/$1/instances/$2/disks/$3"
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4"
 }
 
 function cmd_disk_create_demo
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
-	mkjson name="$2" description="a disk called $2" size=1024 |
-	    do_curl "/projects/$1/disks" -X POST -T -
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
+	mkjson name="$3" description="a disk called $3" size=1024 |
+	    do_curl "/organizations/$1/projects/$2/disks" -X POST -T -
 }
 
 function cmd_disk_get
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
-	do_curl "/projects/$1/disks/$2"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
+	do_curl "/organizations/$1/projects/$2/disks/$3"
 }
 
 function cmd_disk_delete
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME DISK_NAME"
-	do_curl "/projects/$1/disks/$2" -X DELETE
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
+	do_curl "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo
 {
-	[[ $# != 3 ]] && usage "expected PROJECT_NAME VPC_NAME DNS_NAME"
-	mkjson name="$2" dnsName="$3" description="a vpc called $2" |
-	    do_curl "/projects/$1/vpcs" -X POST -T -
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME"
+	mkjson name="$3" dnsName="$4" description="a vpc called $3" |
+	    do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
 }
 
 function cmd_vpc_get
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
-	do_curl "/projects/$1/vpcs/$2"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3"
 }
 
 function cmd_vpc_delete
 {
 	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
-	do_curl "/projects/$1/vpcs/$2" -X DELETE
+	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
 }
 
 function cmd_racks_list
