@@ -80,8 +80,10 @@ impl FieldValue {
         s: &str,
         field_type: FieldType,
     ) -> Result<Self, Error> {
-        let make_err =
-            || Error::ParseError { src: s.to_string(), typ: field_type.to_string() };
+        let make_err = || Error::ParseError {
+            src: s.to_string(),
+            typ: field_type.to_string(),
+        };
         match field_type {
             FieldType::String => Ok(FieldValue::String(s.to_string())),
             FieldType::I64 => {
@@ -370,10 +372,7 @@ pub enum Error {
 
     /// An error parsing a field or measurement from a string.
     #[error("String '{src}' could not be parsed as type '{typ}'")]
-    ParseError {
-        src: String,
-        typ: String
-    },
+    ParseError { src: String, typ: String },
 }
 
 /// A cumulative or counter data type.

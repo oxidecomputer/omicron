@@ -57,17 +57,11 @@ pub enum HistogramError {
 
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
     #[error("Neigboring bins {left} and {right} are not adjoining")]
-    NonAdjoiningBins {
-        left: String,
-        right: String,
-    },
+    NonAdjoiningBins { left: String, right: String },
 
     /// Bin and count arrays are of different sizes.
     #[error("Bin and count arrays must have the same size, found {n_bins} and {n_counts}")]
-    ArraySizeMismatch {
-        n_bins: usize,
-        n_counts: usize
-    },
+    ArraySizeMismatch { n_bins: usize, n_counts: usize },
 }
 
 /// A type storing a range over `T`.
@@ -80,7 +74,7 @@ pub enum BinRange<T> {
     RangeTo(T),
 
     /// A range bounded inclusively below and exclusively above, `start..end`.
-    Range { start: T, end: T},
+    Range { start: T, end: T },
 
     /// A range bounded inclusively below and unbouned above, `start..`.
     RangeFrom(T),
