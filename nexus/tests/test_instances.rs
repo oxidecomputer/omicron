@@ -26,7 +26,7 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::create_project;
+use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 
 #[tokio::test]
@@ -37,9 +37,14 @@ async fn test_instances() {
     let nexus = &apictx.nexus;
 
     /* Create a project that we'll use for testing. */
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
-    let url_instances = format!("/projects/{}/instances", project_name);
-    let _ = create_project(&client, &project_name).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        org_name, project_name
+    );
+    let _ = create_project(&client, &org_name, &project_name).await;
 
     /* List instances.  There aren't any yet. */
     let instances = instances_list(&client, &url_instances).await;

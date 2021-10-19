@@ -33,11 +33,12 @@ pub async fn create_organization(
 
 pub async fn create_project(
     client: &ClientTestContext,
+    organization_name: &str,
     project_name: &str,
 ) -> Project {
     objects_post(
         &client,
-        "/projects",
+        format!("/organizations/{}/projects", &organization_name).as_str(),
         ProjectCreateParams {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from(project_name).unwrap(),
@@ -50,12 +51,17 @@ pub async fn create_project(
 
 pub async fn create_vpc(
     client: &ClientTestContext,
+    organization_name: &str,
     project_name: &str,
     vpc_name: &str,
 ) -> Vpc {
     objects_post(
         &client,
-        format!("/projects/{}/vpcs", &project_name).as_str(),
+        format!(
+            "/organizations/{}/projects/{}/vpcs",
+            &organization_name, &project_name
+        )
+        .as_str(),
         VpcCreateParams {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from(vpc_name).unwrap(),
@@ -71,6 +77,7 @@ pub async fn create_vpc(
 // just generates the create params since that's the noisiest part
 pub async fn create_vpc_with_error(
     client: &ClientTestContext,
+    organization_name: &str,
     project_name: &str,
     vpc_name: &str,
     status: StatusCode,
@@ -78,7 +85,11 @@ pub async fn create_vpc_with_error(
     client
         .make_request_error_body(
             Method::POST,
-            format!("/projects/{}/vpcs", &project_name).as_str(),
+            format!(
+                "/organizations/{}/projects/{}/vpcs",
+                &organization_name, &project_name
+            )
+            .as_str(),
             VpcCreateParams {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(vpc_name).unwrap(),

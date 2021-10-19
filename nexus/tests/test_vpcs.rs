@@ -13,7 +13,7 @@ use dropshot::test_util::ClientTestContext;
 pub mod common;
 use common::identity_eq;
 use common::resource_helpers::{
-    create_project, create_vpc, create_vpc_with_error,
+    create_organization, create_project, create_vpc, create_vpc_with_error,
 };
 use common::test_setup;
 
@@ -25,12 +25,15 @@ async fn test_vpcs() {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
-    let vpcs_url = format!("/projects/{}/vpcs", project_name);
-    let _ = create_project(&client, &project_name).await;
+    let vpcs_url =
+        format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
+    let _ = create_project(&client, &org_name, &project_name).await;
 
     let project_name2 = "pokemon";
-    let _ = create_project(&client, &project_name2).await;
+    let _ = create_project(&client, &org_name, &project_name2).await;
 
     /* List vpcs.  We see the default VPC, and nothing else. */
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -55,7 +58,7 @@ async fn test_vpcs() {
 
     /* Create a VPC. */
     let vpc_name = "just-rainsticks";
-    let vpc = create_vpc(&client, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
@@ -63,6 +66,7 @@ async fn test_vpcs() {
     /* Attempt to create a second VPC with a conflicting name. */
     let error = create_vpc_with_error(
         &client,
+        org_name,
         project_name,
         vpc_name,
         StatusCode::BAD_REQUEST,
@@ -71,7 +75,8 @@ async fn test_vpcs() {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     /* creating a VPC with the same name in another project works, though */
-    let vpc2: Vpc = create_vpc(&client, project_name2, vpc_name).await;
+    let vpc2: Vpc =
+        create_vpc(&client, org_name, project_name2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     /* List VPCs again and expect to find the one we just created. */
