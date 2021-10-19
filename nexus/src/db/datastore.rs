@@ -951,9 +951,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::metricproducer::dsl;
 
-        // TODO: Need to handle the case where a producer is assigned to a _new_
-        // collector, but this requires APIs for un-assigning a producer from
-        // a collector, which doesn't yet exist.
+        // TODO: see https://github.com/oxidecomputer/omicron/issues/323
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
             .on_conflict(dsl::id)

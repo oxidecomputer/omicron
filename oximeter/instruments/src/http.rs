@@ -32,6 +32,8 @@ pub struct RequestLatencyHistogram {
 
 impl RequestLatencyHistogram {
     /// Build a new `RequestLatencyHistogram` with a specified histogram.
+    ///
+    /// Latencies are expressed in seconds.
     pub fn new<T>(
         request: &Request<T>,
         status_code: StatusCode,
@@ -47,7 +49,12 @@ impl RequestLatencyHistogram {
 
     /// Build a `RequestLatencyHistogram` with a histogram whose bins span the given decades.
     ///
-    /// See [`Histogram::span_decades`] for details about how the bins are specified and used.
+    /// `start_decade` and `end_decade` specify the lower and upper limits of the histogram's
+    /// range, as a power of 10. For example, passing `-3` and `2` results in a histogram with bins
+    /// spanning `[10 ** -3, 10 ** 2)`. There are 10 bins in each decade. See the
+    /// [`Histogram::span_decades`] method for more details.
+    ///
+    /// Latencies are expressed as seconds.
     pub fn with_latency_decades<T>(
         request: &Request<T>,
         status_code: StatusCode,
@@ -61,7 +68,7 @@ impl RequestLatencyHistogram {
         ))
     }
 
-    pub fn key_for<T>(request: &Request<T>, status_code: StatusCode) -> String {
+    fn key_for<T>(request: &Request<T>, status_code: StatusCode) -> String {
         format!(
             "{}:{}:{}",
             request.uri().path(),
@@ -71,14 +78,25 @@ impl RequestLatencyHistogram {
     }
 }
 
+/// The `LatencyTracker` is an [`oximeter::Producer`] that tracks the latencies of requests for an
+/// HTTP service, in seconds.
+///
+/// Consumers should construct one `LatencyTracker` for each HTTP service they wish to instrument.
+/// As requests are received, the [`update`] method can be called with the request/response and the
+/// latency for handling the request, and the tracker will store that in the appropriate histogram.
+///
+/// The `LatencyTracker` can be used to produce metric data collected by `oximeter`.
 #[derive(Debug, Clone)]
 pub struct LatencyTracker {
     pub service: HttpService,
-    pub latencies: Arc<Mutex<BTreeMap<String, RequestLatencyHistogram>>>,
+    latencies: Arc<Mutex<BTreeMap<String, RequestLatencyHistogram>>>,
     histogram: Histogram<f64>,
 }
 
 impl LatencyTracker {
+    /// Build a new tracker for the given `service`, using `histogram` to track latencies.
+    ///
+    /// Note that the same histogram is used for each tracked timeseries.
     pub fn new(service: HttpService, histogram: Histogram<f64>) -> Self {
         Self {
             service,
@@ -87,6 +105,8 @@ impl LatencyTracker {
         }
     }
 
+    /// Build a new tracker for the given `service`, with a histogram that spans the given decades
+    /// (powers of 10). See [`RequestLatencyHistogram::span_decades`] for details on the arguments.
     pub fn with_latency_decades(
         service: HttpService,
         start_decade: i8,
@@ -98,6 +118,10 @@ impl LatencyTracker {
         ))
     }
 
+    /// Update (or create) a timeseries in response to a new request.
+    ///
+    /// This method adds the given `latency` to the internal histogram for tracking the timeseries
+    /// to which the other arguments belong. (One is created if it does not exist.)
     pub fn update<T>(
         &self,
         request: &Request<T>,
@@ -116,6 +140,14 @@ impl LatencyTracker {
         entry.latency.sample(latency.as_secs_f64()).map_err(Error::from)
     }
 
+    /// Instrument the given Dropshot endpoint handler function.
+    ///
+    /// This method is intended as a semi-convenient way to instrument the handler for a `dropshot`
+    /// endpoint. The `context`, required by the `dropshot::endpoint` macro, provides information
+    /// about the `Request` on which the handler operates. The `handler` is any future that
+    /// produces an expected `dropshot` response. This method runs and times the handler, records
+    /// the latency in the appropriate timeseries, and forwards the result of the handler to the
+    /// caller.
     pub async fn instrument_dropshot_handler<T, H, R>(
         &self,
         context: &RequestContext<T>,
