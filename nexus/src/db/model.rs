@@ -402,10 +402,13 @@ pub struct Project {
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(params: external::ProjectCreateParams) -> Self {
+    pub fn new(
+        organization_id: Uuid,
+        params: external::ProjectCreateParams,
+    ) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
-            organization_id: params.organization_id,
+            organization_id: organization_id,
         }
     }
 }

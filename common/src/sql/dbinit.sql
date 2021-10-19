@@ -98,10 +98,10 @@ CREATE TABLE omicron.public.Project (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
 
     /* Which organization this project belongs to */
-    organization_id UUID NOT NULL, /* foreign key into "Organization" table */
+    organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Project (

@@ -352,10 +352,15 @@ impl DataStore {
     }
 
     /// Lookup a project by name.
-    pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
+    pub async fn project_fetch(
+        &self,
+        organization_id: &Uuid,
+        name: &Name,
+    ) -> LookupResult<Project> {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .select(Project::as_select())
             .first_async(self.pool())
@@ -375,11 +380,16 @@ impl DataStore {
      * depend on the Project (Disks, Instances).  We can do this with a
      * generation counter that gets bumped when these resources are created.
      */
-    pub async fn project_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn project_delete(
+        &self,
+        organization_id: &Uuid,
+        name: &Name,
+    ) -> DeleteResult {
         use db::schema::project::dsl;
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .set(dsl::time_deleted.eq(now))
             .returning(Project::as_returning())
@@ -398,11 +408,13 @@ impl DataStore {
     /// Look up the id for a project based on its name
     pub async fn project_lookup_id_by_name(
         &self,
+        organization_id: &Uuid,
         name: &Name,
     ) -> Result<Uuid, Error> {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .select(dsl::id)
             .get_result_async::<Uuid>(self.pool())
@@ -418,10 +430,12 @@ impl DataStore {
 
     pub async fn projects_list_by_id(
         &self,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
             .load_async(self.pool())
@@ -437,11 +451,13 @@ impl DataStore {
 
     pub async fn projects_list_by_name(
         &self,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
 
         paginated(dsl::project, dsl::name, &pagparams)
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
             .load_async(self.pool())
@@ -458,6 +474,7 @@ impl DataStore {
     /// Updates a project by name (clobbering update -- no etag)
     pub async fn project_update(
         &self,
+        organization_id: &Uuid,
         name: &Name,
         update_params: &api::external::ProjectUpdateParams,
     ) -> UpdateResult<Project> {
@@ -466,6 +483,7 @@ impl DataStore {
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
             .returning(Project::as_returning())
