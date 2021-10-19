@@ -19,34 +19,6 @@ use diesel::sql_types::SingleValue;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-/// A simple wrapper type for Diesel's [`InsertStatement`], which
-/// allows referencing generics with names (and extending usage
-/// without re-stating those generic parameters everywhere).
-/// NOTE: This only waraps insert statements without a returning clause.
-pub trait InsertStatementExt<ResourceType, C: DatastoreCollection<ResourceType>>
-{
-    type Records;
-
-    fn statement(
-        self,
-    ) -> InsertStatement<
-        // Force the insert statement to have the appropriate target table
-        ResourceTable<ResourceType, C>,
-        Self::Records,
-    >;
-}
-
-impl<ResourceType, C: DatastoreCollection<ResourceType>, U>
-    InsertStatementExt<ResourceType, C>
-    for InsertStatement<ResourceTable<ResourceType, C>, U>
-{
-    type Records = U;
-
-    fn statement(self) -> InsertStatement<ResourceTable<ResourceType, C>, U> {
-        self
-    }
-}
-
 /// Trait to be implemented by any structs representing a collection.
 /// For example, since Organizations have a one-to-many relationship with
 /// Projects, the Organization datatype should implement this trait.
@@ -73,22 +45,21 @@ pub trait DatastoreCollection<ResourceType> {
     /// The time deleted column in the CollectionTable
     fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn;
 
-    fn insert_resource<IS>(
+    fn insert_resource<ISR>(
         key: Self::CollectionId,
-        insert: IS,
-    ) -> InsertIntoCollectionStatement<ResourceType, IS, Self>
+        insert: InsertStatement<ResourceTable<ResourceType, Self>, ISR>,
+    ) -> InsertIntoCollectionStatement<ResourceType, ISR, Self>
     where
         (
             <Self::GenerationNumberColumn as Column>::Table,
             <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
         Self: Sized,
-        IS: InsertStatementExt<ResourceType, Self>,
         ResourceTable<ResourceType, Self>: Copy + Debug,
         ResourceType: Selectable<Pg>,
     {
         InsertIntoCollectionStatement {
-            insert_statement: insert.statement(),
+            insert_statement: insert,
             key,
             query_type: PhantomData,
         }
@@ -116,22 +87,19 @@ impl<T> TypesAreSame for (T, T) {}
 /// The CTE described in the module docs
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
-pub struct InsertIntoCollectionStatement<ResourceType, IS, C>
+pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    IS: InsertStatementExt<ResourceType, C>,
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
 {
-    insert_statement:
-        InsertStatement<ResourceTable<ResourceType, C>, IS::Records>,
+    insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
     key: CollectionId<ResourceType, C>,
     query_type: PhantomData<ResourceType>,
 }
 
-impl<ResourceType, IS, C> QueryId
-    for InsertIntoCollectionStatement<ResourceType, IS, C>
+impl<ResourceType, ISR, C> QueryId
+    for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    IS: InsertStatementExt<ResourceType, C>,
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
 {
@@ -151,15 +119,14 @@ pub enum InsertError {
     DatabaseError(PoolError),
 }
 
-impl<ResourceType, IS, C> InsertIntoCollectionStatement<ResourceType, IS, C>
+impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: 'static + Debug + Send,
-    IS: 'static + InsertStatementExt<ResourceType, C> + Send,
     C: 'static + DatastoreCollection<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
-    IS::Records: 'static + Send,
-    InsertIntoCollectionStatement<ResourceType, IS, C>: Send,
+    ISR: 'static + Send,
+    InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -197,10 +164,9 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<ResourceType, IS, C> Query
-    for InsertIntoCollectionStatement<ResourceType, IS, C>
+impl<ResourceType, ISR, C> Query
+    for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    IS: InsertStatementExt<ResourceType, C>,
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
@@ -208,10 +174,9 @@ where
     type SqlType = SelectableSqlType<ResourceType>;
 }
 
-impl<ResourceType, IS, C> RunQueryDsl<PgConnection>
-    for InsertIntoCollectionStatement<ResourceType, IS, C>
+impl<ResourceType, ISR, C> RunQueryDsl<PgConnection>
+    for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    IS: InsertStatementExt<ResourceType, C>,
     ResourceTable<ResourceType, C>: Table + Copy + Debug,
     C: DatastoreCollection<ResourceType>,
 {
@@ -238,12 +203,11 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// //                      time_deleted IS NULL RETURNING 1),
 /// // <user provided insert statement>
 /// ```
-impl<ResourceType, IS, C> QueryFragment<Pg>
-    for InsertIntoCollectionStatement<ResourceType, IS, C>
+impl<ResourceType, ISR, C> QueryFragment<Pg>
+    for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
     <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
-    IS: InsertStatementExt<ResourceType, C>,
     C: DatastoreCollection<ResourceType>,
     CollectionTable<ResourceType, C>: HasTable<Table = CollectionTable<ResourceType, C>>
         + Table
@@ -265,8 +229,7 @@ where
         >,
     <CollectionTable<ResourceType, C> as diesel::QuerySource>::FromClause:
         QueryFragment<Pg>,
-    InsertStatement<ResourceTable<ResourceType, C>, IS::Records>:
-        QueryFragment<Pg>,
+    InsertStatement<ResourceTable<ResourceType, C>, ISR>: QueryFragment<Pg>,
     BoxedQuery<CollectionTable<ResourceType, C>>: query_methods::FilterDsl<
         Eq<
             CollectionPrimaryKey<ResourceType, C>,
