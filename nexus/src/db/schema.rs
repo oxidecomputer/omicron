@@ -145,10 +145,12 @@ table! {
 }
 
 table! {
-    pool (id) {
+    zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
 
         ip -> Inet,
         port -> Int4,

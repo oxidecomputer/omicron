@@ -15,6 +15,7 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
+use omicron_common::api::internal::nexus::SledAgentPoolInfo;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -28,6 +29,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
+        api.register(zpool_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
@@ -68,6 +70,35 @@ async fn cpapi_sled_agents_post(
     let si = sled_info.into_inner();
     let sled_id = &path.sled_id;
     nexus.upsert_sled(*sled_id, si.sa_address).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/**
+ * Path parameters for Sled Agent requests (internal API)
+ */
+#[derive(Deserialize, JsonSchema)]
+struct ZpoolPathParam {
+    sled_id: Uuid,
+    zpool_id: Uuid,
+}
+
+/**
+ * Report that a pool for a specified sled has come online.
+ */
+#[endpoint {
+     method = POST,
+     path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
+ }]
+async fn zpool_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ZpoolPathParam>,
+    pool_info: TypedBody<SledAgentPoolInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pi = pool_info.into_inner();
+    nexus.upsert_zpool(path.zpool_id, path.sled_id, pi.address).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

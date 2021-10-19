@@ -178,11 +178,21 @@ impl Nexus {
         address: SocketAddr,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
-
-        // Insert the sled into the database.
         let sled = db::model::Sled::new(id, address);
         self.db_datastore.sled_upsert(sled).await?;
+        Ok(())
+    }
 
+    /// Upserts a Zpool into the database, updating it if it already exists.
+    pub async fn upsert_zpool(
+        &self,
+        id: Uuid,
+        sled_id: Uuid,
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        info!(self.log, "registered storage pool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
+        let zpool = db::model::Zpool::new(id, sled_id, address);
+        self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
 

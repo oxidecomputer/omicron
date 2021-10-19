@@ -3,7 +3,7 @@
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
-    pool, region, project, rack, sled, vpc, vpcsubnet,
+    zpool, region, project, rack, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -329,14 +329,33 @@ impl Into<external::Sled> for Sled {
 
 /// Database representation of a Pool
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "pool"]
-pub struct Pool {
+#[table_name = "zpool"]
+pub struct Zpool {
     #[diesel(embed)]
-    identity: PoolIdentity,
+    identity: ZpoolIdentity,
+
+    // Sled to which this Zpool belongs.
+    pub sled_id: Uuid,
 
     // Service address.
-    ip: ipnetwork::IpNetwork,
-    port: i32,
+    pub ip: ipnetwork::IpNetwork,
+    pub port: i32,
+}
+
+impl Zpool {
+    pub fn new(id: Uuid, sled_id: Uuid, addr: SocketAddr) -> Self {
+        Self {
+            identity: ZpoolIdentity::new(id),
+            sled_id,
+            ip: addr.ip().into(),
+            port: addr.port().into(),
+        }
+    }
+
+    pub fn address(&self) -> SocketAddr {
+        // TODO: avoid this unwrap
+        SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
+    }
 }
 
 /// Database representation of a Region

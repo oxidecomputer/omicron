@@ -80,7 +80,7 @@ impl InstanceManager {
         Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
 
         // Create a base zone, from which all running instance zones are cloned.
-        Zones::create_base(&log)?;
+        Zones::create_propolis_base(&log)?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
@@ -273,8 +273,8 @@ mod test {
             Ok(())
         });
 
-        let zones_create_base_ctx = MockZones::create_base_context();
-        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+        let zones_create_propolis_base_ctx = MockZones::create_propolis_base_context();
+        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
@@ -355,8 +355,8 @@ mod test {
             Ok(())
         });
 
-        let zones_create_base_ctx = MockZones::create_base_context();
-        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+        let zones_create_propolis_base_ctx = MockZones::create_propolis_base_context();
+        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));

@@ -41,6 +41,7 @@ impl Server {
             "server" => config.id.clone().to_string()
         ));
         let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone())
+            .await
             .map_err(|e| e.to_string())?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));

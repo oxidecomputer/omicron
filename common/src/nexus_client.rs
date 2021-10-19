@@ -10,6 +10,7 @@ use crate::api::external::Error;
 use crate::api::internal::nexus::DiskRuntimeState;
 use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::nexus::SledAgentStartupInfo;
+use crate::api::internal::nexus::SledAgentPoolInfo;
 use crate::http_client::HttpClient;
 use http::Method;
 use hyper::Body;
@@ -41,6 +42,18 @@ impl Client {
         info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
         let path = format!("/sled_agents/{}", id);
+        let body = Body::from(serde_json::to_string(&info).unwrap());
+        self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
+    }
+
+    /// Publish information about a zpool.
+    pub async fn zpool_post(
+        &self,
+        zpool_id: Uuid,
+        sled_id: Uuid,
+        info: SledAgentPoolInfo,
+    ) -> Result<(), Error> {
+        let path = format!("/sled_agents/{}/zpools/{}", sled_id, zpool_id);
         let body = Body::from(serde_json::to_string(&info).unwrap());
         self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
     }

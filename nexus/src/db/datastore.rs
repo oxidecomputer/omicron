@@ -47,7 +47,7 @@ use crate::db::{
         Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
         InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -120,6 +120,31 @@ impl DataStore {
                     e,
                     ResourceType::Sled,
                     LookupType::ById(id),
+                )
+            })
+    }
+
+    /// Stores a new zpool in the database.
+    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+        use db::schema::zpool::dsl;
+        diesel::insert_into(dsl::zpool)
+            .values(zpool.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::sled_id.eq(zpool.sled_id),
+                dsl::ip.eq(zpool.ip),
+                dsl::port.eq(zpool.port),
+            ))
+            .returning(Zpool::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Zpool,
+                    &zpool.id().to_string(),
                 )
             })
     }

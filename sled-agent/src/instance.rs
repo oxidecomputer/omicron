@@ -455,8 +455,8 @@ impl Instance {
             .chain(std::iter::once(control_nic.name.clone()))
             .collect();
 
-        Zones::configure_child_zone(&inner.log, &zname, nics_to_put_in_zone)?;
-        info!(inner.log, "Configured child zone: {}", zname);
+        Zones::configure_propolis_zone(&inner.log, &zname, nics_to_put_in_zone)?;
+        info!(inner.log, "Configured propolis zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
         // boot it up.
@@ -843,9 +843,9 @@ mod test {
                 Ok(())
             });
 
-        let zone_configure_child_ctx =
-            MockZones::configure_child_zone_context();
-        zone_configure_child_ctx
+        let zone_configure_propolis_ctx =
+            MockZones::configure_propolis_zone_context();
+        zone_configure_propolis_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)

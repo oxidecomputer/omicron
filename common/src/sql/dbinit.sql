@@ -64,22 +64,29 @@ CREATE TABLE omicron.public.Sled (
 );
 
 /*
- * Pools of Storage, attached to Sleds.
+ * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
  */
-CREATE TABLE omicron.public.Pool (
+CREATE TABLE omicron.public.Zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
 
     /* Contact information for the Crucible Storage Agent */
     ip INET NOT NULL,
     port INT4 NOT NULL
 );
 
+CREATE UNIQUE INDEX ON omicron.public.Zpool (
+    sled_id,
+);
+
 /*
- * A region of allocated space within a pool.
+ * A region of allocated space within a zpool.
  */
 CREATE TABLE omicron.public.Region (
     /* Identity metadata (asset) */
@@ -87,7 +94,7 @@ CREATE TABLE omicron.public.Region (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* Pool to which this Region belongs */
+    /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
     /* Contact information for the downstairs region */
@@ -98,6 +105,10 @@ CREATE TABLE omicron.public.Region (
     block_size INT NOT NULL,
     extent_size INT NOT NULL,
     extent_count INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.Region (
+    pool_id,
 );
 
 /*

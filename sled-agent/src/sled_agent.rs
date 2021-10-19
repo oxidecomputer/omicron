@@ -1,5 +1,8 @@
 //! Sled agent implementation
 
+use crate::config::Config;
+use crate::instance_manager::InstanceManager;
+use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
@@ -7,9 +10,9 @@ use omicron_common::api::{
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
-
 use slog::Logger;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -17,9 +20,8 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
-use crate::config::Config;
-use crate::instance_manager::InstanceManager;
-use crate::storage_manager::StorageManager;
+// TODO: I wanna make a task that continually reports the storage status
+// upward to nexus.
 
 /// Describes an executing Sled Agent object.
 ///
@@ -27,11 +29,13 @@ use crate::storage_manager::StorageManager;
 pub struct SledAgent {
     storage: StorageManager,
     instances: InstanceManager,
+    nexus_client: Arc<NexusClient>,
+
 }
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
-    pub fn new(
+    pub async fn new(
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
@@ -41,12 +45,15 @@ impl SledAgent {
         info!(&log, "created sled agent"; "id" => ?id);
 
         let storage = match &config.zpools {
-            Some(pools) => StorageManager::new_from_zpools(pools.clone())?,
+            Some(pools) => StorageManager::new_from_zpools(pools.clone()).await?,
             None => StorageManager::new()?,
         };
-        let instances = InstanceManager::new(log, vlan, nexus_client)?;
+        // TODO-nit: Could remove nexus_client from IM?
+        // basically just one less place to store it, could be passed in
+        // 'ensure'. idk.
+        let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { storage, instances })
+        Ok(SledAgent { storage, instances, nexus_client })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.
@@ -59,7 +66,7 @@ impl SledAgent {
         self.instances.ensure(instance_id, initial, target).await
     }
 
-    /// Idempotently ensures that the given virtual Disk is attached (or not) as
+    /// Idempotently ensures that the given virtual disk is attached (or not) as
     /// specified.
     ///
     /// NOTE: Not yet implemented.

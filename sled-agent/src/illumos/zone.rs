@@ -60,7 +60,7 @@ impl Zones {
 
     /// Creates a "base" zone for Propolis, from which other Propolis
     /// zones may quickly be cloned.
-    pub fn create_base(log: &Logger) -> Result<(), Error> {
+    pub fn create_propolis_base(log: &Logger) -> Result<(), Error> {
         let name = BASE_ZONE;
 
         info!(log, "Querying for prescence of zone: {}", name);
@@ -120,12 +120,12 @@ impl Zones {
     /// Sets the configuration for a Propolis zone.
     ///
     /// This zone will be cloned as a child of the "base propolis zone".
-    pub fn configure_child_zone(
+    pub fn configure_propolis_zone(
         log: &Logger,
         name: &str,
         vnics: Vec<String>,
     ) -> Result<(), Error> {
-        info!(log, "Creating child zone: {}", name);
+        info!(log, "Creating propolis zone: {}", name);
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,

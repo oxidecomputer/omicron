@@ -460,6 +460,7 @@ pub enum ResourceType {
     VpcSubnet,
     Oximeter,
     MetricProducer,
+    Zpool,
 }
 
 impl Display for ResourceType {
@@ -480,6 +481,7 @@ impl Display for ResourceType {
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Zpool => "zpool",
             }
         )
     }
