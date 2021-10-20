@@ -273,7 +273,7 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// insert a new resource into its table with its collection id column set
 /// to the collection we just checked for.
 ///
-/// Note that it is important that the where clauses on the SELECT and UPDATE
+/// Note that it is important that the WHERE clauses on the SELECT and UPDATE
 /// against the collection table must match, or else we will not get the desired
 /// behavior described in RFD 192.
 ///
