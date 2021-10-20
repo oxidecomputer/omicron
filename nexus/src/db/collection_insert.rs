@@ -28,25 +28,30 @@ pub trait DatastoreCollection<ResourceType> {
 
     /// The column in the CollectionTable that acts as a generation number.
     /// This is the "child-resource-generation-number" in RFD 192.
-    type GenerationNumberColumn: Column;
+    type GenerationNumberColumn: Column + Default;
+
+    /// The time deleted column in the CollectionTable
+    // We enforce that this column comes from the same table as
+    // GenerationNumberColumn when defining insert_resource() below.
+    type CollectionTimeDeletedColumn: Column + Default;
 
     /// The column in the ResourceTable that acts as a foreign key into
     /// the CollectionTable
     type CollectionIdColumn: Column;
 
-    /// The time deleted column in the CollectionTable
-    // We enforce that this column comes from the same table as
-    // GenerationNumberColumn when defining insert_resource() below.
-    type CollectionTimeDeletedColumn: Column;
-
-    /// The generation number column in the CollectionTable
-    fn generation_number_column() -> Self::GenerationNumberColumn;
-
-    /// The time deleted column in the CollectionTable
-    fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn;
-
+    /// Create a statement for inserting a resource into the given collection.
+    ///
+    /// The ISR type is the same type as the second generic argument to
+    /// InsertStatement, and should generally be inferred rather than explicitly
+    /// specified.
+    ///
+    /// CAUTION: The API does not currently enforce that `key` matches the value
+    /// of the collection id within the inserted row.
     fn insert_resource<ISR>(
         key: Self::CollectionId,
+        // Note that InsertStatement's fourth argument defaults to Ret =
+        // NoReturningClause. This enforces that the given input statement does
+        // not have a RETURNING clause.
         insert: InsertStatement<ResourceTable<ResourceType, Self>, ISR>,
     ) -> InsertIntoCollectionStatement<ResourceType, ISR, Self>
     where
@@ -154,6 +159,11 @@ where
                     info,
                 ),
             ))) if info.message() == "division by zero" => {
+                // See
+                // https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators
+                // for a full explanation of why we're checking for this. In
+                // summary, the CTE generates a division by zero intentionally
+                // if the collection doesn't exist in the database.
                 Err(InsertError::CollectionNotFound)
             }
             Err(other) => Err(InsertError::DatabaseError(other)),
@@ -203,6 +213,23 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// //                      time_deleted IS NULL RETURNING 1),
 /// // <user provided insert statement>
 /// ```
+///
+/// This CTE is equivalent in desired behavior to the one specified in
+/// [RFD 192](https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators).
+///
+/// The general idea is that the first clause of the CTE (the "dummy" table)
+/// will generate a divison by zero error and rollback the transaction if the
+/// target collection is not found in its table. It simultaneously locks the
+/// row for update, to allow us to subsequently use the "updated_row" query to
+/// increase the child-resource generation count for the collection. In the same
+/// transaction, it performs the provided insert query, which should
+/// insert a new resource into its table with its collection id column set
+/// to the collection we just checked for.
+///
+/// Note that it is important that the where clauses on the SELECT and UPDATE
+/// against the collection table must match, or else we will not get the desired
+/// behavior described in RFD 192.
+///
 impl<ResourceType, ISR, C> QueryFragment<Pg>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
@@ -256,11 +283,11 @@ where
                     .primary_key()
                     .eq(self.key),
             )
-            .filter(C::collection_time_deleted_column().is_null());
+            .filter(C::CollectionTimeDeletedColumn::default().is_null());
         subquery.walk_ast(out.reborrow())?;
         // Manually add the FOR_UPDATE, since .for_update() is incompatible with
         // BoxedQuery
-        out.push_sql(" FOR UPDATE), TRUE, CAST(1/0 AS BOOL))),");
+        out.push_sql(" FOR UPDATE), TRUE, CAST(1/0 AS BOOL))), ");
 
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
@@ -282,7 +309,7 @@ where
         out.push_identifier(
             CollectionTimeDeletedColumn::<ResourceType, C>::NAME,
         )?;
-        out.push_sql(" IS NULL RETURNING 1)");
+        out.push_sql(" IS NULL RETURNING 1) ");
 
         // TODO: Check or force the insert_statement to have
         //       C::CollectionIdColumn set
@@ -300,7 +327,8 @@ where
 mod test {
     use super::{DatastoreCollection, InsertError};
     use crate::db;
-    use async_bb8_diesel::AsyncRunQueryDsl;
+    use crate::db::identity::Resource as IdentityResource;
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -333,46 +361,29 @@ mod test {
     }
 
     async fn setup_db(pool: &crate::db::Pool) {
-        diesel::sql_query("CREATE SCHEMA IF NOT EXISTS test_schema")
-            .execute_async(pool.pool())
-            .await
-            .unwrap();
-
-        diesel::sql_query(
-            "CREATE TABLE IF NOT EXISTS test_schema.collection (
-                id UUID PRIMARY KEY,
-                name STRING(63) NOT NULL,
-                description STRING(512) NOT NULL,
-                time_created TIMESTAMPTZ NOT NULL,
-                time_modified TIMESTAMPTZ NOT NULL,
-                time_deleted TIMESTAMPTZ,
-                rcgen INT NOT NULL)",
-        )
-        .execute_async(pool.pool())
-        .await
-        .unwrap();
-
-        diesel::sql_query(
-            "CREATE TABLE IF NOT EXISTS test_schema.resource(
-                id UUID PRIMARY KEY,
-                name STRING(63) NOT NULL,
-                description STRING(512) NOT NULL,
-                time_created TIMESTAMPTZ NOT NULL,
-                time_modified TIMESTAMPTZ NOT NULL,
-                time_deleted TIMESTAMPTZ,
-                collection_id UUID NOT NULL)",
-        )
-        .execute_async(pool.pool())
-        .await
-        .unwrap();
-
-        diesel::sql_query("TRUNCATE test_schema.collection")
-            .execute_async(pool.pool())
-            .await
-            .unwrap();
-
-        diesel::sql_query("TRUNCATE test_schema.resource")
-            .execute_async(pool.pool())
+        let connection = pool.pool().get().await.unwrap();
+        (*connection)
+            .batch_execute_async(
+                "CREATE SCHEMA IF NOT EXISTS test_schema; \
+                 CREATE TABLE IF NOT EXISTS test_schema.collection ( \
+                     id UUID PRIMARY KEY, \
+                     name STRING(63) NOT NULL, \
+                     description STRING(512) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_modified TIMESTAMPTZ NOT NULL, \
+                     time_deleted TIMESTAMPTZ, \
+                     rcgen INT NOT NULL); \
+                 CREATE TABLE IF NOT EXISTS test_schema.resource( \
+                     id UUID PRIMARY KEY, \
+                     name STRING(63) NOT NULL, \
+                     description STRING(512) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_modified TIMESTAMPTZ NOT NULL, \
+                     time_deleted TIMESTAMPTZ, \
+                     collection_id UUID NOT NULL); \
+                 TRUNCATE test_schema.collection; \
+                 TRUNCATE test_schema.resource",
+            )
             .await
             .unwrap();
     }
@@ -393,13 +404,6 @@ mod test {
         type GenerationNumberColumn = collection::dsl::rcgen;
         type CollectionIdColumn = resource::dsl::collection_id;
         type CollectionTimeDeletedColumn = collection::dsl::time_deleted;
-        fn generation_number_column() -> Self::GenerationNumberColumn {
-            collection::dsl::rcgen
-        }
-        fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn
-        {
-            collection::dsl::time_deleted
-        }
     }
 
     #[test]
@@ -427,7 +431,43 @@ mod test {
         );
         let query = diesel::debug_query::<Pg, _>(&insert).to_string();
 
-        let expected_query = "WITH dummy AS (SELECT IF(EXISTS(SELECT \"test_schema\".\"collection\".\"id\", \"test_schema\".\"collection\".\"name\", \"test_schema\".\"collection\".\"description\", \"test_schema\".\"collection\".\"time_created\", \"test_schema\".\"collection\".\"time_modified\", \"test_schema\".\"collection\".\"time_deleted\", \"test_schema\".\"collection\".\"rcgen\" FROM \"test_schema\".\"collection\" WHERE ((\"test_schema\".\"collection\".\"id\" = $1) AND (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)) FOR UPDATE), TRUE, CAST(1/0 AS BOOL))),updated_row AS (UPDATE \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1)INSERT INTO \"test_schema\".\"resource\" (\"id\", \"name\", \"description\", \"time_created\", \"time_modified\", \"collection_id\") VALUES ($3, $4, $5, $6, $7, $8) RETURNING \"test_schema\".\"resource\".\"id\", \"test_schema\".\"resource\".\"name\", \"test_schema\".\"resource\".\"description\", \"test_schema\".\"resource\".\"time_created\", \"test_schema\".\"resource\".\"time_modified\", \"test_schema\".\"resource\".\"time_deleted\", \"test_schema\".\"resource\".\"collection_id\" -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \"test\", \"desc\", 1970-01-01T00:00:00Z, 1970-01-01T00:00:01Z, 223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0]";
+        let expected_query = "WITH \
+             dummy AS (SELECT IF(EXISTS(\
+                 SELECT \
+                     \"test_schema\".\"collection\".\"id\", \
+                     \"test_schema\".\"collection\".\"name\", \
+                     \"test_schema\".\"collection\".\"description\", \
+                     \"test_schema\".\"collection\".\"time_created\", \
+                     \"test_schema\".\"collection\".\"time_modified\", \
+                     \"test_schema\".\"collection\".\"time_deleted\", \
+                     \"test_schema\".\"collection\".\"rcgen\" \
+                     FROM \"test_schema\".\"collection\" WHERE (\
+                     (\"test_schema\".\"collection\".\"id\" = $1) AND \
+                     (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)\
+                     ) FOR UPDATE), \
+                 TRUE, CAST(1/0 AS BOOL))), \
+             updated_row AS (UPDATE \"test_schema\".\"collection\" SET \
+                 \"rcgen\" = \"rcgen\" + 1 \
+                 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1) \
+         INSERT INTO \"test_schema\".\"resource\" \
+            (\"id\", \"name\", \"description\", \"time_created\", \
+             \"time_modified\", \"collection_id\") \
+            VALUES ($3, $4, $5, $6, $7, $8) \
+            RETURNING \"test_schema\".\"resource\".\"id\", \
+                      \"test_schema\".\"resource\".\"name\", \
+                      \"test_schema\".\"resource\".\"description\", \
+                      \"test_schema\".\"resource\".\"time_created\", \
+                      \"test_schema\".\"resource\".\"time_modified\", \
+                      \"test_schema\".\"resource\".\"time_deleted\", \
+                      \"test_schema\".\"resource\".\"collection_id\" \
+        -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
+                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
+                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \
+                   \"test\", \
+                   \"desc\", \
+                   1970-01-01T00:00:00Z, \
+                   1970-01-01T00:00:01Z, \
+                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0]";
 
         assert_eq!(query, expected_query);
     }
@@ -487,20 +527,30 @@ mod test {
             .await
             .unwrap();
 
-        Collection::insert_resource(
+        let create_time =
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
+        let modify_time =
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
+        let resource = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table).values(vec![(
                 resource::dsl::id.eq(resource_id),
                 resource::dsl::name.eq("test"),
                 resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
+                resource::dsl::time_created.eq(create_time),
+                resource::dsl::time_modified.eq(modify_time),
                 resource::dsl::collection_id.eq(collection_id),
             )]),
         )
         .insert_and_get_result_async(pool.pool())
         .await
         .unwrap();
+        assert_eq!(resource.id(), resource_id);
+        assert_eq!(resource.name().as_str(), "test");
+        assert_eq!(resource.description(), "desc");
+        assert_eq!(resource.time_created(), create_time);
+        assert_eq!(resource.time_modified(), modify_time);
+        assert_eq!(resource.collection_id, collection_id);
 
         let collection_rcgen = collection::table
             .find(collection_id)
