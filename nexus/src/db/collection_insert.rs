@@ -22,6 +22,53 @@ use std::marker::PhantomData;
 /// Trait to be implemented by any structs representing a collection.
 /// For example, since Organizations have a one-to-many relationship with
 /// Projects, the Organization datatype should implement this trait.
+/// ```
+/// # use diesel::prelude::*;
+/// # use omicron_nexus::db::collection_insert::DatastoreCollection;
+/// # use omicron_nexus::db::model::Generation;
+/// #
+/// # table! {
+/// #     test_schema.organization (id) {
+/// #         id -> Uuid,
+/// #         time_deleted -> Nullable<Timestamptz>,
+/// #         rcgen -> Int8,
+/// #     }
+/// # }
+/// #
+/// # table! {
+/// #     test_schema.project (id) {
+/// #         id -> Uuid,
+/// #         time_deleted -> Nullable<Timestamptz>,
+/// #         organization_id -> Uuid,
+/// #     }
+/// # }
+///
+/// #[derive(Queryable, Insertable, Debug, Selectable)]
+/// #[table_name = "project"]
+/// struct Project {
+///     pub id: uuid::Uuid,
+///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+///     pub organization_id: uuid::Uuid,
+/// }
+///
+/// #[derive(Queryable, Insertable, Debug, Selectable)]
+/// #[table_name = "organization"]
+/// struct Organization {
+///     pub id: uuid::Uuid,
+///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+///     pub rcgen: Generation,
+/// }
+///
+/// impl DatastoreCollection<Project> for Organization {
+///     // Type of Organization::identity::id and Project::organization_id
+///     type CollectionId = uuid::Uuid;
+///
+///     type GenerationNumberColumn = organization::dsl::rcgen;
+///     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
+///
+///     type CollectionIdColumn = project::dsl::organization_id;
+/// }
+/// ```
 pub trait DatastoreCollection<ResourceType> {
     /// The Rust type of the collection id (typically Uuid for us)
     type CollectionId: Copy + Debug;
@@ -201,20 +248,25 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// This implementation uses the following CTE:
 ///
 /// ```text
-/// // WITH dummy AS (SELECT IF(EXISTS(SELECT <PK> FROM C WHERE <PK> = <value>
-/// //                                 AND time_deleted IS NULL FOR UPDATE),
-///                             TRUE, CAST(1/0 AS BOOL))),
-/// //      updated_row AS (UPDATE C SET <generation number> =
-/// //                      <generation_number> + 1 WHERE <PK> = <value> AND
-/// //                      time_deleted IS NULL RETURNING 1),
-/// // <user provided insert statement>
+/// // WITH found_row AS MATERIALIZED (
+/// //          SELECT <PK> FROM C WHERE <PK> = <value> AND
+/// //              <time_deleted> IS NULL FOR UPDATE),
+/// //      dummy AS MATERIALIZED (
+/// //          SELECT IF(EXISTS(SELECT <PK> FROM found_row), TRUE,
+/// //              CAST(1/0 AS BOOL))),
+/// //      updated_row AS MATERIALIZED (
+/// //          UPDATE C SET <generation number> = <generation_number> + 1 WHERE
+/// //              <PK> = <value> AND <time_deleted> IS NULL RETURNING 1),
+/// //      inserted_row AS (<user provided insert statement>
+/// //          RETURNING <ResourceType.as_returning()>)
+/// //  SELECT * FROM inserted_row;
 /// ```
 ///
 /// This CTE is equivalent in desired behavior to the one specified in
 /// [RFD 192](https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators).
 ///
 /// The general idea is that the first clause of the CTE (the "dummy" table)
-/// will generate a divison by zero error and rollback the transaction if the
+/// will generate a divison-by-zero error and rollback the transaction if the
 /// target collection is not found in its table. It simultaneously locks the
 /// row for update, to allow us to subsequently use the "updated_row" query to
 /// increase the child-resource generation count for the collection. In the same
@@ -222,10 +274,15 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// insert a new resource into its table with its collection id column set
 /// to the collection we just checked for.
 ///
-/// Note that it is important that the where clauses on the SELECT and UPDATE
+/// NOTE: It is important that the WHERE clauses on the SELECT and UPDATE
 /// against the collection table must match, or else we will not get the desired
 /// behavior described in RFD 192.
-///
+/// NOTE: It is important that the WITH clauses have MATERIALIZED, since under
+/// some conditions, clauses may be inlined (and potentially eliminated by
+/// consequence of being unused). At the time of writing this, this happens
+/// for the "dummy" table, preventing the division-by-zero error from occuring.
+/// The MATERIALIZED keyword forces the queries that are not referenced
+/// to be materialized instead.
 impl<ResourceType, ISR, C> QueryFragment<Pg>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
@@ -271,7 +328,6 @@ where
     <ResourceTable<ResourceType, C> as Table>::AllColumns: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
-        out.push_sql("WITH dummy AS (SELECT IF(EXISTS(");
         let subquery = CollectionTable::<ResourceType, C>::table()
             .into_boxed()
             .filter(
@@ -280,14 +336,21 @@ where
                     .eq(self.key),
             )
             .filter(C::CollectionTimeDeletedColumn::default().is_null());
+        out.push_sql("WITH found_row AS MATERIALIZED (");
         subquery.walk_ast(out.reborrow())?;
         // Manually add the FOR_UPDATE, since .for_update() is incompatible with
         // BoxedQuery
-        out.push_sql(" FOR UPDATE), TRUE, CAST(1/0 AS BOOL))), ");
+        out.push_sql(" FOR UPDATE), ");
+        out.push_sql(
+            "dummy AS MATERIALIZED (\
+                SELECT IF(EXISTS(SELECT ",
+        );
+        out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
+        out.push_sql(" FROM found_row), TRUE, CAST(1/0 AS BOOL))), ");
 
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
-        out.push_sql("updated_row AS (UPDATE ");
+        out.push_sql("updated_row AS MATERIALIZED (UPDATE ");
         CollectionTable::<ResourceType, C>::table()
             .from_clause()
             .walk_ast(out.reborrow())?;
@@ -305,8 +368,11 @@ where
         out.push_identifier(
             CollectionTimeDeletedColumn::<ResourceType, C>::NAME,
         )?;
-        out.push_sql(" IS NULL RETURNING 1) ");
+        // We must include "RETURNING 1" since all CTE clauses must return
+        // something
+        out.push_sql(" IS NULL RETURNING 1), ");
 
+        out.push_sql("inserted_row AS (");
         // TODO: Check or force the insert_statement to have
         //       C::CollectionIdColumn set
         self.insert_statement.walk_ast(out.reborrow())?;
@@ -315,6 +381,8 @@ where
         // used for InsertStatement's Ret generic is private to diesel and so we
         // cannot express it.
         ResourceType::as_returning().walk_ast(out.reborrow())?;
+
+        out.push_sql(") SELECT * FROM inserted_row");
         Ok(())
     }
 }
@@ -428,8 +496,7 @@ mod test {
         let query = diesel::debug_query::<Pg, _>(&insert).to_string();
 
         let expected_query = "WITH \
-             dummy AS (SELECT IF(EXISTS(\
-                 SELECT \
+             found_row AS MATERIALIZED (SELECT \
                      \"test_schema\".\"collection\".\"id\", \
                      \"test_schema\".\"collection\".\"name\", \
                      \"test_schema\".\"collection\".\"description\", \
@@ -441,21 +508,24 @@ mod test {
                      (\"test_schema\".\"collection\".\"id\" = $1) AND \
                      (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)\
                      ) FOR UPDATE), \
+             dummy AS MATERIALIZED (SELECT IF(\
+                 EXISTS(SELECT \"id\" FROM found_row), \
                  TRUE, CAST(1/0 AS BOOL))), \
-             updated_row AS (UPDATE \"test_schema\".\"collection\" SET \
-                 \"rcgen\" = \"rcgen\" + 1 \
-                 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1) \
-         INSERT INTO \"test_schema\".\"resource\" \
-            (\"id\", \"name\", \"description\", \"time_created\", \
-             \"time_modified\", \"collection_id\") \
-            VALUES ($3, $4, $5, $6, $7, $8) \
-            RETURNING \"test_schema\".\"resource\".\"id\", \
-                      \"test_schema\".\"resource\".\"name\", \
-                      \"test_schema\".\"resource\".\"description\", \
-                      \"test_schema\".\"resource\".\"time_created\", \
-                      \"test_schema\".\"resource\".\"time_modified\", \
-                      \"test_schema\".\"resource\".\"time_deleted\", \
-                      \"test_schema\".\"resource\".\"collection_id\" \
+             updated_row AS MATERIALIZED (UPDATE \
+                 \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 \
+                 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1), \
+             inserted_row AS (INSERT INTO \"test_schema\".\"resource\" \
+                 (\"id\", \"name\", \"description\", \"time_created\", \
+                  \"time_modified\", \"collection_id\") \
+                 VALUES ($3, $4, $5, $6, $7, $8) \
+                 RETURNING \"test_schema\".\"resource\".\"id\", \
+                           \"test_schema\".\"resource\".\"name\", \
+                           \"test_schema\".\"resource\".\"description\", \
+                           \"test_schema\".\"resource\".\"time_created\", \
+                           \"test_schema\".\"resource\".\"time_modified\", \
+                           \"test_schema\".\"resource\".\"time_deleted\", \
+                           \"test_schema\".\"resource\".\"collection_id\") \
+            SELECT * FROM inserted_row \
         -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
                    223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
                    223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \
