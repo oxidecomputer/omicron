@@ -1317,53 +1317,6 @@
         }
       }
     },
-    "/projects/{project_name}/vpcs/{vpc_name}/router/{router_name}": {
-      "get": {
-        "description": "Get a VPC Router",
-        "operationId": "vpc_routers_get_router",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "router_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "vpc_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VpcRouter"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
         "description": "List VPC Custom and System Routers",
@@ -1480,6 +1433,51 @@
       }
     },
     "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
+      "get": {
+        "description": "Get a VPC Router",
+        "operationId": "vpc_routers_get_router",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "router_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "description": "Update a VPC Router",
         "operationId": "vpc_routers_put_router",
