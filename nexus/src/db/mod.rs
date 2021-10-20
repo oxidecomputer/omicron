@@ -2,7 +2,9 @@
  * Facilities for working with the Omicron database
  */
 
-mod collection_insert;
+// This is not intended to be public, but this is necessary to use it from
+// doctests
+pub mod collection_insert;
 mod config;
 mod datastore;
 mod error;
