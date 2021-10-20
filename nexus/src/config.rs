@@ -4,12 +4,20 @@
  */
 
 use crate::db;
+use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::DeserializeFromStr;
+use serde_with::SerializeDisplay;
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+/*
+ * By design, we require that all config properties be specified (i.e., we don't
+ * use `serde(default)`).
+ */
 
 /**
  * Configuration for a nexus server
@@ -26,6 +34,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
+    /** allowed authentication schemes for external HTTP server */
+    pub authn_schemes_external: Vec<SchemeName>,
 }
 
 #[derive(Debug)]
@@ -76,6 +86,37 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
     }
 }
 
+/// List of supported external authn schemes
+///
+/// Note that the authn subsystem doesn't know about this type.  It allows
+/// schemes to be called whatever they want.  This is just to provide a set of
+/// allowed values for configuration.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
+)]
+pub enum SchemeName {
+    Spoof,
+}
+
+impl std::str::FromStr for SchemeName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "spoof" => Ok(SchemeName::Spoof),
+            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for SchemeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SchemeName::Spoof => "spoof",
+        })
+    }
+}
+
 impl Config {
     /**
      * Load a `Config` from the given TOML file
@@ -96,6 +137,7 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::Config;
+    use super::SchemeName;
     use super::{LoadError, LoadErrorKind};
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -204,6 +246,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_schemes_external = []
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -225,6 +268,7 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                authn_schemes_external: Vec::new(),
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
@@ -246,8 +290,70 @@ mod test {
                     url: "postgresql://127.0.0.1?sslmode=disable"
                         .parse()
                         .unwrap()
-                }
+                },
             }
         );
+
+        let config = read_config(
+            "valid",
+            r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_schemes_external = [ "spoof" ]
+            [dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            [insecure]
+            allow_any_request_to_spoof_authn_header = true
+            "##,
+        )
+        .unwrap();
+
+        assert_eq!(config.authn_schemes_external, vec![SchemeName::Spoof],);
+    }
+
+    #[test]
+    fn test_bad_authn_schemes() {
+        let error = read_config(
+            "bad authn_schemes_external",
+            r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            authn_schemes_external = ["trust-me"]
+            [dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            "##,
+        )
+        .expect_err("expected failure");
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert!(error.to_string().starts_with(
+                "unsupported authn scheme: \"trust-me\" \
+                for key `authn_schemes_external`"
+            ));
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
     }
 }
