@@ -254,13 +254,13 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// ```text
 /// // WITH found_row AS MATERIALIZED (
 /// //          SELECT <PK> FROM C WHERE <PK> = <value> AND
-/// //              time_deleted IS NULL FOR UPDATE),
+/// //              <time_deleted> IS NULL FOR UPDATE),
 /// //      dummy AS MATERIALIZED (
-/// //          SELECT IF(EXISTS(SELECT id FROM found_row), TRUE,
+/// //          SELECT IF(EXISTS(SELECT <PK> FROM found_row), TRUE,
 /// //              CAST(1/0 AS BOOL))),
 /// //      updated_row AS MATERIALIZED (
 /// //          UPDATE C SET <generation number> = <generation_number> + 1 WHERE
-/// //              <PK> = <value> AND time_deleted IS NULL RETURNING 1),
+/// //              <PK> = <value> AND <time_deleted> IS NULL RETURNING 1),
 /// //      inserted_row AS (<user provided insert statement>
 /// //          RETURNING <ResourceType.as_returning()>)
 /// //  SELECT * FROM inserted_row;
@@ -347,11 +347,10 @@ where
         out.push_sql(" FOR UPDATE), ");
         out.push_sql(
             "dummy AS MATERIALIZED (\
-                SELECT IF(\
-                    EXISTS(SELECT id FROM found_row), \
-                    TRUE, \
-                    CAST(1/0 AS BOOL))), ",
+                SELECT IF(EXISTS(SELECT ",
         );
+        out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
+        out.push_sql(" FROM found_row), TRUE, CAST(1/0 AS BOOL))), ");
 
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
@@ -514,7 +513,8 @@ mod test {
                      (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)\
                      ) FOR UPDATE), \
              dummy AS MATERIALIZED (SELECT IF(\
-                 EXISTS(SELECT id FROM found_row), TRUE, CAST(1/0 AS BOOL))), \
+                 EXISTS(SELECT \"id\" FROM found_row), \
+                 TRUE, CAST(1/0 AS BOOL))), \
              updated_row AS MATERIALIZED (UPDATE \
                  \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 \
                  WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1), \
