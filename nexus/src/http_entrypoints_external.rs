@@ -1245,7 +1245,7 @@ struct VpcRouterPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_name}/vpcs/{vpc_name}/router/{router_name}"
+    path = "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}"
 }]
 async fn vpc_routers_get_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
