@@ -353,16 +353,8 @@ impl Organization {
 impl DatastoreCollection<Project> for Organization {
     type CollectionId = Uuid;
     type GenerationNumberColumn = organization::dsl::rcgen;
-    type CollectionIdColumn = project::dsl::organization_id;
     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
-
-    fn generation_number_column() -> Self::GenerationNumberColumn {
-        organization::dsl::rcgen
-    }
-
-    fn collection_time_deleted_column() -> Self::CollectionTimeDeletedColumn {
-        organization::dsl::time_deleted
-    }
+    type CollectionIdColumn = project::dsl::organization_id;
 }
 
 impl Into<external::Organization> for Organization {
