@@ -2,6 +2,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::config;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
@@ -135,10 +136,10 @@ impl Nexus {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        nexus_id: &Uuid,
+        config: &config::Config,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(*nexus_id);
+        let my_sec_id = db::SecId::from(config.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -153,7 +154,7 @@ impl Nexus {
             sec_store,
         ));
         let nexus = Nexus {
-            id: *nexus_id,
+            id: config.id,
             rack_id: *rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),

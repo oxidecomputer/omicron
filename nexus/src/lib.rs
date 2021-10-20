@@ -12,6 +12,7 @@
 /* Clippy's style lints are useful, but not worth running automatically. */
 #![allow(clippy::style)]
 
+pub mod authn; // Public only for testing
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
@@ -89,8 +90,7 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
-
-        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config.id);
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config);
 
         let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(
