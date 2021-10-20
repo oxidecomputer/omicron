@@ -3,6 +3,7 @@
 use crate::authn;
 use authn::Reason;
 
+pub mod cookie;
 pub mod spoof;
 
 /// Authenticates incoming HTTP requests using schemes intended for use by the
