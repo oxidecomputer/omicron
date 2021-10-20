@@ -23,7 +23,6 @@ use std::marker::PhantomData;
 /// For example, since Organizations have a one-to-many relationship with
 /// Projects, the Organization datatype should implement this trait.
 /// ```
-/// extern crate db_macros;
 /// # use diesel::prelude::*;
 /// # use omicron_nexus::db::collection_insert::DatastoreCollection;
 /// # use omicron_nexus::db::model::Generation;
@@ -46,28 +45,29 @@ use std::marker::PhantomData;
 ///
 /// #[derive(Queryable, Insertable, Debug, Selectable)]
 /// #[table_name = "project"]
-///    pub id: uuid::Uuid,
-///    pub time_deleted: Option<chrono::Utc>,
-///    pub organization_id: uuid::Uuid,
-///}
+/// struct Project {
+///     pub id: uuid::Uuid,
+///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+///     pub organization_id: uuid::Uuid,
+/// }
 ///
 /// #[derive(Queryable, Insertable, Debug, Selectable)]
 /// #[table_name = "organization"]
-///struct Organization {
-///    pub id: uuid::Uuid,
-///    pub time_deleted: Option<chrono::Utc>,
-///    pub rcgen: Generation,
-///}
+/// struct Organization {
+///     pub id: uuid::Uuid,
+///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+///     pub rcgen: Generation,
+/// }
 ///
-///impl DatastoreCollection<Project> for Organization {
-///    // Type of Organization::identity::id and Project::organization_id
-///    type CollectionId = uuid::Uuid;
+/// impl DatastoreCollection<Project> for Organization {
+///     // Type of Organization::identity::id and Project::organization_id
+///     type CollectionId = uuid::Uuid;
 ///
-///    type GenerationNumberColumn = organization::dsl::rcgen;
-///    type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
+///     type GenerationNumberColumn = organization::dsl::rcgen;
+///     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
 ///
-///    type CollectionIdColumn = project::dsl::organization_id;
-///}
+///     type CollectionIdColumn = project::dsl::organization_id;
+/// }
 /// ```
 pub trait DatastoreCollection<ResourceType> {
     /// The Rust type of the collection id (typically Uuid for us)
