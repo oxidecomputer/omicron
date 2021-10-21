@@ -4,6 +4,7 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 
 pub mod common;
+use common::db_inspection::{create_datastore, make_name};
 use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 
@@ -14,15 +15,28 @@ async fn test_projects() {
     let cptestctx = test_setup("test_projects").await;
     let client = &cptestctx.external_client;
 
+    let datastore = create_datastore(&cptestctx.database);
+
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
+    let org_after_creation =
+        datastore.organization_fetch(&make_name(org_name)).await.unwrap();
 
     /* Create a project that we'll use for testing. */
     let p1_name = "springfield-squidport";
     let p2_name = "cairo-airport";
     let org_p1_id =
         create_project(&client, &org_name, &p1_name).await.identity.id;
+    // Verify project creation is appropriately manipulating the organization
+    // child-resource generation number
+    let org_after_p1_creation =
+        datastore.organization_fetch(&make_name(org_name)).await.unwrap();
+    assert!(org_after_p1_creation.rcgen > org_after_creation.rcgen);
+
     create_project(&client, &org_name, &p2_name).await;
+    let org_after_p2_creation =
+        datastore.organization_fetch(&make_name(org_name)).await.unwrap();
+    assert!(org_after_p2_creation.rcgen > org_after_p1_creation.rcgen);
 
     let p1_url = format!("/organizations/{}/projects/{}", org_name, p1_name);
     let project: Project = object_get(&client, &p1_url).await;
