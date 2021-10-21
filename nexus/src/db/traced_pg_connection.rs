@@ -24,6 +24,7 @@ pub(crate) struct TracedPgConnection(PgConnection);
 impl SimpleConnection for TracedPgConnection {
     fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
         // TODO: We should trace this. We have a query string here.
+        println!("batch_execute: {}", query);
         self.0.batch_execute(query)
     }
 }
@@ -43,6 +44,7 @@ impl Connection for TracedPgConnection {
 
     fn execute(&mut self, query: &str) -> QueryResult<usize> {
         // TODO: We should trace this. We have a query string here.
+        println!("execute: {}", query);
         self.0.execute(query)
     }
 
@@ -58,7 +60,9 @@ impl Connection for TracedPgConnection {
         // TODO: This is also worth tracing - it appears to issue a call to the
         // underlying DB using the "raw connection" - so it doesn't call
         // 'execute'.
-        self.0.load(source)
+        let query = source.as_query();
+        println!("load: {}", diesel::debug_query::<Self::Backend, _>(&query));
+        self.0.load(query)
     }
 
     fn execute_returning_count<T>(&mut self, source: &T) -> QueryResult<usize>
