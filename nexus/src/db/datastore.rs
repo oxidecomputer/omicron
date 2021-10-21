@@ -20,6 +20,7 @@
 
 use super::identity::{Asset, Resource};
 use super::Pool;
+use super::TracedPgConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -62,7 +63,7 @@ impl DataStore {
         DataStore { pool }
     }
 
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<TracedPgConnection>> {
         self.pool.pool()
     }
 

@@ -10,6 +10,7 @@ mod pool;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
+mod traced_pg_connection;
 mod update_and_check;
 
 #[cfg(test)]
@@ -25,3 +26,4 @@ pub use pool::Pool;
 pub use saga_recovery::{recover, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
+pub(crate) use traced_pg_connection::TracedPgConnection;

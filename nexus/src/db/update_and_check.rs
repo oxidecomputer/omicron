@@ -40,14 +40,15 @@ impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
 ///
 /// US: [`UpdateStatement`] which we are extending.
 /// K: Primary Key type.
-pub trait UpdateAndCheck<US, K>
+pub trait UpdateAndCheck<US, K, C>
 where
     US: UpdateStatementExt,
 {
     /// Nests the existing update statement in a CTE which
     /// identifies if the row exists (by ID), even if the row
     /// cannot be successfully updated.
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q>;
+    fn check_if_exists<Q>(self, key: K)
+        -> UpdateAndQueryStatement<US, K, Q, C>;
 }
 
 // UpdateStatement has four generic parameters:
@@ -63,15 +64,19 @@ where
 //
 // This allows our implementation of the CTE to overwrite
 // the return behavior of the SQL statement.
-impl<US, K> UpdateAndCheck<US, K> for US
+impl<US, K, C> UpdateAndCheck<US, K, C> for US
 where
     US: UpdateStatementExt,
 {
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
+    fn check_if_exists<Q>(
+        self,
+        key: K,
+    ) -> UpdateAndQueryStatement<US, K, Q, C> {
         UpdateAndQueryStatement {
             update_statement: self.statement(),
             key,
             query_type: PhantomData,
+            connection_type: PhantomData,
         }
     }
 }
@@ -80,7 +85,7 @@ where
 /// with other statements to also SELECT a row.
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
-pub struct UpdateAndQueryStatement<US, K, Q>
+pub struct UpdateAndQueryStatement<US, K, Q, C>
 where
     US: UpdateStatementExt,
 {
@@ -88,9 +93,10 @@ where
         UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
     key: K,
     query_type: PhantomData<Q>,
+    connection_type: PhantomData<C>,
 }
 
-impl<US, K, Q> QueryId for UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q, C> QueryId for UpdateAndQueryStatement<US, K, Q, C>
 where
     US: UpdateStatementExt,
 {
@@ -121,7 +127,7 @@ type PrimaryKey<US> = <UpdateTable<US> as diesel::Table>::PrimaryKey;
 // Representation of Primary Key in SQL.
 type SerializedPrimaryKey<US> = <PrimaryKey<US> as diesel::Expression>::SqlType;
 
-impl<US, K, Q> UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q, C> UpdateAndQueryStatement<US, K, Q, C>
 where
     US: 'static + UpdateStatementExt,
     K: 'static + PartialEq + Send,
@@ -129,6 +135,7 @@ where
     US::WhereClause: 'static + Send,
     US::Changeset: 'static + Send,
     Q: std::fmt::Debug + Send + 'static,
+    C: diesel::r2d2::R2D2Connection + 'static,
 {
     /// Issues the CTE and parses the result.
     ///
@@ -138,11 +145,12 @@ where
     /// - Error (row doesn't exist, or other diesel error)
     pub async fn execute_and_check(
         self,
-        pool: &bb8::Pool<ConnectionManager<PgConnection>>,
+        pool: &bb8::Pool<ConnectionManager<C>>,
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: LoadQuery<PgConnection, (Option<K>, Option<K>, Q)>,
+        Self: LoadQuery<C, (Option<K>, Option<K>, Q)>,
+        C: Connection,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
@@ -159,7 +167,7 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<US, K, Q> Query for UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q, C> Query for UpdateAndQueryStatement<US, K, Q, C>
 where
     US: UpdateStatementExt,
     US::Table: Table,
@@ -172,7 +180,7 @@ where
     );
 }
 
-impl<US, K, Q> RunQueryDsl<PgConnection> for UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q, C> RunQueryDsl<C> for UpdateAndQueryStatement<US, K, Q, C>
 where
     US: UpdateStatementExt,
     US::Table: Table,
@@ -195,7 +203,7 @@ where
 /// // ON
 /// //      found.<primary_key> = updated.<primary_key>;
 /// ```
-impl<US, K, Q> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q, C> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q, C>
 where
     US: UpdateStatementExt,
     US::Table: HasTable<Table = US::Table>
