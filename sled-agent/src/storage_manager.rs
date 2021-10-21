@@ -2,11 +2,11 @@
 
 use crate::illumos::zpool::ZpoolInfo;
 use omicron_common::api::external::Error;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use tokio::task::JoinHandle;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 #[cfg(test)]
 use crate::illumos::zpool::MockZpool as Zpool;
@@ -17,9 +17,7 @@ enum PoolManagementState {
     // No assigned Crucible Agent.
     Unmanaged,
     // The pool is actively managed by a Crucible Agent.
-    Managed {
-        address: SocketAddr,
-    },
+    Managed { address: SocketAddr },
 }
 
 /// A ZFS storage pool.
@@ -51,7 +49,6 @@ impl Pool {
 // - I want a queue of pools which need zones.
 // - I want a worker to consume the "pools-needing-work" queue.
 
-
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     pools: Arc<Mutex<HashMap<String, Pool>>>,
@@ -69,7 +66,10 @@ impl StorageWorker {
             // TODO: start zone, update state.
             println!("I should start a zone for {}", name);
             pool.state = PoolManagementState::Managed {
-                address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                address: SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    8080,
+                ),
             };
         }
     }
@@ -96,10 +96,7 @@ impl StorageManager {
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
 
-        let mut worker = StorageWorker {
-            pools: pools.clone(),
-            new_pools_rx,
-        };
+        let mut worker = StorageWorker { pools: pools.clone(), new_pools_rx };
         Ok(StorageManager {
             pools,
             new_pools_tx,
@@ -109,14 +106,13 @@ impl StorageManager {
 
     /// Creates a new [`StorageManager`] from a list of pre-supplied zpools.
     pub async fn new_from_zpools(zpools: Vec<String>) -> Result<Self, Error> {
-        let pools =
-            zpools
-                .into_iter()
-                .map(|name| {
-                    let pool = Pool::new(&name)?;
-                    Ok((name, pool))
-                })
-                .collect::<Result<HashMap<String, Pool>, Error>>()?;
+        let pools = zpools
+            .into_iter()
+            .map(|name| {
+                let pool = Pool::new(&name)?;
+                Ok((name, pool))
+            })
+            .collect::<Result<HashMap<String, Pool>, Error>>()?;
 
         // Enqueue all supplied zpools to the worker.
         let (new_pools_tx, new_pools_rx) = mpsc::channel(pools.len());
@@ -125,10 +121,7 @@ impl StorageManager {
         }
 
         let pools = Arc::new(Mutex::new(pools));
-        let mut worker = StorageWorker {
-            pools: pools.clone(),
-            new_pools_rx,
-        };
+        let mut worker = StorageWorker { pools: pools.clone(), new_pools_rx };
         Ok(StorageManager {
             pools,
             new_pools_tx,
@@ -143,12 +136,15 @@ impl StorageManager {
         let is_new = {
             let mut pools = self.pools.lock().unwrap();
             let entry = pools.entry(name.to_string());
-            let is_new = matches!(entry, std::collections::hash_map::Entry::Vacant(_));
+            let is_new =
+                matches!(entry, std::collections::hash_map::Entry::Vacant(_));
 
             // Ensure that the pool info is up-to-date.
-            entry.and_modify(|e| {
-                e.info = zpool.info.clone();
-            }).or_insert_with(|| zpool);
+            entry
+                .and_modify(|e| {
+                    e.info = zpool.info.clone();
+                })
+                .or_insert_with(|| zpool);
             is_new
         };
 

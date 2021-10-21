@@ -38,6 +38,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::db::model::VpcRouterUpdate;
 use crate::db::{
     self,
     error::{
@@ -47,7 +48,7 @@ use crate::db::{
         Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
         InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool
+        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -976,8 +977,18 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::metricproducer::dsl;
 
+        // TODO: see https://github.com/oxidecomputer/omicron/issues/323
         diesel::insert_into(dsl::metricproducer)
             .values(producer.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::ip.eq(producer.ip),
+                dsl::port.eq(producer.port),
+                dsl::interval.eq(producer.interval),
+                dsl::base_route.eq(producer.base_route.clone()),
+            ))
             .execute_async(self.pool())
             .await
             .map_err(|e| {
@@ -1376,6 +1387,123 @@ impl DataStore {
                     e,
                     ResourceType::VpcSubnet,
                     LookupType::ById(*subnet_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn vpc_list_routers(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcRouter> {
+        use db::schema::vpcrouter::dsl;
+
+        paginated(dsl::vpcrouter, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .select(VpcRouter::as_select())
+            .load_async::<db::model::VpcRouter>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn vpc_router_fetch_by_name(
+        &self,
+        vpc_id: &Uuid,
+        router_name: &Name,
+    ) -> LookupResult<VpcRouter> {
+        use db::schema::vpcrouter::dsl;
+
+        dsl::vpcrouter
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::name.eq(router_name.clone()))
+            .select(VpcRouter::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::ByName(router_name.as_str().to_owned()),
+                )
+            })
+    }
+
+    pub async fn vpc_create_router(
+        &self,
+        router_id: &Uuid,
+        vpc_id: &Uuid,
+        params: &api::external::VpcRouterCreateParams,
+    ) -> CreateResult<VpcRouter> {
+        use db::schema::vpcrouter::dsl;
+
+        let router = VpcRouter::new(*router_id, *vpc_id, params.clone());
+        let name = router.name().clone();
+        let router = diesel::insert_into(dsl::vpcrouter)
+            .values(router)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(VpcRouter::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::VpcRouter,
+                    name.as_str(),
+                )
+            })?;
+        Ok(router)
+    }
+
+    pub async fn vpc_delete_router(&self, router_id: &Uuid) -> DeleteResult {
+        use db::schema::vpcrouter::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::vpcrouter)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*router_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(VpcRouter::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::ById(*router_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn vpc_update_router(
+        &self,
+        router_id: &Uuid,
+        params: &api::external::VpcRouterUpdateParams,
+    ) -> Result<(), Error> {
+        use db::schema::vpcrouter::dsl;
+        let updates: VpcRouterUpdate = params.clone().into();
+
+        diesel::update(dsl::vpcrouter)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*router_id))
+            .set(updates)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::ById(*router_id),
                 )
             })?;
         Ok(())

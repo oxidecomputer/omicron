@@ -30,7 +30,6 @@ pub struct SledAgent {
     storage: StorageManager,
     instances: InstanceManager,
     nexus_client: Arc<NexusClient>,
-
 }
 
 impl SledAgent {
@@ -45,7 +44,9 @@ impl SledAgent {
         info!(&log, "created sled agent"; "id" => ?id);
 
         let storage = match &config.zpools {
-            Some(pools) => StorageManager::new_from_zpools(pools.clone()).await?,
+            Some(pools) => {
+                StorageManager::new_from_zpools(pools.clone()).await?
+            }
             None => StorageManager::new()?,
         };
         // TODO-nit: Could remove nexus_client from IM?

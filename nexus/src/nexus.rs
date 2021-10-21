@@ -2,6 +2,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::config;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
@@ -34,6 +35,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcRouter;
+use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
@@ -46,9 +50,11 @@ use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
+use omicron_common::backoff;
 use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
+use oximeter_producer::register;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -91,6 +97,9 @@ pub trait TestInterfaces {
  * Manages an Oxide fleet -- the heart of the control plane
  */
 pub struct Nexus {
+    /** uuid for this nexus instance. */
+    id: Uuid,
+
     /** uuid for this rack (TODO should also be in persistent storage) */
     rack_id: Uuid,
 
@@ -127,10 +136,10 @@ impl Nexus {
         rack_id: &Uuid,
         log: Logger,
         pool: db::Pool,
-        nexus_id: &Uuid,
+        config: &config::Config,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(*nexus_id);
+        let my_sec_id = db::SecId::from(config.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -145,6 +154,7 @@ impl Nexus {
             sec_store,
         ));
         let nexus = Nexus {
+            id: config.id,
             rack_id: *rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
@@ -208,6 +218,12 @@ impl Nexus {
         // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
         self.db_datastore.oximeter_create(&db_info).await?;
+        info!(
+            self.log,
+            "registered new oximeter metric collection server";
+            "collector_id" => ?oximeter_info.collector_id,
+            "address" => oximeter_info.address,
+        );
 
         // Regardless, notify the collector of any assigned metric producers. This should be empty
         // if this Oximeter collector is registering for the first time, but may not be if the
@@ -249,6 +265,35 @@ impl Nexus {
             }
         }
         Ok(())
+    }
+
+    /// Register as a metric producer with the oximeter metric collection server.
+    pub async fn register_as_producer(&self, address: SocketAddr) {
+        let producer_endpoint = ProducerEndpoint {
+            id: self.id,
+            address,
+            base_route: String::from("/metrics/collect"),
+            interval: Duration::from_secs(10),
+        };
+        let register = || async {
+            debug!(self.log, "registering nexus as metric producer");
+            register(address, &producer_endpoint)
+                .await
+                .map_err(backoff::BackoffError::Transient)
+        };
+        let log_registration_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to register nexus as a metric producer, will retry in {:?}", delay;
+                "error_message" => ?error,
+            );
+        };
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            register,
+            log_registration_failure,
+        ).await
+        .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
     /// Return a client to the Oximeter instance with the given ID.
@@ -1283,6 +1328,78 @@ impl Nexus {
         Ok(self
             .db_datastore
             .vpc_update_subnet(&subnet.identity.id, params)
+            .await?)
+    }
+
+    pub async fn vpc_list_routers(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcRouter> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let routers = self
+            .db_datastore
+            .vpc_list_routers(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|router| router.into())
+            .collect::<Vec<VpcRouter>>();
+        Ok(routers)
+    }
+
+    pub async fn vpc_lookup_router(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+    ) -> LookupResult<VpcRouter> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        Ok(self
+            .db_datastore
+            .vpc_router_fetch_by_name(&vpc.identity.id, router_name)
+            .await?
+            .into())
+    }
+
+    pub async fn vpc_create_router(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcRouterCreateParams,
+    ) -> CreateResult<VpcRouter> {
+        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let id = Uuid::new_v4();
+        let router = self
+            .db_datastore
+            .vpc_create_router(&id, &vpc.identity.id, params)
+            .await?;
+        Ok(router.into())
+    }
+
+    pub async fn vpc_delete_router(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+    ) -> DeleteResult {
+        let router =
+            self.vpc_lookup_router(project_name, vpc_name, router_name).await?;
+        self.db_datastore.vpc_delete_router(&router.identity.id).await
+    }
+
+    pub async fn vpc_update_router(
+        &self,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        params: &VpcRouterUpdateParams,
+    ) -> UpdateResult<()> {
+        let router =
+            self.vpc_lookup_router(project_name, vpc_name, router_name).await?;
+        Ok(self
+            .db_datastore
+            .vpc_update_router(&router.identity.id, params)
             .await?)
     }
 

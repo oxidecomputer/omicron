@@ -386,6 +386,25 @@ CREATE TABLE omicron.public.NetworkInterface (
     ip INET NOT NULL
 );
 
+
+CREATE TABLE omicron.public.VpcRouter (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.VpcRouter (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /* TODO-completeness
 
  * We currently have a NetworkInterface table with the IP and MAC addresses inline.

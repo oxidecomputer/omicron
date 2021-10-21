@@ -273,7 +273,8 @@ mod test {
             Ok(())
         });
 
-        let zones_create_propolis_base_ctx = MockZones::create_propolis_base_context();
+        let zones_create_propolis_base_ctx =
+            MockZones::create_propolis_base_context();
         zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
@@ -355,7 +356,8 @@ mod test {
             Ok(())
         });
 
-        let zones_create_propolis_base_ctx = MockZones::create_propolis_base_context();
+        let zones_create_propolis_base_ctx =
+            MockZones::create_propolis_base_context();
         zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();

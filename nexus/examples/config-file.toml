@@ -5,9 +5,16 @@
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
+# List of authentication schemes to support.
+#
+# This is not fleshed out yet and the only reason to change it now is for
+# working on authentication or authorization.  Neither is really implemented
+# yet.
+authn_schemes_external = []
+
 [database]
 # URL for connecting to the database
-url = "postgresql://root@127.0.0.1:26257?sslmode=disable"
+url = "postgresql://root@127.0.0.1:26257/omicron?sslmode=disable"
 
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API

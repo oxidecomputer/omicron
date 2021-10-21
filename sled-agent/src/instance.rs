@@ -455,7 +455,11 @@ impl Instance {
             .chain(std::iter::once(control_nic.name.clone()))
             .collect();
 
-        Zones::configure_propolis_zone(&inner.log, &zname, nics_to_put_in_zone)?;
+        Zones::configure_propolis_zone(
+            &inner.log,
+            &zname,
+            nics_to_put_in_zone,
+        )?;
         info!(inner.log, "Configured propolis zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and

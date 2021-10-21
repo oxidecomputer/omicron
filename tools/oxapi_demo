@@ -286,8 +286,8 @@ function cmd_disk_delete
 
 function cmd_vpc_create_demo
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
-	mkjson name="$2" description="a vpc called $2" |
+	[[ $# != 3 ]] && usage "expected PROJECT_NAME VPC_NAME DNS_NAME"
+	mkjson name="$2" dnsName="$3" description="a vpc called $2" |
 	    do_curl "/projects/$1/vpcs" -X POST -T -
 }
 
