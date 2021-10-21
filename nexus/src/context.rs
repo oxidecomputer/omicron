@@ -10,7 +10,10 @@ use authn::external::HttpAuthnScheme;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 /**
@@ -85,5 +88,83 @@ impl ServerContext {
             external_latencies,
             producer_registry,
         })
+    }
+}
+
+/// Provides general facilities scoped to whatever operation Nexus is currently
+/// doing
+///
+/// The idea is that whatever code path you're looking at in Nexus, it should
+/// eventually have an OpContext that allows it to:
+///
+/// - log a message (with relevant operation-specific metadata)
+/// - bump a counter (exported via Oximeter)
+/// - emit tracing data
+/// - do an authorization check
+///
+/// OpContexts are constructed when Nexus begins doing something.  This is often
+/// when it starts handling an API request, but it could be when starting a
+/// background operation or something else.
+// Not all of these fields are used yet, but they may still prove useful for
+// debugging.
+#[allow(dead_code)]
+pub struct OpContext {
+    pub log: slog::Logger,
+    pub authn: authn::Context,
+
+    created_instant: Instant,
+    created_walltime: SystemTime,
+    metadata: BTreeMap<String, String>,
+    kind: OpKind,
+}
+
+pub enum OpKind {
+    /// Handling an external API request
+    ExternalApiRequest,
+    /// Background operations in Nexus
+    Background,
+}
+
+impl OpContext {
+    /// Authenticates an incoming request to the external API and produces a new
+    /// operation context for it
+    pub async fn for_external_api(
+        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    ) -> Result<OpContext, dropshot::HttpError> {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let apictx = rqctx.context();
+        let log = apictx.log.new(o!());
+        let authn = apictx.external_authn.authn_request(rqctx).await?;
+
+        let request = rqctx.request.lock().await;
+        let mut metadata = BTreeMap::new();
+        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
+        metadata
+            .insert(String::from("http_method"), request.method().to_string());
+        metadata.insert(String::from("http_uri"), request.uri().to_string());
+
+        Ok(OpContext {
+            log,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::ExternalApiRequest,
+        })
+    }
+
+    /// Returns a context suitable for use in background operations in Nexus
+    pub fn for_background(log: slog::Logger) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        OpContext {
+            log,
+            authn: authn::Context::internal_unauthenticated(),
+            created_instant,
+            created_walltime,
+            metadata: BTreeMap::new(),
+            kind: OpKind::Background,
+        }
     }
 }

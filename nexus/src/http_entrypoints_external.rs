@@ -3,6 +3,7 @@
  */
 
 use super::ServerContext;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
 
@@ -185,6 +186,7 @@ async fn organizations_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
+    let opctx = OpContext::for_external_api(&rqctx).await?;
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
@@ -195,14 +197,14 @@ async fn organizations_get(
         let organizations = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.organizations_list_by_id(&page_selector).await?
+                nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
 
             PagField::Name => {
                 let page_selector =
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&page_selector).await?
+                nexus.organizations_list_by_name(&opctx, &page_selector).await?
             }
         }
         .into_iter()
