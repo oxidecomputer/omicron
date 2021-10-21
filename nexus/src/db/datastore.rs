@@ -648,13 +648,13 @@ impl DataStore {
         let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
 
-        diesel::update(dsl::instance)
+        let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state.eq_any(vec![stopped, failed]))
             .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .returning(Instance::as_returning())
-            .get_result_async(self.pool())
+            .check_if_exists::<Instance>(*instance_id)
+            .execute_and_check(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -663,7 +663,17 @@ impl DataStore {
                     LookupType::ById(*instance_id),
                 )
             })?;
-        Ok(())
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "instance cannot be deleted in state \"{}\"",
+                        result.found.runtime_state.state.state()
+                    ),
+                });
+            }
+        }
     }
 
     /*
