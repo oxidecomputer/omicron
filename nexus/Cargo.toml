@@ -45,6 +45,19 @@ path = "../common"
 [dependencies.omicron-sled-agent]
 path = "../sled-agent"
 
+[dependencies.oximeter]
+version = "0.1.0"
+path = "../oximeter/oximeter"
+
+[dependencies.oximeter-instruments]
+version = "0.1.0"
+path = "../oximeter/instruments"
+features = [ "http-instruments" ]
+
+[dependencies.oximeter-producer]
+version = "0.1.0"
+path = "../oximeter/producer"
+
 [dependencies.schemars]
 version = "0.8"
 features = [ "chrono", "uuid" ]
@@ -80,21 +93,13 @@ omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"
 subprocess = "0.2.8"
 
-[dev-dependencies.oximeter]
-version = "0.1.0"
-path = "../oximeter/oximeter"
+[dev-dependencies.openapi-lint]
+git = "https://github.com/oxidecomputer/openapi-lint"
+branch = "main"
 
 [dev-dependencies.oximeter-collector]
 version = "0.1.0"
 path = "../oximeter/collector"
-
-[dev-dependencies.oximeter-producer]
-version = "0.1.0"
-path = "../oximeter/producer"
-
-[dev-dependencies.openapi-lint]
-git = "https://github.com/oxidecomputer/openapi-lint"
-branch = "main"
 
 #
 # Disable doc builds by default for our binaries to work around issue
