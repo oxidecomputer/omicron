@@ -34,7 +34,9 @@ static PROJECT_NAME: &str = "springfield-squidport";
 
 #[tokio::test]
 async fn test_instances_access_before_create_returns_not_found() {
-    let cptestctx = test_setup("test_instances_not_found").await;
+    let cptestctx =
+        test_setup("test_instances_access_before_create_returns_not_found")
+            .await;
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -72,7 +74,7 @@ async fn test_instances_access_before_create_returns_not_found() {
 
 #[tokio::test]
 async fn test_instances_create_reboot_halt() {
-    let cptestctx = test_setup("test_instances").await;
+    let cptestctx = test_setup("test_instances_create_reboot_halt").await;
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
@@ -345,7 +347,10 @@ async fn test_instances_create_reboot_halt() {
 
 #[tokio::test]
 async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
-    let cptestctx = test_setup("test_instances").await;
+    let cptestctx = test_setup(
+        "test_instances_delete_fails_when_running_succeeds_when_stopped",
+    )
+    .await;
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
@@ -408,7 +413,8 @@ async fn test_instances_invalid_creation_returns_bad_request() {
      * but we exercise a few different types of errors to make sure those get
      * passed through properly.
      */
-    let cptestctx = test_setup("test_instances_invalid_create").await;
+    let cptestctx =
+        test_setup("test_instances_invalid_creation_returns_bad_request").await;
     let client = &cptestctx.external_client;
     let url_instances = format!("/projects/{}/instances", PROJECT_NAME);
 
