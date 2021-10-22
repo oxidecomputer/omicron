@@ -134,6 +134,17 @@ table! {
 }
 
 table! {
+    session (token) {
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        token -> Text,
+        time_expires -> Timestamptz,
+        user_id -> Uuid,
+    }
+}
+
+table! {
     sled (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -181,6 +192,7 @@ allow_tables_to_appear_in_same_query!(
     project,
     saga,
     saganodeevent,
+    session,
     sled,
     vpc,
     vpcsubnet,

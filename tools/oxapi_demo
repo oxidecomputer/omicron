@@ -161,8 +161,8 @@ function cmd_organization_get
 
 function cmd_projects_list
 {
-	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /projects
+	# [[ $# != 0 ]] && usage "expected no arguments"
+	do_curl /projects $@
 }
 
 function cmd_project_create_demo

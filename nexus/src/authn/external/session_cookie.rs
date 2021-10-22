@@ -8,24 +8,30 @@ use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
 use anyhow::Context;
+use chrono::{DateTime, Duration, Utc};
 use cookie::{Cookie, CookieJar, ParseError};
 use uuid::Uuid;
 
-pub const COOKIE_NAME_OXIDE_AUTHN_COOKIE: &str = "oxide-authn-cookie";
-pub const COOKIE_SCHEME_NAME: authn::SchemeName = authn::SchemeName("cookie");
+// many parts of the implementation will reference this OWASP guide
+// https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+
+// generic cookie name is recommended by OWASP
+pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
+pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
+    authn::SchemeName("session_cookie");
 
 /// Implements an authentication scheme where we check the DB to see if we have
 /// a session matching the token in a cookie ([`COOKIE_NAME_OXIDE_AUTHN_COOKIE`])
 /// on the request. This is meant to be used by the web console.
 #[derive(Debug)]
-pub struct HttpAuthnCookie;
+pub struct HttpAuthnSessionCookie;
 
-impl<T> HttpAuthnScheme<T> for HttpAuthnCookie
+impl<T> HttpAuthnScheme<T> for HttpAuthnSessionCookie
 where
     T: Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
-        COOKIE_SCHEME_NAME
+        SESSION_COOKIE_SCHEME_NAME
     }
 
     fn authn(
@@ -39,7 +45,9 @@ where
             Ok(cookies) => cookies,
             Err(_) => return SchemeResult::NotRequested,
         };
-        authn_cookie(cookies.get(COOKIE_NAME_OXIDE_AUTHN_COOKIE))
+        let result = authn_cookie(cookies.get(SESSION_COOKIE_COOKIE_NAME));
+        println!("\n=============\nresult: {:?}\n=============\n", result);
+        result
     }
 }
 
@@ -62,29 +70,30 @@ fn parse_cookies(
     Ok(cookies)
 }
 
+fn mock_lookup(token: &str) -> Option<(&str, Uuid, DateTime<Utc>)> {
+    match token {
+        "good" => {
+            Some((token, Uuid::new_v4(), Utc::now() + Duration::seconds(30)))
+        }
+        "expired" => {
+            Some((token, Uuid::new_v4(), Utc::now() - Duration::seconds(300)))
+        }
+        _ => None,
+    }
+}
+
 fn authn_cookie(cookie: Option<&Cookie>) -> SchemeResult {
     if let Some(cookie) = cookie {
-        let cookie_value = cookie.value();
-
-        // check expiration
-        // match cookie.expires_datetime() {
-        //     Some(exp) if exp < Utc::now() => {
-        //         // return expired error
-        //     }
-        //     None => {
-        //         // should probably error if there's no expiration
-        //     }
-        //     Some(exp) => {
-        //         // continue
-        //     }
-        // }
+        let token = cookie.value();
+        println!("\n=============\ntoken: {}\n=============\n", token);
 
         // look up the cookie in the session table and pull the corresponding user
-        let session_exists = true;
-        if session_exists {
-            let actor = Actor(Uuid::new_v4());
-            let session_expired = false;
-            if session_expired {
+        let session = mock_lookup(token);
+        println!("\n=============\nsession: {:?}\n=============\n", session);
+
+        if let Some(session) = session {
+            let actor = Actor(session.1);
+            if session.2 < Utc::now() {
                 return SchemeResult::Failed(Reason::BadCredentials {
                     actor,
                     source: anyhow!("expired session"),
@@ -94,7 +103,7 @@ fn authn_cookie(cookie: Option<&Cookie>) -> SchemeResult {
             }
         } else {
             return SchemeResult::Failed(Reason::UnknownActor {
-                actor: cookie_value.to_owned(),
+                actor: token.to_owned(),
             });
         }
     } else {
@@ -106,9 +115,8 @@ fn authn_cookie(cookie: Option<&Cookie>) -> SchemeResult {
 mod test {
     use super::super::super::{Actor, Details, Reason};
     use super::super::SchemeResult;
-    use super::{authn_cookie, COOKIE_NAME_OXIDE_AUTHN_COOKIE};
+    use super::{authn_cookie, SESSION_COOKIE_COOKIE_NAME};
     use cookie::{Cookie, CookieJar};
-
 
     #[test]
     fn test_cookie_missing() {

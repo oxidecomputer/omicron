@@ -96,6 +96,7 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 )]
 pub enum SchemeName {
     Spoof,
+    SessionCookie,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -104,6 +105,7 @@ impl std::str::FromStr for SchemeName {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "spoof" => Ok(SchemeName::Spoof),
+            "session_cookie" => Ok(SchemeName::SessionCookie),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -113,6 +115,7 @@ impl std::fmt::Display for SchemeName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             SchemeName::Spoof => "spoof",
+            SchemeName::SessionCookie => "session_cookie",
         })
     }
 }
@@ -298,7 +301,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_schemes_external = [ "spoof" ]
+            authn_schemes_external = [ "spoof", "session_cookie" ]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -318,7 +321,10 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(config.authn_schemes_external, vec![SchemeName::Spoof],);
+        assert_eq!(
+            config.authn_schemes_external,
+            vec![SchemeName::Spoof, SchemeName::SessionCookie],
+        );
     }
 
     #[test]

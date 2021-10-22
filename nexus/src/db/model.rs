@@ -3,7 +3,7 @@
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, sled, vpc, vpcsubnet,
+    project, rack, session, sled, vpc, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -964,4 +964,16 @@ pub struct NetworkInterface {
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+}
+
+#[derive(Queryable, Insertable, Clone, Debug)]
+#[table_name = "session"]
+// #[primary_key(token)]
+pub struct Session {
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+
+    pub token: String,
+    pub time_expires: DateTime<Utc>,
+    pub user_id: Uuid,
 }

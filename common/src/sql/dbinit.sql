@@ -444,6 +444,24 @@ CREATE TABLE omicron.public.SagaNodeEvent (
 /*******************************************************************/
 
 /*
+ * Sessions for use by web console.
+ */
+CREATE TABLE omicron.public.Session (
+    -- let's see if we can get away with not making this an Asset. there's really no
+    -- need for a primary key that's not the token
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    token STRING(31) PRIMARY KEY,
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- TODO: let's stay agnostic about what this means for now, but obviously the 
+    -- simplest interpretation is that it points to a row in the User table
+    user_id UUID NOT NULL
+);
+
+/*******************************************************************/
+
+/*
  * Metadata for the schema itself.  This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */

@@ -5,6 +5,7 @@ use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
+use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use oximeter::types::ProducerRegistry;
@@ -47,6 +48,11 @@ impl ServerContext {
             .iter()
             .map(|name| match name {
                 config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
+                config::SchemeName::SessionCookie => {
+                    Box::new(HttpAuthnSessionCookie)
+                    // TODO: gross
+                        as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>
+                }
             }
                 as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
             .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();

@@ -324,6 +324,10 @@ async fn projects_get(
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
+
+    let authn = apictx.external_authn.authn_request(&rqctx).await?;
+    println!("\n=============\n{:?}\n=============\n", authn);
+
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
