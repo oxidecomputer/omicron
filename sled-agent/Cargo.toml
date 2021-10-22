@@ -7,7 +7,7 @@ edition = "2018"
 async-trait = "0.1.51"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "test-request-with-headers" }
 futures = "0.3.15"
 http = "0.2.5"
 hyper = "0.14"

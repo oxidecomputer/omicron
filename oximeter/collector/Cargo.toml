@@ -5,7 +5,7 @@ edition = "2018"
 description = "The oximeter metric collection server"
 
 [dependencies]
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "test-request-with-headers" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
 oximeter-db = { path = "../db" }

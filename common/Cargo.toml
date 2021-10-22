@@ -37,7 +37,7 @@ features = [ "serde" ]
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
-branch = "main"
+branch = "test-request-with-headers"
 
 [dependencies.ipnet]
 version = "2.3.1"

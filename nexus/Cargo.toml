@@ -38,7 +38,7 @@ features = [ "serde" ]
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
-branch = "main"
+branch = "test-request-with-headers"
 
 [dependencies.omicron-common]
 path = "../common"

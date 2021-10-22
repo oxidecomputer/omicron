@@ -13,7 +13,7 @@
 #![allow(clippy::style)]
 
 pub mod authn; // Public only for testing
-mod config;
+pub mod config; // Public only for testing
 mod context;
 pub mod db; // Public only for some documentation examples
 mod http_entrypoints_external;
