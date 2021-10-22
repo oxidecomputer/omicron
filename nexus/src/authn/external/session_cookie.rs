@@ -51,6 +51,7 @@ where
     }
 }
 
+// TODO: could live in its own file along with its tests, but where
 fn parse_cookies(
     headers: &http::HeaderMap<http::HeaderValue>,
 ) -> Result<CookieJar, ParseError> {
@@ -113,10 +114,100 @@ fn authn_cookie(cookie: Option<&Cookie>) -> SchemeResult {
 
 #[cfg(test)]
 mod test {
-    use super::super::super::{Actor, Details, Reason};
     use super::super::SchemeResult;
-    use super::{authn_cookie, SESSION_COOKIE_COOKIE_NAME};
-    use cookie::{Cookie, CookieJar};
+    use super::{authn_cookie, parse_cookies};
+    use http::{
+        header::{ACCEPT, COOKIE},
+        HeaderMap,
+    };
+
+    #[test]
+    fn test_parse_cookies_empty_headers() {
+        let headers = HeaderMap::new();
+        let cookies = parse_cookies(&headers).unwrap();
+        assert_eq!(cookies.iter().count(), 0);
+    }
+
+    #[test]
+    fn test_parse_cookies_one_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, "session=abc".parse().unwrap());
+        let cookies = parse_cookies(&headers).unwrap();
+
+        assert_eq!(cookies.iter().count(), 1);
+
+        let cookie = cookies.get("session").unwrap();
+        assert_eq!(cookie.name(), "session");
+        assert_eq!(cookie.value(), "abc");
+    }
+
+    #[test]
+    fn test_parse_cookies_two_cookies() {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, "cookie1=abc; cookie2=def".parse().unwrap());
+        let cookies = parse_cookies(&headers).unwrap();
+
+        assert_eq!(cookies.iter().count(), 2);
+
+        let cookie1 = cookies.get("cookie1").unwrap();
+        assert_eq!(cookie1.name(), "cookie1");
+        assert_eq!(cookie1.value(), "abc");
+
+        let cookie2 = cookies.get("cookie2").unwrap();
+        assert_eq!(cookie2.name(), "cookie2");
+        assert_eq!(cookie2.value(), "def");
+    }
+
+    #[test]
+    fn test_parse_cookies_two_cookie_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, "cookie1=abc".parse().unwrap());
+        headers.append(COOKIE, "cookie2=def".parse().unwrap());
+
+        let cookies = parse_cookies(&headers).unwrap();
+
+        assert_eq!(cookies.iter().count(), 2);
+
+        let cookie1 = cookies.get("cookie1").unwrap();
+        assert_eq!(cookie1.name(), "cookie1");
+        assert_eq!(cookie1.value(), "abc");
+
+        let cookie2 = cookies.get("cookie2").unwrap();
+        assert_eq!(cookie2.name(), "cookie2");
+        assert_eq!(cookie2.value(), "def");
+    }
+
+    #[test]
+    fn test_parse_cookies_two_cookie_headers_same_name() {
+        // when two cookies in two separate cookie headers have the same name,
+        // the second one should override the first
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, "cookie=abc".parse().unwrap());
+        headers.append(COOKIE, "cookie=def".parse().unwrap());
+
+        let cookies = parse_cookies(&headers).unwrap();
+
+        assert_eq!(cookies.iter().count(), 1);
+
+        let cookie = cookies.get("cookie").unwrap();
+        assert_eq!(cookie.name(), "cookie");
+        assert_eq!(cookie.value(), "def");
+    }
+
+    #[test]
+    fn test_parse_cookies_ignore_other_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, "session=abc".parse().unwrap());
+        headers.insert(ACCEPT, "application/json".parse().unwrap());
+
+        let cookies = parse_cookies(&headers).unwrap();
+
+        assert_eq!(cookies.iter().count(), 1);
+
+        let cookie = cookies.get("session").unwrap();
+        assert_eq!(cookie.name(), "session");
+        assert_eq!(cookie.value(), "abc");
+    }
 
     #[test]
     fn test_cookie_missing() {
