@@ -10,6 +10,8 @@ use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
+use chrono;
+use chrono::{DateTime, Utc};
 use futures::future::ready;
 use futures::StreamExt;
 use omicron_common::api::external;
@@ -91,6 +93,13 @@ pub trait TestInterfaces {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
+
+    async fn session_create_with(
+        &self,
+        token: String,
+        user_id: Uuid,
+        time_expires: DateTime<Utc>,
+    ) -> CreateResult<db::model::Session>;
 }
 
 /**
@@ -1641,6 +1650,25 @@ impl Nexus {
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         Ok(self.build_oximeter_client(info.id, address))
     }
+
+    pub async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<db::model::Session> {
+        self.db_datastore.session_fetch(token).await
+    }
+
+    pub async fn session_create(
+        &self,
+        user_id: Uuid,
+    ) -> CreateResult<db::model::Session> {
+        // TODO: generate token
+        let token = String::from("abc");
+        // TODO: get session TTL from config
+        let time_expires = Utc::now() + chrono::Duration::seconds(3600);
+        let session = db::model::Session::new(token, user_id, time_expires);
+        Ok(self.db_datastore.session_create(session).await?)
+    }
 }
 
 #[async_trait]
@@ -1661,5 +1689,15 @@ impl TestInterfaces for Nexus {
         let instance_id = disk.runtime().attach_instance_id.unwrap();
         let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
+    }
+
+    async fn session_create_with(
+        &self,
+        token: String,
+        user_id: Uuid,
+        time_expires: DateTime<Utc>,
+    ) -> CreateResult<db::model::Session> {
+        let session = db::model::Session::new(token, user_id, time_expires);
+        Ok(self.db_datastore.session_create(session).await?)
     }
 }

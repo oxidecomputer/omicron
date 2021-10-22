@@ -470,6 +470,7 @@ CREATE TABLE omicron.public.Session (
     -- need for a primary key that's not the token
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
     token STRING(31) PRIMARY KEY,
     time_expires TIMESTAMPTZ NOT NULL,

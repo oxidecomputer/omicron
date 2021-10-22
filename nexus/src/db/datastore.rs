@@ -47,8 +47,8 @@ use crate::db::{
     model::{
         Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
         InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Session, Sled,
+        Vpc, VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -1492,5 +1492,43 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn session_fetch(&self, token: String) -> LookupResult<Session> {
+        use db::schema::session::dsl;
+        dsl::session
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::token.eq(token.clone()))
+            .select(Session::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Project,
+                    LookupType::Other(token.to_owned()),
+                )
+            })
+    }
+
+    pub async fn session_create(
+        &self,
+        session: Session,
+    ) -> CreateResult<Session> {
+        use db::schema::session::dsl;
+
+        let token = session.token.clone();
+        diesel::insert_into(dsl::session)
+            .values(session)
+            .returning(Session::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Session,
+                    token.as_str(),
+                )
+            })
     }
 }

@@ -1010,14 +1010,41 @@ pub struct NetworkInterface {
     pub ip: ipnetwork::IpNetwork,
 }
 
-#[derive(Queryable, Insertable, Clone, Debug)]
+// TODO
+
+// #[derive(
+//     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+// )]
+// #[serde(try_from = "String")]
+// pub struct SessionToken(String);
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "session"]
 // #[primary_key(token)]
 pub struct Session {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 
     pub token: String,
     pub time_expires: DateTime<Utc>,
     pub user_id: Uuid,
+}
+
+impl Session {
+    pub fn new(
+        token: String,
+        user_id: Uuid,
+        time_expires: DateTime<Utc>,
+    ) -> Self {
+        let now = Utc::now();
+        Session {
+            token,
+            user_id,
+            time_expires,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+        }
+    }
 }

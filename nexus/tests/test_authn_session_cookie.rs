@@ -1,10 +1,12 @@
+use chrono::{Duration, Utc};
 use dropshot::{test_util::ClientTestContext, HttpErrorResponseBody};
 use http::{Response, StatusCode};
 use hyper::{Body, Method, Request};
 
 pub mod common;
 use common::{load_test_config, test_setup_with_config};
-use omicron_nexus::config::SchemeName;
+use omicron_nexus::{config::SchemeName, TestInterfaces};
+use uuid::Uuid;
 
 extern crate slog;
 
@@ -15,6 +17,17 @@ async fn test_authn_session_cookie() {
     let cptestctx =
         test_setup_with_config("test_authn_session_cookie", &mut config).await;
     let client = &cptestctx.external_client;
+
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let user1 = Uuid::new_v4();
+    let in_5_minutes = Utc::now() + Duration::seconds(300);
+    let _ = nexus.session_create_with("good".into(), user1, in_5_minutes).await;
+
+    let user2 = Uuid::new_v4();
+    let ago_5_minutes = Utc::now() - Duration::seconds(300);
+    let _ =
+        nexus.session_create_with("expired".into(), user2, ago_5_minutes).await;
 
     let _ =
         get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
