@@ -458,6 +458,7 @@ pub enum ResourceType {
     SagaDbg,
     Vpc,
     VpcSubnet,
+    VpcRouter,
     Oximeter,
     MetricProducer,
 }
@@ -478,6 +479,7 @@ impl Display for ResourceType {
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
                 ResourceType::VpcSubnet => "vpc subnet",
+                ResourceType::VpcRouter => "vpc router",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
             }
@@ -1286,6 +1288,33 @@ pub struct VpcSubnetUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
+}
+
+/// A VPC router defines a series of rules that indicate where traffic
+/// should be sent depending on its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcRouter {
+    /// common identifying metadata
+    pub identity: IdentityMetadata,
+
+    /// The VPC to which the router belongs.
+    pub vpc_id: Uuid,
+}
+
+/// Create-time parameters for a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/// Updateable properties of a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify

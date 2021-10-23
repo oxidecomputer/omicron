@@ -35,6 +35,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcRouter;
+use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
@@ -1509,6 +1512,101 @@ impl Nexus {
         Ok(self
             .db_datastore
             .vpc_update_subnet(&subnet.identity.id, params)
+            .await?)
+    }
+
+    pub async fn vpc_list_routers(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcRouter> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let routers = self
+            .db_datastore
+            .vpc_list_routers(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|router| router.into())
+            .collect::<Vec<VpcRouter>>();
+        Ok(routers)
+    }
+
+    pub async fn vpc_lookup_router(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+    ) -> LookupResult<VpcRouter> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .vpc_router_fetch_by_name(&vpc.identity.id, router_name)
+            .await?
+            .into())
+    }
+
+    pub async fn vpc_create_router(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcRouterCreateParams,
+    ) -> CreateResult<VpcRouter> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let id = Uuid::new_v4();
+        let router = self
+            .db_datastore
+            .vpc_create_router(&id, &vpc.identity.id, params)
+            .await?;
+        Ok(router.into())
+    }
+
+    pub async fn vpc_delete_router(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+    ) -> DeleteResult {
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
+        self.db_datastore.vpc_delete_router(&router.identity.id).await
+    }
+
+    pub async fn vpc_update_router(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        params: &VpcRouterUpdateParams,
+    ) -> UpdateResult<()> {
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
+        Ok(self
+            .db_datastore
+            .vpc_update_router(&router.identity.id, params)
             .await?)
     }
 

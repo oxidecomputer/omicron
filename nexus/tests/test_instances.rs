@@ -18,6 +18,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use dropshot::test_util::object_delete;
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
@@ -29,22 +30,23 @@ use common::identity_eq;
 use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 
+static ORGANIZATION_NAME: &str = "test-org";
+static PROJECT_NAME: &str = "springfield-squidport";
+
 #[tokio::test]
-async fn test_instances() {
-    let cptestctx = test_setup("test_instances").await;
+async fn test_instances_access_before_create_returns_not_found() {
+    let cptestctx =
+        test_setup("test_instances_access_before_create_returns_not_found")
+            .await;
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
-    let nexus = &apictx.nexus;
 
     /* Create a project that we'll use for testing. */
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-    let project_name = "springfield-squidport";
+    create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
-        org_name, project_name
+        ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, &org_name, &project_name).await;
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     /* List instances.  There aren't any yet. */
     let instances = instances_list(&client, &url_instances).await;
@@ -72,8 +74,26 @@ async fn test_instances() {
         error.message,
         "not found: instance with name \"just-rainsticks\""
     );
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_instances_create_reboot_halt() {
+    let cptestctx = test_setup("test_instances_create_reboot_halt").await;
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    /* Create a project that we'll use for testing. */
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     /* Create an instance. */
+    let instance_url = format!("{}/just-rainsticks", url_instances);
     let new_instance = InstanceCreateParams {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from("just-rainsticks").unwrap(),
@@ -331,12 +351,88 @@ async fn test_instances() {
         )
         .await;
 
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
+    let cptestctx = test_setup(
+        "test_instances_delete_fails_when_running_succeeds_when_stopped",
+    )
+    .await;
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create a project that we'll use for testing.
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance.
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let new_instance = InstanceCreateParams {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from("just-rainsticks").unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_mebibytes_u32(256),
+        hostname: String::from("rainsticks"),
+    };
+    let instance: Instance =
+        objects_post(&client, &url_instances, new_instance.clone()).await;
+
+    // Simulate the instance booting.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Attempt to delete a running instance. This should fail.
+    let error = client
+        .make_request_error(
+            Method::DELETE,
+            &instance_url,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    assert_eq!(
+        error.message,
+        "instance cannot be deleted in state \"running\""
+    );
+
+    // Stop the instance
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Now deletion should succeed.
+    object_delete(&client, &instance_url).await;
+
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_instances_invalid_creation_returns_bad_request() {
     /*
      * The rest of these examples attempt to create invalid instances.  We don't
      * do exhaustive tests of the model here -- those are part of unit tests --
      * but we exercise a few different types of errors to make sure those get
      * passed through properly.
      */
+    let cptestctx =
+        test_setup("test_instances_invalid_creation_returns_bad_request").await;
+    let client = &cptestctx.external_client;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
 
     let error = client
         .make_request_with_body(

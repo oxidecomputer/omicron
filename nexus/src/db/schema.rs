@@ -172,6 +172,18 @@ table! {
     }
 }
 
+table! {
+    vpcrouter (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
@@ -185,4 +197,5 @@ allow_tables_to_appear_in_same_query!(
     sled,
     vpc,
     vpcsubnet,
+    vpcrouter
 );

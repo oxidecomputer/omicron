@@ -4,7 +4,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, sled, vpc, vpcsubnet,
+    project, rack, sled, vpc, vpcrouter, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -969,6 +969,50 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
             time_modified: Utc::now(),
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "vpcrouter"]
+pub struct VpcRouter {
+    #[diesel(embed)]
+    identity: VpcRouterIdentity,
+
+    pub vpc_id: Uuid,
+}
+
+impl VpcRouter {
+    pub fn new(
+        router_id: Uuid,
+        vpc_id: Uuid,
+        params: external::VpcRouterCreateParams,
+    ) -> Self {
+        let identity = VpcRouterIdentity::new(router_id, params.identity);
+        Self { identity, vpc_id }
+    }
+}
+
+impl Into<external::VpcRouter> for VpcRouter {
+    fn into(self) -> external::VpcRouter {
+        external::VpcRouter { identity: self.identity(), vpc_id: self.vpc_id }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "vpcrouter"]
+pub struct VpcRouterUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
+    fn from(params: external::VpcRouterUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
         }
     }
 }
