@@ -14,7 +14,9 @@ use dropshot::test_util::objects_post;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::{create_project, create_vpc};
+use common::resource_helpers::{
+    create_organization, create_project, create_vpc,
+};
 use common::test_setup;
 
 extern crate slog;
@@ -31,6 +33,7 @@ async fn test_vpc_routers() {
         "/organizations/{}/projects/{}/vpcs",
         organization_name, project_name
     );
+    create_organization(&client, organization_name).await;
     let _ = create_project(&client, organization_name, project_name).await;
 
     /* Create a VPC. */
