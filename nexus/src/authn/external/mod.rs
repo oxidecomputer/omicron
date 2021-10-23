@@ -1,6 +1,7 @@
 //! Authentication for requests to the external HTTP API
 
 use crate::authn;
+use async_trait::async_trait;
 use authn::Reason;
 
 pub mod session_cookie;
@@ -53,7 +54,7 @@ where
             let scheme_name = scheme_impl.name();
             trace!(log, "authn: trying {:?}", scheme_name);
             schemes_tried.push(scheme_name);
-            let result = scheme_impl.authn(ctx, log, &request);
+            let result = scheme_impl.authn(ctx, log, &request).await;
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
@@ -77,6 +78,7 @@ where
 }
 
 /// Implements a particular HTTP authentication scheme
+#[async_trait]
 pub trait HttpAuthnScheme<T>: std::fmt::Debug + Send + Sync + 'static
 where
     T: Send + Sync + 'static,
@@ -85,7 +87,7 @@ where
     fn name(&self) -> authn::SchemeName;
 
     /// Locate credentials in the HTTP request and attempt to verify them
-    fn authn(
+    async fn authn(
         &self,
         ctx: &T,
         log: &slog::Logger,

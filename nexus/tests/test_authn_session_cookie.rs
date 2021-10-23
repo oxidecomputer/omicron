@@ -20,6 +20,7 @@ async fn test_authn_session_cookie() {
 
     let nexus = &cptestctx.server.apictx.nexus;
 
+    // create 2 sessions in DB: one good, one expired
     let user1 = Uuid::new_v4();
     let in_5_minutes = Utc::now() + Duration::seconds(300);
     let _ = nexus.session_create_with("good".into(), user1, in_5_minutes).await;

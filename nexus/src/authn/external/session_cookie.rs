@@ -6,11 +6,13 @@ use super::Reason;
 use super::SchemeResult;
 use crate::authn;
 use crate::authn::Actor;
+use crate::ServerContext;
 use anyhow::anyhow;
 use anyhow::Context;
-use chrono::{DateTime, Duration, Utc};
+use async_trait::async_trait;
+use chrono::Utc;
 use cookie::{Cookie, CookieJar, ParseError};
-use uuid::Uuid;
+use std::sync::Arc;
 
 // many parts of the implementation will reference this OWASP guide
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
@@ -26,28 +28,52 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 #[derive(Debug)]
 pub struct HttpAuthnSessionCookie;
 
-impl<T> HttpAuthnScheme<T> for HttpAuthnSessionCookie
-where
-    T: Send + Sync + 'static,
-{
+#[async_trait]
+impl HttpAuthnScheme<Arc<ServerContext>> for HttpAuthnSessionCookie {
     fn name(&self) -> authn::SchemeName {
         SESSION_COOKIE_SCHEME_NAME
     }
 
-    fn authn(
+    async fn authn(
         &self,
-        _ctx: &T,
+        ctx: &Arc<ServerContext>,
         _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();
+
+        // TODO: control flow here is clearly not idiomatic, get some help
+
         let cookies = match parse_cookies(headers) {
             Ok(cookies) => cookies,
             Err(_) => return SchemeResult::NotRequested,
         };
-        let result = authn_cookie(cookies.get(SESSION_COOKIE_COOKIE_NAME));
-        println!("\n=============\nresult: {:?}\n=============\n", result);
-        result
+        let token = match cookies.get(SESSION_COOKIE_COOKIE_NAME) {
+            Some(cookie) => cookie.value(),
+            None => return SchemeResult::NotRequested,
+        };
+        println!("\n=============\ntoken: \"{}\"", token);
+
+        let session = match ctx.nexus.session_fetch(token.to_string()).await {
+            Ok(session) => session,
+            Err(_) => {
+                println!("session not found");
+                return SchemeResult::Failed(Reason::UnknownActor {
+                    actor: token.to_owned(),
+                });
+            }
+        };
+        println!("session: {:?}", session);
+
+        let actor = Actor(session.user_id);
+        if session.time_expires < Utc::now() {
+            return SchemeResult::Failed(Reason::BadCredentials {
+                actor,
+                source: anyhow!("expired session"),
+            });
+        }
+
+        SchemeResult::Authenticated(Details { actor })
     }
 }
 
@@ -71,51 +97,9 @@ fn parse_cookies(
     Ok(cookies)
 }
 
-fn mock_lookup(token: &str) -> Option<(&str, Uuid, DateTime<Utc>)> {
-    match token {
-        "good" => {
-            Some((token, Uuid::new_v4(), Utc::now() + Duration::seconds(30)))
-        }
-        "expired" => {
-            Some((token, Uuid::new_v4(), Utc::now() - Duration::seconds(300)))
-        }
-        _ => None,
-    }
-}
-
-fn authn_cookie(cookie: Option<&Cookie>) -> SchemeResult {
-    if let Some(cookie) = cookie {
-        let token = cookie.value();
-        println!("\n=============\ntoken: {}\n=============\n", token);
-
-        // look up the cookie in the session table and pull the corresponding user
-        let session = mock_lookup(token);
-        println!("\n=============\nsession: {:?}\n=============\n", session);
-
-        if let Some(session) = session {
-            let actor = Actor(session.1);
-            if session.2 < Utc::now() {
-                return SchemeResult::Failed(Reason::BadCredentials {
-                    actor,
-                    source: anyhow!("expired session"),
-                });
-            } else {
-                return SchemeResult::Authenticated(Details { actor });
-            }
-        } else {
-            return SchemeResult::Failed(Reason::UnknownActor {
-                actor: token.to_owned(),
-            });
-        }
-    } else {
-        SchemeResult::NotRequested
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use super::super::SchemeResult;
-    use super::{authn_cookie, parse_cookies};
+    use super::parse_cookies;
     use http::{
         header::{ACCEPT, COOKIE},
         HeaderMap,
@@ -209,11 +193,7 @@ mod test {
         assert_eq!(cookie.value(), "abc");
     }
 
-    #[test]
-    fn test_cookie_missing() {
-        // The client provided no credentials.
-        assert!(matches!(authn_cookie(None), SchemeResult::NotRequested));
-    }
+    // test: missing cookie
 
     // test: expired cookie
 
