@@ -871,6 +871,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hmac"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1369,6 +1375,7 @@ dependencies = [
  "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
  "expectorate",
  "futures",
+ "hex",
  "http",
  "hyper",
  "ipnetwork",
@@ -1387,6 +1394,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "pq-sys",
+ "rand",
  "ref-cast",
  "schemars",
  "serde",

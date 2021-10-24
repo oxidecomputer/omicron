@@ -14,6 +14,7 @@ use chrono;
 use chrono::{DateTime, Utc};
 use futures::future::ready;
 use futures::StreamExt;
+use hex;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -57,6 +58,7 @@ use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -1662,13 +1664,26 @@ impl Nexus {
         &self,
         user_id: Uuid,
     ) -> CreateResult<db::model::Session> {
-        // TODO: generate token
-        let token = String::from("abc");
         // TODO: get session TTL from config
         let time_expires = Utc::now() + chrono::Duration::seconds(3600);
-        let session = db::model::Session::new(token, user_id, time_expires);
+        let session =
+            db::model::Session::new(gen_session_token(), user_id, time_expires);
         Ok(self.db_datastore.session_create(session).await?)
     }
+}
+
+fn gen_session_token() -> String {
+    // TODO: might want to specify a particular algo rather than StdRng, which
+    // is currently ChaCha12Rng but can change if they decide it's no longer
+    // good enough
+    let mut rng = StdRng::from_entropy();
+    // OWASP recommends at least 64 bits of entropy
+    // 16 bytes = 128 bits of entropy
+    // TODO: confirm assumption that 16 random bytes means 128 bits of entropy
+    // TODO: the 16 should be a constant somewhere, maybe even in config?
+    let mut random_bytes: [u8; 16] = [0; 16];
+    rng.fill_bytes(&mut random_bytes);
+    hex::encode(random_bytes)
 }
 
 #[async_trait]

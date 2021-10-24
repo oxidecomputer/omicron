@@ -20,20 +20,23 @@ async fn test_authn_session_cookie() {
 
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // create 2 sessions in DB: one good, one expired
+    // create valid session with token "good"
     let user1 = Uuid::new_v4();
     let in_5_minutes = Utc::now() + Duration::seconds(300);
     let _ = nexus.session_create_with("good".into(), user1, in_5_minutes).await;
 
+    // request with good token should 200
+    let _ =
+        get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
+            .await;
+
+    // create expired session with token "expired", request with token should 401
     let user2 = Uuid::new_v4();
     let ago_5_minutes = Utc::now() - Duration::seconds(300);
     let _ =
         nexus.session_create_with("expired".into(), user2, ago_5_minutes).await;
 
-    let _ =
-        get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
-            .await;
-
+    // request with expired session should 401
     let _ = get_projects_with_cookie(
         &client,
         Some("session=expired"),
@@ -41,6 +44,17 @@ async fn test_authn_session_cookie() {
     )
     .await;
 
+    // create session with generated random token
+    let user3 = Uuid::new_v4();
+    let session = nexus.session_create(user3).await.unwrap();
+    let cookie = format!("session={}", session.token);
+
+    // request with generated session should be OK
+    let _ =
+        get_projects_with_cookie(&client, Some(&cookie), StatusCode::OK).await;
+    println!("{:?}", session);
+
+    // request with nonexistent session should 401
     let _ = get_projects_with_cookie(
         &client,
         Some("session=other"),

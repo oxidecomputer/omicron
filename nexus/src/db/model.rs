@@ -1032,6 +1032,9 @@ pub struct Session {
 }
 
 impl Session {
+    // TODO: should new() generate the token? i.e., should we move that code
+    // from nexus create_session into here? we can just use the full struct
+    // constructor when we want to specify a token value for testing purposes
     pub fn new(
         token: String,
         user_id: Uuid,
