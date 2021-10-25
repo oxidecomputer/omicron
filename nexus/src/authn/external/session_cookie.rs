@@ -197,16 +197,16 @@ mod test {
         assert_eq!(cookie.value(), "abc");
     }
 
-    struct CookieAuthServerContext;
+    // struct CookieAuthServerContext;
 
-    impl SessionBackend for CookieAuthServerContext {
-        async fn session_fetch(
-            &self,
-            token: String,
-        ) -> LookupResult<db::model::Session> {
-            Ok("hello")
-        }
-    }
+    // impl SessionBackend for CookieAuthServerContext {
+    //     async fn session_fetch(
+    //         &self,
+    //         token: String,
+    //     ) -> LookupResult<db::model::Session> {
+    //         Ok("hello")
+    //     }
+    // }
 
     // test: missing cookie
 
