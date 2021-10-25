@@ -19,7 +19,7 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.104"
+libc = "0.2.105"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 # See omicron-rpaths for more about the "pq-sys" dependency.
