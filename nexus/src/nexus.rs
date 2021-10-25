@@ -100,8 +100,8 @@ pub trait TestInterfaces {
         &self,
         token: String,
         user_id: Uuid,
-        time_expires: DateTime<Utc>,
-    ) -> CreateResult<db::model::Session>;
+        last_used: DateTime<Utc>,
+    ) -> CreateResult<db::model::ConsoleSession>;
 }
 
 /**
@@ -1656,21 +1656,16 @@ impl Nexus {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::Session> {
+    ) -> LookupResult<db::model::ConsoleSession> {
         self.db_datastore.session_fetch(token).await
     }
 
     pub async fn session_create(
         &self,
         user_id: Uuid,
-    ) -> CreateResult<db::model::Session> {
-        // TODO: get session TTL from config
-        let time_expires = Utc::now() + chrono::Duration::seconds(3600);
-        let session = db::model::Session::new(
-            generate_session_token(),
-            user_id,
-            time_expires,
-        );
+    ) -> CreateResult<db::model::ConsoleSession> {
+        let session =
+            db::model::ConsoleSession::new(generate_session_token(), user_id);
         Ok(self.db_datastore.session_create(session).await?)
     }
 }
@@ -1715,9 +1710,16 @@ impl TestInterfaces for Nexus {
         &self,
         token: String,
         user_id: Uuid,
-        time_expires: DateTime<Utc>,
-    ) -> CreateResult<db::model::Session> {
-        let session = db::model::Session::new(token, user_id, time_expires);
+        last_used: DateTime<Utc>,
+    ) -> CreateResult<db::model::ConsoleSession> {
+        let now = Utc::now();
+        let session = db::model::ConsoleSession {
+            token,
+            user_id,
+            last_used,
+            time_created: now,
+            time_modified: now,
+        };
         Ok(self.db_datastore.session_create(session).await?)
     }
 }

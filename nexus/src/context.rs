@@ -102,7 +102,7 @@ pub trait SessionBackend {
     async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::Session>;
+    ) -> LookupResult<db::model::ConsoleSession>;
 }
 
 #[async_trait]
@@ -110,7 +110,7 @@ impl SessionBackend for Arc<ServerContext> {
     async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::Session> {
+    ) -> LookupResult<db::model::ConsoleSession> {
         self.nexus.session_fetch(token).await
     }
 }

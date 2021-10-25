@@ -134,13 +134,12 @@ table! {
 }
 
 table! {
-    session (token) {
+    consolesession (token) {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
 
         token -> Text,
-        time_expires -> Timestamptz,
+        last_used -> Timestamptz,
         user_id -> Uuid,
     }
 }
@@ -205,7 +204,7 @@ allow_tables_to_appear_in_same_query!(
     project,
     saga,
     saganodeevent,
-    session,
+    consolesession,
     sled,
     vpc,
     vpcsubnet,

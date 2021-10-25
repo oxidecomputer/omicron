@@ -20,23 +20,27 @@ async fn test_authn_session_cookie() {
 
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // create valid session with token "good"
+    /*
+     * Valid fake token "good"
+     */
     let user1 = Uuid::new_v4();
-    let in_5_minutes = Utc::now() + Duration::seconds(300);
-    let _ = nexus.session_create_with("good".into(), user1, in_5_minutes).await;
+    let last_used_now = Utc::now();
+    let _ =
+        nexus.session_create_with("good".into(), user1, last_used_now).await;
 
-    // request with good token should 200
     let _ =
         get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
             .await;
 
     /*
-     * EXPIRED TOKEN
+     * Expired fake token "expired"
      */
     let user2 = Uuid::new_v4();
-    let ago_5_minutes = Utc::now() - Duration::seconds(300);
-    let _ =
-        nexus.session_create_with("expired".into(), user2, ago_5_minutes).await;
+    let last_used_2_hours = Utc::now() - Duration::seconds(3600);
+    let _ = nexus
+        .session_create_with("expired".into(), user2, last_used_2_hours)
+        .await;
+
     let _ = get_projects_with_cookie(
         &client,
         Some("session=expired"),
@@ -44,17 +48,20 @@ async fn test_authn_session_cookie() {
     )
     .await;
 
-    // create session with generated random token
+    /*
+     * Valid random token
+     */
     let user3 = Uuid::new_v4();
     let session = nexus.session_create(user3).await.unwrap();
     let cookie = format!("session={}", session.token);
 
-    // request with generated session should be OK
     let _ =
         get_projects_with_cookie(&client, Some(&cookie), StatusCode::OK).await;
     println!("{:?}", session);
 
-    // request with nonexistent session should 401
+    /*
+     * Nonexistent token
+     */
     let _ = get_projects_with_cookie(
         &client,
         Some("session=other"),
@@ -63,6 +70,9 @@ async fn test_authn_session_cookie() {
     .await;
 
     // TODO: this passes with NotRequested but we probably need it to fail
+    /*
+     * No session cookie
+     */
     let _ = get_projects_with_cookie(&client, None, StatusCode::OK).await;
 
     cptestctx.teardown().await;

@@ -2,8 +2,8 @@
 
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, session, sled, vpc, vpcrouter, vpcsubnet,
+    consolesession, disk, instance, metricproducer, networkinterface,
+    organization, oximeter, project, rack, sled, vpc, vpcrouter, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1019,35 +1019,29 @@ pub struct NetworkInterface {
 // pub struct SessionToken(String);
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "session"]
+#[table_name = "consolesession"]
 // #[primary_key(token)]
-pub struct Session {
+pub struct ConsoleSession {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
 
     pub token: String,
-    pub time_expires: DateTime<Utc>,
+    pub last_used: DateTime<Utc>,
     pub user_id: Uuid,
 }
 
-impl Session {
+impl ConsoleSession {
     // TODO: should new() generate the token? i.e., should we move that code
     // from nexus create_session into here? we can just use the full struct
     // constructor when we want to specify a token value for testing purposes
-    pub fn new(
-        token: String,
-        user_id: Uuid,
-        time_expires: DateTime<Utc>,
-    ) -> Self {
+    pub fn new(token: String, user_id: Uuid) -> Self {
         let now = Utc::now();
-        Session {
+        Self {
             token,
             user_id,
-            time_expires,
+            last_used: now,
             time_created: now,
             time_modified: now,
-            time_deleted: None,
         }
     }
 }

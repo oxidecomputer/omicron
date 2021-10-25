@@ -10,7 +10,7 @@ use crate::context::SessionBackend;
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use cookie::{Cookie, CookieJar, ParseError};
 
 // many parts of the implementation will reference this OWASP guide
@@ -56,24 +56,29 @@ where
             Some(cookie) => cookie.value(),
             None => return SchemeResult::NotRequested,
         };
-        println!("\n=============\ntoken: \"{}\"", token);
 
         let session = match ctx.session_fetch(token.to_string()).await {
             Ok(session) => session,
             Err(_) => {
-                println!("session not found");
+                println!("session not found"); // TODO: log this
                 return SchemeResult::Failed(Reason::UnknownActor {
                     actor: token.to_owned(),
                 });
             }
         };
-        println!("session: {:?}", session);
 
         let actor = Actor(session.user_id);
-        if session.time_expires < Utc::now() {
+        let session_ttl = Duration::seconds(3600); // TODO: pull from config
+        let now = Utc::now();
+        if now - session.last_used > session_ttl {
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
-                source: anyhow!("expired session"),
+                source: anyhow!(
+                    "expired session. last used: {}. time checked: {}. TTL: {}",
+                    session.last_used,
+                    now,
+                    session_ttl
+                ),
             });
         }
 
@@ -203,7 +208,7 @@ mod test {
     //     async fn session_fetch(
     //         &self,
     //         token: String,
-    //     ) -> LookupResult<db::model::Session> {
+    //     ) -> LookupResult<db::model::ConsoleSession> {
     //         Ok("hello")
     //     }
     // }
