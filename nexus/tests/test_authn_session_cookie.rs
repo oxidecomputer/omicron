@@ -29,14 +29,14 @@ async fn test_authn_session_cookie() {
     let _ =
         get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
             .await;
-
-    // create expired session with token "expired", request with token should 401
+    
+    /*
+     * EXPIRED TOKEN
+     */
     let user2 = Uuid::new_v4();
     let ago_5_minutes = Utc::now() - Duration::seconds(300);
     let _ =
         nexus.session_create_with("expired".into(), user2, ago_5_minutes).await;
-
-    // request with expired session should 401
     let _ = get_projects_with_cookie(
         &client,
         Some("session=expired"),

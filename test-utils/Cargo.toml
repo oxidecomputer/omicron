@@ -17,7 +17,7 @@ thiserror = "1.0"
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
-branch = "test-request-with-headers"
+branch = "main"
 
 [dependencies.signal-hook-tokio]
 version = "0.3"

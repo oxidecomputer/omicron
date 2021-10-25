@@ -490,41 +490,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
- "dropshot_endpoint 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
- "futures",
- "hostname",
- "http",
- "hyper",
- "indexmap",
- "openapiv3",
- "paste",
- "percent-encoding",
- "proc-macro2",
- "schemars",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
- "slog-term",
- "syn",
- "tokio",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "dropshot"
-version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers#53e14d20496ddb32e35583e640a69f213c7fc054"
-dependencies = [
- "async-trait",
- "base64",
- "bytes",
- "chrono",
- "dropshot_endpoint 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot_endpoint",
  "futures",
  "hostname",
  "http",
@@ -553,18 +519,6 @@ dependencies = [
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
 source = "git+https://github.com/oxidecomputer/dropshot?branch=main#f44c41831dc014ce48a0ba103737ceac72a836e2"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream",
- "syn",
-]
-
-[[package]]
-name = "dropshot_endpoint"
-version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers#53e14d20496ddb32e35583e640a69f213c7fc054"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1328,7 +1282,7 @@ dependencies = [
  "async-trait",
  "backoff",
  "chrono",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -1372,7 +1326,7 @@ dependencies = [
  "cookie",
  "db-macros",
  "diesel",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "expectorate",
  "futures",
  "hex",
@@ -1422,7 +1376,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "chrono",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -1455,7 +1409,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "expectorate",
  "futures",
  "libc 0.2.104",
@@ -1567,7 +1521,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "expectorate",
  "omicron-common",
  "omicron-test-utils",
@@ -1615,7 +1569,7 @@ name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "futures",
  "http",
  "oximeter",
@@ -1637,7 +1591,7 @@ name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=test-request-with-headers)",
+ "dropshot",
  "omicron-common",
  "oximeter",
  "reqwest",
@@ -1965,7 +1919,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
 dependencies = [
  "anyhow",
- "dropshot 0.5.2-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "futures",
  "hyper",
  "propolis",
