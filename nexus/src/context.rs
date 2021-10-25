@@ -5,9 +5,11 @@ use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
+use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
+use omicron_common::api::external::LookupResult;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -90,5 +92,25 @@ impl ServerContext {
             external_latencies,
             producer_registry,
         })
+    }
+}
+
+// TODO: make this generic in the session type so we can use tuples in the tests
+
+#[async_trait]
+pub trait SessionBackend {
+    async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<db::model::Session>;
+}
+
+#[async_trait]
+impl SessionBackend for Arc<ServerContext> {
+    async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<db::model::Session> {
+        self.nexus.session_fetch(token).await
     }
 }

@@ -6,13 +6,12 @@ use super::Reason;
 use super::SchemeResult;
 use crate::authn;
 use crate::authn::Actor;
-use crate::ServerContext;
+use crate::context::SessionBackend;
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use cookie::{Cookie, CookieJar, ParseError};
-use std::sync::Arc;
 
 // many parts of the implementation will reference this OWASP guide
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
@@ -29,14 +28,17 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 pub struct HttpAuthnSessionCookie;
 
 #[async_trait]
-impl HttpAuthnScheme<Arc<ServerContext>> for HttpAuthnSessionCookie {
+impl<T> HttpAuthnScheme<T> for HttpAuthnSessionCookie
+where
+    T: Send + Sync + 'static + SessionBackend,
+{
     fn name(&self) -> authn::SchemeName {
         SESSION_COOKIE_SCHEME_NAME
     }
 
     async fn authn(
         &self,
-        ctx: &Arc<ServerContext>,
+        ctx: &T,
         _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
@@ -56,7 +58,7 @@ impl HttpAuthnScheme<Arc<ServerContext>> for HttpAuthnSessionCookie {
         };
         println!("\n=============\ntoken: \"{}\"", token);
 
-        let session = match ctx.nexus.session_fetch(token.to_string()).await {
+        let session = match ctx.session_fetch(token.to_string()).await {
             Ok(session) => session,
             Err(_) => {
                 println!("session not found");
@@ -193,6 +195,17 @@ mod test {
         let cookie = cookies.get("session").unwrap();
         assert_eq!(cookie.name(), "session");
         assert_eq!(cookie.value(), "abc");
+    }
+
+    struct CookieAuthServerContext;
+
+    impl SessionBackend for CookieAuthServerContext {
+        async fn session_fetch(
+            &self,
+            token: String,
+        ) -> LookupResult<db::model::Session> {
+            Ok("hello")
+        }
     }
 
     // test: missing cookie

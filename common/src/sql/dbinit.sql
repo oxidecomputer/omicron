@@ -472,7 +472,7 @@ CREATE TABLE omicron.public.Session (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    token STRING(32) PRIMARY KEY,
+    token STRING(40) PRIMARY KEY,
     time_expires TIMESTAMPTZ NOT NULL,
     -- TODO: let's stay agnostic about what this means for now, but obviously the 
     -- simplest interpretation is that it points to a row in the User table
