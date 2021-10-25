@@ -43,6 +43,8 @@ impl HttpAuthnScheme<Arc<ServerContext>> for HttpAuthnSessionCookie {
         let headers = request.headers();
 
         // TODO: control flow here is clearly not idiomatic, get some help
+        // TODO: logging
+        // TODO: pass in session lookup function from outside
 
         let cookies = match parse_cookies(headers) {
             Ok(cookies) => cookies,

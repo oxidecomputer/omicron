@@ -46,16 +46,15 @@ impl ServerContext {
         let nexus_schemes = config
             .authn_schemes_external
             .iter()
-            .map(|name| match name {
-                config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
-                config::SchemeName::SessionCookie => {
-                    Box::new(HttpAuthnSessionCookie)
-                    // TODO: gross
-                        as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>
+            .map::<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>, _>(|name| {
+                match name {
+                    config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
+                    config::SchemeName::SessionCookie => {
+                        Box::new(HttpAuthnSessionCookie)
+                    }
                 }
-            }
-                as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
-            .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
+            })
+            .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };

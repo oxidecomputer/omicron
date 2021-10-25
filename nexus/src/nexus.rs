@@ -1666,22 +1666,27 @@ impl Nexus {
     ) -> CreateResult<db::model::Session> {
         // TODO: get session TTL from config
         let time_expires = Utc::now() + chrono::Duration::seconds(3600);
-        let session =
-            db::model::Session::new(gen_session_token(), user_id, time_expires);
+        let session = db::model::Session::new(
+            generate_session_token(),
+            user_id,
+            time_expires,
+        );
         Ok(self.db_datastore.session_create(session).await?)
     }
 }
 
-fn gen_session_token() -> String {
+fn generate_session_token() -> String {
     // TODO: might want to specify a particular algo rather than StdRng, which
     // is currently ChaCha12Rng but can change if they decide it's no longer
     // good enough
+    // TODO: "If getrandom is unable to provide secure entropy this method will panic."
+    // Should we explicitly handle that possibility, e.g., by wrapping this in a Result?
+    // TODO: file issue to avoid reseeding every time if this makes it into the final PR
     let mut rng = StdRng::from_entropy();
-    // OWASP recommends at least 64 bits of entropy
-    // 16 bytes = 128 bits of entropy
-    // TODO: confirm assumption that 16 random bytes means 128 bits of entropy
-    // TODO: the 16 should be a constant somewhere, maybe even in config?
-    let mut random_bytes: [u8; 16] = [0; 16];
+    // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
+    // 20 bytes = 160 bits of entropy
+    // TODO: the size should be a constant somewhere, maybe even in config?
+    let mut random_bytes: [u8; 20] = [0; 20];
     rng.fill_bytes(&mut random_bytes);
     hex::encode(random_bytes)
 }
