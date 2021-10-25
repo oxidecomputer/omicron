@@ -1672,11 +1672,11 @@ impl Nexus {
     // update last_used to now
     // do we need time_modified anymore? probably not
 
-    pub async fn session_renew(
+    pub async fn session_update_last_used(
         &self,
         token: String,
     ) -> UpdateResult<db::model::ConsoleSession> {
-        Ok(self.db_datastore.session_renew(token).await?)
+        Ok(self.db_datastore.session_update_last_used(token).await?)
     }
 }
 

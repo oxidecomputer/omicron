@@ -1534,7 +1534,7 @@ impl DataStore {
             })
     }
 
-    pub async fn session_renew(
+    pub async fn session_update_last_used(
         &self,
         token: String,
     ) -> UpdateResult<ConsoleSession> {

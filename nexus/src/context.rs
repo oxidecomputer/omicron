@@ -104,7 +104,7 @@ pub trait SessionBackend {
         token: String,
     ) -> LookupResult<db::model::ConsoleSession>;
 
-    async fn session_renew(
+    async fn session_update_last_used(
         &self,
         token: String,
     ) -> UpdateResult<db::model::ConsoleSession>;
@@ -119,10 +119,10 @@ impl SessionBackend for Arc<ServerContext> {
         self.nexus.session_fetch(token).await
     }
 
-    async fn session_renew(
+    async fn session_update_last_used(
         &self,
         token: String,
     ) -> UpdateResult<db::model::ConsoleSession> {
-        self.nexus.session_renew(token).await
+        self.nexus.session_update_last_used(token).await
     }
 }

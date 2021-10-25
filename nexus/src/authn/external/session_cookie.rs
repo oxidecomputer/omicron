@@ -105,7 +105,7 @@ where
             });
         }
 
-        match ctx.session_renew(token.to_string()).await {
+        match ctx.session_update_last_used(token.to_string()).await {
             Ok(_) => {}
             Err(_) => {
                 // couldn't renew session wtf
