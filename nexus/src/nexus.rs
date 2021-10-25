@@ -1668,6 +1668,18 @@ impl Nexus {
             db::model::ConsoleSession::new(generate_session_token(), user_id);
         Ok(self.db_datastore.session_create(session).await?)
     }
+
+    // update last_used to now
+    // do we need time_modified anymore? probably not
+
+    // pub async fn session_refresh(
+    //     &self,
+    //     token: String,
+    // ) -> CreateResult<db::model::ConsoleSession> {
+    //     let session =
+    //         db::model::ConsoleSession::new(generate_session_token(), user_id);
+    //     Ok(self.db_datastore.session_create(session).await?)
+    // }
 }
 
 fn generate_session_token() -> String {

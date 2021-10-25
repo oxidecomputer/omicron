@@ -12,6 +12,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use cookie::{Cookie, CookieJar, ParseError};
+use lazy_static::lazy_static;
 
 // many parts of the implementation will reference this OWASP guide
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
@@ -20,6 +21,12 @@ use cookie::{Cookie, CookieJar, ParseError};
 pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
 pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
     authn::SchemeName("session_cookie");
+
+// TODO: put these in a config
+lazy_static! {
+    pub static ref SESSION_IDLE_TTL: Duration = Duration::seconds(3600);
+    pub static ref SESSION_ABS_TTL: Duration = Duration::seconds(8 * 3600);
+}
 
 /// Implements an authentication scheme where we check the DB to see if we have
 /// a session matching the token in a cookie ([`COOKIE_NAME_OXIDE_AUTHN_COOKIE`])
@@ -68,19 +75,37 @@ where
         };
 
         let actor = Actor(session.user_id);
-        let session_ttl = Duration::seconds(3600); // TODO: pull from config
+
         let now = Utc::now();
-        if now - session.last_used > session_ttl {
+        if now - session.last_used > *SESSION_IDLE_TTL {
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
-                    "expired session. last used: {}. time checked: {}. TTL: {}",
+                    "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
                     session.last_used,
                     now,
-                    session_ttl
+                    *SESSION_IDLE_TTL
                 ),
             });
         }
+
+        // if the user is still within the idle timeout, but the session has existed longer
+        // than the absolute timeout, we can no longer extend the session
+
+        if now - session.time_created > *SESSION_ABS_TTL {
+            return SchemeResult::Failed(Reason::BadCredentials {
+                actor,
+                source: anyhow!(
+                    "session expired due to absolute timeout. created: {}. last used: {}. time checked: {}. TTL: {}",
+                    session.time_created,
+                    session.last_used,
+                    now,
+                    *SESSION_ABS_TTL
+                ),
+            });
+        }
+
+        // TODO: update last used to now
 
         SchemeResult::Authenticated(Details { actor })
     }
