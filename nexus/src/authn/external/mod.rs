@@ -138,12 +138,13 @@ mod test {
     const OK: u8 = 1;
     const FAIL: u8 = 2;
 
+    #[async_trait]
     impl HttpAuthnScheme<()> for GruntScheme {
         fn name(&self) -> authn::SchemeName {
             self.name
         }
 
-        fn authn(
+        async fn authn(
             &self,
             _ctx: &(),
             _log: &slog::Logger,
