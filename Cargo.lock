@@ -484,7 +484,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c2f21739e909f6e07c4b431cc68fb2f0714a45b1"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#19d44d89f3966c720a71526ac0bada6e298522ce"
 dependencies = [
  "async-trait",
  "base64",
@@ -518,7 +518,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c2f21739e909f6e07c4b431cc68fb2f0714a45b1"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#19d44d89f3966c720a71526ac0bada6e298522ce"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2868,7 +2868,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4752a97f8eebd6854ff91f1c1824cd6160626ac4bd44287f7f4ea2035a02a242"
 dependencies = [
  "const_fn",
- "libc 0.2.104",
+ "libc 0.2.105",
  "standback",
  "stdweb",
  "time-macros",

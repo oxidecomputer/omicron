@@ -29,7 +29,7 @@ async fn test_authn_session_cookie() {
     let _ =
         get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
             .await;
-    
+
     /*
      * EXPIRED TOKEN
      */
