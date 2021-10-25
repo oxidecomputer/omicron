@@ -105,7 +105,12 @@ where
             });
         }
 
-        // TODO: update last used to now
+        match ctx.session_renew(token.to_string()).await {
+            Ok(_) => {}
+            Err(_) => {
+                // couldn't renew session wtf
+            }
+        };
 
         SchemeResult::Authenticated(Details { actor })
     }

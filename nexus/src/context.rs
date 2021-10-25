@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
-use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::{LookupResult, UpdateResult};
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -103,6 +103,11 @@ pub trait SessionBackend {
         &self,
         token: String,
     ) -> LookupResult<db::model::ConsoleSession>;
+
+    async fn session_renew(
+        &self,
+        token: String,
+    ) -> UpdateResult<db::model::ConsoleSession>;
 }
 
 #[async_trait]
@@ -112,5 +117,12 @@ impl SessionBackend for Arc<ServerContext> {
         token: String,
     ) -> LookupResult<db::model::ConsoleSession> {
         self.nexus.session_fetch(token).await
+    }
+
+    async fn session_renew(
+        &self,
+        token: String,
+    ) -> UpdateResult<db::model::ConsoleSession> {
+        self.nexus.session_renew(token).await
     }
 }

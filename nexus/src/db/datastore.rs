@@ -1533,4 +1533,25 @@ impl DataStore {
                 )
             })
     }
+
+    pub async fn session_renew(
+        &self,
+        token: String,
+    ) -> UpdateResult<ConsoleSession> {
+        use db::schema::consolesession::dsl;
+
+        diesel::update(dsl::consolesession)
+            .filter(dsl::token.eq(token.clone()))
+            .set((dsl::last_used.eq(Utc::now()),))
+            .returning(ConsoleSession::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::ConsoleSession,
+                    LookupType::Other(token.to_owned()),
+                )
+            })
+    }
 }
