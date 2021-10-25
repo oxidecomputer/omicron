@@ -1,6 +1,7 @@
 //! Sled agent implementation
 
 use crate::config::Config;
+use crate::illumos::zfs::ZONE_ZFS_DATASET;
 use crate::instance_manager::InstanceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
@@ -12,13 +13,18 @@ use omicron_common::api::{
 };
 use slog::Logger;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
+use {
+    crate::mocks::MockNexusClient as NexusClient,
+    crate::illumos::zfs::MockZfs as Zfs,
+};
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use {
+    omicron_common::NexusClient,
+    crate::illumos::zfs::Zfs,
+};
 
 // TODO: I wanna make a task that continually reports the storage status
 // upward to nexus.
@@ -43,11 +49,15 @@ impl SledAgent {
         let vlan = config.vlan.clone();
         info!(&log, "created sled agent"; "id" => ?id);
 
+        // Before we start creating zones, we need to ensure that the
+        // necessary ZFS and Zone resources are ready.
+        Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
+
         let storage = match &config.zpools {
             Some(pools) => {
-                StorageManager::new_from_zpools(pools.clone()).await?
+                StorageManager::new_from_zpools(&log, pools.clone()).await?
             }
-            None => StorageManager::new()?,
+            None => StorageManager::new(&log)?,
         };
         // TODO-nit: Could remove nexus_client from IM?
         // basically just one less place to store it, could be passed in

@@ -78,15 +78,19 @@ impl ZpoolInfo {
     pub fn name(&self) -> &str {
         &self.name
     }
+
     pub fn size(&self) -> u64 {
         self.size
     }
+
     pub fn allocated(&self) -> u64 {
         self.allocated
     }
+
     pub fn free(&self) -> u64 {
         self.free
     }
+
     pub fn health(&self) -> ZpoolHealth {
         self.health
     }

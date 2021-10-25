@@ -9,15 +9,20 @@ use uuid::Uuid;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
-const BASE_ZONE: &str = "propolis_base";
+const PROPOLIS_BASE_ZONE: &str = "propolis_base";
+const CRUCIBLE_BASE_ZONE: &str = "crucible_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
+const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
 
 const IPADM: &str = "/usr/sbin/ipadm";
 const SVCADM: &str = "/usr/sbin/svcadm";
 const SVCCFG: &str = "/usr/sbin/svccfg";
 const ZLOGIN: &str = "/usr/sbin/zlogin";
 
-pub const ZONE_PREFIX: &str = "propolis_instance_";
+// TODO: These could become enums
+pub const ZONE_PREFIX: &str = "oxz_";
+pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_instance_";
+pub const CRUCIBLE_ZONE_PREFIX: &str = "oxz_crucible_instance_";
 
 fn get_zone(name: &str) -> Result<Option<zone::Zone>, Error> {
     Ok(zone::Adm::list()
@@ -58,11 +63,12 @@ impl Zones {
         Ok(())
     }
 
-    /// Creates a "base" zone for Propolis, from which other Propolis
-    /// zones may quickly be cloned.
-    pub fn create_propolis_base(log: &Logger) -> Result<(), Error> {
-        let name = BASE_ZONE;
-
+    fn create_base(
+        name: &str,
+        log: &Logger,
+        filesystems: &[zone::Fs],
+        devices: &[zone::Device],
+    ) -> Result<(), Error> {
         info!(log, "Querying for prescence of zone: {}", name);
         if let Some(zone) = get_zone(name)? {
             info!(
@@ -95,13 +101,12 @@ impl Zones {
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
-        cfg.add_fs(&zone::Fs {
-            ty: "lofs".to_string(),
-            dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-            special: PROPOLIS_SVC_DIRECTORY.to_string(),
-            options: vec!["ro".to_string()],
-            ..Default::default()
-        });
+        for fs in filesystems {
+            cfg.add_fs(&fs);
+        }
+        for device in devices {
+            cfg.add_device(device);
+        }
         cfg.run().map_err(|e| Error::InternalError {
             message: format!("Failed to create base zone: {}", e),
         })?;
@@ -117,15 +122,58 @@ impl Zones {
         Ok(())
     }
 
-    /// Sets the configuration for a Propolis zone.
-    ///
-    /// This zone will be cloned as a child of the "base propolis zone".
-    pub fn configure_propolis_zone(
+    /// Creates a "base" zone for Propolis, from which other Propolis
+    /// zones may quickly be cloned.
+    pub fn create_propolis_base(log: &Logger) -> Result<(), Error> {
+        Zones::create_base(
+            PROPOLIS_BASE_ZONE,
+            log,
+            &[
+                zone::Fs {
+                    ty: "lofs".to_string(),
+                    dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+                    special: PROPOLIS_SVC_DIRECTORY.to_string(),
+                    options: vec!["ro".to_string()],
+                    ..Default::default()
+                }
+            ],
+            &[
+                zone::Device { name: "/dev/vmm/*".to_string() },
+                zone::Device { name: "/dev/vmmctl".to_string() },
+                zone::Device { name: "/dev/viona".to_string() },
+            ],
+        )
+    }
+
+    /// Creates a "base" zone for the Crucible agent, from which other
+    /// zones may quickly be cloned.
+    pub fn create_crucible_base(log: &Logger) -> Result<(), Error> {
+        Zones::create_base(
+            CRUCIBLE_BASE_ZONE,
+            log,
+            &[
+                zone::Fs {
+                    ty: "lofs".to_string(),
+                    dir: CRUCIBLE_SVC_DIRECTORY.to_string(),
+                    special: CRUCIBLE_SVC_DIRECTORY.to_string(),
+                    options: vec!["ro".to_string()],
+                    ..Default::default()
+                }
+            ],
+            &[],
+        )
+    }
+
+    /// Sets the configuration for a zone.
+    fn configure_zone(
         log: &Logger,
         name: &str,
+        filesystems: &[zone::Fs],
+        devices: &[zone::Device],
+        datasets: &[zone::Dataset],
         vnics: Vec<String>,
     ) -> Result<(), Error> {
-        info!(log, "Creating propolis zone: {}", name);
+        info!(log, "Configuring zone: {}", name);
         let mut cfg = zone::Config::create(
             name,
             /* overwrite= */ true,
@@ -136,22 +184,21 @@ impl Zones {
             .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
-        cfg.add_fs(&zone::Fs {
-            ty: "lofs".to_string(),
-            dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-            special: PROPOLIS_SVC_DIRECTORY.to_string(),
-            options: vec!["ro".to_string()],
-            ..Default::default()
-        });
+        for fs in filesystems {
+            cfg.add_fs(&fs);
+        }
+        for device in devices {
+            cfg.add_device(device);
+        }
+        for dataset in datasets {
+            cfg.add_dataset(dataset);
+        }
         for vnic in &vnics {
             cfg.add_net(&zone::Net {
                 physical: vnic.to_string(),
                 ..Default::default()
             });
         }
-        cfg.add_device(&zone::Device { name: "/dev/vmm/*".to_string() });
-        cfg.add_device(&zone::Device { name: "/dev/vmmctl".to_string() });
-        cfg.add_device(&zone::Device { name: "/dev/viona".to_string() });
         cfg.run().map_err(|e| Error::InternalError {
             message: format!("Failed to create child zone: {}", e),
         })?;
@@ -159,14 +206,85 @@ impl Zones {
         Ok(())
     }
 
+    /// Sets the configuration for a Propolis zone.
+    ///
+    /// This zone will be cloned as a child of the "base propolis zone".
+    pub fn configure_propolis_zone(
+        log: &Logger,
+        name: &str,
+        vnics: Vec<String>,
+    ) -> Result<(), Error> {
+        Zones::configure_zone(
+            log,
+            name,
+            &[
+                zone::Fs {
+                    ty: "lofs".to_string(),
+                    dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+                    special: PROPOLIS_SVC_DIRECTORY.to_string(),
+                    options: vec!["ro".to_string()],
+                    ..Default::default()
+                }
+            ],
+            &[
+                zone::Device { name: "/dev/vmm/*".to_string() },
+                zone::Device { name: "/dev/vmmctl".to_string() },
+                zone::Device { name: "/dev/viona".to_string() },
+            ],
+            &[],
+            vnics,
+        )
+    }
+
+    /// Sets the configuration for a Crucible zone.
+    ///
+    /// This zone will be cloned as a child of the "base crucible zone".
+    pub fn configure_crucible_zone(
+        log: &Logger,
+        name: &str,
+        vnic: String,
+        pool_name: String,
+    ) -> Result<(), Error> {
+        Zones::configure_zone(
+            log,
+            name,
+            &[
+                zone::Fs {
+                    ty: "lofs".to_string(),
+                    dir: CRUCIBLE_SVC_DIRECTORY.to_string(),
+                    special: CRUCIBLE_SVC_DIRECTORY.to_string(),
+                    options: vec!["ro".to_string()],
+                    ..Default::default()
+                }
+            ],
+            &[],
+            &[
+                zone::Dataset {
+                    name: pool_name,
+                },
+            ],
+            vec![vnic],
+        )
+    }
+
     /// Clones a zone (named `name`) from the base Propolis zone.
-    pub fn clone_from_base(name: &str) -> Result<(), Error> {
-        zone::Adm::new(name).clone(BASE_ZONE).map_err(|e| {
+    fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
+        zone::Adm::new(name).clone(base).map_err(|e| {
             Error::InternalError {
                 message: format!("Failed to clone zone: {}", e),
             }
         })?;
         Ok(())
+    }
+
+    /// Clones a zone (named `name`) from the base Propolis zone.
+    pub fn clone_from_base_propolis(name: &str) -> Result<(), Error> {
+        Zones::clone_from_base(name, PROPOLIS_BASE_ZONE)
+    }
+
+    /// Clones a zone (named `name`) from the base Crucible zone.
+    pub fn clone_from_base_crucible(name: &str) -> Result<(), Error> {
+        Zones::clone_from_base(name, CRUCIBLE_BASE_ZONE)
     }
 
     /// Boots a zone (named `name`).

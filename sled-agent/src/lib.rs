@@ -22,6 +22,7 @@ mod instance_manager;
 pub mod server;
 mod sled_agent;
 mod storage_manager;
+mod vnic;
 
 #[cfg(test)]
 mod mocks;

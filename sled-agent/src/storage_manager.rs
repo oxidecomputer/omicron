@@ -1,17 +1,29 @@
 //! Management of sled-local storage.
 
-use crate::illumos::zpool::ZpoolInfo;
+use crate::illumos::{
+    svc::wait_for_service,
+    zone::CRUCIBLE_ZONE_PREFIX,
+    zpool::ZpoolInfo,
+};
+use crate::vnic::{interface_name, IdAllocator, Vnic};
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::Error;
+use slog::Logger;
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
-#[cfg(test)]
-use crate::illumos::zpool::MockZpool as Zpool;
 #[cfg(not(test))]
-use crate::illumos::zpool::Zpool;
+use crate::illumos::{dladm::Dladm, zpool::Zpool, zone::Zones};
+#[cfg(test)]
+use crate::illumos::{dladm::MockDladm as Dladm, zpool::MockZpool as Zpool, zone::MockZones as Zones};
+
+fn crucible_zone_name(id: &Uuid) -> String {
+    format!("{}{}", CRUCIBLE_ZONE_PREFIX, id)
+}
 
 enum PoolManagementState {
     // No assigned Crucible Agent.
@@ -51,27 +63,71 @@ impl Pool {
 
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
+    log: Logger,
     pools: Arc<Mutex<HashMap<String, Pool>>>,
     new_pools_rx: mpsc::Receiver<String>,
+    vnic_id_allocator: IdAllocator,
 }
 
 impl StorageWorker {
-    async fn do_work(&mut self) {
-        while let Some(name) = self.new_pools_rx.recv().await {
-            let mut pools = self.pools.lock().unwrap();
+    async fn do_work(&mut self) -> Result<(), Error> {
+        // Create a base zone, from which all running storage zones are cloned.
+        Zones::create_crucible_base(&self.log)?;
 
+        while let Some(pool_name) = self.new_pools_rx.recv().await {
+            info!(&self.log, "creating crucible zone for zpool: {}", pool_name);
+
+            let mut pools = self.pools.lock().await;
             // TODO: when would this not exist? It really should...
-            let mut pool = pools.get_mut(&name).unwrap();
+            let mut pool = pools.get_mut(&pool_name).unwrap();
 
-            // TODO: start zone, update state.
-            println!("I should start a zone for {}", name);
+            // TODO: We need to ensure the crucible agent server starts
+            // running with this address / port combo too.
+            let network = self.create_crucible_zone(pool_name).await?;
             pool.state = PoolManagementState::Managed {
                 address: SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    network.ip(),
                     8080,
                 ),
             };
+            drop(pools);
+
+            // TODO: Notify nexus!
         }
+        Ok(())
+    }
+
+    // Configures and starts a zone which contains a Crucible Agent,
+    // responsible for managing the provided zpool.
+    async fn create_crucible_zone(&self, pool_name: String) -> Result<IpNetwork, Error> {
+        let physical_dl = Dladm::find_physical()?;
+        let nic = Vnic::new_control(&self.vnic_id_allocator, &physical_dl, None)?;
+
+        let id = Uuid::new_v4();
+        let zname = crucible_zone_name(&id);
+
+        // Configure the new zone - this should be identical to the base zone,
+        // but with a specified VNIC and pool.
+        Zones::configure_crucible_zone(
+            &self.log,
+            &zname,
+            nic.name().to_string(),
+            pool_name,
+        )?;
+
+        // Clone from the base crucible installation.
+        Zones::clone_from_base_crucible(&zname)?;
+
+        // Boot the new zone.
+        Zones::boot(&zname)?;
+
+        // Wait for the network services to come online, then create an address
+        // to use for communicating with the newly created zone.
+        wait_for_service(Some(&zname), "svc:/milestone/network:default")
+            .await?;
+        let network =
+            Zones::create_address(&zname, &interface_name(&nic.name()))?;
+        Ok(network)
     }
 }
 
@@ -84,7 +140,7 @@ pub struct StorageManager {
     new_pools_tx: mpsc::Sender<String>,
 
     // A handle to a worker which updates "pools".
-    task: JoinHandle<()>,
+    task: JoinHandle<Result<(), Error>>,
 }
 
 impl StorageManager {
@@ -92,11 +148,17 @@ impl StorageManager {
     ///
     /// NOTE: Monitoring is not yet implemented - this option simply reports
     /// "no observed local disks".
-    pub fn new() -> Result<Self, Error> {
+    pub fn new(log: &Logger) -> Result<Self, Error> {
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
+        let log = log.new(o!("component" => "sled agent storage manager"));
 
-        let mut worker = StorageWorker { pools: pools.clone(), new_pools_rx };
+        let mut worker = StorageWorker {
+            log,
+            pools: pools.clone(),
+            new_pools_rx,
+            vnic_id_allocator: IdAllocator::new(),
+        };
         Ok(StorageManager {
             pools,
             new_pools_tx,
@@ -105,7 +167,7 @@ impl StorageManager {
     }
 
     /// Creates a new [`StorageManager`] from a list of pre-supplied zpools.
-    pub async fn new_from_zpools(zpools: Vec<String>) -> Result<Self, Error> {
+    pub async fn new_from_zpools(log: &Logger, zpools: Vec<String>) -> Result<Self, Error> {
         let pools = zpools
             .into_iter()
             .map(|name| {
@@ -121,7 +183,13 @@ impl StorageManager {
         }
 
         let pools = Arc::new(Mutex::new(pools));
-        let mut worker = StorageWorker { pools: pools.clone(), new_pools_rx };
+        let log = log.new(o!("component" => "sled agent storage manager"));
+        let mut worker = StorageWorker {
+            log,
+            pools: pools.clone(),
+            new_pools_rx,
+            vnic_id_allocator: IdAllocator::new(),
+        };
         Ok(StorageManager {
             pools,
             new_pools_tx,
@@ -134,7 +202,7 @@ impl StorageManager {
         let zpool = Pool::new(name)?;
 
         let is_new = {
-            let mut pools = self.pools.lock().unwrap();
+            let mut pools = self.pools.lock().await;
             let entry = pools.entry(name.to_string());
             let is_new =
                 matches!(entry, std::collections::hash_map::Entry::Vacant(_));

@@ -1,7 +1,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::zfs::ZONE_ZFS_DATASET;
+use crate::vnic::IdAllocator;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -9,7 +9,6 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
 use uuid::Uuid;
@@ -21,34 +20,16 @@ use omicron_common::NexusClient;
 
 #[cfg(not(test))]
 use crate::{
-    illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
+    illumos::{dladm::Dladm, zone::Zones},
     instance::Instance,
 };
 #[cfg(test)]
 use crate::{
     illumos::{
-        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
-        zone::MockZones as Zones,
+        dladm::MockDladm as Dladm, zone::MockZones as Zones,
     },
     instance::MockInstance as Instance,
 };
-
-/// A shareable wrapper around an atomic counter.
-/// May be used to allocate runtime-unique IDs.
-#[derive(Clone, Debug)]
-pub struct IdAllocator {
-    value: Arc<AtomicU64>,
-}
-
-impl IdAllocator {
-    pub fn new() -> Self {
-        Self { value: Arc::new(AtomicU64::new(0)) }
-    }
-
-    pub fn next(&self) -> u64 {
-        self.value.fetch_add(1, Ordering::SeqCst)
-    }
-}
 
 struct InstanceManagerInternal {
     log: Logger,
@@ -75,10 +56,6 @@ impl InstanceManager {
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
-        // Before we start creating instances, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
-
         // Create a base zone, from which all running instance zones are cloned.
         Zones::create_propolis_base(&log)?;
 
