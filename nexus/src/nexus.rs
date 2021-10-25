@@ -1728,7 +1728,6 @@ impl TestInterfaces for Nexus {
             user_id,
             last_used,
             time_created: now,
-            time_modified: now,
         };
         Ok(self.db_datastore.session_create(session).await?)
     }

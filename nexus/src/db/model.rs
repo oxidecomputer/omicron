@@ -1020,11 +1020,8 @@ pub struct NetworkInterface {
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "consolesession"]
-// #[primary_key(token)]
 pub struct ConsoleSession {
     pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-
     pub token: String,
     pub last_used: DateTime<Utc>,
     pub user_id: Uuid,
@@ -1036,12 +1033,6 @@ impl ConsoleSession {
     // constructor when we want to specify a token value for testing purposes
     pub fn new(token: String, user_id: Uuid) -> Self {
         let now = Utc::now();
-        Self {
-            token,
-            user_id,
-            last_used: now,
-            time_created: now,
-            time_modified: now,
-        }
+        Self { token, user_id, last_used: now, time_created: now }
     }
 }

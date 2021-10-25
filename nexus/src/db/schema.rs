@@ -136,8 +136,6 @@ table! {
 table! {
     consolesession (token) {
         time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
         token -> Text,
         last_used -> Timestamptz,
         user_id -> Uuid,

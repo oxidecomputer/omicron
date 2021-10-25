@@ -467,8 +467,6 @@ CREATE TABLE omicron.public.SagaNodeEvent (
  */
 CREATE TABLE omicron.public.ConsoleSession (
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
     token STRING(40) PRIMARY KEY,
     last_used TIMESTAMPTZ NOT NULL,
     -- TODO: let's stay agnostic about what this means for now, but obviously the 
