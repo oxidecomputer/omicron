@@ -3,7 +3,11 @@
 use crate::illumos::{
     svc::wait_for_service,
     zfs::Mountpoint,
-    zone::CRUCIBLE_ZONE_PREFIX,
+    zone::{
+        CRUCIBLE_SVC_DIRECTORY,
+        CRUCIBLE_ZONE_PREFIX,
+        COCKROACH_ZONE_PREFIX,
+    },
     zpool::ZpoolInfo,
 };
 use crate::vnic::{interface_name, IdAllocator, Vnic};
@@ -31,24 +35,18 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
-fn crucible_zone_name(id: &Uuid) -> String {
-    format!("{}{}", CRUCIBLE_ZONE_PREFIX, id)
-}
-
-enum PoolManagementState {
-    // No assigned agents.
-    Unmanaged,
-    // The pool is actively managed by a Crucible Agent.
-    Managed {
-        address: SocketAddr
-    },
+/// A ZFS filesystem dataset within a zpool.
+struct Filesystem {
+    id: Uuid,
+    name: String,
+    address: SocketAddr,
 }
 
 /// A ZFS storage pool.
 struct Pool {
     id: Uuid,
     info: ZpoolInfo,
-    state: PoolManagementState,
+    filesystems: Vec<Filesystem>,
 }
 
 impl Pool {
@@ -64,13 +62,46 @@ impl Pool {
             .map_err(|e| Error::InternalError {
                 message: format!("Zpool's name cannot be parsed as UUID: {}", e),
             })?;
-        Ok(Pool { id, info, state: PoolManagementState::Unmanaged })
+        Ok(Pool { id, info, filesystems: vec![] })
+    }
+
+    fn add_filesystem(&mut self, fs: Filesystem) {
+        self.filesystems.push(fs);
     }
 
     fn id(&self) -> Uuid {
         self.id
     }
 }
+
+// Description of a dataset within a ZFS pool, which should be created
+// by the Sled Agent.
+struct PartitionInfo<'a> {
+    name: &'a str,
+    zone_prefix: &'a str,
+    data_directory: &'a str,
+    svc_directory: &'a str,
+    port: u16,
+}
+
+const PARTITIONS: &[PartitionInfo<'static>] = &[
+    PartitionInfo {
+        name: "crucible",
+        zone_prefix: CRUCIBLE_ZONE_PREFIX,
+        data_directory: "/data",
+        svc_directory: CRUCIBLE_SVC_DIRECTORY,
+        // TODO: Ensure crucible agent uses this port
+        port: 8080,
+    },
+    PartitionInfo {
+        name: "cockroach",
+        zone_prefix: COCKROACH_ZONE_PREFIX,
+        data_directory: "/data",
+        svc_directory: CRUCIBLE_SVC_DIRECTORY, // XXX Replace me
+        // TODO: Ensure cockroach uses this port
+        port: 8080,
+    }
+];
 
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
@@ -83,6 +114,7 @@ struct StorageWorker {
 }
 
 impl StorageWorker {
+    // Idempotently ensure the named filesystem exists with a UUID.
     fn ensure_filesystem_with_id(fs_name: &str) -> Result<Uuid, Error> {
         Zfs::ensure_filesystem(&fs_name, Mountpoint::Legacy)?;
         // Ensure the filesystem has a usable UUID.
@@ -98,14 +130,14 @@ impl StorageWorker {
 
     async fn do_work(&mut self) -> Result<(), Error> {
         // Create a base zone, from which all running storage zones are cloned.
-        Zones::create_crucible_base(&self.log)?;
+        Zones::create_storage_base(&self.log)?;
 
         while let Some(pool_name) = self.new_pools_rx.recv().await {
-            info!(&self.log, "creating crucible zone for zpool: {}", pool_name);
+            info!(&self.log, "Storage manager processing zpool: {}", pool_name);
 
             let mut pools = self.pools.lock().await;
             // TODO: when would this not exist? It really should...
-            let mut pool = pools.get_mut(&pool_name).unwrap();
+            let pool = pools.get_mut(&pool_name).unwrap();
 
             // For now, we place all "expected" filesystems on each new zpool
             // we see. The decision of "whether or not to actually use the
@@ -116,22 +148,24 @@ impl StorageWorker {
             // where Cockroach nodes should exist, we could be more selective
             // about this placement.
 
-            // Ensure the necessary filesystems exist (Cockroach, Crucible, etc).
-            let crucible_fs = format!("{}/{}", pool.info.name(), "crucible");
-            let crucible_id = StorageWorker::ensure_filesystem_with_id(&crucible_fs)?;
+            // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
+            // and start zones for each of them.
+            for partition in PARTITIONS {
+                let name = format!("{}/{}", pool.info.name(), partition.name);
+                let id = StorageWorker::ensure_filesystem_with_id(&name)?;
 
-            // TODO: We need to ensure the crucible agent server starts
-            // running with this address / port combo too.
-            let network = self.create_crucible_zone(crucible_fs).await?;
-            pool.state = PoolManagementState::Managed {
-                address: SocketAddr::new(
-                    network.ip(),
-                    8080,
-                ),
-            };
-
-            let cockroach_fs = format!("{}/{}", pool.info.name(), "cockroach");
-            let cockroach_id = StorageWorker::ensure_filesystem_with_id(&cockroach_fs)?;
+                let network = self.create_zone(
+                    partition.zone_prefix,
+                    &name,
+                    partition.data_directory,
+                    partition.svc_directory,
+                ).await?;
+                pool.add_filesystem(Filesystem {
+                    id,
+                    name,
+                    address: SocketAddr::new(network.ip(), partition.port),
+                });
+            }
 
             // TODO: Notify nexus!
             let allocation_info = self.nexus_client.zpool_post(
@@ -142,42 +176,59 @@ impl StorageWorker {
                     size: ByteCount::try_from(pool.info.size()).unwrap(),
                 },
             ).await;
-
-            // TODO: Ensure the datasets are of the requested size
-
-            // TODO: Notify nexus that the datasets are up too
         }
         Ok(())
     }
 
-    // TODO TODO:
+    // Creates a new zone, injecting the associated ZFS filesystem.
     //
-    // Pool ID != Crucible ID
+    // * zone_name_prefix: Describes the newly created zone name (prefix + ID)
+    // * filesystem_name: Name of ZFS filesystem to inject.
+    // * data_directory: Path to mounted ZFS filesytem within the zone.
+    // * svc_directory: Auxiliary filesystem to inject as read-only loopback.
+    //      (This is useful for injecting paths to binaries).
     //
-    // We should carve a dataset *out* of the pool for Crucible
-    // Could also carve a dataset out for other stuff
-    // TODO: ASK NEXUS WHAT TO DO
-
-    // Configures and starts a zone which contains a Crucible Agent,
-    // responsible for managing the provided ZFS filesystem.
-    async fn create_crucible_zone(&self, filesystem_name: String) -> Result<IpNetwork, Error> {
+    // TODO: Should this be idempotent? Can we "create a zone if it doesn't
+    // already exist"?
+    async fn create_zone(
+        &self,
+        zone_name_prefix: &str,
+        filesystem_name: &str,
+        data_directory: &str,
+        svc_directory: &str,
+    ) -> Result<IpNetwork, Error> {
         let physical_dl = Dladm::find_physical()?;
         let nic = Vnic::new_control(&self.vnic_id_allocator, &physical_dl, None)?;
-
         let id = Uuid::new_v4();
-        let zname = crucible_zone_name(&id);
+        let zname = format!("{}{}", zone_name_prefix, id);
 
         // Configure the new zone - this should be identical to the base zone,
         // but with a specified VNIC and pool.
-        Zones::configure_crucible_zone(
+        Zones::configure_zone(
             &self.log,
             &zname,
-            nic.name().to_string(),
-            filesystem_name,
+            &[
+                zone::Fs {
+                    ty: "lofs".to_string(),
+                    dir: svc_directory.to_string(),
+                    special: svc_directory.to_string(),
+                    options: vec!["ro".to_string()],
+                    ..Default::default()
+                },
+                zone::Fs {
+                    ty: "zfs".to_string(),
+                    dir: filesystem_name.to_string(),
+                    special: data_directory.to_string(),
+                    options: vec!["rw".to_string()],
+                    ..Default::default()
+                },
+            ],
+            &[],
+            vec![nic.name().to_string()],
         )?;
 
-        // Clone from the base crucible installation.
-        Zones::clone_from_base_crucible(&zname)?;
+        // Clone from the base zone installation.
+        Zones::clone_from_base_storage(&zname)?;
 
         // Boot the new zone.
         Zones::boot(&zname)?;

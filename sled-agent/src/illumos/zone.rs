@@ -10,10 +10,9 @@ use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
 const PROPOLIS_BASE_ZONE: &str = "propolis_base";
-const CRUCIBLE_BASE_ZONE: &str = "crucible_base";
+const STORAGE_BASE_ZONE: &str = "storage_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
-const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
-const CRUCIBLE_DATA_DIRECTORY: &str = "/data";
+pub const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
 
 const IPADM: &str = "/usr/sbin/ipadm";
 const SVCADM: &str = "/usr/sbin/svcadm";
@@ -24,6 +23,7 @@ const ZLOGIN: &str = "/usr/sbin/zlogin";
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_instance_";
 pub const CRUCIBLE_ZONE_PREFIX: &str = "oxz_crucible_instance_";
+pub const COCKROACH_ZONE_PREFIX: &str = "oxz_cockroach_instance_";
 
 fn get_zone(name: &str) -> Result<Option<zone::Zone>, Error> {
     Ok(zone::Adm::list()
@@ -146,27 +146,19 @@ impl Zones {
         )
     }
 
-    /// Creates a "base" zone for the Crucible agent, from which other
+    /// Creates a "base" zone for storage services, from which other
     /// zones may quickly be cloned.
-    pub fn create_crucible_base(log: &Logger) -> Result<(), Error> {
+    pub fn create_storage_base(log: &Logger) -> Result<(), Error> {
         Zones::create_base(
-            CRUCIBLE_BASE_ZONE,
+            STORAGE_BASE_ZONE,
             log,
-            &[
-                zone::Fs {
-                    ty: "lofs".to_string(),
-                    dir: CRUCIBLE_SVC_DIRECTORY.to_string(),
-                    special: CRUCIBLE_SVC_DIRECTORY.to_string(),
-                    options: vec!["ro".to_string()],
-                    ..Default::default()
-                }
-            ],
+            &[],
             &[],
         )
     }
 
     /// Sets the configuration for a zone.
-    fn configure_zone(
+    pub fn configure_zone(
         log: &Logger,
         name: &str,
         filesystems: &[zone::Fs],
@@ -232,39 +224,6 @@ impl Zones {
         )
     }
 
-    /// Sets the configuration for a Crucible zone.
-    ///
-    /// This zone will be cloned as a child of the "base crucible zone".
-    pub fn configure_crucible_zone(
-        log: &Logger,
-        name: &str,
-        vnic: String,
-        filesystem_name: String,
-    ) -> Result<(), Error> {
-        Zones::configure_zone(
-            log,
-            name,
-            &[
-                zone::Fs {
-                    ty: "lofs".to_string(),
-                    dir: CRUCIBLE_SVC_DIRECTORY.to_string(),
-                    special: CRUCIBLE_SVC_DIRECTORY.to_string(),
-                    options: vec!["ro".to_string()],
-                    ..Default::default()
-                },
-                zone::Fs {
-                    ty: "zfs".to_string(),
-                    dir: filesystem_name,
-                    special: CRUCIBLE_DATA_DIRECTORY.to_string(),
-                    options: vec!["rw".to_string()],
-                    ..Default::default()
-                },
-            ],
-            &[],
-            vec![vnic],
-        )
-    }
-
     /// Clones a zone (named `name`) from the base Propolis zone.
     fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
         zone::Adm::new(name).clone(base).map_err(|e| {
@@ -281,8 +240,8 @@ impl Zones {
     }
 
     /// Clones a zone (named `name`) from the base Crucible zone.
-    pub fn clone_from_base_crucible(name: &str) -> Result<(), Error> {
-        Zones::clone_from_base(name, CRUCIBLE_BASE_ZONE)
+    pub fn clone_from_base_storage(name: &str) -> Result<(), Error> {
+        Zones::clone_from_base(name, STORAGE_BASE_ZONE)
     }
 
     /// Boots a zone (named `name`).
