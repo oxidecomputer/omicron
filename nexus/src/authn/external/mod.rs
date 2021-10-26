@@ -4,6 +4,7 @@ use crate::authn;
 use async_trait::async_trait;
 use authn::Reason;
 
+mod cookies;
 pub mod session_cookie;
 pub mod spoof;
 

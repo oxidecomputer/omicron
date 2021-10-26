@@ -1670,8 +1670,6 @@ impl Nexus {
     }
 
     // update last_used to now
-    // do we need time_modified anymore? probably not
-
     pub async fn session_update_last_used(
         &self,
         token: String,
