@@ -117,8 +117,8 @@ impl Session for ConsoleSession {
     fn user_id(&self) -> Uuid {
         self.user_id
     }
-    fn last_used(&self) -> DateTime<Utc> {
-        self.last_used
+    fn time_last_used(&self) -> DateTime<Utc> {
+        self.time_last_used
     }
     fn time_created(&self) -> DateTime<Utc> {
         self.time_created

@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 pub trait Session {
     fn user_id(&self) -> Uuid;
-    fn last_used(&self) -> DateTime<Utc>;
+    fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
 
@@ -90,13 +90,13 @@ where
 
         // TODO: could move this logic into methods on the session trait
         let now = Utc::now();
-        if session.last_used() + *SESSION_IDLE_TTL < now {
+        if session.time_last_used() + *SESSION_IDLE_TTL < now {
             // TODO: hard delete the session?
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
                     "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
-                    session.last_used(),
+                    session.time_last_used(),
                     now,
                     *SESSION_IDLE_TTL
                 ),
@@ -106,14 +106,14 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than the absolute timeout, we can no longer extend the session
 
-        if session.last_used() + *SESSION_ABS_TTL < now {
+        if session.time_last_used() + *SESSION_ABS_TTL < now {
             // TODO: hard delete the session?
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
                     "session expired due to absolute timeout. created: {}. last used: {}. time checked: {}. TTL: {}",
                     session.time_created(),
-                    session.last_used(),
+                    session.time_last_used(),
                     now,
                     *SESSION_ABS_TTL
                 ),
@@ -175,7 +175,7 @@ mod test_session_cookie_scheme {
     #[derive(Clone, Copy)]
     struct FakeSession {
         time_created: DateTime<Utc>,
-        last_used: DateTime<Utc>,
+        time_last_used: DateTime<Utc>,
     }
 
     impl Session for FakeSession {
@@ -185,8 +185,8 @@ mod test_session_cookie_scheme {
         fn time_created(&self) -> DateTime<Utc> {
             self.time_created
         }
-        fn last_used(&self) -> DateTime<Utc> {
-            self.last_used
+        fn time_last_used(&self) -> DateTime<Utc> {
+            self.time_last_used
         }
     }
 
@@ -241,7 +241,7 @@ mod test_session_cookie_scheme {
     async fn test_expired_cookie() {
         let context = TestServerContext {
             global_session: Some(FakeSession {
-                last_used: Utc::now() - Duration::minutes(70),
+                time_last_used: Utc::now() - Duration::minutes(70),
                 time_created: Utc::now() - Duration::minutes(70),
             }),
         };
@@ -260,7 +260,7 @@ mod test_session_cookie_scheme {
     async fn test_valid_cookie() {
         let context = TestServerContext {
             global_session: Some(FakeSession {
-                last_used: Utc::now(),
+                time_last_used: Utc::now(),
                 time_created: Utc::now(),
             }),
         };

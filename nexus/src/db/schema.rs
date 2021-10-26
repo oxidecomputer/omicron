@@ -135,9 +135,9 @@ table! {
 
 table! {
     consolesession (token) {
-        time_created -> Timestamptz,
         token -> Text,
-        last_used -> Timestamptz,
+        time_created -> Timestamptz,
+        time_last_used -> Timestamptz,
         user_id -> Uuid,
     }
 }

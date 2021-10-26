@@ -100,7 +100,7 @@ pub trait TestInterfaces {
         &self,
         token: String,
         user_id: Uuid,
-        last_used: DateTime<Utc>,
+        time_last_used: DateTime<Utc>,
     ) -> CreateResult<db::model::ConsoleSession>;
 }
 
@@ -1720,13 +1720,13 @@ impl TestInterfaces for Nexus {
         &self,
         token: String,
         user_id: Uuid,
-        last_used: DateTime<Utc>,
+        time_last_used: DateTime<Utc>,
     ) -> CreateResult<db::model::ConsoleSession> {
         let now = Utc::now();
         let session = db::model::ConsoleSession {
             token,
             user_id,
-            last_used,
+            time_last_used,
             time_created: now,
         };
         Ok(self.db_datastore.session_create(session).await?)

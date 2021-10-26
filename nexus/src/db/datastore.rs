@@ -1542,7 +1542,7 @@ impl DataStore {
 
         diesel::update(dsl::consolesession)
             .filter(dsl::token.eq(token.clone()))
-            .set((dsl::last_used.eq(Utc::now()),))
+            .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await

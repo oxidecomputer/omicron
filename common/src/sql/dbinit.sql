@@ -466,9 +466,9 @@ CREATE TABLE omicron.public.SagaNodeEvent (
  * Sessions for use by web console.
  */
 CREATE TABLE omicron.public.ConsoleSession (
-    time_created TIMESTAMPTZ NOT NULL,
     token STRING(40) PRIMARY KEY,
-    last_used TIMESTAMPTZ NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_last_used TIMESTAMPTZ NOT NULL,
     -- TODO: let's stay agnostic about what this means for now, but obviously the 
     -- simplest interpretation is that it points to a row in the User table
     user_id UUID NOT NULL
