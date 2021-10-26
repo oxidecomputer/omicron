@@ -35,7 +35,7 @@
     </method_environment>
   </method_context>
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} --zpools testpool &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} --zpools d462a7f7-b628-40fe-80ff-4e4189e2d62b &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
