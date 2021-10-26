@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
+use chrono::{DateTime, Utc};
 use omicron_common::api::external::{LookupResult, UpdateResult};
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -96,22 +97,31 @@ impl ServerContext {
 }
 
 // TODO: make this generic in the session type so we can use tuples in the tests
+pub trait Session {
+    fn user_id(&self) -> Uuid;
+    fn last_used(&self) -> DateTime<Utc>;
+    fn time_created(&self) -> DateTime<Utc>;
+}
 
 #[async_trait]
-pub trait SessionBackend {
+pub trait SessionStore {
+    type SessionModel;
+
     async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::ConsoleSession>;
+    ) -> LookupResult<Self::SessionModel>;
 
     async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<db::model::ConsoleSession>;
+    ) -> UpdateResult<Self::SessionModel>;
 }
 
 #[async_trait]
-impl SessionBackend for Arc<ServerContext> {
+impl SessionStore for Arc<ServerContext> {
+    type SessionModel = db::model::ConsoleSession;
+
     async fn session_fetch(
         &self,
         token: String,
@@ -124,5 +134,17 @@ impl SessionBackend for Arc<ServerContext> {
         token: String,
     ) -> UpdateResult<db::model::ConsoleSession> {
         self.nexus.session_update_last_used(token).await
+    }
+}
+
+impl Session for db::model::ConsoleSession {
+    fn user_id(&self) -> Uuid {
+        self.user_id
+    }
+    fn last_used(&self) -> DateTime<Utc> {
+        self.last_used
+    }
+    fn time_created(&self) -> DateTime<Utc> {
+        self.time_created
     }
 }

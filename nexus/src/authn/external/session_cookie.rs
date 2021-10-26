@@ -6,7 +6,7 @@ use super::Reason;
 use super::SchemeResult;
 use crate::authn;
 use crate::authn::Actor;
-use crate::context::SessionBackend;
+use crate::context::{Session, SessionStore};
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -37,7 +37,8 @@ pub struct HttpAuthnSessionCookie;
 #[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnSessionCookie
 where
-    T: Send + Sync + 'static + SessionBackend,
+    T: Send + Sync + 'static + SessionStore,
+    T::SessionModel: Send + Sync + 'static + Session,
 {
     fn name(&self) -> authn::SchemeName {
         SESSION_COOKIE_SCHEME_NAME
@@ -74,15 +75,15 @@ where
             }
         };
 
-        let actor = Actor(session.user_id);
+        let actor = Actor(session.user_id());
 
         let now = Utc::now();
-        if now - session.last_used > *SESSION_IDLE_TTL {
+        if now - session.last_used() > *SESSION_IDLE_TTL {
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
                     "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
-                    session.last_used,
+                    session.last_used(),
                     now,
                     *SESSION_IDLE_TTL
                 ),
@@ -92,13 +93,13 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than the absolute timeout, we can no longer extend the session
 
-        if now - session.time_created > *SESSION_ABS_TTL {
+        if now - session.time_created() > *SESSION_ABS_TTL {
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
                     "session expired due to absolute timeout. created: {}. last used: {}. time checked: {}. TTL: {}",
-                    session.time_created,
-                    session.last_used,
+                    session.time_created(),
+                    session.last_used(),
                     now,
                     *SESSION_ABS_TTL
                 ),
