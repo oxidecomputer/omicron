@@ -5,6 +5,8 @@ use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
+use crate::authn::external::session_cookie::{Session, SessionStore};
+use crate::db::model::ConsoleSession;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
@@ -95,30 +97,9 @@ impl ServerContext {
     }
 }
 
-// TODO: move this stuff into its own file
-pub trait Session {
-    fn user_id(&self) -> Uuid;
-    fn last_used(&self) -> DateTime<Utc>;
-    fn time_created(&self) -> DateTime<Utc>;
-}
-
-#[async_trait]
-pub trait SessionStore {
-    type SessionModel;
-
-    // TODO: these should return results, it was just a lot easier to
-    // write the tests with Option. will change it back
-    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel>;
-
-    async fn session_update_last_used(
-        &self,
-        token: String,
-    ) -> Option<Self::SessionModel>;
-}
-
 #[async_trait]
 impl SessionStore for Arc<ServerContext> {
-    type SessionModel = db::model::ConsoleSession;
+    type SessionModel = ConsoleSession;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
         self.nexus.session_fetch(token).await.ok()
@@ -132,7 +113,7 @@ impl SessionStore for Arc<ServerContext> {
     }
 }
 
-impl Session for db::model::ConsoleSession {
+impl Session for ConsoleSession {
     fn user_id(&self) -> Uuid {
         self.user_id
     }

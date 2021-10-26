@@ -3,16 +3,36 @@
 use super::{HttpAuthnScheme, Reason, SchemeResult};
 use crate::authn;
 use crate::authn::{Actor, Details};
-use crate::context::{Session, SessionStore};
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use cookie::{Cookie, CookieJar, ParseError};
 use lazy_static::lazy_static;
+use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+
+pub trait Session {
+    fn user_id(&self) -> Uuid;
+    fn last_used(&self) -> DateTime<Utc>;
+    fn time_created(&self) -> DateTime<Utc>;
+}
+
+#[async_trait]
+pub trait SessionStore {
+    type SessionModel;
+
+    // TODO: these should return results, it was just a lot easier to
+    // write the tests with Option. will change it back
+    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel>;
+
+    async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> Option<Self::SessionModel>;
+}
 
 // generic cookie name is recommended by OWASP
 pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
@@ -47,13 +67,7 @@ where
         _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
-        let headers = request.headers();
-
-        // TODO: control flow here is clearly not idiomatic, get some help
-        // TODO: logging
-        // TODO: pass in session lookup function from outside
-
-        let cookies = match parse_cookies(headers) {
+        let cookies = match parse_cookies(request.headers()) {
             Ok(cookies) => cookies,
             Err(_) => return SchemeResult::NotRequested,
         };
@@ -74,8 +88,10 @@ where
 
         let actor = Actor(session.user_id());
 
+        // TODO: could move this logic into methods on the session trait
         let now = Utc::now();
-        if now - session.last_used() > *SESSION_IDLE_TTL {
+        if session.last_used() + *SESSION_IDLE_TTL < now {
+            // TODO: hard delete the session?
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -90,7 +106,8 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than the absolute timeout, we can no longer extend the session
 
-        if now - session.time_created() > *SESSION_ABS_TTL {
+        if session.last_used() + *SESSION_ABS_TTL < now {
+            // TODO: hard delete the session?
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -141,8 +158,8 @@ fn parse_cookies(
 mod test_session_cookie_scheme {
     use super::{
         Details, HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult,
+        Session, SessionStore,
     };
-    use crate::context::{Session, SessionStore};
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
     use http;
