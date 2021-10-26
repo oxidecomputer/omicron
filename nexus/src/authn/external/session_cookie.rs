@@ -1,11 +1,8 @@
 //! authn scheme for console that looks up cookie values in a session table
 
-use super::super::Details;
-use super::HttpAuthnScheme;
-use super::Reason;
-use super::SchemeResult;
+use super::{HttpAuthnScheme, Reason, SchemeResult};
 use crate::authn;
-use crate::authn::Actor;
+use crate::authn::{Actor, Details};
 use crate::context::{Session, SessionStore};
 use anyhow::anyhow;
 use anyhow::Context;
@@ -66,8 +63,8 @@ where
         };
 
         let session = match ctx.session_fetch(token.to_string()).await {
-            Ok(session) => session,
-            Err(_) => {
+            Some(session) => session,
+            None => {
                 println!("session not found"); // TODO: log this
                 return SchemeResult::Failed(Reason::UnknownActor {
                     actor: token.to_owned(),
@@ -107,8 +104,8 @@ where
         }
 
         match ctx.session_update_last_used(token.to_string()).await {
-            Ok(_) => {}
-            Err(_) => {
+            Some(_) => {}
+            None => {
                 // couldn't renew session wtf
             }
         };
@@ -137,8 +134,141 @@ fn parse_cookies(
     Ok(cookies)
 }
 
+// TODO: these unit tests for the scheme are pretty concise and get the idea across, but
+// still feel a little off
+
 #[cfg(test)]
-mod test {
+mod test_session_cookie_scheme {
+    use super::{
+        Details, HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult,
+    };
+    use crate::context::{Session, SessionStore};
+    use async_trait::async_trait;
+    use chrono::{DateTime, Duration, Utc};
+    use http;
+    use hyper;
+    use slog;
+    use uuid::Uuid;
+
+    struct TestServerContext {
+        // this global to the context instance. it is the response to every session fetch
+        global_session: Option<FakeSession>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct FakeSession {
+        time_created: DateTime<Utc>,
+        last_used: DateTime<Utc>,
+    }
+
+    impl Session for FakeSession {
+        fn user_id(&self) -> Uuid {
+            Uuid::new_v4()
+        }
+        fn time_created(&self) -> DateTime<Utc> {
+            self.time_created
+        }
+        fn last_used(&self) -> DateTime<Utc> {
+            self.last_used
+        }
+    }
+
+    #[async_trait]
+    impl SessionStore for TestServerContext {
+        type SessionModel = FakeSession;
+
+        async fn session_fetch(
+            &self,
+            _token: String,
+        ) -> Option<Self::SessionModel> {
+            self.global_session
+        }
+
+        async fn session_update_last_used(
+            &self,
+            _token: String,
+        ) -> Option<Self::SessionModel> {
+            self.global_session
+        }
+    }
+
+    async fn authn_with_cookie_header(
+        context: TestServerContext,
+        cookie: Option<&str>,
+    ) -> SchemeResult {
+        let scheme = HttpAuthnSessionCookie {};
+        let log = slog::Logger::root(slog::Discard, o!());
+        let mut request = http::Request::new(hyper::Body::from("hi"));
+        if let Some(cookie) = cookie {
+            let headers = request.headers_mut();
+            headers.insert(http::header::COOKIE, cookie.parse().unwrap());
+        }
+        scheme.authn(&context, &log, &request).await
+    }
+
+    #[tokio::test]
+    async fn test_missing_cookie() {
+        let context = TestServerContext { global_session: None };
+        let result = authn_with_cookie_header(context, None).await;
+        assert!(matches!(result, SchemeResult::NotRequested));
+    }
+
+    #[tokio::test]
+    async fn test_other_cookie() {
+        let context = TestServerContext { global_session: None };
+        let result = authn_with_cookie_header(context, Some("other=def")).await;
+        assert!(matches!(result, SchemeResult::NotRequested));
+    }
+
+    #[tokio::test]
+    async fn test_expired_cookie() {
+        let context = TestServerContext {
+            global_session: Some(FakeSession {
+                last_used: Utc::now() - Duration::minutes(70),
+                time_created: Utc::now() - Duration::minutes(70),
+            }),
+        };
+        let result =
+            authn_with_cookie_header(context, Some("session=abc")).await;
+        assert!(matches!(
+            result,
+            SchemeResult::Failed(Reason::BadCredentials {
+                actor: _,
+                source: _
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_valid_cookie() {
+        let context = TestServerContext {
+            global_session: Some(FakeSession {
+                last_used: Utc::now(),
+                time_created: Utc::now(),
+            }),
+        };
+        let result =
+            authn_with_cookie_header(context, Some("session=abc")).await;
+        assert!(matches!(
+            result,
+            SchemeResult::Authenticated(Details { actor: _ })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_garbage_cookie() {
+        let context = TestServerContext { global_session: None };
+        let result = authn_with_cookie_header(
+            context,
+            Some("unparseable garbage!!!!!1"),
+        )
+        .await;
+        assert!(matches!(result, SchemeResult::NotRequested));
+    }
+}
+
+#[cfg(test)]
+mod test_parse_cookies {
     use super::parse_cookies;
     use http::{
         header::{ACCEPT, COOKIE},
@@ -232,25 +362,4 @@ mod test {
         assert_eq!(cookie.name(), "session");
         assert_eq!(cookie.value(), "abc");
     }
-
-    // struct CookieAuthServerContext;
-
-    // impl SessionBackend for CookieAuthServerContext {
-    //     async fn session_fetch(
-    //         &self,
-    //         token: String,
-    //     ) -> LookupResult<db::model::ConsoleSession> {
-    //         Ok("hello")
-    //     }
-    // }
-
-    // test: missing cookie
-
-    // test: expired cookie
-
-    // test: cookie valid, session in DB but expired
-
-    // test: cookie valid, session in DB and not expired
-
-    // test: unparseable Cookie header value (NotRequested, not failed)
 }
