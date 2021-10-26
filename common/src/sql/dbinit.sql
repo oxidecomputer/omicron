@@ -474,9 +474,9 @@ CREATE TABLE omicron.public.ConsoleSession (
     user_id UUID NOT NULL
 );
 
--- to be used for cleaning up expired tokens
+-- to be used for cleaning up old tokens
 CREATE INDEX ON omicron.public.ConsoleSession (
-    last_used
+    time_created
 );
 
 /*******************************************************************/
