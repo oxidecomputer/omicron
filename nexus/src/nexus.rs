@@ -46,6 +46,7 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::SledAgentPoolInfo;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -198,11 +199,11 @@ impl Nexus {
         &self,
         id: Uuid,
         sled_id: Uuid,
-        address: SocketAddr,
+        info: SledAgentPoolInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered storage pool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
-        let zpool = db::model::Zpool::new(id, sled_id, address);
-        self.db_datastore.zpool_upsert(zpool).await?;
+        let zpool = db::model::Zpool::new(id, sled_id);
+        self.db_datastore.zpool_upsert(zpool, info).await?;
         Ok(())
     }
 

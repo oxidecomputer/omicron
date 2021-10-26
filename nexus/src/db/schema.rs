@@ -152,6 +152,18 @@ table! {
 
         sled_id -> Uuid,
 
+        total_size -> Int8,
+    }
+}
+
+table! {
+    dataset (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        pool_id -> Uuid,
+
         ip -> Inet,
         port -> Int4,
     }
@@ -163,10 +175,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
 
-        pool_id -> Uuid,
-
-        ip -> Inet,
-        port -> Int4,
+        dataset_id -> Uuid,
+        disk_id -> Uuid,
 
         block_size -> Int8,
         extent_size -> Int8,

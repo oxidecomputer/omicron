@@ -2,7 +2,7 @@
 
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    disk, instance, metricproducer, networkinterface, organization, oximeter,
+    dataset, disk, instance, metricproducer, networkinterface, organization, oximeter,
     project, rack, region, sled, vpc, vpcrouter, vpcsubnet, zpool,
 };
 use chrono::{DateTime, Utc};
@@ -327,7 +327,10 @@ impl Into<external::Sled> for Sled {
     }
 }
 
-/// Database representation of a Pool
+/// Database representation of a Pool.
+///
+/// A zpool represents a ZFS storage pool, allocated on a single
+/// physical sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "zpool"]
 pub struct Zpool {
@@ -337,16 +340,45 @@ pub struct Zpool {
     // Sled to which this Zpool belongs.
     pub sled_id: Uuid,
 
-    // Service address.
-    pub ip: ipnetwork::IpNetwork,
-    pub port: i32,
+    // TODO: In the future, we may expand this structure to include
+    // size, allocation, and health information.
+    pub total_size: ByteCount,
 }
 
 impl Zpool {
-    pub fn new(id: Uuid, sled_id: Uuid, addr: SocketAddr) -> Self {
+    pub fn new(id: Uuid, sled_id: Uuid, info: internal::nexus::SledAgentPoolInfo) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             sled_id,
+            total_size: info.size.into(),
+        }
+    }
+}
+
+/// Database representation of a Dataset.
+///
+/// A dataset represents a portion of a Zpool, which is then made
+/// available to a service on the Sled.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "dataset"]
+pub struct Dataset {
+    #[diesel(embed)]
+    identity: DatasetIdentity,
+
+    pool_id: Uuid,
+
+    ip: ipnetwork::IpNetwork,
+    port: i32,
+
+    // TODO: Do we want to indicate "Type of thing using this dataset?"
+    // Do we care?
+}
+
+impl Dataset {
+    pub fn new(id: Uuid, pool_id: Uuid, addr: SocketAddr) -> Self {
+        Self {
+            identity: DatasetIdentity::new(id),
+            pool_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
         }
@@ -358,18 +390,18 @@ impl Zpool {
     }
 }
 
-/// Database representation of a Region
+/// Database representation of a Region.
+///
+/// A region represents a portion of a Crucible Downstairs dataset
+/// allocated within a volume.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "region"]
 pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
 
-    pool_id: Uuid,
-
-    // Service address.
-    ip: ipnetwork::IpNetwork,
-    port: i32,
+    dataset_id: Uuid,
+    disk_id: Uuid,
 
     block_size: i64,
     extent_size: i64,

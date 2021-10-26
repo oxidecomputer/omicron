@@ -55,8 +55,20 @@ pub struct SledAgentStartupInfo {
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentPoolInfo {
-    /// Address of the Crucible storage agent's API endpoint
-    pub address: SocketAddr,
+    /// Total size of the pool.
+    pub size: ByteCount,
+    // TODO: add other info (allocated, free, health, etc).
+    // TODO: Indicate if the pool needs formatting?
+}
+
+/// Allocation strategy for pools.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentPoolAllocation {
+    /// Size of the dataset which should be allocated for Crucible.
+    pub size_crucible: ByteCount,
+    /// Size of the dataset which should be allocated for Cockroach.
+    pub size_cockroach: Option<ByteCount>,
+    // TODO: Other sizes? Other instructions? How about Clickhouse?
 }
 
 // Oximeter producer/collector objects.

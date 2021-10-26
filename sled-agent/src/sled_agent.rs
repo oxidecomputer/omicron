@@ -1,7 +1,7 @@
 //! Sled agent implementation
 
 use crate::config::Config;
-use crate::illumos::zfs::ZONE_ZFS_DATASET;
+use crate::illumos::zfs::{Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT};
 use crate::instance_manager::InstanceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
@@ -51,14 +51,17 @@ impl SledAgent {
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
+        Zfs::ensure_filesystem(
+            ZONE_ZFS_DATASET,
+            Mountpoint::Path(std::path::PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)),
+        )?;
 
-        let storage = match &config.zpools {
-            Some(pools) => {
-                StorageManager::new_from_zpools(&log, pools.clone()).await?
+        let storage = StorageManager::new(&log, *id, nexus_client.clone()).await?;
+        if let Some(pools) = &config.zpools {
+            for pool in pools {
+                storage.upsert_zpool(pool).await?;
             }
-            None => StorageManager::new(&log)?,
-        };
+        }
         // TODO-nit: Could remove nexus_client from IM?
         // basically just one less place to store it, could be passed in
         // 'ensure'. idk.

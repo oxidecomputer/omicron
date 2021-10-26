@@ -15,6 +15,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::SledAgentPoolAllocation;
 use omicron_common::api::internal::nexus::SledAgentPoolInfo;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use oximeter::types::ProducerResults;
@@ -100,13 +101,19 @@ async fn zpool_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ZpoolPathParam>,
     pool_info: TypedBody<SledAgentPoolInfo>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<SledAgentPoolAllocation>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let pi = pool_info.into_inner();
-    nexus.upsert_zpool(path.zpool_id, path.sled_id, pi.address).await?;
-    Ok(HttpResponseUpdatedNoContent())
+    nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
+    Ok(
+        HttpResponseOk(
+            SledAgentPoolAllocation {
+
+            }
+        )
+    )
 }
 
 /**

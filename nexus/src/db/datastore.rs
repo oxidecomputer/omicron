@@ -33,6 +33,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::internal::nexus::SledAgentPoolInfo;
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -45,7 +46,7 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
+        ByteCount, Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
         InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
         VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
@@ -126,7 +127,7 @@ impl DataStore {
     }
 
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+    pub async fn zpool_upsert(&self, zpool: Zpool, info: SledAgentPoolInfo) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
         diesel::insert_into(dsl::zpool)
             .values(zpool.clone())
@@ -135,8 +136,7 @@ impl DataStore {
             .set((
                 dsl::time_modified.eq(Utc::now()),
                 dsl::sled_id.eq(zpool.sled_id),
-                dsl::ip.eq(zpool.ip),
-                dsl::port.eq(zpool.port),
+                dsl::total_size.eq(ByteCount(info.size)),
             ))
             .returning(Zpool::as_returning())
             .get_result_async(self.pool())

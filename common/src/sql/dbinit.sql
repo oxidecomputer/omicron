@@ -76,9 +76,7 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    /* Contact information for the Crucible Storage Agent */
-    ip INET NOT NULL,
-    port INT4 NOT NULL
+    total_size INT NOT NULL,
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Zpool (
@@ -86,9 +84,9 @@ CREATE UNIQUE INDEX ON omicron.public.Zpool (
 );
 
 /*
- * A region of allocated space within a zpool.
+ * A dataset of allocated space within a zpool.
  */
-CREATE TABLE omicron.public.Region (
+CREATE TABLE omicron.public.Dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -101,6 +99,29 @@ CREATE TABLE omicron.public.Region (
     ip INET NOT NULL,
     port INT4 NOT NULL,
 
+    /* TODO: Do we want to indicate "type"? */
+    /* We are eyeing "Crucible datasets" to start, but these could be used for e.g. clickhouse */
+);
+
+CREATE UNIQUE INDEX ON omicron.public.Dataset (
+    pool_id,
+);
+
+/*
+ * A region of allocated space within a zpool.
+ */
+CREATE TABLE omicron.public.Region (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Dataset table */
+    dataset_id UUID NOT NULL,
+
+    /* FK into the Disk table */
+    disk_id UUID NOT NULL,
+
     /* Metadata describing the region */
     block_size INT NOT NULL,
     extent_size INT NOT NULL,
@@ -108,7 +129,8 @@ CREATE TABLE omicron.public.Region (
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Region (
-    pool_id,
+    dataset_id,
+    disk_id,
 );
 
 /*

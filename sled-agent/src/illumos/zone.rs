@@ -13,6 +13,7 @@ const PROPOLIS_BASE_ZONE: &str = "propolis_base";
 const CRUCIBLE_BASE_ZONE: &str = "crucible_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
+const CRUCIBLE_DATA_DIRECTORY: &str = "/data";
 
 const IPADM: &str = "/usr/sbin/ipadm";
 const SVCADM: &str = "/usr/sbin/svcadm";
@@ -170,7 +171,6 @@ impl Zones {
         name: &str,
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
-        datasets: &[zone::Dataset],
         vnics: Vec<String>,
     ) -> Result<(), Error> {
         info!(log, "Configuring zone: {}", name);
@@ -189,9 +189,6 @@ impl Zones {
         }
         for device in devices {
             cfg.add_device(device);
-        }
-        for dataset in datasets {
-            cfg.add_dataset(dataset);
         }
         for vnic in &vnics {
             cfg.add_net(&zone::Net {
@@ -231,7 +228,6 @@ impl Zones {
                 zone::Device { name: "/dev/vmmctl".to_string() },
                 zone::Device { name: "/dev/viona".to_string() },
             ],
-            &[],
             vnics,
         )
     }
@@ -243,7 +239,7 @@ impl Zones {
         log: &Logger,
         name: &str,
         vnic: String,
-        pool_name: String,
+        filesystem_name: String,
     ) -> Result<(), Error> {
         Zones::configure_zone(
             log,
@@ -255,14 +251,16 @@ impl Zones {
                     special: CRUCIBLE_SVC_DIRECTORY.to_string(),
                     options: vec!["ro".to_string()],
                     ..Default::default()
-                }
-            ],
-            &[],
-            &[
-                zone::Dataset {
-                    name: pool_name,
+                },
+                zone::Fs {
+                    ty: "zfs".to_string(),
+                    dir: filesystem_name,
+                    special: CRUCIBLE_DATA_DIRECTORY.to_string(),
+                    options: vec!["rw".to_string()],
+                    ..Default::default()
                 },
             ],
+            &[],
             vec![vnic],
         )
     }
