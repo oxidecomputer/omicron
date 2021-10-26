@@ -47,8 +47,8 @@ panic = "abort"
 
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the
-# README.md.oxide in the "oxide" branch of our fork for details.
+# README.oxide.md in the "oxide" branch of our fork for details.
 #
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
-branch = "omicron"
+branch = "oxide/omicron"
