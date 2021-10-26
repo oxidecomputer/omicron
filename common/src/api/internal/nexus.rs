@@ -6,6 +6,7 @@ use crate::api::external::{
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -52,23 +53,48 @@ pub struct SledAgentStartupInfo {
     pub sa_address: SocketAddr,
 }
 
+/// Describes a dataset within a pool.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DatasetInfo {
+    /// Unique identifier for the dataset.
+    pub id: Uuid,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentPoolInfo {
+    /// Unique identifier for the pool.
+    pub id: Uuid,
     /// Total size of the pool.
     pub size: ByteCount,
-    // TODO: add other info (allocated, free, health, etc).
-    // TODO: Indicate if the pool needs formatting?
+    // TODO: We could include any other data from `ZpoolInfo` we want,
+    // such as "allocated/free" space and pool health?
+    /// Description of datasets within the pool.
+    pub datasets: Vec<DatasetInfo>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AllocationInfo {
+    /// A minimum reservation size for a filesystem.
+    /// Refer to ZFS native properties for more detail.
+    pub reservation: ByteCount,
+    /// A maximum quota on filesystem usage.
+    /// Refer to ZFS native properties for more detail.
+    pub quota: ByteCount,
 }
 
 /// Allocation strategy for pools.
+// TODO: This could be useful for indicating quotas, or
+// for Nexus instructing the Sled Agent "what to format, and where".
+//
+// For now, the Sled Agent is a bit more proactive about allocation
+// decisions - see the "storage manager" section of the Sled Agent for
+// more details. Nexus, in response, merely advises minimums/maximums
+// for dataset sizes.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentPoolAllocation {
-    /// Size of the dataset which should be allocated for Crucible.
-    pub size_crucible: ByteCount,
-    /// Size of the dataset which should be allocated for Cockroach.
-    pub size_cockroach: Option<ByteCount>,
-    // TODO: Other sizes? Other instructions? How about Clickhouse?
+    /// Mapping of Dataset UUID to allocation properties to set.
+    pub allocations: HashMap<Uuid, AllocationInfo>,
 }
 
 // Oximeter producer/collector objects.

@@ -107,7 +107,11 @@ async fn zpool_post(
     let path = path_params.into_inner();
     let pi = pool_info.into_inner();
     nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
-    Ok(HttpResponseOk(SledAgentPoolAllocation {}))
+    Ok(HttpResponseOk(
+        SledAgentPoolAllocation {
+            allocations: std::collections::HashMap::new(),
+        }
+    ))
 }
 
 /**

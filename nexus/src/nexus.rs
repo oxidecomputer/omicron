@@ -202,7 +202,7 @@ impl Nexus {
         info: SledAgentPoolInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered storage pool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
-        let zpool = db::model::Zpool::new(id, sled_id);
+        let zpool = db::model::Zpool::new(id, sled_id, &info);
         self.db_datastore.zpool_upsert(zpool, info).await?;
         Ok(())
     }

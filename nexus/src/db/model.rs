@@ -349,7 +349,7 @@ impl Zpool {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        info: internal::nexus::SledAgentPoolInfo,
+        info: &internal::nexus::SledAgentPoolInfo,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),

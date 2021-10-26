@@ -32,9 +32,9 @@ use {crate::illumos::zfs::Zfs, omicron_common::NexusClient};
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
+    #[allow(dead_code)]
     storage: StorageManager,
     instances: InstanceManager,
-    nexus_client: Arc<NexusClient>,
 }
 
 impl SledAgent {
@@ -69,7 +69,7 @@ impl SledAgent {
         // 'ensure'. idk.
         let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { storage, instances, nexus_client })
+        Ok(SledAgent { storage, instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.

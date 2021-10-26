@@ -65,7 +65,7 @@ impl FromStr for ZpoolHealth {
 }
 
 /// Describes a Zpool.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ZpoolInfo {
     name: String,
     size: u64,
@@ -83,14 +83,17 @@ impl ZpoolInfo {
         self.size
     }
 
+    #[allow(dead_code)]
     pub fn allocated(&self) -> u64 {
         self.allocated
     }
 
+    #[allow(dead_code)]
     pub fn free(&self) -> u64 {
         self.free
     }
 
+    #[allow(dead_code)]
     pub fn health(&self) -> ZpoolHealth {
         self.health
     }

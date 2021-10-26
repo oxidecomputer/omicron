@@ -11,7 +11,7 @@ use crate::illumos::{
 use crate::vnic::{interface_name, IdAllocator, Vnic};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
-use omicron_common::api::internal::nexus::SledAgentPoolInfo;
+use omicron_common::api::internal::nexus::{DatasetInfo, SledAgentPoolInfo};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -35,8 +35,8 @@ use crate::mocks::MockNexusClient as NexusClient;
 use omicron_common::NexusClient;
 
 /// A ZFS filesystem dataset within a zpool.
+#[allow(dead_code)]
 struct Filesystem {
-    id: Uuid,
     name: String,
     address: SocketAddr,
 }
@@ -45,7 +45,7 @@ struct Filesystem {
 struct Pool {
     id: Uuid,
     info: ZpoolInfo,
-    filesystems: Vec<Filesystem>,
+    filesystems: HashMap<Uuid, Filesystem>,
 }
 
 impl Pool {
@@ -64,11 +64,11 @@ impl Pool {
                     e
                 ),
             })?;
-        Ok(Pool { id, info, filesystems: vec![] })
+        Ok(Pool { id, info, filesystems: HashMap::new() })
     }
 
-    fn add_filesystem(&mut self, fs: Filesystem) {
-        self.filesystems.push(fs);
+    fn add_filesystem(&mut self, id: Uuid, fs: Filesystem) {
+        self.filesystems.insert(id, fs);
     }
 
     fn id(&self) -> Uuid {
@@ -131,15 +131,17 @@ impl StorageWorker {
     }
 
     async fn do_work(&mut self) -> Result<(), Error> {
+        info!(self.log, "StorageWorker creating storage base zone");
         // Create a base zone, from which all running storage zones are cloned.
         Zones::create_storage_base(&self.log)?;
+        info!(self.log, "StorageWorker creating storage base zone - DONE");
 
         while let Some(pool_name) = self.new_pools_rx.recv().await {
-            info!(&self.log, "Storage manager processing zpool: {}", pool_name);
-
             let mut pools = self.pools.lock().await;
             // TODO: when would this not exist? It really should...
             let pool = pools.get_mut(&pool_name).unwrap();
+
+            info!(&self.log, "Storage manager processing zpool: {:#?}", pool.info);
 
             // For now, we place all "expected" filesystems on each new zpool
             // we see. The decision of "whether or not to actually use the
@@ -152,10 +154,14 @@ impl StorageWorker {
 
             // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
             // and start zones for each of them.
+            let mut datasets = vec![];
             for partition in PARTITIONS {
                 let name = format!("{}/{}", pool.info.name(), partition.name);
+
+                info!(&self.log, "Ensuring filesystem {} exists", name);
                 let id = StorageWorker::ensure_filesystem_with_id(&name)?;
 
+                info!(&self.log, "Creating zone for {}", name);
                 let network = self
                     .create_zone(
                         partition.zone_prefix,
@@ -164,12 +170,20 @@ impl StorageWorker {
                         partition.svc_directory,
                     )
                     .await?;
-                pool.add_filesystem(Filesystem {
-                    id,
-                    name,
-                    address: SocketAddr::new(network.ip(), partition.port),
+
+                let address = SocketAddr::new(network.ip(), partition.port);
+                info!(&self.log, "Created zone with address {}", address);
+                pool.add_filesystem(id, Filesystem { name, address });
+                datasets.push(DatasetInfo {
+                    id
                 });
             }
+
+            let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
+                Error::InternalError {
+                    message: format!("Invalid pool size: {}", e)
+                }
+            })?;
 
             // TODO: Notify nexus!
             let _allocation_info = self
@@ -178,11 +192,15 @@ impl StorageWorker {
                     pool.id(),
                     self.sled_id,
                     SledAgentPoolInfo {
-                        // TODO: No unwrap
-                        size: ByteCount::try_from(pool.info.size()).unwrap(),
+                        id: pool.id(),
+                        size,
+                        datasets,
                     },
                 )
                 .await;
+
+            // TODO: Apply allocation advice from Nexus (setting reservation /
+            // quota properties).
         }
         Ok(())
     }
@@ -271,6 +289,7 @@ impl StorageManager {
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
+        info!(log, "SLED AGENT: Creating storage manager");
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
         let mut worker = StorageWorker {
