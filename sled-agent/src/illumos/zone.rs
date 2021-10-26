@@ -129,15 +129,13 @@ impl Zones {
         Zones::create_base(
             PROPOLIS_BASE_ZONE,
             log,
-            &[
-                zone::Fs {
-                    ty: "lofs".to_string(),
-                    dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-                    special: PROPOLIS_SVC_DIRECTORY.to_string(),
-                    options: vec!["ro".to_string()],
-                    ..Default::default()
-                }
-            ],
+            &[zone::Fs {
+                ty: "lofs".to_string(),
+                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+                special: PROPOLIS_SVC_DIRECTORY.to_string(),
+                options: vec!["ro".to_string()],
+                ..Default::default()
+            }],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
@@ -149,12 +147,7 @@ impl Zones {
     /// Creates a "base" zone for storage services, from which other
     /// zones may quickly be cloned.
     pub fn create_storage_base(log: &Logger) -> Result<(), Error> {
-        Zones::create_base(
-            STORAGE_BASE_ZONE,
-            log,
-            &[],
-            &[],
-        )
+        Zones::create_base(STORAGE_BASE_ZONE, log, &[], &[])
     }
 
     /// Sets the configuration for a zone.
@@ -206,15 +199,13 @@ impl Zones {
         Zones::configure_zone(
             log,
             name,
-            &[
-                zone::Fs {
-                    ty: "lofs".to_string(),
-                    dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-                    special: PROPOLIS_SVC_DIRECTORY.to_string(),
-                    options: vec!["ro".to_string()],
-                    ..Default::default()
-                }
-            ],
+            &[zone::Fs {
+                ty: "lofs".to_string(),
+                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+                special: PROPOLIS_SVC_DIRECTORY.to_string(),
+                options: vec!["ro".to_string()],
+                ..Default::default()
+            }],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
@@ -226,10 +217,8 @@ impl Zones {
 
     /// Clones a zone (named `name`) from the base Propolis zone.
     fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
-        zone::Adm::new(name).clone(base).map_err(|e| {
-            Error::InternalError {
-                message: format!("Failed to clone zone: {}", e),
-            }
+        zone::Adm::new(name).clone(base).map_err(|e| Error::InternalError {
+            message: format!("Failed to clone zone: {}", e),
         })?;
         Ok(())
     }

@@ -91,7 +91,9 @@ impl Vnic {
         }
     }
 
-    pub fn name(&self) -> &str { &self.name }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl Drop for Vnic {

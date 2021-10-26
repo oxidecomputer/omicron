@@ -2,8 +2,8 @@
 
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    dataset, disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, region, sled, vpc, vpcrouter, vpcsubnet, zpool,
+    dataset, disk, instance, metricproducer, networkinterface, organization,
+    oximeter, project, rack, region, sled, vpc, vpcrouter, vpcsubnet, zpool,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -346,7 +346,11 @@ pub struct Zpool {
 }
 
 impl Zpool {
-    pub fn new(id: Uuid, sled_id: Uuid, info: internal::nexus::SledAgentPoolInfo) -> Self {
+    pub fn new(
+        id: Uuid,
+        sled_id: Uuid,
+        info: internal::nexus::SledAgentPoolInfo,
+    ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             sled_id,
@@ -369,7 +373,6 @@ pub struct Dataset {
 
     ip: ipnetwork::IpNetwork,
     port: i32,
-
     // TODO: Do we want to indicate "Type of thing using this dataset?"
     // Do we care?
 }

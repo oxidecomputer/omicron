@@ -4,9 +4,7 @@ use crate::illumos::{
     svc::wait_for_service,
     zfs::Mountpoint,
     zone::{
-        CRUCIBLE_SVC_DIRECTORY,
-        CRUCIBLE_ZONE_PREFIX,
-        COCKROACH_ZONE_PREFIX,
+        COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY, CRUCIBLE_ZONE_PREFIX,
     },
     zpool::ZpoolInfo,
 };
@@ -24,10 +22,11 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zpool::Zpool, zfs::Zfs, zone::Zones};
+use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones, zpool::Zpool};
 #[cfg(test)]
 use crate::illumos::{
-    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zpool::MockZpool as Zpool, zone::MockZones as Zones
+    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
+    zpool::MockZpool as Zpool,
 };
 
 #[cfg(test)]
@@ -58,9 +57,12 @@ impl Pool {
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        let id: Uuid = info.name().parse()
-            .map_err(|e| Error::InternalError {
-                message: format!("Zpool's name cannot be parsed as UUID: {}", e),
+        let id: Uuid =
+            info.name().parse().map_err(|e| Error::InternalError {
+                message: format!(
+                    "Zpool's name cannot be parsed as UUID: {}",
+                    e
+                ),
             })?;
         Ok(Pool { id, info, filesystems: vec![] })
     }
@@ -100,7 +102,7 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         svc_directory: CRUCIBLE_SVC_DIRECTORY, // XXX Replace me
         // TODO: Ensure cockroach uses this port
         port: 8080,
-    }
+    },
 ];
 
 // A worker that starts zones for pools as they are received.
@@ -154,12 +156,14 @@ impl StorageWorker {
                 let name = format!("{}/{}", pool.info.name(), partition.name);
                 let id = StorageWorker::ensure_filesystem_with_id(&name)?;
 
-                let network = self.create_zone(
-                    partition.zone_prefix,
-                    &name,
-                    partition.data_directory,
-                    partition.svc_directory,
-                ).await?;
+                let network = self
+                    .create_zone(
+                        partition.zone_prefix,
+                        &name,
+                        partition.data_directory,
+                        partition.svc_directory,
+                    )
+                    .await?;
                 pool.add_filesystem(Filesystem {
                     id,
                     name,
@@ -168,14 +172,17 @@ impl StorageWorker {
             }
 
             // TODO: Notify nexus!
-            let allocation_info = self.nexus_client.zpool_post(
-                pool.id(),
-                self.sled_id,
-                SledAgentPoolInfo {
-                    // TODO: No unwrap
-                    size: ByteCount::try_from(pool.info.size()).unwrap(),
-                },
-            ).await;
+            let _allocation_info = self
+                .nexus_client
+                .zpool_post(
+                    pool.id(),
+                    self.sled_id,
+                    SledAgentPoolInfo {
+                        // TODO: No unwrap
+                        size: ByteCount::try_from(pool.info.size()).unwrap(),
+                    },
+                )
+                .await;
         }
         Ok(())
     }
@@ -198,7 +205,8 @@ impl StorageWorker {
         svc_directory: &str,
     ) -> Result<IpNetwork, Error> {
         let physical_dl = Dladm::find_physical()?;
-        let nic = Vnic::new_control(&self.vnic_id_allocator, &physical_dl, None)?;
+        let nic =
+            Vnic::new_control(&self.vnic_id_allocator, &physical_dl, None)?;
         let id = Uuid::new_v4();
         let zname = format!("{}{}", zone_name_prefix, id);
 

@@ -8,9 +8,7 @@ use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::sync::{
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -25,9 +23,7 @@ use crate::{
 };
 #[cfg(test)]
 use crate::{
-    illumos::{
-        dladm::MockDladm as Dladm, zone::MockZones as Zones,
-    },
+    illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones},
     instance::MockInstance as Instance,
 };
 

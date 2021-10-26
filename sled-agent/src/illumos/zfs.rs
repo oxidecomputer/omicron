@@ -100,12 +100,10 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
-    fn get_value(
-        filesystem_name: &str,
-        name: &str,
-    ) -> Result<String, Error> {
+    fn get_value(filesystem_name: &str, name: &str) -> Result<String, Error> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
+        let cmd =
+            command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
         let output = execute(cmd)?;
         let stdout = String::from_utf8(output.stdout).map_err(|e| {
             Error::InternalError {
@@ -118,11 +116,12 @@ impl Zfs {
         let value = stdout.trim();
         if value == "-" {
             return Err(Error::InternalError {
-                message: format!("Property {} does not exist for {}", name, filesystem_name),
+                message: format!(
+                    "Property {} does not exist for {}",
+                    name, filesystem_name
+                ),
             });
         }
         Ok(value.to_string())
     }
-
-
 }

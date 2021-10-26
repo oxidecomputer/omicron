@@ -405,8 +405,10 @@ impl Instance {
             .await?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
-        let network =
-            Zones::create_address(&zname, &interface_name(&control_nic.name()))?;
+        let network = Zones::create_address(
+            &zname,
+            &interface_name(&control_nic.name()),
+        )?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.

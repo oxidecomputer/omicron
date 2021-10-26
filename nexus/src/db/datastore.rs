@@ -46,8 +46,8 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        ByteCount, Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
-        InstanceRuntimeState, Name, Organization, OrganizationUpdate,
+        ByteCount, Disk, DiskAttachment, DiskRuntimeState, Generation,
+        Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
         VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
@@ -127,7 +127,11 @@ impl DataStore {
     }
 
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert(&self, zpool: Zpool, info: SledAgentPoolInfo) -> CreateResult<Zpool> {
+    pub async fn zpool_upsert(
+        &self,
+        zpool: Zpool,
+        info: SledAgentPoolInfo,
+    ) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
         diesel::insert_into(dsl::zpool)
             .values(zpool.clone())

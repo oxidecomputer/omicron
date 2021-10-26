@@ -1,7 +1,9 @@
 //! Sled agent implementation
 
 use crate::config::Config;
-use crate::illumos::zfs::{Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT};
+use crate::illumos::zfs::{
+    Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+};
 use crate::instance_manager::InstanceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
@@ -17,14 +19,11 @@ use uuid::Uuid;
 
 #[cfg(test)]
 use {
-    crate::mocks::MockNexusClient as NexusClient,
     crate::illumos::zfs::MockZfs as Zfs,
+    crate::mocks::MockNexusClient as NexusClient,
 };
 #[cfg(not(test))]
-use {
-    omicron_common::NexusClient,
-    crate::illumos::zfs::Zfs,
-};
+use {crate::illumos::zfs::Zfs, omicron_common::NexusClient};
 
 // TODO: I wanna make a task that continually reports the storage status
 // upward to nexus.
@@ -53,10 +52,13 @@ impl SledAgent {
         // necessary ZFS and Zone resources are ready.
         Zfs::ensure_filesystem(
             ZONE_ZFS_DATASET,
-            Mountpoint::Path(std::path::PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)),
+            Mountpoint::Path(std::path::PathBuf::from(
+                ZONE_ZFS_DATASET_MOUNTPOINT,
+            )),
         )?;
 
-        let storage = StorageManager::new(&log, *id, nexus_client.clone()).await?;
+        let storage =
+            StorageManager::new(&log, *id, nexus_client.clone()).await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 storage.upsert_zpool(pool).await?;
