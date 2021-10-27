@@ -19,11 +19,22 @@ use uuid::Uuid;
 
 #[cfg(test)]
 use {
-    crate::illumos::zfs::MockZfs as Zfs,
+    crate::illumos::{
+        dladm::MockDladm as Dladm,
+        zfs::MockZfs as Zfs,
+        zone::MockZones as Zones,
+    },
     crate::mocks::MockNexusClient as NexusClient,
 };
 #[cfg(not(test))]
-use {crate::illumos::zfs::Zfs, omicron_common::NexusClient};
+use {
+    crate::illumos::{
+        dladm::Dladm,
+        zfs::Zfs,
+        zone::Zones,
+    },
+    omicron_common::NexusClient,
+};
 
 // TODO: I wanna make a task that continually reports the storage status
 // upward to nexus.
@@ -45,7 +56,7 @@ impl SledAgent {
         nexus_client: Arc<NexusClient>,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
-        let vlan = config.vlan.clone();
+        let vlan = config.vlan;
         info!(&log, "created sled agent"; "id" => ?id);
 
         // Before we start creating zones, we need to ensure that the
@@ -56,6 +67,31 @@ impl SledAgent {
                 ZONE_ZFS_DATASET_MOUNTPOINT,
             )),
         )?;
+
+        // Identify all existing zones which should be managed by the Sled
+        // Agent.
+        //
+        // NOTE: Currently, we're removing these zones. In the future, we should
+        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
+        // to leave the running Zones intact).
+        let zones = Zones::get()?;
+        for z in zones {
+            warn!(log, "Deleting zone: {}", z.name());
+            Zones::halt_and_remove(&log, z.name())?;
+        }
+
+        // Identify all VNICs which should be managed by the Sled Agent.
+        //
+        // NOTE: Currently, we're removing these VNICs. In the future, we should
+        // identify if they're being used by the aforementioned existing zones,
+        // and track them once more.
+        //
+        // (dladm show-vnic -p -o ZONE,LINK) might help
+        let vnics = Dladm::get_vnics()?;
+        for vnic in vnics {
+            warn!(log, "Deleting VNIC: {}", vnic);
+            Dladm::delete_vnic(&vnic)?;
+        }
 
         let storage =
             StorageManager::new(&log, *id, nexus_client.clone()).await?;

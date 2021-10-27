@@ -131,6 +131,17 @@ impl StorageWorker {
     }
 
     async fn do_work(&mut self) -> Result<(), Error> {
+        self.do_work_internal().await
+            .map(|()| {
+                info!(self.log, "StorageWorker exited successfully");
+            })
+            .map_err(|e| {
+                warn!(self.log, "StorageWorker exited unexpectedly: {}", e);
+                e
+            })
+    }
+
+    async fn do_work_internal(&mut self) -> Result<(), Error> {
         info!(self.log, "StorageWorker creating storage base zone");
         // Create a base zone, from which all running storage zones are cloned.
         Zones::create_storage_base(&self.log)?;
@@ -243,8 +254,8 @@ impl StorageWorker {
                 },
                 zone::Fs {
                     ty: "zfs".to_string(),
-                    dir: filesystem_name.to_string(),
-                    special: data_directory.to_string(),
+                    dir: data_directory.to_string(),
+                    special: filesystem_name.to_string(),
                     options: vec!["rw".to_string()],
                     ..Default::default()
                 },
@@ -257,12 +268,14 @@ impl StorageWorker {
         Zones::clone_from_base_storage(&zname)?;
 
         // Boot the new zone.
+        info!(&self.log, "Zone {} booting", zname);
         Zones::boot(&zname)?;
 
         // Wait for the network services to come online, then create an address
         // to use for communicating with the newly created zone.
         wait_for_service(Some(&zname), "svc:/milestone/network:default")
             .await?;
+
         let network =
             Zones::create_address(&zname, &interface_name(&nic.name()))?;
         Ok(network)

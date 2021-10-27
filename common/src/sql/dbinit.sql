@@ -76,11 +76,11 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    total_size INT NOT NULL,
+    total_size INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Zpool (
-    sled_id,
+    sled_id
 );
 
 /*
@@ -97,14 +97,14 @@ CREATE TABLE omicron.public.Dataset (
 
     /* Contact information for the downstairs region */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 NOT NULL
 
     /* TODO: Do we want to indicate "type"? */
     /* We are eyeing "Crucible datasets" to start, but these could be used for e.g. clickhouse */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.Dataset (
-    pool_id,
+    pool_id
 );
 
 /*
@@ -130,7 +130,7 @@ CREATE TABLE omicron.public.Region (
 
 CREATE UNIQUE INDEX ON omicron.public.Region (
     dataset_id,
-    disk_id,
+    disk_id
 );
 
 /*

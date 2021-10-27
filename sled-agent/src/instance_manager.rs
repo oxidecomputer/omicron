@@ -18,12 +18,12 @@ use omicron_common::NexusClient;
 
 #[cfg(not(test))]
 use crate::{
-    illumos::{dladm::Dladm, zone::Zones},
+    illumos::zone::Zones,
     instance::Instance,
 };
 #[cfg(test)]
 use crate::{
-    illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones},
+    illumos::zone::MockZones as Zones,
     instance::MockInstance as Instance,
 };
 
@@ -54,31 +54,6 @@ impl InstanceManager {
     ) -> Result<InstanceManager, Error> {
         // Create a base zone, from which all running instance zones are cloned.
         Zones::create_propolis_base(&log)?;
-
-        // Identify all existing zones which should be managed by the Sled
-        // Agent.
-        //
-        // NOTE: Currently, we're removing these zones. In the future, we should
-        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
-        // to leave the running Zones intact).
-        let zones = Zones::get()?;
-        for z in zones {
-            warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(&log, z.name())?;
-        }
-
-        // Identify all VNICs which should be managed by the Sled Agent.
-        //
-        // NOTE: Currently, we're removing these VNICs. In the future, we should
-        // identify if they're being used by the aforementioned existing zones,
-        // and track them once more.
-        //
-        // (dladm show-vnic -p -o ZONE,LINK) might help
-        let vnics = Dladm::get_vnics()?;
-        for vnic in vnics {
-            warn!(log, "Deleting VNIC: {}", vnic);
-            Dladm::delete_vnic(&vnic)?;
-        }
 
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
