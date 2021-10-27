@@ -29,6 +29,7 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
+use common::resource_helpers::create_organization;
 use common::resource_helpers::create_project;
 use common::test_setup;
 
@@ -44,9 +45,12 @@ async fn test_disks() {
     let nexus = &apictx.nexus;
 
     /* Create a project for testing. */
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport-disks";
-    let url_disks = format!("/projects/{}/disks", project_name);
-    let project = create_project(client, &project_name).await;
+    let url_disks =
+        format!("/organizations/{}/projects/{}/disks", org_name, project_name);
+    let project = create_project(client, &org_name, &project_name).await;
 
     /* List disks.  There aren't any yet. */
     let disks = disks_list(&client, &url_disks).await;
@@ -112,7 +116,10 @@ async fn test_disks() {
     disks_eq(&disks[0], &disk);
 
     /* Create an instance to attach the disk. */
-    let url_instances = format!("/projects/{}/instances", project_name);
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        org_name, project_name
+    );
     let instance: Instance = objects_post(
         &client,
         &url_instances,
@@ -133,12 +140,14 @@ async fn test_disks() {
      * that our disk is not attached to this instance.
      */
     let url_instance_disks = format!(
-        "/projects/{}/instances/{}/disks",
+        "/organizations/{}/projects/{}/instances/{}/disks",
+        org_name,
         project_name,
         instance.identity.name.as_str()
     );
     let url_instance_disk = format!(
-        "/projects/{}/instances/{}/disks/{}",
+        "/organizations/{}/projects/{}/instances/{}/disks/{}",
+        org_name,
         project_name,
         instance.identity.name.as_str(),
         disk.identity.name.as_str(),
@@ -241,7 +250,8 @@ async fn test_disks() {
     )
     .await;
     let url_instance2_disk = format!(
-        "/projects/{}/instances/{}/disks/{}",
+        "/organizations/{}/projects/{}/instances/{}/disks/{}",
+        org_name,
         project_name,
         instance2.identity.name.as_str(),
         disk.identity.name.as_str()

@@ -18,7 +18,9 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::{create_project, create_vpc};
+use common::resource_helpers::{
+    create_organization, create_project, create_vpc,
+};
 use common::test_setup;
 
 extern crate slog;
@@ -29,13 +31,16 @@ async fn test_vpc_subnets() {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
-    let vpcs_url = format!("/projects/{}/vpcs", project_name);
-    let _ = create_project(&client, project_name).await;
+    let vpcs_url =
+        format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
+    let _ = create_project(&client, org_name, project_name).await;
 
     /* Create a VPC. */
     let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
 
     let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
     let subnets_url = format!("{}/subnets", vpc_url);
@@ -214,7 +219,7 @@ async fn test_vpc_subnets() {
 
     // Creating a subnet with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
+    let vpc2 = create_vpc(&client, org_name, project_name, vpc2_name).await;
 
     let subnet_same_name: VpcSubnet = objects_post(
         &client,

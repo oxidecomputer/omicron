@@ -27,9 +27,10 @@ use dropshot::test_util::ClientTestContext;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::create_project;
+use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 
+static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
 #[tokio::test]
@@ -40,8 +41,12 @@ async fn test_instances_access_before_create_returns_not_found() {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
-    let url_instances = format!("/projects/{}/instances", PROJECT_NAME);
-    let _ = create_project(&client, &PROJECT_NAME).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     /* List instances.  There aren't any yet. */
     let instances = instances_list(&client, &url_instances).await;
@@ -80,8 +85,12 @@ async fn test_instances_create_reboot_halt() {
     let nexus = &apictx.nexus;
 
     /* Create a project that we'll use for testing. */
-    let url_instances = format!("/projects/{}/instances", PROJECT_NAME);
-    let _ = create_project(&client, &PROJECT_NAME).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     /* Create an instance. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
@@ -356,8 +365,12 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
-    let url_instances = format!("/projects/{}/instances", PROJECT_NAME);
-    let _ = create_project(&client, &PROJECT_NAME).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
@@ -416,7 +429,10 @@ async fn test_instances_invalid_creation_returns_bad_request() {
     let cptestctx =
         test_setup("test_instances_invalid_creation_returns_bad_request").await;
     let client = &cptestctx.external_client;
-    let url_instances = format!("/projects/{}/instances", PROJECT_NAME);
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
 
     let error = client
         .make_request_with_body(

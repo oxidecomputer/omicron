@@ -598,6 +598,7 @@ pub struct Project {
      */
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub organization_id: Uuid,
 }
 
 /**

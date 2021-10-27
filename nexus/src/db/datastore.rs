@@ -18,6 +18,8 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
+use super::collection_insert::{DatastoreCollection, InsertError};
+use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
@@ -234,6 +236,7 @@ impl DataStore {
     /// Delete a organization
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
         use db::schema::organization::dsl;
+        use db::schema::project;
 
         let (id, rcgen) = dsl::organization
             .filter(dsl::time_deleted.is_null())
@@ -249,8 +252,29 @@ impl DataStore {
                 )
             })?;
 
-        // TODO: Check Project table for current children once it is tracking
-        // that relationship
+        // Make sure there are no projects present within this organization.
+        let project_found = diesel_pool_result_optional(
+            project::dsl::project
+                .filter(project::dsl::organization_id.eq(id))
+                .filter(project::dsl::time_deleted.is_null())
+                .select(project::dsl::id)
+                .limit(1)
+                .first_async::<Uuid>(self.pool())
+                .await,
+        )
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ResourceType::Project,
+                LookupType::Other("by organization_id".to_string()),
+            )
+        })?;
+        if project_found.is_some() {
+            return Err(Error::InvalidRequest {
+                message: "organization to be deleted contains a project"
+                    .to_string(),
+            });
+        }
 
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::organization)
@@ -369,25 +393,38 @@ impl DataStore {
         use db::schema::project::dsl;
 
         let name = project.name().as_str().to_string();
-        diesel::insert_into(dsl::project)
-            .values(project)
-            .returning(Project::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+        let organization_id = project.organization_id;
+        Organization::insert_resource(
+            organization_id,
+            diesel::insert_into(dsl::project).values(project),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            InsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Organization,
+                lookup_type: LookupType::ById(organization_id),
+            },
+            InsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
-                    name.as_str(),
+                    &name,
                 )
-            })
+            }
+        })
     }
 
     /// Lookup a project by name.
-    pub async fn project_fetch(&self, name: &Name) -> LookupResult<Project> {
+    pub async fn project_fetch(
+        &self,
+        organization_id: &Uuid,
+        name: &Name,
+    ) -> LookupResult<Project> {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .select(Project::as_select())
             .first_async(self.pool())
@@ -407,11 +444,16 @@ impl DataStore {
      * depend on the Project (Disks, Instances).  We can do this with a
      * generation counter that gets bumped when these resources are created.
      */
-    pub async fn project_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn project_delete(
+        &self,
+        organization_id: &Uuid,
+        name: &Name,
+    ) -> DeleteResult {
         use db::schema::project::dsl;
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .set(dsl::time_deleted.eq(now))
             .returning(Project::as_returning())
@@ -430,11 +472,13 @@ impl DataStore {
     /// Look up the id for a project based on its name
     pub async fn project_lookup_id_by_name(
         &self,
+        organization_id: &Uuid,
         name: &Name,
     ) -> Result<Uuid, Error> {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .select(dsl::id)
             .get_result_async::<Uuid>(self.pool())
@@ -450,10 +494,12 @@ impl DataStore {
 
     pub async fn projects_list_by_id(
         &self,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
         paginated(dsl::project, dsl::id, pagparams)
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
             .load_async(self.pool())
@@ -469,11 +515,13 @@ impl DataStore {
 
     pub async fn projects_list_by_name(
         &self,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
 
         paginated(dsl::project, dsl::name, &pagparams)
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
             .load_async(self.pool())
@@ -490,6 +538,7 @@ impl DataStore {
     /// Updates a project by name (clobbering update -- no etag)
     pub async fn project_update(
         &self,
+        organization_id: &Uuid,
         name: &Name,
         update_params: &api::external::ProjectUpdateParams,
     ) -> UpdateResult<Project> {
@@ -498,6 +547,7 @@ impl DataStore {
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::organization_id.eq(*organization_id))
             .filter(dsl::name.eq(name.clone()))
             .set(updates)
             .returning(Project::as_returning())
@@ -1555,5 +1605,52 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::db;
+    use crate::db::identity::Resource;
+    use crate::db::model::{Organization, Project};
+    use crate::db::DataStore;
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+        ProjectCreateParams,
+    };
+    use omicron_test_utils::dev;
+    use std::convert::TryFrom;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_project_creation() {
+        let logctx = dev::test_setup_log("test_collection_not_present");
+        let db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let organization = Organization::new(OrganizationCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("org".to_string()).unwrap(),
+                description: "desc".to_string(),
+            },
+        });
+        let organization =
+            datastore.organization_create(organization).await.unwrap();
+
+        let project = Project::new(
+            organization.id(),
+            ProjectCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from("project".to_string()).unwrap(),
+                    description: "desc".to_string(),
+                },
+            },
+        );
+        datastore.project_create(project).await.unwrap();
+        let organization_after_project_create =
+            datastore.organization_fetch(organization.name()).await.unwrap();
+        assert!(organization_after_project_create.rcgen > organization.rcgen);
     }
 }
