@@ -111,6 +111,18 @@ impl SessionStore for Arc<ServerContext> {
     ) -> Option<Self::SessionModel> {
         self.nexus.session_update_last_used(token).await.ok()
     }
+
+    async fn session_expire(&self, token: String) -> Option<()> {
+        self.nexus.session_hard_delete(token).await.ok()
+    }
+
+    // fn session_abs_ttl() {
+    //     self.config.session_abs_ttl
+    // }
+
+    // fn session_idle_ttl() {
+    //     self.config.session_idle_ttl
+    // }
 }
 
 impl Session for ConsoleSession {

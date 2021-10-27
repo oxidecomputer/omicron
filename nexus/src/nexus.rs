@@ -1676,6 +1676,10 @@ impl Nexus {
     ) -> UpdateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_update_last_used(token).await?)
     }
+
+    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+        self.db_datastore.session_hard_delete(token).await
+    }
 }
 
 fn generate_session_token() -> String {

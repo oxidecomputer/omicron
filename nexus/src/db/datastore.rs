@@ -1554,4 +1554,26 @@ impl DataStore {
                 )
             })
     }
+
+    // putting "hard" in the name because we don't do this with any other model
+    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+        use db::schema::consolesession::dsl;
+
+        diesel::delete(dsl::consolesession)
+            .filter(dsl::token.eq(token.clone()))
+            .execute_async(self.pool())
+            .await
+            .map(|_rows_deleted| {
+                // TODO: from a logic POV we don't care if it already didn't exist, but
+                // we may want to log that fact
+                ()
+            })
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::ConsoleSession,
+                    LookupType::Other(token.to_owned()),
+                )
+            })
+    }
 }

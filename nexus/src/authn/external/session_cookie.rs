@@ -23,7 +23,7 @@ pub trait Session {
 pub trait SessionStore {
     type SessionModel;
 
-    // TODO: these should return results, it was just a lot easier to
+    // TODO: these should all return results, it was just a lot easier to
     // write the tests with Option. will change it back
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel>;
 
@@ -31,6 +31,8 @@ pub trait SessionStore {
         &self,
         token: String,
     ) -> Option<Self::SessionModel>;
+
+    async fn session_expire(&self, token: String) -> Option<()>;
 }
 
 // generic cookie name is recommended by OWASP
@@ -66,19 +68,14 @@ where
         _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
-        let cookies = match parse_cookies(request.headers()) {
-            Ok(cookies) => cookies,
-            Err(_) => return SchemeResult::NotRequested,
-        };
-        let token = match cookies.get(SESSION_COOKIE_COOKIE_NAME) {
-            Some(cookie) => cookie.value(),
+        let token = match get_token_from_cookie(request.headers()) {
+            Some(token) => token,
             None => return SchemeResult::NotRequested,
         };
 
-        let session = match ctx.session_fetch(token.to_string()).await {
+        let session = match ctx.session_fetch(token.clone()).await {
             Some(session) => session,
             None => {
-                println!("session not found"); // TODO: log this
                 return SchemeResult::Failed(Reason::UnknownActor {
                     actor: token.to_owned(),
                 });
@@ -90,7 +87,7 @@ where
         // TODO: could move this logic into methods on the session trait
         let now = Utc::now();
         if session.time_last_used() + *SESSION_IDLE_TTL < now {
-            // TODO: hard delete the session?
+            ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -105,8 +102,8 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than the absolute timeout, we can no longer extend the session
 
-        if session.time_last_used() + *SESSION_ABS_TTL < now {
-            // TODO: hard delete the session?
+        if session.time_created() + *SESSION_ABS_TTL < now {
+            ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -119,7 +116,7 @@ where
             });
         }
 
-        match ctx.session_update_last_used(token.to_string()).await {
+        match ctx.session_update_last_used(token.clone()).await {
             Some(_) => {}
             None => {
                 // couldn't renew session wtf
@@ -128,6 +125,14 @@ where
 
         SchemeResult::Authenticated(Details { actor })
     }
+}
+
+fn get_token_from_cookie(
+    headers: &http::HeaderMap<http::HeaderValue>,
+) -> Option<String> {
+    parse_cookies(headers).ok().and_then(|cs| {
+        cs.get(SESSION_COOKIE_COOKIE_NAME).map(|c| c.value().to_string())
+    })
 }
 
 // TODO: these unit tests for the scheme are pretty concise and get the idea across, but
@@ -186,6 +191,10 @@ mod test {
         ) -> Option<Self::SessionModel> {
             self.global_session
         }
+
+        async fn session_expire(&self, _token: String) -> Option<()> {
+            Some(())
+        }
     }
 
     async fn authn_with_cookie_header(
@@ -233,7 +242,12 @@ mod test {
                 source: _
             })
         ));
+        // TODO: find a way to assert that it deletes the session?
     }
+
+    // TODO: test session expired due to absolute TTL
+
+    // TODO: test get_token_from_cookies
 
     #[tokio::test]
     async fn test_valid_cookie() {
