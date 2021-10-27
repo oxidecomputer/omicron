@@ -11,15 +11,15 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::internal::nexus::DatasetPostRequest;
+use omicron_common::api::internal::nexus::DatasetPostResponse;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::DatasetPostRequest;
-use omicron_common::api::internal::nexus::DatasetPostResponse;
+use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use omicron_common::api::internal::nexus::ZpoolPostRequest;
 use omicron_common::api::internal::nexus::ZpoolPostResponse;
-use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -115,7 +115,6 @@ async fn zpool_post(
 
 #[derive(Deserialize, JsonSchema)]
 struct DatasetPathParam {
-    sled_id: Uuid,
     zpool_id: Uuid,
     dataset_id: Uuid,
 }
@@ -125,7 +124,7 @@ struct DatasetPathParam {
  */
 #[endpoint {
      method = POST,
-     path = "/sled_agents/{sled_id}/zpools/{zpool_id}/dataset/{dataset_id}",
+     path = "/zpools/{zpool_id}/dataset/{dataset_id}",
  }]
 async fn dataset_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -137,10 +136,7 @@ async fn dataset_post(
     let path = path_params.into_inner();
     let info = info.into_inner();
     nexus.upsert_dataset(path.dataset_id, path.zpool_id, info.address).await?;
-    Ok(HttpResponseOk(DatasetPostResponse {
-        reservation: None,
-        quota: None,
-    }))
+    Ok(HttpResponseOk(DatasetPostResponse { reservation: None, quota: None }))
 }
 
 /**

@@ -7,13 +7,13 @@
  */
 
 use crate::api::external::Error;
-use crate::api::internal::nexus::DiskRuntimeState;
-use crate::api::internal::nexus::InstanceRuntimeState;
 use crate::api::internal::nexus::DatasetPostRequest;
 use crate::api::internal::nexus::DatasetPostResponse;
+use crate::api::internal::nexus::DiskRuntimeState;
+use crate::api::internal::nexus::InstanceRuntimeState;
+use crate::api::internal::nexus::SledAgentStartupInfo;
 use crate::api::internal::nexus::ZpoolPostRequest;
 use crate::api::internal::nexus::ZpoolPostResponse;
-use crate::api::internal::nexus::SledAgentStartupInfo;
 use crate::http_client::HttpClient;
 use http::Method;
 use hyper::Body;
@@ -75,10 +75,9 @@ impl Client {
         &self,
         dataset_id: Uuid,
         zpool_id: Uuid,
-        sled_id: Uuid,
         info: DatasetPostRequest,
     ) -> Result<DatasetPostResponse, Error> {
-        let path = format!("/sled_agents/{}/zpools/{}/dataset/{}", sled_id, zpool_id, dataset_id);
+        let path = format!("/zpools/{}/dataset/{}", zpool_id, dataset_id);
         let body = Body::from(serde_json::to_string(&info).unwrap());
         let mut response =
             self.client.request(Method::POST, path.as_str(), body).await?;

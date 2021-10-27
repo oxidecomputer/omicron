@@ -203,7 +203,7 @@ impl Nexus {
     ) -> Result<(), Error> {
         info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
         let zpool = db::model::Zpool::new(id, sled_id, &info);
-        self.db_datastore.zpool_upsert(zpool, info).await?;
+        self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
 

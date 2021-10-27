@@ -325,6 +325,13 @@ impl Sled {
     }
 }
 
+impl DatastoreCollection<Zpool> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    type CollectionIdColumn = zpool::dsl::sled_id;
+}
+
 impl Into<external::Sled> for Sled {
     fn into(self) -> external::Sled {
         let service_address = self.address();
@@ -368,6 +375,13 @@ impl Zpool {
     }
 }
 
+impl DatastoreCollection<Dataset> for Zpool {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = zpool::dsl::rcgen;
+    type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
+    type CollectionIdColumn = dataset::dsl::pool_id;
+}
+
 /// Database representation of a Dataset.
 ///
 /// A dataset represents a portion of a Zpool, which is then made
@@ -380,7 +394,7 @@ pub struct Dataset {
     time_deleted: Option<DateTime<Utc>>,
     rcgen: Generation,
 
-    pool_id: Uuid,
+    pub pool_id: Uuid,
 
     ip: ipnetwork::IpNetwork,
     port: i32,
@@ -406,6 +420,20 @@ impl Dataset {
     }
 }
 
+impl DatastoreCollection<Region> for Dataset {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = dataset::dsl::rcgen;
+    type CollectionTimeDeletedColumn = dataset::dsl::time_deleted;
+    type CollectionIdColumn = region::dsl::dataset_id;
+}
+
+// impl DatastoreCollection<Region> for Disk {
+//     type CollectionId = Uuid;
+//     type GenerationNumberColumn = disk::dsl::rcgen;
+//     type CollectionTimeDeletedColumn = disk::dsl::time_deleted;
+//     type CollectionIdColumn = region::dsl::disk_id;
+// }
+
 /// Database representation of a Region.
 ///
 /// A region represents a portion of a Crucible Downstairs dataset
@@ -416,6 +444,7 @@ pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
 
+    // TODO: How do we insert into two collections simultaneously?
     dataset_id: Uuid,
     disk_id: Uuid,
 

@@ -12,8 +12,7 @@ use crate::vnic::{interface_name, IdAllocator, Vnic};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
 use omicron_common::api::internal::nexus::{
-    DatasetPostRequest,
-    ZpoolPostRequest,
+    DatasetPostRequest, ZpoolPostRequest,
 };
 use slog::Logger;
 use std::collections::HashMap;
@@ -171,13 +170,7 @@ impl StorageWorker {
             // TODO: retry on failure
             let _ = self
                 .nexus_client
-                .zpool_post(
-                    pool.id(),
-                    self.sled_id,
-                    ZpoolPostRequest {
-                        size,
-                    },
-                )
+                .zpool_post(pool.id(), self.sled_id, ZpoolPostRequest { size })
                 .await?;
 
             // For now, we place all "expected" filesystems on each new zpool
@@ -211,21 +204,14 @@ impl StorageWorker {
                 info!(&self.log, "Created zone with address {}", address);
                 pool.add_filesystem(id, Filesystem { name, address });
 
-                let _ = self
-                    .nexus_client
-                    .dataset_post(
-                        id,
-                        pool.id(),
-                        self.sled_id,
-                        DatasetPostRequest {
-                            address,
-                        },
-                    )
-                    .await?;
+                // TODO: Retry on failure
                 // TODO: Apply allocation advice from Nexus (setting reservation /
                 // quota properties).
+                let _ = self
+                    .nexus_client
+                    .dataset_post(id, pool.id(), DatasetPostRequest { address })
+                    .await?;
             }
-
         }
         Ok(())
     }
