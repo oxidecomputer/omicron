@@ -1544,3 +1544,50 @@ impl DataStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::db;
+    use crate::db::identity::Resource;
+    use crate::db::model::{Organization, Project};
+    use crate::db::DataStore;
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+        ProjectCreateParams,
+    };
+    use omicron_test_utils::dev;
+    use std::convert::TryFrom;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_project_creation() {
+        let logctx = dev::test_setup_log("test_collection_not_present");
+        let db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let organization = Organization::new(OrganizationCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("org".to_string()).unwrap(),
+                description: "desc".to_string(),
+            },
+        });
+        let organization =
+            datastore.organization_create(organization).await.unwrap();
+
+        let project = Project::new(
+            organization.id(),
+            ProjectCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from("project".to_string()).unwrap(),
+                    description: "desc".to_string(),
+                },
+            },
+        );
+        datastore.project_create(project).await.unwrap();
+        let organization_after_project_create =
+            datastore.organization_fetch(organization.name()).await.unwrap();
+        assert!(organization_after_project_create.rcgen > organization.rcgen);
+    }
+}

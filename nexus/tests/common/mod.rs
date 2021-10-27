@@ -19,7 +19,6 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
-pub mod db_inspection;
 pub mod resource_helpers;
 
 const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
