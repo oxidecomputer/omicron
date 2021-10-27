@@ -7,7 +7,6 @@ use crate::authn::{Actor, Details};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use lazy_static::lazy_static;
 use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide
@@ -33,18 +32,15 @@ pub trait SessionStore {
     ) -> Option<Self::SessionModel>;
 
     async fn session_expire(&self, token: String) -> Option<()>;
+
+    fn idle_timeout(&self) -> Duration;
+    fn absolute_timeout(&self) -> Duration;
 }
 
 // generic cookie name is recommended by OWASP
 pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
 pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
     authn::SchemeName("session_cookie");
-
-// TODO: put these in a config
-lazy_static! {
-    pub static ref SESSION_IDLE_TTL: Duration = Duration::seconds(3600);
-    pub static ref SESSION_ABS_TTL: Duration = Duration::seconds(8 * 3600);
-}
 
 /// Implements an authentication scheme where we check the DB to see if we have
 /// a session matching the token in a cookie ([`COOKIE_NAME_OXIDE_AUTHN_COOKIE`])
@@ -86,15 +82,15 @@ where
 
         // TODO: could move this logic into methods on the session trait
         let now = Utc::now();
-        if session.time_last_used() + *SESSION_IDLE_TTL < now {
+        if session.time_last_used() + ctx.idle_timeout() < now {
             ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
                     "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
                     session.time_last_used(),
-                    now,
-                    *SESSION_IDLE_TTL
+                    now, 
+                    ctx.idle_timeout()
                 ),
             });
         }
@@ -102,7 +98,7 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than the absolute timeout, we can no longer extend the session
 
-        if session.time_created() + *SESSION_ABS_TTL < now {
+        if session.time_created() + ctx.absolute_timeout() < now {
             ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
@@ -111,7 +107,7 @@ where
                     session.time_created(),
                     session.time_last_used(),
                     now,
-                    *SESSION_ABS_TTL
+                    ctx.absolute_timeout()
                 ),
             });
         }
@@ -201,6 +197,14 @@ mod test {
             (*sessions).remove(&token);
             Some(())
         }
+
+        fn idle_timeout(&self) -> Duration {
+            Duration::hours(1)
+        }
+
+        fn absolute_timeout(&self) -> Duration {
+            Duration::hours(8)
+        }
     }
 
     async fn authn_with_cookie(
@@ -239,8 +243,8 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
-                    time_last_used: Utc::now() - Duration::minutes(70),
-                    time_created: Utc::now() - Duration::minutes(70),
+                    time_last_used: Utc::now() - Duration::hours(2),
+                    time_created: Utc::now() - Duration::hours(2),
                 },
             )])),
         };

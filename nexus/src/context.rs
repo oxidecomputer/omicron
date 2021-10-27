@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -116,13 +116,14 @@ impl SessionStore for Arc<ServerContext> {
         self.nexus.session_hard_delete(token).await.ok()
     }
 
-    // fn session_abs_ttl() {
-    //     self.config.session_abs_ttl
-    // }
+    // TODO: pull these values from the config
+    fn idle_timeout(&self) -> Duration {
+        Duration::hours(1)
+    }
 
-    // fn session_idle_ttl() {
-    //     self.config.session_idle_ttl
-    // }
+    fn absolute_timeout(&self) -> Duration {
+        Duration::hours(8)
+    }
 }
 
 impl Session for ConsoleSession {
