@@ -259,7 +259,10 @@ async fn organizations_get_organization(
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let handler = async {
-        let organization = nexus.organization_fetch(&organization_name).await?;
+        let authn = apictx.external_authn.authn_request(&rqctx).await?;
+        let organization = nexus
+            .organization_fetch(&authn, &apictx.authz, &organization_name)
+            .await?;
         Ok(HttpResponseOk(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

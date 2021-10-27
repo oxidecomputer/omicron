@@ -22,6 +22,8 @@ use super::collection_insert::{DatastoreCollection, InsertError};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
+use crate::authn;
+use crate::authz;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -152,10 +154,19 @@ impl DataStore {
     /// Lookup a organization by name.
     pub async fn organization_fetch(
         &self,
+        authn: &authn::Context,
+        authz: &authz::Authz,
         name: &Name,
     ) -> LookupResult<Organization> {
         use db::schema::organization::dsl;
-        dsl::organization
+        // XXX Should use query-based authorization
+        // XXX might be nice if self.pool() accepted an authn and required it to
+        // be authenticated
+        let actor = authn.actor().ok_or(Error::not_found_by_name(
+            ResourceType::Organization,
+            name,
+        ))?;
+        let organization = dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(Organization::as_select())
@@ -167,7 +178,27 @@ impl DataStore {
                     ResourceType::Organization,
                     LookupType::ByName(name.as_str().to_owned()),
                 )
-            })
+            })?;
+        let result = authz
+            .oso
+            .is_allowed(
+                authz::Actor::from(actor),
+                "read",
+                authz::Organization::from(&organization),
+            )
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "authz error (is_allowed): {:#}",
+                    e
+                ))
+            })?;
+        if !result {
+            return Err(Error::not_found_by_name(
+                ResourceType::Organization,
+                name,
+            ));
+        }
+        Ok(organization)
     }
 
     /// Delete a organization
