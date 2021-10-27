@@ -11,7 +11,10 @@ use crate::illumos::{
 use crate::vnic::{interface_name, IdAllocator, Vnic};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
-use omicron_common::api::internal::nexus::{DatasetInfo, SledAgentPoolInfo};
+use omicron_common::api::internal::nexus::{
+    DatasetPostRequest,
+    ZpoolPostRequest,
+};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -158,6 +161,25 @@ impl StorageWorker {
                 "Storage manager processing zpool: {:#?}", pool.info
             );
 
+            let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
+                Error::InternalError {
+                    message: format!("Invalid pool size: {}", e),
+                }
+            })?;
+
+            // TODO: Notify nexus
+            // TODO: retry on failure
+            let _ = self
+                .nexus_client
+                .zpool_post(
+                    pool.id(),
+                    self.sled_id,
+                    ZpoolPostRequest {
+                        size,
+                    },
+                )
+                .await?;
+
             // For now, we place all "expected" filesystems on each new zpool
             // we see. The decision of "whether or not to actually use the
             // filesystem" is a decision left to both the bootstrapping protocol
@@ -169,7 +191,6 @@ impl StorageWorker {
 
             // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
             // and start zones for each of them.
-            let mut datasets = vec![];
             for partition in PARTITIONS {
                 let name = format!("{}/{}", pool.info.name(), partition.name);
 
@@ -189,27 +210,22 @@ impl StorageWorker {
                 let address = SocketAddr::new(network.ip(), partition.port);
                 info!(&self.log, "Created zone with address {}", address);
                 pool.add_filesystem(id, Filesystem { name, address });
-                datasets.push(DatasetInfo { id });
+
+                let _ = self
+                    .nexus_client
+                    .dataset_post(
+                        id,
+                        pool.id(),
+                        self.sled_id,
+                        DatasetPostRequest {
+                            address,
+                        },
+                    )
+                    .await?;
+                // TODO: Apply allocation advice from Nexus (setting reservation /
+                // quota properties).
             }
 
-            let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
-                Error::InternalError {
-                    message: format!("Invalid pool size: {}", e),
-                }
-            })?;
-
-            // TODO: Notify nexus!
-            let _allocation_info = self
-                .nexus_client
-                .zpool_post(
-                    pool.id(),
-                    self.sled_id,
-                    SledAgentPoolInfo { id: pool.id(), size, datasets },
-                )
-                .await;
-
-            // TODO: Apply allocation advice from Nexus (setting reservation /
-            // quota properties).
         }
         Ok(())
     }

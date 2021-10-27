@@ -46,7 +46,7 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::SledAgentPoolInfo;
+use omicron_common::api::internal::nexus::ZpoolPostRequest;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -199,11 +199,24 @@ impl Nexus {
         &self,
         id: Uuid,
         sled_id: Uuid,
-        info: SledAgentPoolInfo,
+        info: ZpoolPostRequest,
     ) -> Result<(), Error> {
-        info!(self.log, "registered storage pool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
+        info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
         let zpool = db::model::Zpool::new(id, sled_id, &info);
         self.db_datastore.zpool_upsert(zpool, info).await?;
+        Ok(())
+    }
+
+    /// Upserts a dataset into the database, updating it if it already exists.
+    pub async fn upsert_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string());
+        let dataset = db::model::Dataset::new(id, zpool_id, address);
+        self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }
 

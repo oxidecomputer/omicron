@@ -299,6 +299,8 @@ impl Into<external::Rack> for Rack {
 pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
@@ -309,6 +311,8 @@ impl Sled {
     pub fn new(id: Uuid, addr: SocketAddr) -> Self {
         Self {
             identity: SledIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
             ip: addr.ip().into(),
             port: addr.port().into(),
         }
@@ -336,6 +340,8 @@ impl Into<external::Sled> for Sled {
 pub struct Zpool {
     #[diesel(embed)]
     identity: ZpoolIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
 
     // Sled to which this Zpool belongs.
     pub sled_id: Uuid,
@@ -349,10 +355,12 @@ impl Zpool {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        info: &internal::nexus::SledAgentPoolInfo,
+        info: &internal::nexus::ZpoolPostRequest,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
             sled_id,
             total_size: info.size.into(),
         }
@@ -368,6 +376,8 @@ impl Zpool {
 pub struct Dataset {
     #[diesel(embed)]
     identity: DatasetIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
 
     pool_id: Uuid,
 
@@ -381,6 +391,8 @@ impl Dataset {
     pub fn new(id: Uuid, pool_id: Uuid, addr: SocketAddr) -> Self {
         Self {
             identity: DatasetIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
             pool_id,
             ip: addr.ip().into(),
             port: addr.port().into(),

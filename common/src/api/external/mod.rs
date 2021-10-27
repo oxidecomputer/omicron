@@ -450,6 +450,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     Organization,
     Project,
+    Dataset,
     Disk,
     DiskAttachment,
     Instance,
@@ -472,6 +473,7 @@ impl Display for ResourceType {
             match self {
                 ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
+                ResourceType::Dataset => "dataset",
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
                 ResourceType::Instance => "instance",

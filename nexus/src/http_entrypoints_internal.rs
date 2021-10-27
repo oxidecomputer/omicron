@@ -15,8 +15,10 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::SledAgentPoolAllocation;
-use omicron_common::api::internal::nexus::SledAgentPoolInfo;
+use omicron_common::api::internal::nexus::DatasetPostRequest;
+use omicron_common::api::internal::nexus::DatasetPostResponse;
+use omicron_common::api::internal::nexus::ZpoolPostRequest;
+use omicron_common::api::internal::nexus::ZpoolPostResponse;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
@@ -34,6 +36,7 @@ pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
         api.register(zpool_post)?;
+        api.register(dataset_post)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
@@ -100,15 +103,43 @@ struct ZpoolPathParam {
 async fn zpool_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ZpoolPathParam>,
-    pool_info: TypedBody<SledAgentPoolInfo>,
-) -> Result<HttpResponseOk<SledAgentPoolAllocation>, HttpError> {
+    pool_info: TypedBody<ZpoolPostRequest>,
+) -> Result<HttpResponseOk<ZpoolPostResponse>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let pi = pool_info.into_inner();
     nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
-    Ok(HttpResponseOk(SledAgentPoolAllocation {
-        allocations: std::collections::HashMap::new(),
+    Ok(HttpResponseOk(ZpoolPostResponse {}))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DatasetPathParam {
+    sled_id: Uuid,
+    zpool_id: Uuid,
+    dataset_id: Uuid,
+}
+
+/**
+ * Report that a dataset within a pool has come online.
+ */
+#[endpoint {
+     method = POST,
+     path = "/sled_agents/{sled_id}/zpools/{zpool_id}/dataset/{dataset_id}",
+ }]
+async fn dataset_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DatasetPathParam>,
+    info: TypedBody<DatasetPostRequest>,
+) -> Result<HttpResponseOk<DatasetPostResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let info = info.into_inner();
+    nexus.upsert_dataset(path.dataset_id, path.zpool_id, info.address).await?;
+    Ok(HttpResponseOk(DatasetPostResponse {
+        reservation: None,
+        quota: None,
     }))
 }
 

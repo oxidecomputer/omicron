@@ -76,6 +76,8 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
+    /* TODO: Could also store physical disk FK here */
+
     total_size INT NOT NULL
 );
 
@@ -91,6 +93,7 @@ CREATE TABLE omicron.public.Dataset (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
@@ -108,7 +111,7 @@ CREATE UNIQUE INDEX ON omicron.public.Dataset (
 );
 
 /*
- * A region of allocated space within a zpool.
+ * A region of space allocated to Crucible Downstairs, within a dataset.
  */
 CREATE TABLE omicron.public.Region (
     /* Identity metadata (asset) */
@@ -119,7 +122,7 @@ CREATE TABLE omicron.public.Region (
     /* FK into the Dataset table */
     dataset_id UUID NOT NULL,
 
-    /* FK into the Disk table */
+    /* FK into the (Guest-visible, Virtual) Disk table */
     disk_id UUID NOT NULL,
 
     /* Metadata describing the region */

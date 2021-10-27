@@ -9,8 +9,10 @@
 use crate::api::external::Error;
 use crate::api::internal::nexus::DiskRuntimeState;
 use crate::api::internal::nexus::InstanceRuntimeState;
-use crate::api::internal::nexus::SledAgentPoolAllocation;
-use crate::api::internal::nexus::SledAgentPoolInfo;
+use crate::api::internal::nexus::DatasetPostRequest;
+use crate::api::internal::nexus::DatasetPostResponse;
+use crate::api::internal::nexus::ZpoolPostRequest;
+use crate::api::internal::nexus::ZpoolPostResponse;
 use crate::api::internal::nexus::SledAgentStartupInfo;
 use crate::http_client::HttpClient;
 use http::Method;
@@ -47,14 +49,13 @@ impl Client {
         self.client.request(Method::POST, path.as_str(), body).await.map(|_| ())
     }
 
-    /// Publish information about a zpool, receive a response
-    /// about how the pool should be subdivided.
+    /// Publish information about a zpool.
     pub async fn zpool_post(
         &self,
         zpool_id: Uuid,
         sled_id: Uuid,
-        info: SledAgentPoolInfo,
-    ) -> Result<SledAgentPoolAllocation, Error> {
+        info: ZpoolPostRequest,
+    ) -> Result<ZpoolPostResponse, Error> {
         let path = format!("/sled_agents/{}/zpools/{}", sled_id, zpool_id);
         let body = Body::from(serde_json::to_string(&info).unwrap());
         let mut response =
@@ -62,7 +63,29 @@ impl Client {
         assert!(response.status().is_success());
         let value = self
             .client
-            .read_json::<SledAgentPoolAllocation>(
+            .read_json::<ZpoolPostResponse>(
+                &self.client.error_message_base(&Method::PUT, path.as_str()),
+                &mut response,
+            )
+            .await?;
+        Ok(value)
+    }
+
+    pub async fn dataset_post(
+        &self,
+        dataset_id: Uuid,
+        zpool_id: Uuid,
+        sled_id: Uuid,
+        info: DatasetPostRequest,
+    ) -> Result<DatasetPostResponse, Error> {
+        let path = format!("/sled_agents/{}/zpools/{}/dataset/{}", sled_id, zpool_id, dataset_id);
+        let body = Body::from(serde_json::to_string(&info).unwrap());
+        let mut response =
+            self.client.request(Method::POST, path.as_str(), body).await?;
+        assert!(response.status().is_success());
+        let value = self
+            .client
+            .read_json::<DatasetPostResponse>(
                 &self.client.error_message_base(&Method::PUT, path.as_str()),
                 &mut response,
             )

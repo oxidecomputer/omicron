@@ -6,7 +6,6 @@ use crate::api::external::{
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -53,37 +52,28 @@ pub struct SledAgentStartupInfo {
     pub sa_address: SocketAddr,
 }
 
-/// Describes a dataset within a pool.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DatasetInfo {
-    /// Unique identifier for the dataset.
-    pub id: Uuid,
-}
-
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentPoolInfo {
-    /// Unique identifier for the pool.
-    pub id: Uuid,
+pub struct ZpoolPostRequest {
     /// Total size of the pool.
     pub size: ByteCount,
     // TODO: We could include any other data from `ZpoolInfo` we want,
     // such as "allocated/free" space and pool health?
-    /// Description of datasets within the pool.
-    pub datasets: Vec<DatasetInfo>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct AllocationInfo {
-    /// A minimum reservation size for a filesystem.
-    /// Refer to ZFS native properties for more detail.
-    pub reservation: ByteCount,
-    /// A maximum quota on filesystem usage.
-    /// Refer to ZFS native properties for more detail.
-    pub quota: ByteCount,
+pub struct ZpoolPostResponse {}
+
+/// Describes a dataset within a pool.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DatasetPostRequest {
+    /// Address on which a service is responding to requests for the
+    /// dataset.
+    pub address: SocketAddr,
 }
 
-/// Allocation strategy for pools.
+/// Describes which ZFS properties should be set for a particular allocated
+/// dataset.
 // TODO: This could be useful for indicating quotas, or
 // for Nexus instructing the Sled Agent "what to format, and where".
 //
@@ -92,9 +82,13 @@ pub struct AllocationInfo {
 // more details. Nexus, in response, merely advises minimums/maximums
 // for dataset sizes.
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentPoolAllocation {
-    /// Mapping of Dataset UUID to allocation properties to set.
-    pub allocations: HashMap<Uuid, AllocationInfo>,
+pub struct DatasetPostResponse {
+    /// A minimum reservation size for a filesystem.
+    /// Refer to ZFS native properties for more detail.
+    pub reservation: Option<ByteCount>,
+    /// A maximum quota on filesystem usage.
+    /// Refer to ZFS native properties for more detail.
+    pub quota: Option<ByteCount>,
 }
 
 // Oximeter producer/collector objects.

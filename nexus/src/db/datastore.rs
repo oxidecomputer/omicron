@@ -23,6 +23,7 @@ use super::Pool;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::upsert::excluded;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -33,7 +34,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus::SledAgentPoolInfo;
+use omicron_common::api::internal::nexus::ZpoolPostRequest;
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -46,7 +47,7 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        ByteCount, Disk, DiskAttachment, DiskRuntimeState, Generation,
+        ByteCount, Dataset, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
         VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
@@ -130,9 +131,10 @@ impl DataStore {
     pub async fn zpool_upsert(
         &self,
         zpool: Zpool,
-        info: SledAgentPoolInfo,
+        info: ZpoolPostRequest,
     ) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
+
         diesel::insert_into(dsl::zpool)
             .values(zpool.clone())
             .on_conflict(dsl::id)
@@ -150,6 +152,38 @@ impl DataStore {
                     e,
                     ResourceType::Zpool,
                     &zpool.id().to_string(),
+                )
+            })
+    }
+
+    pub async fn dataset_upsert(
+        &self,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        diesel::insert_into(dsl::dataset)
+            .values(dataset.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::pool_id.eq(excluded(dsl::id)),
+                dsl::ip.eq(excluded(dsl::ip)),
+                dsl::port.eq(excluded(dsl::port)),
+            ))
+            .returning(Dataset::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                // NOTE: technically, this is returning info for the zpool...
+                // but it really *shouldn't* ever fail to update due to a
+                // conflict, since we're providing a way to deal with
+                // conflicts!
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
                 )
             })
     }

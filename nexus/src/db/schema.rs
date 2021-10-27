@@ -138,6 +138,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
 
         ip -> Inet,
         port -> Int4,
@@ -149,6 +151,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
 
         sled_id -> Uuid,
 
@@ -161,6 +165,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
 
         pool_id -> Uuid,
 
