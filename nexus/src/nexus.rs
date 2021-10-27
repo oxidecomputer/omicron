@@ -10,8 +10,6 @@ use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono;
-use chrono::{DateTime, Utc};
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
@@ -98,9 +96,7 @@ pub trait TestInterfaces {
 
     async fn session_create_with(
         &self,
-        token: String,
-        user_id: Uuid,
-        time_last_used: DateTime<Utc>,
+        session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession>;
 }
 
@@ -1720,17 +1716,8 @@ impl TestInterfaces for Nexus {
 
     async fn session_create_with(
         &self,
-        token: String,
-        user_id: Uuid,
-        time_last_used: DateTime<Utc>,
+        session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession> {
-        let now = Utc::now();
-        let session = db::model::ConsoleSession {
-            token,
-            user_id,
-            time_last_used,
-            time_created: now,
-        };
         Ok(self.db_datastore.session_create(session).await?)
     }
 }

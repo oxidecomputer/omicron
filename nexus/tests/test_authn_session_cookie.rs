@@ -5,7 +5,9 @@ use hyper::{Body, Method, Request};
 
 pub mod common;
 use common::{load_test_config, test_setup_with_config};
-use omicron_nexus::{config::SchemeName, TestInterfaces};
+use omicron_nexus::{
+    config::SchemeName, db::model::ConsoleSession, TestInterfaces,
+};
 use uuid::Uuid;
 
 extern crate slog;
@@ -23,10 +25,14 @@ async fn test_authn_session_cookie() {
     /*
      * Valid fake token "good"
      */
-    let user1 = Uuid::new_v4();
-    let last_used_now = Utc::now();
-    let _ =
-        nexus.session_create_with("good".into(), user1, last_used_now).await;
+    let _ = nexus
+        .session_create_with(ConsoleSession {
+            token: "good".into(),
+            user_id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            time_last_used: Utc::now(),
+        })
+        .await;
 
     let _ =
         get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
@@ -35,15 +41,37 @@ async fn test_authn_session_cookie() {
     /*
      * Expired fake token "expired"
      */
-    let user2 = Uuid::new_v4();
-    let last_used_2_hours = Utc::now() - Duration::seconds(3600);
     let _ = nexus
-        .session_create_with("expired".into(), user2, last_used_2_hours)
+        .session_create_with(ConsoleSession {
+            token: "expired_idle".into(),
+            user_id: Uuid::new_v4(),
+            time_created: Utc::now() - Duration::hours(2),
+            time_last_used: Utc::now() - Duration::hours(2),
+        })
         .await;
 
     let _ = get_projects_with_cookie(
         &client,
-        Some("session=expired"),
+        Some("session=expired_idle"),
+        StatusCode::UNAUTHORIZED,
+    )
+    .await;
+
+    /*
+     * Expired fake token "expired_absolute"
+     */
+    let _ = nexus
+        .session_create_with(ConsoleSession {
+            token: "expired_absolute".into(),
+            user_id: Uuid::new_v4(),
+            time_created: Utc::now() - Duration::hours(24),
+            time_last_used: Utc::now(),
+        })
+        .await;
+
+    let _ = get_projects_with_cookie(
+        &client,
+        Some("session=expired_absolute"),
         StatusCode::UNAUTHORIZED,
     )
     .await;
@@ -51,8 +79,7 @@ async fn test_authn_session_cookie() {
     /*
      * Valid random token
      */
-    let user3 = Uuid::new_v4();
-    let session = nexus.session_create(user3).await.unwrap();
+    let session = nexus.session_create(Uuid::new_v4()).await.unwrap();
     let cookie = format!("session={}", session.token);
 
     let _ =
