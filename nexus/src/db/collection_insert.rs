@@ -260,7 +260,7 @@ type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 /// //              CAST(1/0 AS BOOL))),
 /// //      updated_row AS MATERIALIZED (
 /// //          UPDATE C SET <generation number> = <generation_number> + 1 WHERE
-/// //              <PK> = <value> AND <time_deleted> IS NULL RETURNING 1),
+/// //              <PK> IN (SELECT <PK> FROM found_row) RETURNING 1),
 /// //      inserted_row AS (<user provided insert statement>
 /// //          RETURNING <ResourceType.as_returning()>)
 /// //  SELECT * FROM inserted_row;
@@ -364,17 +364,11 @@ where
         out.push_identifier(GenerationNumberColumn::<ResourceType, C>::NAME)?;
         out.push_sql(" + 1 WHERE ");
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<SerializedCollectionPrimaryKey<ResourceType, C>, _>(
-            &self.key,
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(
-            CollectionTimeDeletedColumn::<ResourceType, C>::NAME,
-        )?;
+        out.push_sql(" IN (SELECT ");
         // We must include "RETURNING 1" since all CTE clauses must return
         // something
-        out.push_sql(" IS NULL RETURNING 1), ");
+        out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
+        out.push_sql(" FROM found_row) RETURNING 1), ");
 
         out.push_sql("inserted_row AS (");
         // TODO: Check or force the insert_statement to have
@@ -517,11 +511,11 @@ mod test {
                  TRUE, CAST(1/0 AS BOOL))), \
              updated_row AS MATERIALIZED (UPDATE \
                  \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 \
-                 WHERE \"id\" = $2 AND \"time_deleted\" IS NULL RETURNING 1), \
+                 WHERE \"id\" IN (SELECT \"id\" FROM found_row) RETURNING 1), \
              inserted_row AS (INSERT INTO \"test_schema\".\"resource\" \
                  (\"id\", \"name\", \"description\", \"time_created\", \
                   \"time_modified\", \"collection_id\") \
-                 VALUES ($3, $4, $5, $6, $7, $8) \
+                 VALUES ($2, $3, $4, $5, $6, $7) \
                  RETURNING \"test_schema\".\"resource\".\"id\", \
                            \"test_schema\".\"resource\".\"name\", \
                            \"test_schema\".\"resource\".\"description\", \
@@ -531,7 +525,6 @@ mod test {
                            \"test_schema\".\"resource\".\"collection_id\") \
             SELECT * FROM inserted_row \
         -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
-                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
                    223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \
                    \"test\", \
                    \"desc\", \
