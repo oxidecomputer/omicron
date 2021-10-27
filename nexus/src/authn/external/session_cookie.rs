@@ -135,25 +135,25 @@ fn get_token_from_cookie(
     })
 }
 
-// TODO: these unit tests for the scheme are pretty concise and get the idea across, but
-// still feel a little off
-
 #[cfg(test)]
 mod test {
     use super::{
-        Details, HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult,
-        Session, SessionStore,
+        get_token_from_cookie, Details, HttpAuthnScheme,
+        HttpAuthnSessionCookie, Reason, SchemeResult, Session, SessionStore,
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
     use http;
     use hyper;
     use slog;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
     use uuid::Uuid;
 
+    // the mutex is annoying, but we need it in order to mutate the hashmap
+    // without passing TestServerContext around as mutable
     struct TestServerContext {
-        // this global to the context instance. it is the response to every session fetch
-        global_session: Option<FakeSession>,
+        sessions: Mutex<HashMap<String, FakeSession>>,
     }
 
     #[derive(Clone, Copy)]
@@ -180,25 +180,31 @@ mod test {
 
         async fn session_fetch(
             &self,
-            _token: String,
+            token: String,
         ) -> Option<Self::SessionModel> {
-            self.global_session
+            self.sessions.lock().unwrap().get(&token).map(|s| *s)
         }
 
         async fn session_update_last_used(
             &self,
-            _token: String,
+            token: String,
         ) -> Option<Self::SessionModel> {
-            self.global_session
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = *sessions.get(&token).unwrap();
+            let new_session =
+                FakeSession { time_last_used: Utc::now(), ..session };
+            (*sessions).insert(token, new_session)
         }
 
-        async fn session_expire(&self, _token: String) -> Option<()> {
+        async fn session_expire(&self, token: String) -> Option<()> {
+            let mut sessions = self.sessions.lock().unwrap();
+            (*sessions).remove(&token);
             Some(())
         }
     }
 
-    async fn authn_with_cookie_header(
-        context: TestServerContext,
+    async fn authn_with_cookie(
+        context: &TestServerContext,
         cookie: Option<&str>,
     ) -> SchemeResult {
         let scheme = HttpAuthnSessionCookie {};
@@ -208,33 +214,37 @@ mod test {
             let headers = request.headers_mut();
             headers.insert(http::header::COOKIE, cookie.parse().unwrap());
         }
-        scheme.authn(&context, &log, &request).await
+        scheme.authn(context, &log, &request).await
     }
 
     #[tokio::test]
     async fn test_missing_cookie() {
-        let context = TestServerContext { global_session: None };
-        let result = authn_with_cookie_header(context, None).await;
+        let context =
+            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let result = authn_with_cookie(&context, None).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
 
     #[tokio::test]
     async fn test_other_cookie() {
-        let context = TestServerContext { global_session: None };
-        let result = authn_with_cookie_header(context, Some("other=def")).await;
+        let context =
+            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let result = authn_with_cookie(&context, Some("other=def")).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
 
     #[tokio::test]
-    async fn test_expired_cookie() {
+    async fn test_expired_cookie_idle() {
         let context = TestServerContext {
-            global_session: Some(FakeSession {
-                time_last_used: Utc::now() - Duration::minutes(70),
-                time_created: Utc::now() - Duration::minutes(70),
-            }),
+            sessions: Mutex::new(HashMap::from([(
+                "abc".to_string(),
+                FakeSession {
+                    time_last_used: Utc::now() - Duration::minutes(70),
+                    time_created: Utc::now() - Duration::minutes(70),
+                },
+            )])),
         };
-        let result =
-            authn_with_cookie_header(context, Some("session=abc")).await;
+        let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
             result,
             SchemeResult::Failed(Reason::BadCredentials {
@@ -242,37 +252,89 @@ mod test {
                 source: _
             })
         ));
-        // TODO: find a way to assert that it deletes the session?
+
+        // key should be removed from sessions dict, i.e., session deleted
+        assert!(!context.sessions.lock().unwrap().contains_key("abc"))
     }
 
-    // TODO: test session expired due to absolute TTL
+    #[tokio::test]
+    async fn test_expired_cookie_absolute() {
+        let context = TestServerContext {
+            sessions: Mutex::new(HashMap::from([(
+                "abc".to_string(),
+                FakeSession {
+                    time_last_used: Utc::now(),
+                    time_created: Utc::now() - Duration::hours(20),
+                },
+            )])),
+        };
+        let result = authn_with_cookie(&context, Some("session=abc")).await;
+        assert!(matches!(
+            result,
+            SchemeResult::Failed(Reason::BadCredentials {
+                actor: _,
+                source: _
+            })
+        ));
 
-    // TODO: test get_token_from_cookies
+        // key should be removed from sessions dict, i.e., session deleted
+        let sessions = context.sessions.lock().unwrap();
+        assert!(!sessions.contains_key("abc"))
+    }
 
     #[tokio::test]
     async fn test_valid_cookie() {
+        let time_last_used = Utc::now() - Duration::seconds(5);
         let context = TestServerContext {
-            global_session: Some(FakeSession {
-                time_last_used: Utc::now(),
-                time_created: Utc::now(),
-            }),
+            sessions: Mutex::new(HashMap::from([(
+                "abc".to_string(),
+                FakeSession { time_last_used, time_created: Utc::now() },
+            )])),
         };
-        let result =
-            authn_with_cookie_header(context, Some("session=abc")).await;
+        let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
             result,
             SchemeResult::Authenticated(Details { actor: _ })
         ));
+
+        // valid cookie should have updated time_last_used
+        let sessions = context.sessions.lock().unwrap();
+        assert!(sessions.get("abc").unwrap().time_last_used > time_last_used)
     }
 
     #[tokio::test]
     async fn test_garbage_cookie() {
-        let context = TestServerContext { global_session: None };
-        let result = authn_with_cookie_header(
-            context,
-            Some("unparseable garbage!!!!!1"),
-        )
-        .await;
+        let context =
+            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let result =
+            authn_with_cookie(&context, Some("unparseable garbage!!!!!1"))
+                .await;
         assert!(matches!(result, SchemeResult::NotRequested));
+    }
+
+    #[test]
+    fn test_get_token() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::COOKIE, "session=abc".parse().unwrap());
+        let token = get_token_from_cookie(&headers);
+        assert_eq!(token, Some("abc".to_string()));
+    }
+
+    #[test]
+    fn test_get_token_no_header() {
+        let headers = http::HeaderMap::new();
+        let token = get_token_from_cookie(&headers);
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn test_get_token_other_cookie_present() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::COOKIE,
+            "other_cookie=value".parse().unwrap(),
+        );
+        let token = get_token_from_cookie(&headers);
+        assert_eq!(token, None);
     }
 }
