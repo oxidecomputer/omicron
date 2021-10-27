@@ -556,7 +556,10 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{dladm::MockDladm, zone::MockZones};
+    use crate::illumos::{
+        dladm::{MockDladm, PhysicalLink},
+        zone::MockZones,
+    };
     use crate::mocks::MockNexusClient;
     use crate::vnic::vnic_name;
     use chrono::Utc;
@@ -794,8 +797,9 @@ mod test {
                 Ok(())
             });
 
-        let zone_clone_from_base_ctx = MockZones::clone_from_base_context();
-        zone_clone_from_base_ctx
+        let zone_clone_from_base_propolis_ctx =
+            MockZones::clone_from_base_propolis_context();
+        zone_clone_from_base_propolis_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)

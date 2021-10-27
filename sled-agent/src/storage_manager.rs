@@ -131,7 +131,8 @@ impl StorageWorker {
     }
 
     async fn do_work(&mut self) -> Result<(), Error> {
-        self.do_work_internal().await
+        self.do_work_internal()
+            .await
             .map(|()| {
                 info!(self.log, "StorageWorker exited successfully");
             })
@@ -152,7 +153,10 @@ impl StorageWorker {
             // TODO: when would this not exist? It really should...
             let pool = pools.get_mut(&pool_name).unwrap();
 
-            info!(&self.log, "Storage manager processing zpool: {:#?}", pool.info);
+            info!(
+                &self.log,
+                "Storage manager processing zpool: {:#?}", pool.info
+            );
 
             // For now, we place all "expected" filesystems on each new zpool
             // we see. The decision of "whether or not to actually use the
@@ -185,14 +189,12 @@ impl StorageWorker {
                 let address = SocketAddr::new(network.ip(), partition.port);
                 info!(&self.log, "Created zone with address {}", address);
                 pool.add_filesystem(id, Filesystem { name, address });
-                datasets.push(DatasetInfo {
-                    id
-                });
+                datasets.push(DatasetInfo { id });
             }
 
             let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
                 Error::InternalError {
-                    message: format!("Invalid pool size: {}", e)
+                    message: format!("Invalid pool size: {}", e),
                 }
             })?;
 
@@ -202,11 +204,7 @@ impl StorageWorker {
                 .zpool_post(
                     pool.id(),
                     self.sled_id,
-                    SledAgentPoolInfo {
-                        id: pool.id(),
-                        size,
-                        datasets,
-                    },
+                    SledAgentPoolInfo { id: pool.id(), size, datasets },
                 )
                 .await;
 

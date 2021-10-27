@@ -17,23 +17,18 @@ use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[cfg(not(test))]
+use {
+    crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
+    omicron_common::NexusClient,
+};
 #[cfg(test)]
 use {
     crate::illumos::{
-        dladm::MockDladm as Dladm,
-        zfs::MockZfs as Zfs,
+        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
         zone::MockZones as Zones,
     },
     crate::mocks::MockNexusClient as NexusClient,
-};
-#[cfg(not(test))]
-use {
-    crate::illumos::{
-        dladm::Dladm,
-        zfs::Zfs,
-        zone::Zones,
-    },
-    omicron_common::NexusClient,
 };
 
 // TODO: I wanna make a task that continually reports the storage status

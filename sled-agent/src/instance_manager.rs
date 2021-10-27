@@ -16,16 +16,12 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
-#[cfg(not(test))]
-use crate::{
-    illumos::zone::Zones,
-    instance::Instance,
-};
 #[cfg(test)]
 use crate::{
-    illumos::zone::MockZones as Zones,
-    instance::MockInstance as Instance,
+    illumos::zone::MockZones as Zones, instance::MockInstance as Instance,
 };
+#[cfg(not(test))]
+use crate::{illumos::zone::Zones, instance::Instance};
 
 struct InstanceManagerInternal {
     log: Logger,
@@ -165,7 +161,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{dladm::MockDladm, zfs::MockZfs, zone::MockZones};
+    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
@@ -214,12 +210,6 @@ mod test {
         // Creation of the instance manager incurs some "global" system
         // checks - creation of the base zone, and cleanup of existing
         // zones + vnics.
-
-        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
-        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_DATASET);
-            Ok(())
-        });
 
         let zones_create_propolis_base_ctx =
             MockZones::create_propolis_base_context();
@@ -297,12 +287,6 @@ mod test {
         let nexus_client = Arc::new(MockNexusClient::default());
 
         // Instance Manager creation.
-
-        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
-        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_DATASET);
-            Ok(())
-        });
 
         let zones_create_propolis_base_ctx =
             MockZones::create_propolis_base_context();

@@ -184,10 +184,85 @@
           }
         }
       }
+    },
+    "/sled_agents/{sled_id}/zpools/{zpool_id}": {
+      "post": {
+        "description": "Report that a pool for a specified sled has come online.",
+        "operationId": "zpool_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledAgentPoolInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledAgentPoolAllocation"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AllocationInfo": {
+        "type": "object",
+        "properties": {
+          "quota": {
+            "description": "A maximum quota on filesystem usage. Refer to ZFS native properties for more detail.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "description": "A minimum reservation size for a filesystem. Refer to ZFS native properties for more detail.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "quota",
+          "reservation"
+        ]
+      },
       "BinRange_for_double": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -396,6 +471,20 @@
         "required": [
           "start_time",
           "value"
+        ]
+      },
+      "DatasetInfo": {
+        "description": "Describes a dataset within a pool.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Unique identifier for the dataset.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "Datum": {
@@ -1273,6 +1362,53 @@
           "target",
           "timeseries_key",
           "timeseries_name"
+        ]
+      },
+      "SledAgentPoolAllocation": {
+        "description": "Allocation strategy for pools.",
+        "type": "object",
+        "properties": {
+          "allocations": {
+            "description": "Mapping of Dataset UUID to allocation properties to set.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AllocationInfo"
+            }
+          }
+        },
+        "required": [
+          "allocations"
+        ]
+      },
+      "SledAgentPoolInfo": {
+        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "description": "Description of datasets within the pool.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetInfo"
+            }
+          },
+          "id": {
+            "description": "Unique identifier for the pool.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "description": "Total size of the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "datasets",
+          "id",
+          "size"
         ]
       },
       "SledAgentStartupInfo": {

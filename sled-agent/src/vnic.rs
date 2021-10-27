@@ -18,7 +18,7 @@ fn guest_vnic_name(id: u64) -> String {
     format!("{}_guest{}", VNIC_PREFIX, id)
 }
 
-fn vnic_name(id: u64) -> String {
+pub fn vnic_name(id: u64) -> String {
     format!("{}{}", VNIC_PREFIX, id)
 }
 
