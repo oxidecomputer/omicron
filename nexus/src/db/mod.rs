@@ -6,7 +6,8 @@
 // doctests
 pub mod collection_insert;
 mod config;
-mod datastore;
+// This is marked public for use by the integration tests
+pub mod datastore;
 mod error;
 mod pagination;
 mod pool;

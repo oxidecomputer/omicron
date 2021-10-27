@@ -24,6 +24,7 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 pub mod common;
+use common::resource_helpers::create_organization;
 use common::start_sled_agent;
 use common::test_setup;
 
@@ -34,6 +35,9 @@ extern crate slog;
 async fn test_basic_failures() {
     let testctx = test_setup("basic_failures").await;
     let client = &testctx.external_client;
+
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
 
     /* Error case: GET /nonexistent (a path with no route at all) */
     let error = client
@@ -48,13 +52,13 @@ async fn test_basic_failures() {
     assert_eq!("Not Found", error.message);
 
     /*
-     * Error case: GET /projects/nonexistent (a possible value that does not
-     * exist inside a collection that does exist)
+     * Error case: GET /organizations/test-org/projects/nonexistent (a possible
+     * value that does not exist inside a collection that does exist)
      */
     let error = client
         .make_request(
             Method::GET,
-            "/projects/nonexistent",
+            "/organizations/test-org/projects/nonexistent",
             None as Option<()>,
             StatusCode::NOT_FOUND,
         )
@@ -63,14 +67,14 @@ async fn test_basic_failures() {
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     /*
-     * Error case: GET /projects/-invalid-name
+     * Error case: GET /organizations/test-org/projects/-invalid-name
      * TODO-correctness is 400 the right error code here or is 404 more
      * appropriate?
      */
     let error = client
         .make_request(
             Method::GET,
-            "/projects/-invalid-name",
+            "/organizations/test-org/projects/-invalid-name",
             None as Option<()>,
             StatusCode::BAD_REQUEST,
         )
@@ -82,11 +86,11 @@ async fn test_basic_failures() {
         error.message
     );
 
-    /* Error case: PUT /projects */
+    /* Error case: PUT /organizations/test-org/projects */
     let error = client
         .make_request(
             Method::PUT,
-            "/projects",
+            "/organizations/test-org/projects",
             None as Option<()>,
             StatusCode::METHOD_NOT_ALLOWED,
         )
@@ -94,11 +98,11 @@ async fn test_basic_failures() {
         .expect_err("expected error");
     assert_eq!("Method Not Allowed", error.message);
 
-    /* Error case: DELETE /projects */
+    /* Error case: DELETE /organizations/test-org/projects */
     let error = client
         .make_request(
             Method::DELETE,
-            "/projects",
+            "/organizations/test-org/projects",
             None as Option<()>,
             StatusCode::METHOD_NOT_ALLOWED,
         )
@@ -110,7 +114,7 @@ async fn test_basic_failures() {
     let error = client
         .make_request_with_body(
             Method::GET,
-            "/projects/nonexistent/instances",
+            "/organizations/test-org/projects/nonexistent/instances",
             "".into(),
             StatusCode::NOT_FOUND,
         )
@@ -122,7 +126,7 @@ async fn test_basic_failures() {
     let error = client
         .make_request_with_body(
             Method::GET,
-            "/projects/nonexistent/instances/my-instance",
+            "/organizations/test-org/projects/nonexistent/instances/my-instance",
             "".into(),
             StatusCode::NOT_FOUND,
         )
@@ -134,7 +138,7 @@ async fn test_basic_failures() {
     let error = client
         .make_request_with_body(
             Method::GET,
-            "/projects/nonexistent/instances/my_instance",
+            "/organizations/test-org/projects/nonexistent/instances/my_instance",
             "".into(),
             StatusCode::BAD_REQUEST,
         )
@@ -150,7 +154,7 @@ async fn test_basic_failures() {
     let error = client
         .make_request_with_body(
             Method::DELETE,
-            "/projects/nonexistent/instances/my_instance",
+            "/organizations/test-org/projects/nonexistent/instances/my_instance",
             "".into(),
             StatusCode::BAD_REQUEST,
         )
@@ -170,10 +174,13 @@ async fn test_projects() {
     let testctx = test_setup("test_projects").await;
     let client = &testctx.external_client;
 
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
+
     /*
      * Verify that there are no projects to begin with.
      */
-    let projects_url = "/projects";
+    let projects_url = "/organizations/test-org/projects";
     let projects = projects_list(&client, &projects_url).await;
     assert_eq!(0, projects.len());
 
@@ -204,20 +211,20 @@ async fn test_projects() {
     };
 
     /*
-     * Error case: GET /projects/simproject1/nonexistent (a path that does not
+     * Error case: GET /organizations/test-org/projects/simproject1/nonexistent (a path that does not
      * exist beneath a resource that does exist)
      */
     let error = client
         .make_request_error(
             Method::GET,
-            "/projects/simproject1/nonexistent",
+            "/organizations/test-org/projects/simproject1/nonexistent",
             StatusCode::NOT_FOUND,
         )
         .await;
     assert_eq!("Not Found", error.message);
 
     /*
-     * Basic GET /projects now that we've created a few.
+     * Basic GET /organizations/test-org/projects now that we've created a few.
      * TODO-coverage: pagination
      * TODO-coverage: marker even without pagination
      */
@@ -234,9 +241,11 @@ async fn test_projects() {
     assert!(initial_projects[2].identity.description.len() > 0);
 
     /*
-     * Basic test of out-of-the-box GET /projects/simproject2
+     * Basic test of out-of-the-box GET /organizations/test-org/projects/simproject2
      */
-    let project = project_get(&client, "/projects/simproject2").await;
+    let project =
+        project_get(&client, "/organizations/test-org/projects/simproject2")
+            .await;
     let expected = &initial_projects[1];
     assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
@@ -250,7 +259,7 @@ async fn test_projects() {
     client
         .make_request_no_body(
             Method::DELETE,
-            "/projects/simproject2",
+            "/organizations/test-org/projects/simproject2",
             StatusCode::NO_CONTENT,
         )
         .await
@@ -258,26 +267,26 @@ async fn test_projects() {
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
-     * "/projects/simproject2".
+     * "/organizations/test-org/projects/simproject2".
      */
     client
         .make_request_error(
             Method::GET,
-            "/projects/simproject2",
+            "/organizations/test-org/projects/simproject2",
             StatusCode::NOT_FOUND,
         )
         .await;
     client
         .make_request_error(
             Method::DELETE,
-            "/projects/simproject2",
+            "/organizations/test-org/projects/simproject2",
             StatusCode::NOT_FOUND,
         )
         .await;
     client
         .make_request_error_body(
             Method::PUT,
-            "/projects/simproject2",
+            "/organizations/test-org/projects/simproject2",
             ProjectUpdateParams {
                 identity: IdentityMetadataUpdateParams {
                     name: None,
@@ -289,13 +298,14 @@ async fn test_projects() {
         .await;
 
     /*
-     * Similarly, verify "GET /projects"
+     * Similarly, verify "GET /organizations/test-org/projects"
      */
     let expected_projects: Vec<&Project> = initial_projects
         .iter()
         .filter(|p| p.identity.name != "simproject2")
         .collect();
-    let new_projects = projects_list(&client, "/projects").await;
+    let new_projects =
+        projects_list(&client, "/organizations/test-org/projects").await;
     assert_eq!(new_projects.len(), expected_projects.len());
     assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
@@ -329,7 +339,7 @@ async fn test_projects() {
     let mut response = client
         .make_request(
             Method::PUT,
-            "/projects/simproject3",
+            "/organizations/test-org/projects/simproject3",
             Some(project_update),
             StatusCode::OK,
         )
@@ -341,7 +351,9 @@ async fn test_projects() {
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
     let expected = project;
-    let project = project_get(&client, "/projects/simproject3").await;
+    let project =
+        project_get(&client, "/organizations/test-org/projects/simproject3")
+            .await;
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -360,7 +372,7 @@ async fn test_projects() {
     let mut response = client
         .make_request(
             Method::PUT,
-            "/projects/simproject3",
+            "/organizations/test-org/projects/simproject3",
             Some(project_update),
             StatusCode::OK,
         )
@@ -374,7 +386,7 @@ async fn test_projects() {
     client
         .make_request_error(
             Method::GET,
-            "/projects/simproject3",
+            "/organizations/test-org/projects/simproject3",
             StatusCode::NOT_FOUND,
         )
         .await;
@@ -391,7 +403,7 @@ async fn test_projects() {
     let error = client
         .make_request_error_body(
             Method::POST,
-            "/projects",
+            "/organizations/test-org/projects",
             project_create,
             StatusCode::BAD_REQUEST,
         )
@@ -405,7 +417,7 @@ async fn test_projects() {
     let error = client
         .make_request_with_body(
             Method::POST,
-            "/projects",
+            "/organizations/test-org/projects",
             "{\"name\": \"sim_project\", \"description\": \"underscore\"}"
                 .into(),
             StatusCode::BAD_REQUEST,
@@ -426,8 +438,12 @@ async fn test_projects() {
             description: "a soapbox racer".to_string(),
         },
     };
-    let project: Project =
-        objects_post(&client, "/projects", project_create).await;
+    let project: Project = objects_post(
+        &client,
+        "/organizations/test-org/projects",
+        project_create,
+    )
+    .await;
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
 
@@ -455,8 +471,11 @@ async fn test_projects_list() {
     let testctx = test_setup("test_projects_list").await;
     let client = &testctx.external_client;
 
+    let org_name = "test-org";
+    create_organization(&client, &org_name).await;
+
     /* Verify that there are no projects to begin with. */
-    let projects_url = "/projects";
+    let projects_url = "/organizations/test-org/projects";
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
 
     /* Create a large number of projects that we can page through. */

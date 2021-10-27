@@ -1,5 +1,6 @@
 //! Structures stored to the database.
 
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
@@ -349,6 +350,13 @@ impl Organization {
     }
 }
 
+impl DatastoreCollection<Project> for Organization {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = organization::dsl::rcgen;
+    type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
+    type CollectionIdColumn = project::dsl::organization_id;
+}
+
 impl Into<external::Organization> for Organization {
     fn into(self) -> external::Organization {
         external::Organization { identity: self.identity() }
@@ -380,18 +388,29 @@ impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
 pub struct Project {
     #[diesel(embed)]
     identity: ProjectIdentity,
+
+    pub organization_id: Uuid,
 }
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(params: external::ProjectCreateParams) -> Self {
-        Self { identity: ProjectIdentity::new(Uuid::new_v4(), params.identity) }
+    pub fn new(
+        organization_id: Uuid,
+        params: external::ProjectCreateParams,
+    ) -> Self {
+        Self {
+            identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
+            organization_id: organization_id,
+        }
     }
 }
 
 impl Into<external::Project> for Project {
     fn into(self) -> external::Project {
-        external::Project { identity: self.identity() }
+        external::Project {
+            identity: self.identity(),
+            organization_id: self.organization_id,
+        }
     }
 }
 

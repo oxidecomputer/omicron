@@ -14,7 +14,9 @@ use dropshot::test_util::objects_post;
 
 pub mod common;
 use common::identity_eq;
-use common::resource_helpers::{create_project, create_vpc};
+use common::resource_helpers::{
+    create_organization, create_project, create_vpc,
+};
 use common::test_setup;
 
 extern crate slog;
@@ -25,13 +27,19 @@ async fn test_vpc_routers() {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
+    let organization_name = "test-org";
     let project_name = "springfield-squidport";
-    let vpcs_url = format!("/projects/{}/vpcs", project_name);
-    let _ = create_project(&client, project_name).await;
+    let vpcs_url = format!(
+        "/organizations/{}/projects/{}/vpcs",
+        organization_name, project_name
+    );
+    create_organization(&client, organization_name).await;
+    let _ = create_project(&client, organization_name, project_name).await;
 
     /* Create a VPC. */
     let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, project_name, vpc_name).await;
+    let vpc =
+        create_vpc(&client, organization_name, project_name, vpc_name).await;
 
     let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
     let routers_url = format!("{}/routers", vpc_url);
@@ -178,7 +186,8 @@ async fn test_vpc_routers() {
 
     // Creating a router with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
+    let vpc2 =
+        create_vpc(&client, organization_name, project_name, vpc2_name).await;
 
     let router_same_name: VpcRouter = objects_post(
         &client,
