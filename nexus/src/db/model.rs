@@ -1010,13 +1010,7 @@ pub struct NetworkInterface {
     pub ip: ipnetwork::IpNetwork,
 }
 
-// TODO
-
-// #[derive(
-//     Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
-// )]
-// #[serde(try_from = "String")]
-// pub struct SessionToken(String);
+// TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "consolesession"]
@@ -1028,9 +1022,6 @@ pub struct ConsoleSession {
 }
 
 impl ConsoleSession {
-    // TODO: should new() generate the token? i.e., should we move that code
-    // from nexus create_session into here? we can just use the full struct
-    // constructor when we want to specify a token value for testing purposes
     pub fn new(token: String, user_id: Uuid) -> Self {
         let now = Utc::now();
         Self { token, user_id, time_last_used: now, time_created: now }

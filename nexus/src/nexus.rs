@@ -1679,12 +1679,9 @@ impl Nexus {
 }
 
 fn generate_session_token() -> String {
-    // TODO: might want to specify a particular algo rather than StdRng, which
-    // is currently ChaCha12Rng but can change if they decide it's no longer
-    // good enough
     // TODO: "If getrandom is unable to provide secure entropy this method will panic."
-    // Should we explicitly handle that possibility, e.g., by wrapping this in a Result?
-    // TODO: file issue to avoid reseeding every time if this makes it into the final PR
+    // Should we explicitly handle that?
+    // TODO: store generator somewhere so we don't reseed every time
     let mut rng = StdRng::from_entropy();
     // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
     // 20 bytes = 160 bits of entropy

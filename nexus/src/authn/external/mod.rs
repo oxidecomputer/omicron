@@ -10,9 +10,6 @@ pub mod spoof;
 
 /// Authenticates incoming HTTP requests using schemes intended for use by the
 /// external API
-///
-/// (This will eventually support something like HTTP signatures and OAuth.  For
-/// now, only a dummy scheme is supported.)
 pub struct Authenticator<T> {
     allowed_schemes: Vec<Box<dyn HttpAuthnScheme<T>>>,
 }

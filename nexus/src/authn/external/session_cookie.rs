@@ -43,8 +43,8 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
     authn::SchemeName("session_cookie");
 
 /// Implements an authentication scheme where we check the DB to see if we have
-/// a session matching the token in a cookie ([`COOKIE_NAME_OXIDE_AUTHN_COOKIE`])
-/// on the request. This is meant to be used by the web console.
+/// a session matching the token in a cookie ([`SESSION_COOKIE_COOKIE_NAME`]) on
+/// the request. This is meant to be used by the web console.
 #[derive(Debug)]
 pub struct HttpAuthnSessionCookie;
 
@@ -80,7 +80,7 @@ where
 
         let actor = Actor(session.user_id());
 
-        // TODO: could move this logic into methods on the session trait
+        // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
         if session.time_last_used() + ctx.idle_timeout() < now {
             ctx.session_expire(token.clone()).await;
@@ -89,15 +89,14 @@ where
                 source: anyhow!(
                     "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
                     session.time_last_used(),
-                    now, 
+                    now,
                     ctx.idle_timeout()
                 ),
             });
         }
 
         // if the user is still within the idle timeout, but the session has existed longer
-        // than the absolute timeout, we can no longer extend the session
-
+        // than absolute_timeout, it is expired and we can no longer extend the session
         if session.time_created() + ctx.absolute_timeout() < now {
             ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {

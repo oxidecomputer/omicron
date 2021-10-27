@@ -469,8 +469,8 @@ CREATE TABLE omicron.public.ConsoleSession (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
-    -- TODO: let's stay agnostic about what this means for now, but obviously the 
-    -- simplest interpretation is that it points to a row in the User table
+    -- we're agnostic about what this means until work starts on users, but the
+    -- naive interpretation is that it points to a row in the User table
     user_id UUID NOT NULL
 );
 

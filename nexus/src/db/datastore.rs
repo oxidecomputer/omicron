@@ -1563,11 +1563,8 @@ impl DataStore {
             .filter(dsl::token.eq(token.clone()))
             .execute_async(self.pool())
             .await
-            .map(|_rows_deleted| {
-                // TODO: from a logic POV we don't care if it already didn't exist, but
-                // we may want to log that fact
-                ()
-            })
+            // TODO: log attempts to delete nonexistent tokens?
+            .map(|_rows_deleted| ())
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
