@@ -2,6 +2,7 @@
  * Shared state used by API request handlers
  */
 use super::authn;
+use super::authz;
 use super::config;
 use super::db;
 use super::Nexus;
@@ -23,6 +24,8 @@ pub struct ServerContext {
     pub log: Logger,
     /** authenticator for external HTTP requests */
     pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
+    /** authorizer */
+    pub authz: authz::Authz,
     /** internal API request latency tracker */
     pub internal_latencies: LatencyTracker,
     /** external API request latency tracker */
@@ -51,6 +54,7 @@ impl ServerContext {
                 as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
             .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
+        let authz = authz::Authz::new();
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
             const START_LATENCY_DECADE: i8 = -6;
@@ -81,6 +85,7 @@ impl ServerContext {
             ),
             log,
             external_authn,
+            authz,
             internal_latencies,
             external_latencies,
             producer_registry,
