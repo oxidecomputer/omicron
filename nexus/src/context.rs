@@ -187,13 +187,12 @@ impl OpContext {
 
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
-    pub fn authorize<Action, Resource>(
+    pub fn authorize<Resource>(
         &self,
-        action: Action,
+        action: authz::Action,
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Action: oso::ToPolar + Debug + Clone,
         Resource: oso::ToPolar + Debug + Clone,
     {
         /*
@@ -207,7 +206,7 @@ impl OpContext {
             "action" => ?action,
             "resource" => ?resource
         );
-        let result = self.authz.authorize(action.clone(), resource.clone());
+        let result = self.authz.authorize(action, resource.clone());
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,

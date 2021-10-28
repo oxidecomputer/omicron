@@ -77,7 +77,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<diesel::PgConnection>>, Error>
     {
-        opctx.authorize("query", authz::DATABASE)?;
+        opctx.authorize(authz::Action::Query, authz::DATABASE)?;
         Ok(self.pool.pool())
     }
 
@@ -186,7 +186,10 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })?;
-        opctx.authorize("read", authz::Organization::from(&organization))?;
+        opctx.authorize(
+            authz::Action::Read,
+            authz::Organization::from(&organization),
+        )?;
         Ok(organization)
     }
 

@@ -2,9 +2,13 @@ actor AuthenticatedActor {}
 actor AnyActor {}
 
 resource Database {
+	permissions = [ "Query" ];
+	roles = [ "User" ];
+
+	"Query" if "User";
 }
 
-allow(actor: AnyActor, "query", _database: Database) if
+allow(actor: AnyActor, Action::Query, _database: Database) if
 	actor.authenticated;
 
 resource Organization {
@@ -21,9 +25,9 @@ resource Organization {
 	"read" if "reader";
 }
 
-allow(actor: AnyActor, action, resource) if
+allow(actor: AnyActor, action: Action, resource) if
     actor.authenticated and
-    has_permission(actor.authn_actor.unwrap(), action, resource);
+    has_permission(actor.authn_actor.unwrap(), action.to_perm(), resource);
 
 has_role(actor: AuthenticatedActor, "reader", _resource: Organization) if
     actor.id == "00000000-0000-0000-0000-000000000000";
