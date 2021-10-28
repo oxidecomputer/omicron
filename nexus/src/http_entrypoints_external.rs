@@ -186,10 +186,6 @@ async fn organizations_get(
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
-
-    let authn = apictx.external_authn.authn_request(&rqctx).await?;
-    println!("authn_request(): {:?}", authn);
-
     let nexus = &apictx.nexus;
     let handler = async {
         let query = query_params.into_inner();
