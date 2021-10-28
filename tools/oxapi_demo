@@ -5,7 +5,15 @@
 
 OXAPI_URL='http://127.0.0.1:12220'
 ARG0="$(basename "${BASH_SOURCE[0]}")"
+NO_AUTHENTICATE=false
 HELP="$(cat <<EOF
+usage: $ARG0 [-A] [cmd] [args]
+
+GENERAL OPTIONS
+
+    -A        do not attempt to authenticate
+              (default behavior: use "spoof" authentication for endpoints
+	      that require it)
 
 ORGANIZATIONS
 
@@ -72,6 +80,11 @@ function main
 	type curl > /dev/null 2>&1 || fail "curl not found in PATH."
 	type json > /dev/null 2>&1 || fail "json not found in PATH. Install it with npm i -g json."
 
+	if [[ "$1" == "-A" ]]; then
+		NO_AUTHENTICATE=true
+		shift
+	fi
+
 	[[ $# -gt 0 ]] || usage "command not specified"
 
 	func="cmd_$1"
@@ -105,6 +118,16 @@ function do_curl
 	path="$1"
 	shift
 	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
+}
+
+function do_curl_authz
+{
+	if [[ $NO_AUTHENTICATE == true ]]; then
+		do_curl "$@"
+	else
+		do_curl "$@" \
+		    -H "oxide-authn-spoof: 00000000-0000-0000-0000-000000000000"
+	fi
 }
 
 # TODO-cleanup We could do a lot better than this.
@@ -144,7 +167,7 @@ function cmd_organization_create_demo
 {
 	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
 	mkjson name="$1" description="an organization called $1" |
-		do_curl "/organizations" -X POST -T -
+		do_curl_authz "/organizations" -X POST -T -
 }
 
 function cmd_organization_delete
