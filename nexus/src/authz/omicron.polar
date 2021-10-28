@@ -2,14 +2,15 @@ actor AuthenticatedActor {}
 actor AnyActor {}
 
 resource Database {
-	permissions = [ "Query" ];
-	roles = [ "User" ];
+	permissions = [ "query" ];
+	roles = [ "user" ];
 
-	"Query" if "User";
+	"query" if "user";
 }
 
-allow(actor: AnyActor, Action::Query, _database: Database) if
-	actor.authenticated;
+allow(actor: AnyActor, Action::Query, database: Database) if
+	actor.authenticated and
+	has_permission(actor.authn_actor.unwrap(), action.to_perm(), database)
 
 resource Organization {
 	## This is currently a straight translation of RFD 43.
