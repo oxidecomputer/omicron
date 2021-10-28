@@ -24,17 +24,24 @@ pub trait SessionStore {
 
     // TODO: these should all return results, it was just a lot easier to
     // write the tests with Option. will change it back
+
+    /// Retrieve session from store by token
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel>;
 
+    /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
         token: String,
     ) -> Option<Self::SessionModel>;
 
+    /// Mark session expired
     async fn session_expire(&self, token: String) -> Option<()>;
 
-    fn idle_timeout(&self) -> Duration;
-    fn absolute_timeout(&self) -> Duration;
+    /// Maximum time session can remain idle before expiring
+    fn session_idle_timeout(&self) -> Duration;
+
+    /// Maximum lifetime of session including extensions
+    fn session_absolute_timeout(&self) -> Duration;
 }
 
 // generic cookie name is recommended by OWASP
@@ -82,7 +89,7 @@ where
 
         // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
-        if session.time_last_used() + ctx.idle_timeout() < now {
+        if session.time_last_used() + ctx.session_idle_timeout() < now {
             ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
@@ -90,14 +97,14 @@ where
                     "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
                     session.time_last_used(),
                     now,
-                    ctx.idle_timeout()
+                    ctx.session_idle_timeout()
                 ),
             });
         }
 
         // if the user is still within the idle timeout, but the session has existed longer
         // than absolute_timeout, it is expired and we can no longer extend the session
-        if session.time_created() + ctx.absolute_timeout() < now {
+        if session.time_created() + ctx.session_absolute_timeout() < now {
             ctx.session_expire(token.clone()).await;
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
@@ -106,7 +113,7 @@ where
                     session.time_created(),
                     session.time_last_used(),
                     now,
-                    ctx.absolute_timeout()
+                    ctx.session_absolute_timeout()
                 ),
             });
         }
@@ -197,11 +204,11 @@ mod test {
             Some(())
         }
 
-        fn idle_timeout(&self) -> Duration {
+        fn session_idle_timeout(&self) -> Duration {
             Duration::hours(1)
         }
 
-        fn absolute_timeout(&self) -> Duration {
+        fn session_absolute_timeout(&self) -> Duration {
             Duration::hours(8)
         }
     }

@@ -117,11 +117,11 @@ impl SessionStore for Arc<ServerContext> {
     }
 
     // TODO: pull these values from the config
-    fn idle_timeout(&self) -> Duration {
+    fn session_idle_timeout(&self) -> Duration {
         Duration::hours(1)
     }
 
-    fn absolute_timeout(&self) -> Duration {
+    fn session_absolute_timeout(&self) -> Duration {
         Duration::hours(8)
     }
 }
