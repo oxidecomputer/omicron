@@ -396,18 +396,18 @@ impl Nexus {
 
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         new_organization: &OrganizationCreateParams,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(db_org).await
+        self.db_datastore.organization_create(opctx, db_org).await
     }
 
     pub async fn organization_fetch(
         &self,
-        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(opctx, name).await
+        self.db_datastore.organization_fetch(name).await
     }
 
     pub async fn organizations_list_by_name(

@@ -9,6 +9,7 @@ mod oso_types;
 pub use oso_types::Action;
 pub use oso_types::Organization;
 pub use oso_types::DATABASE;
+pub use oso_types::FLEET;
 
 /// Server-wide authorization context
 pub struct Authz {

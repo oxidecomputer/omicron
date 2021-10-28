@@ -228,8 +228,10 @@ async fn organizations_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
-        let organization =
-            nexus.organization_create(&new_organization.into_inner()).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organization = nexus
+            .organization_create(&opctx, &new_organization.into_inner())
+            .await?;
         Ok(HttpResponseCreated(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -260,9 +262,7 @@ async fn organizations_get_organization(
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization =
-            nexus.organization_fetch(&opctx, &organization_name).await?;
+        let organization = nexus.organization_fetch(&organization_name).await?;
         Ok(HttpResponseOk(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -17,6 +17,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
+        Fleet::get_polar_class(),
         Organization::get_polar_class(),
     ];
     for c in classes {
@@ -31,6 +32,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
 pub enum Action {
     Query, // only used for [`Database`]
     Read,  // general "read" action
+    CreateOrganization,
 }
 
 // We cannot derive(PolarClass) because we need to define equality.
@@ -43,6 +45,7 @@ impl oso::PolarClass for Action {
                 match a {
                     Action::Query => Perm::Query,
                     Action::Read => Perm::Read,
+                    Action::CreateOrganization => Perm::CreateOrganization,
                 }
                 .to_string()
             })
@@ -51,15 +54,19 @@ impl oso::PolarClass for Action {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Perm {
-    Read,
     Query,
+    Read,
+    CreateOrganization,
 }
 
 impl fmt::Display for Perm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // This implementation MUST be kept in sync with the Polar configuration
+        // for Omicron, which uses literal strings for permissions.
         f.write_str(match self {
             Perm::Read => "read",
             Perm::Query => "query",
+            Perm::CreateOrganization => "create_organization",
         })
     }
 }
@@ -131,3 +138,7 @@ impl oso::PolarClass for Organization {
 #[derive(Clone, Debug, Eq, PartialEq, oso::PolarClass)]
 pub struct Database;
 pub const DATABASE: Database = Database;
+
+#[derive(Clone, Debug, Eq, PartialEq, oso::PolarClass)]
+pub struct Fleet;
+pub const FLEET: Fleet = Fleet;

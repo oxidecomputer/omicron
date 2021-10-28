@@ -146,15 +146,18 @@ impl DataStore {
     /// Create a organization
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         organization: Organization,
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
+
+        opctx.authorize(authz::Action::CreateOrganization, authz::FLEET)?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
             .values(organization)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
@@ -168,20 +171,14 @@ impl DataStore {
     /// Lookup a organization by name.
     pub async fn organization_fetch(
         &self,
-        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<Organization> {
         use db::schema::organization::dsl;
-        // XXX Should use query-based authorization.  Relatedly, this should be
-        // a 404, not a 403.
-        // XXX Would it be possible to make the lower-level Diesel interface
-        // here fail if the user didn't have the required authorization to read
-        // each particular object?
-        let organization = dsl::organization
+        dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(Organization::as_select())
-            .first_async::<Organization>(self.pool_authorized(opctx)?)
+            .first_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -189,12 +186,7 @@ impl DataStore {
                     ResourceType::Organization,
                     LookupType::ByName(name.as_str().to_owned()),
                 )
-            })?;
-        opctx.authorize(
-            authz::Action::Read,
-            authz::Organization::from(&organization),
-        )?;
-        Ok(organization)
+            })
     }
 
     /// Delete a organization
