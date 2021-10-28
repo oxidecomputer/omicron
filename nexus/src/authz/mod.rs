@@ -40,7 +40,8 @@ impl Context {
     }
 
     /// Check whether the actor performing this request is authorized for
-    /// `action` on `resource`.
+    /// `action` on `resource`.  For "read" operations, use authorize_read()
+    /// instead.
     pub fn authorize<Resource>(
         &self,
         action: Action,
@@ -49,19 +50,24 @@ impl Context {
     where
         Resource: oso::ToPolar,
     {
+        // XXX Add an assertion that action != "read"
+        // TODO-security For Action::Read (and any other "read" action),
+        // this should return NotFound rather than Forbidden.  But we cannot
+        // construct the appropriate NotFound here without more information:
+        // the resource type and how it was looked up.  In practice, it's
+        // quite possible that all such cases should really use query
+        // filtering instead of an explicit is_allowed() check, in which
+        // case we could safely assume Forbidden here.
+        //
+        // Alternatively, we could let the caller produce the appropriate
+        // "NotFound", but it would add a lot of boilerplate to a lot of
+        // callers if we didn't return ApiError here.
         let actor = oso_types::AnyActor::from(&*self.authn);
         match self.authz.oso.is_allowed(actor, action, resource) {
             Err(error) => Err(Error::internal_error(&format!(
                 "failed to compute authorization: {:#}",
                 error
             ))),
-            // XXX In some cases, this should be NotFound.  These are cases
-            // where "action" is a read permission.  But we cannot construct the
-            // appropriate NotFound here without more information: the resource
-            // type and how it was looked up.  In practice, maybe all of the
-            // cases that should work this way ought to use query filtering
-            // instead, so we can safely assume Forbidden here.  That remains to
-            // be seen.
             Ok(false) => Err(Error::Forbidden),
             Ok(true) => Ok(()),
         }

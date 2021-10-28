@@ -64,23 +64,6 @@ impl fmt::Display for Perm {
     }
 }
 
-// XXX
-//// We cannot derive(PolarClass) because we need to define Perm::from()
-//impl oso::PolarClass for Perm {
-//    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-//        oso::Class::builder()
-//            .name("Perm")
-//            .add_class_method("from_action", |a: &Action| {
-//                match a {
-//                    Action::Query => Perm::Read,
-//                    Action::Read => Perm::Read,
-//                }
-//                .to_string()
-//            })
-//            .set_equality_check(|a1, a2| a1 == a2)
-//    }
-//}
-
 // Define newtypes for the various types that we want to impl PolarClass for.
 // This is needed because is_allowed() consumes these types, not references.  So
 // if we want to call is_allowed() and still reference the original type, we

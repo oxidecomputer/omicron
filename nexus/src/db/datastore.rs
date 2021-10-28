@@ -67,7 +67,11 @@ impl DataStore {
         DataStore { pool }
     }
 
-    // XXX deprecate in favor of pool_authorized()
+    // TODO-security This should be deprecated in favor of pool_authorized(),
+    // which gives us the chance to do a minimal security check before hitting
+    // the database.  Eventually, this function should only be used for doing
+    // authentication in the first place (since we can't do an authz check in
+    // that case).
     fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
         self.pool.pool()
     }
