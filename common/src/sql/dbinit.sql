@@ -58,6 +58,8 @@ CREATE TABLE omicron.public.Sled (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     ip INET NOT NULL,
     port INT4 NOT NULL
@@ -72,6 +74,8 @@ CREATE TABLE omicron.public.Zpool (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
@@ -94,6 +98,7 @@ CREATE TABLE omicron.public.Dataset (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     /* FK into the Pool table */
     pool_id UUID NOT NULL,

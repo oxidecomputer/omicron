@@ -3,8 +3,10 @@
 use mockall::mock;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::SledAgentPoolAllocation;
-use omicron_common::api::internal::nexus::SledAgentPoolInfo;
+use omicron_common::api::internal::nexus::ZpoolPostRequest;
+use omicron_common::api::internal::nexus::ZpoolPostResponse;
+use omicron_common::api::internal::nexus::DatasetPostRequest;
+use omicron_common::api::internal::nexus::DatasetPostResponse;
 use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -27,7 +29,13 @@ mock! {
             &self,
             zpool_id: Uuid,
             sled_id: Uuid,
-            info: SledAgentPoolInfo,
-        ) -> Result<SledAgentPoolAllocation, Error>;
+            info: ZpoolPostRequest,
+        ) -> Result<ZpoolPostResponse, Error>;
+        pub async fn dataset_post(
+            &self,
+            dataset_id: Uuid,
+            zpool_id: Uuid,
+            info: DatasetPostRequest,
+        ) -> Result<DatasetPostResponse, Error>;
     }
 }
