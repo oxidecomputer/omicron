@@ -1,4 +1,11 @@
-actor Actor2 {}
+actor AuthenticatedActor {}
+actor AnyActor {}
+
+resource Database {
+}
+
+allow(actor: AnyActor, "query", _database: Database) if
+	actor.authenticated;
 
 resource Organization {
 	## This is currently a straight translation of RFD 43.
@@ -14,8 +21,9 @@ resource Organization {
 	"read" if "reader";
 }
 
-allow(actor, action, resource) if
-    has_permission(actor, action, resource);
+allow(actor: AnyActor, action, resource) if
+    actor.authenticated and
+    has_permission(actor.authn_actor.unwrap(), action, resource);
 
-has_role(actor: Actor, "reader", _resource: Organization) if
+has_role(actor: AuthenticatedActor, "reader", _resource: Organization) if
     actor.id == "00000000-0000-0000-0000-000000000000";

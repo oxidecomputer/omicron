@@ -8,10 +8,15 @@ use super::db;
 use super::Nexus;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
+use omicron_common::api::external::Error;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 /**
@@ -25,7 +30,7 @@ pub struct ServerContext {
     /** authenticator for external HTTP requests */
     pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
     /** authorizer */
-    pub authz: authz::Authz,
+    pub authz: Arc<authz::Authz>,
     /** internal API request latency tracker */
     pub internal_latencies: LatencyTracker,
     /** external API request latency tracker */
@@ -54,7 +59,7 @@ impl ServerContext {
                 as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
             .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
-        let authz = authz::Authz::new();
+        let authz = Arc::new(authz::Authz::new());
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
             const START_LATENCY_DECADE: i8 = -6;
@@ -90,5 +95,125 @@ impl ServerContext {
             external_latencies,
             producer_registry,
         })
+    }
+}
+
+/// Provides general facilities scoped to whatever operation Nexus is currently
+/// doing
+///
+/// The idea is that whatever code path you're looking at in Nexus, it should
+/// eventually have an OpContext that allows it to:
+///
+/// - log a message (with relevant operation-specific metadata)
+/// - bump a counter (exported via Oximeter)
+/// - emit tracing data
+/// - do an authorization check
+///
+/// OpContexts are constructed when Nexus begins doing something.  This is often
+/// when it starts handling an API request, but it could be when starting a
+/// background operation or something else.
+// Not all of these fields are used yet, but they may still prove useful for
+// debugging.
+#[allow(dead_code)]
+pub struct OpContext {
+    pub log: slog::Logger,
+    pub authz: authz::Context,
+    pub authn: Arc<authn::Context>,
+
+    created_instant: Instant,
+    created_walltime: SystemTime,
+    metadata: BTreeMap<String, String>,
+    kind: OpKind,
+}
+
+pub enum OpKind {
+    /// Handling an external API request
+    ExternalApiRequest,
+    /// Background operations in Nexus
+    Background,
+}
+
+impl OpContext {
+    /// Authenticates an incoming request to the external API and produces a new
+    /// operation context for it
+    pub async fn for_external_api(
+        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    ) -> Result<OpContext, dropshot::HttpError> {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let apictx = rqctx.context();
+        let log = apictx.log.new(o!());
+        let authn = Arc::new(apictx.external_authn.authn_request(rqctx).await?);
+        let authz =
+            authz::Context::new(Arc::clone(&authn), Arc::clone(&apictx.authz));
+
+        let request = rqctx.request.lock().await;
+        let mut metadata = BTreeMap::new();
+        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
+        metadata
+            .insert(String::from("http_method"), request.method().to_string());
+        metadata.insert(String::from("http_uri"), request.uri().to_string());
+
+        Ok(OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::ExternalApiRequest,
+        })
+    }
+
+    /// Returns a context suitable for use in background operations in Nexus
+    pub fn for_background(
+        log: slog::Logger,
+        authz: Arc<authz::Authz>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let authn = Arc::new(authn::Context::internal_unauthenticated());
+        let authz = authz::Context::new(Arc::clone(&authn), Arc::clone(&authz));
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata: BTreeMap::new(),
+            kind: OpKind::Background,
+        }
+    }
+
+    /// Check whether the actor performing this request is authorized for
+    /// `action` on `resource`.
+    pub fn authorize<Action, Resource>(
+        &self,
+        action: Action,
+        resource: Resource,
+    ) -> Result<(), Error>
+    where
+        Action: oso::ToPolar + Debug + Clone,
+        Resource: oso::ToPolar + Debug + Clone,
+    {
+        /*
+         * TODO-cleanup In an ideal world, Oso would consume &Action and
+         * &Resource.  Instead, it consumes owned types.  As a result, they're
+         * not available to us (even for logging) after we make the authorize()
+         * call.  We work around this by cloning.
+         */
+        trace!(self.log, "authorize begin";
+            "actor" => ?self.authn.actor(),
+            "action" => ?action,
+            "resource" => ?resource
+        );
+        let result = self.authz.authorize(action.clone(), resource.clone());
+        debug!(self.log, "authorize result";
+            "actor" => ?self.authn.actor(),
+            "action" => ?action,
+            "resource" => ?resource,
+            "result" => ?result,
+        );
+        result
     }
 }

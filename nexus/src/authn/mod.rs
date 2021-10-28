@@ -58,6 +58,11 @@ impl Context {
     pub fn schemes_tried(&self) -> &[SchemeName] {
         &self.schemes_tried
     }
+
+    /// Returns an unauthenticated context for use internally
+    pub fn internal_unauthenticated() -> Context {
+        Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
+    }
 }
 
 /// Describes whether the user is authenticated and provides more information

@@ -42,6 +42,10 @@ pub enum Error {
     /** The specified input field is not valid. */
     #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
+    /** The request is not authorized to perform the requested operation. */
+    #[error("Forbidden")]
+    Forbidden,
+
     /** The system encountered an unhandled operational error. */
     #[error("Internal Error: {message}")]
     InternalError { message: String },
@@ -74,6 +78,7 @@ impl Error {
             | Error::ObjectAlreadyExists { .. }
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
+            | Error::Forbidden
             | Error::InternalError { .. } => false,
         }
     }
@@ -218,6 +223,12 @@ impl From<Error> for HttpError {
                     message,
                 )
             }
+
+            Error::Forbidden => HttpError::for_client_error(
+                Some(String::from("Forbidden")),
+                http::StatusCode::FORBIDDEN,
+                String::from("Forbidden"),
+            ),
 
             Error::InternalError { message } => {
                 HttpError::for_internal_error(message)

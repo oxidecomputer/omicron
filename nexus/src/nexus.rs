@@ -2,9 +2,8 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
-use crate::authn;
-use crate::authz;
 use crate::config;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
@@ -405,11 +404,10 @@ impl Nexus {
 
     pub async fn organization_fetch(
         &self,
-        authn: &authn::Context,
-        authz: &authz::Authz,
+        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(authn, authz, name).await
+        self.db_datastore.organization_fetch(opctx, name).await
     }
 
     pub async fn organizations_list_by_name(
