@@ -98,15 +98,14 @@ CREATE TABLE omicron.public.Project (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    /* Which organization this project belongs to */
+    organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );
 
-/*
- * TODO: Projects eventually need to be linked into organizations, and the
- * "name" is unique within the org.  For now, we just make the name unique among
- * non-deleted projects.
- */
 CREATE UNIQUE INDEX ON omicron.public.Project (
+    organization_id,
     name
 ) WHERE
     time_deleted IS NULL;

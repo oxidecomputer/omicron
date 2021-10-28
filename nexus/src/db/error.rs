@@ -1,6 +1,6 @@
 //! Error handling and conversions.
 
-use async_bb8_diesel::{ConnectionError, PoolError};
+use async_bb8_diesel::{ConnectionError, PoolError, PoolResult};
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -34,6 +34,21 @@ fn format_database_error(
         rv.push_str(&format!("STATEMENT POSITION: {}\n", statement_position));
     }
     rv
+}
+
+/// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
+/// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
+/// unchanged.
+pub fn diesel_pool_result_optional<T>(
+    result: PoolResult<T>,
+) -> PoolResult<Option<T>> {
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(PoolError::Connection(ConnectionError::Query(
+            DieselError::NotFound,
+        ))) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Converts a Diesel pool error to an external error.

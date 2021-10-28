@@ -447,10 +447,17 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
+        organization_name: &Name,
         new_project: &ProjectCreateParams,
     ) -> CreateResult<db::model::Project> {
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+
         // Create a project.
-        let db_project = db::model::Project::new(new_project.clone());
+        let db_project =
+            db::model::Project::new(organization_id, new_project.clone());
         let db_project = self.db_datastore.project_create(db_project).await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
@@ -482,35 +489,67 @@ impl Nexus {
 
     pub async fn project_fetch(
         &self,
-        name: &Name,
+        organization_name: &Name,
+        project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        self.db_datastore.project_fetch(name).await
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        self.db_datastore.project_fetch(&organization_id, project_name).await
     }
 
     pub async fn projects_list_by_name(
         &self,
+        organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        self.db_datastore.projects_list_by_name(pagparams).await
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        self.db_datastore
+            .projects_list_by_name(&organization_id, pagparams)
+            .await
     }
 
     pub async fn projects_list_by_id(
         &self,
+        organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        self.db_datastore.projects_list_by_id(pagparams).await
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
     }
 
-    pub async fn project_delete(&self, name: &Name) -> DeleteResult {
-        self.db_datastore.project_delete(name).await
+    pub async fn project_delete(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+    ) -> DeleteResult {
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        self.db_datastore.project_delete(&organization_id, project_name).await
     }
 
     pub async fn project_update(
         &self,
-        name: &Name,
+        organization_name: &Name,
+        project_name: &Name,
         new_params: &ProjectUpdateParams,
     ) -> UpdateResult<db::model::Project> {
-        self.db_datastore.project_update(name, &new_params).await
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        self.db_datastore
+            .project_update(&organization_id, project_name, &new_params)
+            .await
     }
 
     /*
@@ -519,20 +558,29 @@ impl Nexus {
 
     pub async fn project_list_disks(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         self.db_datastore.project_list_disks(&project_id, pagparams).await
     }
 
     pub async fn project_create_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         params: &DiskCreateParams,
     ) -> CreateResult<db::model::Disk> {
-        let project = self.project_fetch(project_name).await?;
+        let project =
+            self.project_fetch(organization_name, project_name).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a
@@ -576,20 +624,30 @@ impl Nexus {
 
     pub async fn project_lookup_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
     }
 
     pub async fn project_delete_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let disk = self.project_lookup_disk(project_name, disk_name).await?;
+        let disk = self
+            .project_lookup_disk(organization_name, project_name, disk_name)
+            .await?;
         let runtime = disk.runtime();
         bail_unless!(runtime.state().state() != &DiskState::Destroyed);
 
@@ -649,21 +707,35 @@ impl Nexus {
 
     pub async fn project_list_instances(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         self.db_datastore.project_list_instances(&project_id, pagparams).await
     }
 
     pub async fn project_create_instance(
         self: &Arc<Self>,
+        organization_name: &Name,
         project_name: &Name,
         params: &InstanceCreateParams,
     ) -> CreateResult<db::model::Instance> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             project_id,
@@ -734,6 +806,7 @@ impl Nexus {
      */
     pub async fn project_destroy_instance(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> DeleteResult {
@@ -742,8 +815,14 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         let instance = self
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
@@ -753,11 +832,18 @@ impl Nexus {
 
     pub async fn project_lookup_instance(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         self.db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await
@@ -832,6 +918,7 @@ impl Nexus {
      */
     pub async fn instance_reboot(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
@@ -848,8 +935,13 @@ impl Nexus {
          * never lose track of the fact that this Instance was supposed to be
          * running.
          */
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
 
         self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
@@ -868,11 +960,17 @@ impl Nexus {
      */
     pub async fn instance_start(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
 
         self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
@@ -891,11 +989,17 @@ impl Nexus {
      */
     pub async fn instance_stop(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
 
         self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
         self.instance_set_runtime(
@@ -949,12 +1053,18 @@ impl Nexus {
      */
     pub async fn instance_list_disks(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::DiskAttachment> {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
         self.db_datastore.instance_list_disks(&instance.id(), pagparams).await
     }
 
@@ -963,13 +1073,23 @@ impl Nexus {
      */
     pub async fn instance_get_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<DiskAttachment> {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
-        let disk = self.project_lookup_disk(project_name, disk_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        // TODO: This shouldn't be looking up multiple database entries by name,
+        // it should resolve names to IDs first.
+        let disk = self
+            .project_lookup_disk(organization_name, project_name, disk_name)
+            .await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
             if instance_id == instance.id() {
                 return Ok(DiskAttachment {
@@ -996,13 +1116,23 @@ impl Nexus {
      */
     pub async fn instance_attach_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
     ) -> CreateResult<DiskAttachment> {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
-        let disk = self.project_lookup_disk(project_name, disk_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        // TODO: This shouldn't be looking up multiple database entries by name,
+        // it should resolve names to IDs first.
+        let disk = self
+            .project_lookup_disk(organization_name, project_name, disk_name)
+            .await?;
         let instance_id = &instance.id();
 
         fn disk_attachment_for(
@@ -1111,13 +1241,23 @@ impl Nexus {
      */
     pub async fn instance_detach_disk(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let instance =
-            self.project_lookup_instance(project_name, instance_name).await?;
-        let disk = self.project_lookup_disk(project_name, disk_name).await?;
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        // TODO: This shouldn't be looking up multiple database entries by name,
+        // it should resolve names to IDs first.
+        let disk = self
+            .project_lookup_disk(organization_name, project_name, disk_name)
+            .await?;
         let instance_id = &instance.id();
 
         match &disk.state().into() {
@@ -1189,11 +1329,18 @@ impl Nexus {
 
     pub async fn project_list_vpcs(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Vpc> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         let vpcs = self
             .db_datastore
             .project_list_vpcs(&project_id, pagparams)
@@ -1206,11 +1353,18 @@ impl Nexus {
 
     pub async fn project_create_vpc(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         params: &VpcCreateParams,
     ) -> CreateResult<Vpc> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         let id = Uuid::new_v4();
         let vpc = self
             .db_datastore
@@ -1221,11 +1375,18 @@ impl Nexus {
 
     pub async fn project_lookup_vpc(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<Vpc> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         Ok(self
             .db_datastore
             .vpc_fetch_by_name(&project_id, vpc_name)
@@ -1235,12 +1396,19 @@ impl Nexus {
 
     pub async fn project_update_vpc(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcUpdateParams,
     ) -> UpdateResult<()> {
-        let project_id =
-            self.db_datastore.project_lookup_id_by_name(project_name).await?;
+        let organization_id = self
+            .db_datastore
+            .organization_lookup_id_by_name(organization_name)
+            .await?;
+        let project_id = self
+            .db_datastore
+            .project_lookup_id_by_name(&organization_id, project_name)
+            .await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
         Ok(self.db_datastore.project_update_vpc(&vpc.id(), params).await?)
@@ -1248,20 +1416,26 @@ impl Nexus {
 
     pub async fn project_delete_vpc(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> DeleteResult {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         self.db_datastore.project_delete_vpc(&vpc.identity.id).await
     }
 
     pub async fn vpc_list_subnets(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         let subnets = self
             .db_datastore
             .vpc_list_subnets(&vpc.identity.id, pagparams)
@@ -1274,12 +1448,15 @@ impl Nexus {
 
     pub async fn vpc_lookup_subnet(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<VpcSubnet> {
         // TODO: join projects, vpcs, and subnets and do this in one query
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         Ok(self
             .db_datastore
             .vpc_subnet_fetch_by_name(&vpc.identity.id, subnet_name)
@@ -1289,11 +1466,14 @@ impl Nexus {
 
     pub async fn vpc_create_subnet(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcSubnetCreateParams,
     ) -> CreateResult<VpcSubnet> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         let id = Uuid::new_v4();
         let subnet = self
             .db_datastore
@@ -1304,24 +1484,38 @@ impl Nexus {
 
     pub async fn vpc_delete_subnet(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> DeleteResult {
-        let subnet =
-            self.vpc_lookup_subnet(project_name, vpc_name, subnet_name).await?;
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
         self.db_datastore.vpc_delete_subnet(&subnet.identity.id).await
     }
 
     pub async fn vpc_update_subnet(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
         params: &VpcSubnetUpdateParams,
     ) -> UpdateResult<()> {
-        let subnet =
-            self.vpc_lookup_subnet(project_name, vpc_name, subnet_name).await?;
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
         Ok(self
             .db_datastore
             .vpc_update_subnet(&subnet.identity.id, params)
@@ -1330,11 +1524,14 @@ impl Nexus {
 
     pub async fn vpc_list_routers(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcRouter> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         let routers = self
             .db_datastore
             .vpc_list_routers(&vpc.identity.id, pagparams)
@@ -1347,11 +1544,14 @@ impl Nexus {
 
     pub async fn vpc_lookup_router(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> LookupResult<VpcRouter> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         Ok(self
             .db_datastore
             .vpc_router_fetch_by_name(&vpc.identity.id, router_name)
@@ -1361,11 +1561,14 @@ impl Nexus {
 
     pub async fn vpc_create_router(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcRouterCreateParams,
     ) -> CreateResult<VpcRouter> {
-        let vpc = self.project_lookup_vpc(project_name, vpc_name).await?;
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
         let id = Uuid::new_v4();
         let router = self
             .db_datastore
@@ -1376,24 +1579,38 @@ impl Nexus {
 
     pub async fn vpc_delete_router(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> DeleteResult {
-        let router =
-            self.vpc_lookup_router(project_name, vpc_name, router_name).await?;
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
         self.db_datastore.vpc_delete_router(&router.identity.id).await
     }
 
     pub async fn vpc_update_router(
         &self,
+        organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         params: &VpcRouterUpdateParams,
     ) -> UpdateResult<()> {
-        let router =
-            self.vpc_lookup_router(project_name, vpc_name, router_name).await?;
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
         Ok(self
             .db_datastore
             .vpc_update_router(&router.identity.id, params)

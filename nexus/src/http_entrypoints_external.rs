@@ -76,11 +76,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organizations_delete_organization)?;
         api.register(organizations_put_organization)?;
 
-        api.register(projects_get)?;
-        api.register(projects_post)?;
-        api.register(projects_get_project)?;
-        api.register(projects_delete_project)?;
-        api.register(projects_put_project)?;
+        api.register(organization_projects_get)?;
+        api.register(organization_projects_post)?;
+        api.register(organization_projects_get_project)?;
+        api.register(organization_projects_delete_project)?;
+        api.register(organization_projects_put_project)?;
 
         api.register(project_disks_get)?;
         api.register(project_disks_post)?;
@@ -142,11 +142,11 @@ pub fn external_api() -> NexusApiDescription {
  * Generally, HTTP resources are grouped within some collection.  For a
  * relatively simple example:
  *
- *   GET    /projects                 (list the projects in the collection)
- *   POST   /projects                 (create a project in the collection)
- *   GET    /projects/{project_name}  (look up a project in the collection)
- *   DELETE /projects/{project_name}  (delete a project in the collection)
- *   PUT    /projects/{project_name}  (update a project in the collection)
+ *   GET    /organizations            (list the organizations in the collection)
+ *   POST   /organizations            (create a organization in the collection)
+ *   GET    /organizations/{org_name} (look up a organization in the collection)
+ *   DELETE /organizations/{org_name} (delete a organization in the collection)
+ *   PUT    /organizations/{org_name} (update a organization in the collection)
  *
  * There's a naming convention for the functions that implement these API entry
  * points.  When operating on the collection itself, we use:
@@ -155,8 +155,8 @@ pub fn external_api() -> NexusApiDescription {
  *
  * For examples:
  *
- *    GET  /projects                    -> projects_get()
- *    POST /projects                    -> projects_post()
+ *    GET  /organizations                    -> organizations_get()
+ *    POST /organizations                    -> organizations_post()
  *
  * For operations on items within the collection, we use:
  *
@@ -164,9 +164,9 @@ pub fn external_api() -> NexusApiDescription {
  *
  * For examples:
  *
- *    DELETE /projects/{project_name}   -> projects_delete_project()
- *    GET    /projects/{project_name}   -> projects_get_project()
- *    PUT    /projects/{project_name}   -> projects_put_project()
+ *    DELETE /organizations/{org_name}   -> organizations_delete_organization()
+ *    GET    /organizations/{org_name}   -> organizations_get_organization()
+ *    PUT    /organizations/{org_name}   -> organizations_put_organization()
  *
  * Note that these function names end up in generated OpenAPI spec as the
  * operationId for each endpoint, and therefore represent a contract with
@@ -326,11 +326,12 @@ async fn organizations_put_organization(
  */
 #[endpoint {
      method = GET,
-     path = "/projects",
+     path = "/organizations/{organization_name}/projects",
  }]
-async fn projects_get(
+async fn organization_projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
+    path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
 
@@ -339,21 +340,27 @@ async fn projects_get(
 
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+
     let handler = async {
         let params = ScanByNameOrId::from_query(&query)?;
         let field = pagination_field_for_scan_params(params);
-
         let projects = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.projects_list_by_id(&page_selector).await?
+                nexus
+                    .projects_list_by_id(&organization_name, &page_selector)
+                    .await?
             }
 
             PagField::Name => {
                 let page_selector =
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
-                nexus.projects_list_by_name(&page_selector).await?
+                nexus
+                    .projects_list_by_name(&organization_name, &page_selector)
+                    .await?
             }
         }
         .into_iter()
@@ -369,16 +376,21 @@ async fn projects_get(
  */
 #[endpoint {
     method = POST,
-    path = "/projects"
+    path = "/organizations/{organization_name}/projects"
 }]
-async fn projects_post(
+async fn organization_projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
     new_project: TypedBody<ProjectCreateParams>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let params = path_params.into_inner();
+    let organization_name = &params.organization_name;
     let handler = async {
-        let project = nexus.project_create(&new_project.into_inner()).await?;
+        let project = nexus
+            .project_create(&organization_name, &new_project.into_inner())
+            .await?;
         Ok(HttpResponseCreated(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -389,7 +401,9 @@ async fn projects_post(
  */
 #[derive(Deserialize, JsonSchema)]
 struct ProjectPathParam {
-    /// The project's unique ID.
+    /// The organization's unique name.
+    organization_name: Name,
+    /// The project's unique name within the organization.
     project_name: Name,
 }
 
@@ -398,18 +412,20 @@ struct ProjectPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_name}",
+    path = "/organizations/{organization_name}/projects/{project_name}",
 }]
-async fn projects_get_project(
+async fn organization_projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
-        let project = nexus.project_fetch(&project_name).await?;
+        let project =
+            nexus.project_fetch(&organization_name, &project_name).await?;
         Ok(HttpResponseOk(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -420,18 +436,19 @@ async fn projects_get_project(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}",
  }]
-async fn projects_delete_project(
+async fn organization_projects_delete_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = path_params.into_inner();
+    let organization_name = &params.organization_name;
     let project_name = &params.project_name;
     let handler = async {
-        nexus.project_delete(&project_name).await?;
+        nexus.project_delete(&organization_name, &project_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -448,9 +465,9 @@ async fn projects_delete_project(
  */
 #[endpoint {
      method = PUT,
-     path = "/projects/{project_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}",
  }]
-async fn projects_put_project(
+async fn organization_projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<ProjectUpdateParams>,
@@ -458,10 +475,15 @@ async fn projects_put_project(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
         let newproject = nexus
-            .project_update(&project_name, &updated_project.into_inner())
+            .project_update(
+                &organization_name,
+                &project_name,
+                &updated_project.into_inner(),
+            )
             .await?;
         Ok(HttpResponseOk(newproject.into()))
     };
@@ -477,7 +499,7 @@ async fn projects_put_project(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/disks",
+     path = "/organizations/{organization_name}/projects/{project_name}/disks",
  }]
 async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -488,10 +510,12 @@ async fn project_disks_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
         let disks = nexus
             .project_list_disks(
+                organization_name,
                 project_name,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
@@ -512,7 +536,7 @@ async fn project_disks_get(
  */
 #[endpoint {
      method = POST,
-     path = "/projects/{project_name}/disks",
+     path = "/organizations/{organization_name}/projects/{project_name}/disks",
  }]
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -522,11 +546,17 @@ async fn project_disks_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
-        let disk =
-            nexus.project_create_disk(&project_name, &new_disk_params).await?;
+        let disk = nexus
+            .project_create_disk(
+                &organization_name,
+                &project_name,
+                &new_disk_params,
+            )
+            .await?;
         Ok(HttpResponseCreated(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -537,6 +567,7 @@ async fn project_disks_post(
  */
 #[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
+    organization_name: Name,
     project_name: Name,
     disk_name: Name,
 }
@@ -546,7 +577,7 @@ struct DiskPathParam {
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/disks/{disk_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
  }]
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -555,10 +586,13 @@ async fn project_disks_get_disk(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let disk = nexus.project_lookup_disk(&project_name, &disk_name).await?;
+        let disk = nexus
+            .project_lookup_disk(&organization_name, &project_name, &disk_name)
+            .await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -569,7 +603,7 @@ async fn project_disks_get_disk(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_name}/disks/{disk_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
  }]
 async fn project_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -578,10 +612,13 @@ async fn project_disks_delete_disk(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        nexus.project_delete_disk(&project_name, &disk_name).await?;
+        nexus
+            .project_delete_disk(&organization_name, &project_name, &disk_name)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -596,7 +633,7 @@ async fn project_disks_delete_disk(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/instances",
+     path = "/organizations/{organization_name}/projects/{project_name}/instances",
  }]
 async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -607,10 +644,12 @@ async fn project_instances_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
         let instances = nexus
             .project_list_instances(
+                &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
@@ -637,7 +676,7 @@ async fn project_instances_get(
  */
 #[endpoint {
      method = POST,
-     path = "/projects/{project_name}/instances",
+     path = "/organizations/{organization_name}/projects/{project_name}/instances",
  }]
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -647,11 +686,16 @@ async fn project_instances_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
         let instance = nexus
-            .project_create_instance(&project_name, &new_instance_params)
+            .project_create_instance(
+                &organization_name,
+                &project_name,
+                &new_instance_params,
+            )
             .await?;
         Ok(HttpResponseCreated(instance.into()))
     };
@@ -663,6 +707,7 @@ async fn project_instances_post(
  */
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
+    organization_name: Name,
     project_name: Name,
     instance_name: Name,
 }
@@ -672,7 +717,7 @@ struct InstancePathParam {
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/instances/{instance_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
  }]
 async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -681,11 +726,16 @@ async fn project_instances_get_instance(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
         let instance = nexus
-            .project_lookup_instance(&project_name, &instance_name)
+            .project_lookup_instance(
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseOk(instance.into()))
     };
@@ -697,7 +747,7 @@ async fn project_instances_get_instance(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_name}/instances/{instance_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
  }]
 async fn project_instances_delete_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -706,10 +756,17 @@ async fn project_instances_delete_instance(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
-        nexus.project_destroy_instance(&project_name, &instance_name).await?;
+        nexus
+            .project_destroy_instance(
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -720,7 +777,7 @@ async fn project_instances_delete_instance(
  */
 #[endpoint {
     method = POST,
-    path = "/projects/{project_name}/instances/{instance_name}/reboot",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
 }]
 async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -729,11 +786,13 @@ async fn project_instances_instance_reboot(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
-        let instance =
-            nexus.instance_reboot(&project_name, &instance_name).await?;
+        let instance = nexus
+            .instance_reboot(&organization_name, &project_name, &instance_name)
+            .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -744,7 +803,7 @@ async fn project_instances_instance_reboot(
  */
 #[endpoint {
     method = POST,
-    path = "/projects/{project_name}/instances/{instance_name}/start",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
 }]
 async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -753,11 +812,13 @@ async fn project_instances_instance_start(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
-        let instance =
-            nexus.instance_start(&project_name, &instance_name).await?;
+        let instance = nexus
+            .instance_start(&organization_name, &project_name, &instance_name)
+            .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -768,7 +829,7 @@ async fn project_instances_instance_start(
  */
 #[endpoint {
     method = POST,
-    path = "/projects/{project_name}/instances/{instance_name}/stop",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
 }]
 /* Our naming convention kind of falls apart here. */
 async fn project_instances_instance_stop(
@@ -778,11 +839,13 @@ async fn project_instances_instance_stop(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
-        let instance =
-            nexus.instance_stop(&project_name, &instance_name).await?;
+        let instance = nexus
+            .instance_stop(&organization_name, &project_name, &instance_name)
+            .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -794,7 +857,7 @@ async fn project_instances_instance_stop(
 /* TODO-scalability needs to be paginated */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_name}/instances/{instance_name}/disks"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks"
 }]
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -803,6 +866,7 @@ async fn instance_disks_get(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let fake_query = DataPageParams {
@@ -812,7 +876,12 @@ async fn instance_disks_get(
     };
     let handler = async {
         let disks = nexus
-            .instance_list_disks(&project_name, &instance_name, &fake_query)
+            .instance_list_disks(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &fake_query,
+            )
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -827,6 +896,7 @@ async fn instance_disks_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct InstanceDiskPathParam {
+    organization_name: Name,
     project_name: Name,
     instance_name: Name,
     disk_name: Name,
@@ -837,7 +907,7 @@ struct InstanceDiskPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn instance_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -846,12 +916,18 @@ async fn instance_disks_get_disk(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let disk_name = &path.disk_name;
     let handler = async {
         let attachment = nexus
-            .instance_get_disk(&project_name, &instance_name, &disk_name)
+            .instance_get_disk(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseOk(attachment))
     };
@@ -863,7 +939,7 @@ async fn instance_disks_get_disk(
  */
 #[endpoint {
     method = PUT,
-    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn instance_disks_put_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -872,12 +948,18 @@ async fn instance_disks_put_disk(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let disk_name = &path.disk_name;
     let handler = async {
         let attachment = nexus
-            .instance_attach_disk(&project_name, &instance_name, &disk_name)
+            .instance_attach_disk(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseCreated(attachment))
     };
@@ -889,7 +971,7 @@ async fn instance_disks_put_disk(
  */
 #[endpoint {
     method = DELETE,
-    path = "/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
 }]
 async fn instance_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -898,12 +980,18 @@ async fn instance_disks_delete_disk(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let disk_name = &path.disk_name;
     let handler = async {
         nexus
-            .instance_detach_disk(&project_name, &instance_name, &disk_name)
+            .instance_detach_disk(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };
@@ -919,7 +1007,7 @@ async fn instance_disks_delete_disk(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/vpcs",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
  }]
 async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -930,10 +1018,12 @@ async fn project_vpcs_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
         let vpcs = nexus
             .project_list_vpcs(
+                &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
@@ -949,6 +1039,7 @@ async fn project_vpcs_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct VpcPathParam {
+    organization_name: Name,
     project_name: Name,
     vpc_name: Name,
 }
@@ -958,7 +1049,7 @@ struct VpcPathParam {
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/vpcs/{vpc_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
  }]
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -967,10 +1058,13 @@ async fn project_vpcs_get_vpc(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
-        let vpc = nexus.project_lookup_vpc(&project_name, &vpc_name).await?;
+        let vpc = nexus
+            .project_lookup_vpc(&organization_name, &project_name, &vpc_name)
+            .await?;
         Ok(HttpResponseOk(vpc))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -981,7 +1075,7 @@ async fn project_vpcs_get_vpc(
  */
 #[endpoint {
      method = POST,
-     path = "/projects/{project_name}/vpcs",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
  }]
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -991,11 +1085,17 @@ async fn project_vpcs_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let new_vpc_params = &new_vpc.into_inner();
     let handler = async {
-        let vpc =
-            nexus.project_create_vpc(&project_name, &new_vpc_params).await?;
+        let vpc = nexus
+            .project_create_vpc(
+                &organization_name,
+                &project_name,
+                &new_vpc_params,
+            )
+            .await?;
         Ok(HttpResponseCreated(vpc))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1006,7 +1106,7 @@ async fn project_vpcs_post(
  */
 #[endpoint {
      method = PUT,
-     path = "/projects/{project_name}/vpcs/{vpc_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
  }]
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1019,6 +1119,7 @@ async fn project_vpcs_put_vpc(
     let handler = async {
         nexus
             .project_update_vpc(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &updated_vpc.into_inner(),
@@ -1034,7 +1135,7 @@ async fn project_vpcs_put_vpc(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_name}/vpcs/{vpc_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
  }]
 async fn project_vpcs_delete_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1043,10 +1144,13 @@ async fn project_vpcs_delete_vpc(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
-        nexus.project_delete_vpc(&project_name, &vpc_name).await?;
+        nexus
+            .project_delete_vpc(&organization_name, &project_name, &vpc_name)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1057,7 +1161,7 @@ async fn project_vpcs_delete_vpc(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
  }]
 async fn vpc_subnets_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1071,6 +1175,7 @@ async fn vpc_subnets_get(
     let handler = async {
         let vpcs = nexus
             .vpc_list_subnets(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -1087,6 +1192,7 @@ async fn vpc_subnets_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct VpcSubnetPathParam {
+    organization_name: Name,
     project_name: Name,
     vpc_name: Name,
     subnet_name: Name,
@@ -1097,7 +1203,7 @@ struct VpcSubnetPathParam {
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
  }]
 async fn vpc_subnets_get_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1109,6 +1215,7 @@ async fn vpc_subnets_get_subnet(
     let handler = async {
         let subnet = nexus
             .vpc_lookup_subnet(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &path.subnet_name,
@@ -1124,7 +1231,7 @@ async fn vpc_subnets_get_subnet(
  */
 #[endpoint {
      method = POST,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
  }]
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1137,6 +1244,7 @@ async fn vpc_subnets_post(
     let handler = async {
         let subnet = nexus
             .vpc_create_subnet(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &create_params.into_inner(),
@@ -1152,7 +1260,7 @@ async fn vpc_subnets_post(
  */
 #[endpoint {
      method = DELETE,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
  }]
 async fn vpc_subnets_delete_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1164,6 +1272,7 @@ async fn vpc_subnets_delete_subnet(
     let handler = async {
         nexus
             .vpc_delete_subnet(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &path.subnet_name,
@@ -1179,7 +1288,7 @@ async fn vpc_subnets_delete_subnet(
  */
 #[endpoint {
      method = PUT,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
  }]
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1192,6 +1301,7 @@ async fn vpc_subnets_put_subnet(
     let handler = async {
         nexus
             .vpc_update_subnet(
+                &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &path.subnet_name,
@@ -1212,7 +1322,7 @@ async fn vpc_subnets_put_subnet(
  */
 #[endpoint {
      method = GET,
-     path = "/projects/{project_name}/vpcs/{vpc_name}/routers",
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
  }]
 async fn vpc_routers_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1225,6 +1335,7 @@ async fn vpc_routers_get(
     let path = path_params.into_inner();
     let routers = nexus
         .vpc_list_routers(
+            &path.organization_name,
             &path.project_name,
             &path.vpc_name,
             &data_page_params_for(&rqctx, &query)?
@@ -1239,6 +1350,7 @@ async fn vpc_routers_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct VpcRouterPathParam {
+    organization_name: Name,
     project_name: Name,
     vpc_name: Name,
     router_name: Name,
@@ -1249,7 +1361,7 @@ struct VpcRouterPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}"
 }]
 async fn vpc_routers_get_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1260,6 +1372,7 @@ async fn vpc_routers_get_router(
     let path = path_params.into_inner();
     let vpc_router = nexus
         .vpc_lookup_router(
+            &path.organization_name,
             &path.project_name,
             &path.vpc_name,
             &path.router_name,
@@ -1273,7 +1386,7 @@ async fn vpc_routers_get_router(
  */
 #[endpoint {
     method = POST,
-    path = "/projects/{project_name}/vpcs/{vpc_name}/routers",
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
 }]
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1285,6 +1398,7 @@ async fn vpc_routers_post(
     let path = path_params.into_inner();
     let router = nexus
         .vpc_create_router(
+            &path.organization_name,
             &path.project_name,
             &path.vpc_name,
             &create_params.into_inner(),
@@ -1298,7 +1412,7 @@ async fn vpc_routers_post(
  */
 #[endpoint {
     method = DELETE,
-    path = "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
 }]
 async fn vpc_routers_delete_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1309,6 +1423,7 @@ async fn vpc_routers_delete_router(
     let path = path_params.into_inner();
     nexus
         .vpc_delete_router(
+            &path.organization_name,
             &path.project_name,
             &path.vpc_name,
             &path.router_name,
@@ -1322,7 +1437,7 @@ async fn vpc_routers_delete_router(
  */
 #[endpoint {
     method = PUT,
-    path = "/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
 }]
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1334,6 +1449,7 @@ async fn vpc_routers_put_router(
     let path = path_params.into_inner();
     nexus
         .vpc_update_router(
+            &path.organization_name,
             &path.project_name,
             &path.vpc_name,
             &path.router_name,

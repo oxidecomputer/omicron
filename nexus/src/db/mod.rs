@@ -2,8 +2,12 @@
  * Facilities for working with the Omicron database
  */
 
+// This is not intended to be public, but this is necessary to use it from
+// doctests
+pub mod collection_insert;
 mod config;
-mod datastore;
+// This is marked public for use by the integration tests
+pub mod datastore;
 mod error;
 mod pagination;
 mod pool;

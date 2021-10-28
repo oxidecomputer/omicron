@@ -3,7 +3,7 @@ use omicron_common::api::external::Organization;
 use dropshot::test_util::{object_delete, object_get, objects_list_page};
 
 pub mod common;
-use common::resource_helpers::create_organization;
+use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
@@ -68,6 +68,18 @@ async fn test_organizations() {
     assert_eq!(organization.identity.name, o1_name);
     // It should have a different UUID now
     assert_ne!(organization.identity.id, o1_old_id);
+
+    // Attempt to delete a non-empty organization
+    let project_name = "p1";
+    let project_url = format!("{}/projects/{}", o2_url, project_name);
+    create_project(&client, &o2_name, &project_name).await;
+    client
+        .make_request_error(Method::DELETE, &o2_url, StatusCode::BAD_REQUEST)
+        .await;
+
+    // Delete the project, then delete the organization
+    object_delete(&client, &project_url).await;
+    object_delete(&client, &o2_url).await;
 
     cptestctx.teardown().await;
 }
