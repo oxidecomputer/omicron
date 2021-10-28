@@ -186,6 +186,10 @@ async fn organizations_get(
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
+
+    let authn = apictx.external_authn.authn_request(&rqctx).await?;
+    println!("authn_request(): {:?}", authn);
+
     let nexus = &apictx.nexus;
     let handler = async {
         let query = query_params.into_inner();
@@ -334,10 +338,6 @@ async fn organization_projects_get(
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
-
-    let authn = apictx.external_authn.authn_request(&rqctx).await?;
-    println!("authn_request(): {:?}", authn);
-
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();

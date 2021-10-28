@@ -34,9 +34,8 @@ async fn test_authn_session_cookie() {
         })
         .await;
 
-    let _ =
-        get_projects_with_cookie(&client, Some("session=good"), StatusCode::OK)
-            .await;
+    let _ = get_orgs_with_cookie(&client, Some("session=good"), StatusCode::OK)
+        .await;
 
     /*
      * Expired fake token "expired"
@@ -50,7 +49,7 @@ async fn test_authn_session_cookie() {
         })
         .await;
 
-    let _ = get_projects_with_cookie(
+    let _ = get_orgs_with_cookie(
         &client,
         Some("session=expired_idle"),
         StatusCode::UNAUTHORIZED,
@@ -69,7 +68,7 @@ async fn test_authn_session_cookie() {
         })
         .await;
 
-    let _ = get_projects_with_cookie(
+    let _ = get_orgs_with_cookie(
         &client,
         Some("session=expired_absolute"),
         StatusCode::UNAUTHORIZED,
@@ -82,13 +81,12 @@ async fn test_authn_session_cookie() {
     let session = nexus.session_create(Uuid::new_v4()).await.unwrap();
     let cookie = format!("session={}", session.token);
 
-    let _ =
-        get_projects_with_cookie(&client, Some(&cookie), StatusCode::OK).await;
+    let _ = get_orgs_with_cookie(&client, Some(&cookie), StatusCode::OK).await;
 
     /*
      * Nonexistent token
      */
-    let _ = get_projects_with_cookie(
+    let _ = get_orgs_with_cookie(
         &client,
         Some("session=other"),
         StatusCode::UNAUTHORIZED,
@@ -99,18 +97,19 @@ async fn test_authn_session_cookie() {
     /*
      * No session cookie
      */
-    let _ = get_projects_with_cookie(&client, None, StatusCode::OK).await;
+    let _ = get_orgs_with_cookie(&client, None, StatusCode::OK).await;
 
     cptestctx.teardown().await;
 }
 
-async fn get_projects_with_cookie(
+async fn get_orgs_with_cookie(
     client: &ClientTestContext,
     cookie: Option<&str>,
     expected_status: StatusCode,
 ) -> Result<Response<Body>, HttpErrorResponseBody> {
-    let mut request =
-        Request::builder().method(Method::GET).uri(client.url("/projects"));
+    let mut request = Request::builder()
+        .method(Method::GET)
+        .uri(client.url("/organizations"));
 
     if let Some(cookie) = cookie {
         request = request.header("Cookie", cookie);
