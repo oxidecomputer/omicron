@@ -19,6 +19,16 @@ use std::path::{Path, PathBuf};
  * use `serde(default)`).
  */
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct AuthnConfig {
+    /** allowed authentication schemes for external HTTP server */
+    pub schemes_external: Vec<SchemeName>,
+    /** how long a session can be idle before expiring */
+    pub session_idle_timeout_minutes: u32,
+    /** how long a session can exist before expiring */
+    pub session_absolute_timeout_minutes: u32,
+}
+
 /**
  * Configuration for a nexus server
  */
@@ -34,8 +44,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
-    /** allowed authentication schemes for external HTTP server */
-    pub authn_schemes_external: Vec<SchemeName>,
+    /** Authentication-related configuration */
+    pub authn: AuthnConfig,
 }
 
 #[derive(Debug)]
@@ -139,9 +149,7 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use super::Config;
-    use super::SchemeName;
-    use super::{LoadError, LoadErrorKind};
+    use super::{AuthnConfig, Config, LoadError, LoadErrorKind, SchemeName};
     use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -249,7 +257,10 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_schemes_external = []
+            [authn]
+            schemes_external = []
+            session_idle_timeout_minutes = 60
+            session_absolute_timeout_minutes = 480
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -271,7 +282,11 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                authn_schemes_external: Vec::new(),
+                authn: AuthnConfig {
+                    schemes_external: Vec::new(),
+                    session_idle_timeout_minutes: 60,
+                    session_absolute_timeout_minutes: 480
+                },
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
@@ -301,7 +316,10 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_schemes_external = [ "spoof", "session_cookie" ]
+            [authn]
+            schemes_external = [ "spoof", "session_cookie" ]
+            session_idle_timeout_minutes = 60
+            session_absolute_timeout_minutes = 480
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -322,7 +340,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            config.authn_schemes_external,
+            config.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
     }
@@ -330,10 +348,13 @@ mod test {
     #[test]
     fn test_bad_authn_schemes() {
         let error = read_config(
-            "bad authn_schemes_external",
+            "bad authn.schemes_external",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            authn_schemes_external = ["trust-me"]
+            [authn]
+            schemes_external = ["trust-me"]
+            session_idle_timeout_minutes = 60
+            session_absolute_timeout_minutes = 480
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -353,7 +374,7 @@ mod test {
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert!(error.to_string().starts_with(
                 "unsupported authn scheme: \"trust-me\" \
-                for key `authn_schemes_external`"
+                for key `authn.schemes_external`"
             ));
         } else {
             panic!(

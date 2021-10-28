@@ -34,6 +34,15 @@ pub struct ServerContext {
     pub external_latencies: LatencyTracker,
     /** registry of metric producers */
     pub producer_registry: ProducerRegistry,
+    /** the whole config */
+    pub tunables: Tunables,
+}
+
+pub struct Tunables {
+    /** how long a session can be idle before expiring */
+    pub session_idle_timeout: Duration,
+    /** how long a session can exist before expiring */
+    pub session_absolute_timeout: Duration,
 }
 
 impl ServerContext {
@@ -48,7 +57,8 @@ impl ServerContext {
         config: &config::Config,
     ) -> Arc<ServerContext> {
         let nexus_schemes = config
-            .authn_schemes_external
+            .authn
+            .schemes_external
             .iter()
             .map::<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>, _>(|name| {
                 match name {
@@ -93,6 +103,14 @@ impl ServerContext {
             internal_latencies,
             external_latencies,
             producer_registry,
+            tunables: Tunables {
+                session_idle_timeout: Duration::minutes(
+                    config.authn.session_idle_timeout_minutes.into(),
+                ),
+                session_absolute_timeout: Duration::minutes(
+                    config.authn.session_absolute_timeout_minutes.into(),
+                ),
+            },
         })
     }
 }
@@ -116,13 +134,12 @@ impl SessionStore for Arc<ServerContext> {
         self.nexus.session_hard_delete(token).await.ok()
     }
 
-    // TODO: pull these values from the config
     fn session_idle_timeout(&self) -> Duration {
-        Duration::hours(1)
+        self.tunables.session_idle_timeout
     }
 
     fn session_absolute_timeout(&self) -> Duration {
-        Duration::hours(8)
+        self.tunables.session_absolute_timeout
     }
 }
 
