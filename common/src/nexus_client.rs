@@ -71,6 +71,7 @@ impl Client {
         Ok(value)
     }
 
+    /// PUblish information about a dataset.
     pub async fn dataset_post(
         &self,
         dataset_id: Uuid,

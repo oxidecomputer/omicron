@@ -135,7 +135,14 @@ async fn dataset_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let info = info.into_inner();
-    nexus.upsert_dataset(path.dataset_id, path.zpool_id, info.address).await?;
+    nexus
+        .upsert_dataset(
+            path.dataset_id,
+            path.zpool_id,
+            info.address,
+            info.flavor.into(),
+        )
+        .await?;
     Ok(HttpResponseOk(DatasetPostResponse { reservation: None, quota: None }))
 }
 

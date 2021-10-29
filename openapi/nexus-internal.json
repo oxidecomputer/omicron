@@ -498,6 +498,15 @@
           "value"
         ]
       },
+      "DatasetFlavor": {
+        "description": "Describes the purpose of the dataset.",
+        "type": "string",
+        "enum": [
+          "Crucible",
+          "Cockroach",
+          "Clickhouse"
+        ]
+      },
       "DatasetPostRequest": {
         "description": "Describes a dataset within a pool.",
         "type": "object",
@@ -505,10 +514,19 @@
           "address": {
             "description": "Address on which a service is responding to requests for the dataset.",
             "type": "string"
+          },
+          "flavor": {
+            "description": "Type of dataset being inserted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetFlavor"
+              }
+            ]
           }
         },
         "required": [
-          "address"
+          "address",
+          "flavor"
         ]
       },
       "DatasetPostResponse": {

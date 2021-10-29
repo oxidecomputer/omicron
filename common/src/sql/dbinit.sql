@@ -105,9 +105,10 @@ CREATE TABLE omicron.public.Dataset (
 
     /* Contact information for the downstairs region */
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 NOT NULL,
 
-    /* TODO: Do we want to indicate "type"? */
+    /* Indicates which type of dataset is being used */
+    flavor TEXT NOT NULL
     /* We are eyeing "Crucible datasets" to start, but these could be used for e.g. clickhouse */
 );
 

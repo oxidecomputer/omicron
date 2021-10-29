@@ -20,6 +20,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
@@ -382,6 +383,41 @@ impl DatastoreCollection<Dataset> for Zpool {
     type CollectionIdColumn = dataset::dsl::pool_id;
 }
 
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Deserialize)]
+#[sql_type = "sql_types::Text"]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct DatasetFlavor(internal::nexus::DatasetFlavor);
+
+NewtypeFrom! { () pub struct DatasetFlavor(internal::nexus::DatasetFlavor); }
+NewtypeDeref! { () pub struct DatasetFlavor(internal::nexus::DatasetFlavor); }
+
+impl<DB> ToSql<sql_types::Text, DB> for DatasetFlavor
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for DatasetFlavor
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let s = String::from_sql(bytes)?;
+        let flavor =
+            DatasetFlavor(internal::nexus::DatasetFlavor::from_str(&s)?);
+        Ok(flavor)
+    }
+}
+
 /// Database representation of a Dataset.
 ///
 /// A dataset represents a portion of a Zpool, which is then made
@@ -398,12 +434,17 @@ pub struct Dataset {
 
     ip: ipnetwork::IpNetwork,
     port: i32,
-    // TODO: Do we want to indicate "Type of thing using this dataset?"
-    // Do we care?
+
+    flavor: DatasetFlavor,
 }
 
 impl Dataset {
-    pub fn new(id: Uuid, pool_id: Uuid, addr: SocketAddr) -> Self {
+    pub fn new(
+        id: Uuid,
+        pool_id: Uuid,
+        addr: SocketAddr,
+        flavor: DatasetFlavor,
+    ) -> Self {
         Self {
             identity: DatasetIdentity::new(id),
             time_deleted: None,
@@ -411,6 +452,7 @@ impl Dataset {
             pool_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
+            flavor,
         }
     }
 

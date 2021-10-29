@@ -173,6 +173,8 @@ table! {
 
         ip -> Inet,
         port -> Int4,
+
+        flavor -> Text,
     }
 }
 

@@ -6,7 +6,9 @@ use crate::api::external::{
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -64,12 +66,51 @@ pub struct ZpoolPostRequest {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPostResponse {}
 
+/// Describes the purpose of the dataset.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
+pub enum DatasetFlavor {
+    Crucible,
+    Cockroach,
+    Clickhouse,
+}
+
+impl fmt::Display for DatasetFlavor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DatasetFlavor::*;
+        let s = match self {
+            Crucible => "crucible",
+            Cockroach => "cockroach",
+            Clickhouse => "clickhouse",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl FromStr for DatasetFlavor {
+    type Err = crate::api::external::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use DatasetFlavor::*;
+        match s {
+            "crucible" => Ok(Crucible),
+            "cockroach" => Ok(Cockroach),
+            "clickhouse" => Ok(Clickhouse),
+            _ => Err(Self::Err::InternalError {
+                message: format!("Unknown dataset flavor: {}", s),
+            }),
+        }
+    }
+}
+
 /// Describes a dataset within a pool.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DatasetPostRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
     pub address: SocketAddr,
+
+    /// Type of dataset being inserted.
+    pub flavor: DatasetFlavor,
 }
 
 /// Describes which ZFS properties should be set for a particular allocated

@@ -12,7 +12,7 @@ use crate::vnic::{interface_name, IdAllocator, Vnic};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
 use omicron_common::api::internal::nexus::{
-    DatasetPostRequest, ZpoolPostRequest,
+    DatasetFlavor, DatasetPostRequest, ZpoolPostRequest,
 };
 use slog::Logger;
 use std::collections::HashMap;
@@ -86,6 +86,7 @@ struct PartitionInfo<'a> {
     data_directory: &'a str,
     svc_directory: &'a str,
     port: u16,
+    flavor: DatasetFlavor,
 }
 
 const PARTITIONS: &[PartitionInfo<'static>] = &[
@@ -96,6 +97,7 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         svc_directory: CRUCIBLE_SVC_DIRECTORY,
         // TODO: Ensure crucible agent uses this port
         port: 8080,
+        flavor: DatasetFlavor::Crucible,
     },
     PartitionInfo {
         name: "cockroach",
@@ -104,6 +106,7 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         svc_directory: CRUCIBLE_SVC_DIRECTORY, // XXX Replace me
         // TODO: Ensure cockroach uses this port
         port: 8080,
+        flavor: DatasetFlavor::Cockroach,
     },
 ];
 
@@ -209,7 +212,14 @@ impl StorageWorker {
                 // quota properties).
                 let _ = self
                     .nexus_client
-                    .dataset_post(id, pool.id(), DatasetPostRequest { address })
+                    .dataset_post(
+                        id,
+                        pool.id(),
+                        DatasetPostRequest {
+                            address,
+                            flavor: partition.flavor,
+                        },
+                    )
                     .await?;
             }
         }
