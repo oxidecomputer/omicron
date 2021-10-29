@@ -118,12 +118,11 @@ where
             });
         }
 
-        match ctx.session_update_last_used(token.clone()).await {
-            Some(_) => {}
-            None => {
-                // couldn't renew session wtf
-            }
-        };
+        // we don't want to 500 on error here because the user is legitimately
+        // authenticated for this request at this point. The next request might
+        // be wrongly considered idle, but that's a problem for the next
+        // request.
+        let _ = ctx.session_update_last_used(token.clone()).await;
 
         SchemeResult::Authenticated(Details { actor })
     }
