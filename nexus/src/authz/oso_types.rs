@@ -1,5 +1,21 @@
 //! Types and impls used for integration with Oso
 
+// Most of the types here are used in the Polar configuration, which means they
+// must impl [`oso::PolarClass`].  There is a derive(PolarClass), but it's
+// pretty limited: it doesn't define an equality operator even when the type
+// itself impls PartialEq and Eq.  It also doesn't let you define methods.  We
+// may want to define our own macro(s) to avoid having to impl this by hand
+// everywhere.
+//
+// Many of these are newtypes that wrap existing types, either simple types from
+// Nexus (like `authn::Context`) or database model types.  The main reason is
+// that [`Oso::is_allowed()`] consumes owned values, not references.  Consumers
+// that want to do an authz check almost always want to keep using the thing
+// they had.  We could instead require that the database model types all impl
+// `Clone`, impl `PolarClass` on those types, and then just copy them when we
+// pass them to `is_allowed()`.  Using newtypes is a way to capture just the
+// parts we need for authorization.
+
 use crate::authn;
 use crate::db;
 use crate::db::identity::Resource;
@@ -8,8 +24,11 @@ use oso::Oso;
 use oso::PolarClass;
 use std::fmt;
 
+/// Polar configuration describing control plane authorization rules
 pub const OMICRON_AUTHZ_CONFIG: &str = include_str!("omicron.polar");
 
+/// Returns an Oso handle suitable for authorizing using to Omicron's
+/// authorization rules
 pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
     let classes = [
@@ -28,6 +47,18 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     Ok(oso)
 }
 
+//
+// Helper types
+// See the note above about why we don't use derive(PolarClass).
+//
+
+/// Describes an action being authorized
+///
+/// There's currently just one enum of Actions for all of Omicron.  We expect
+/// most objects to support mosty the same set of actions, except that we use
+/// distinct variants for the various "create" actions because it's possible a
+/// resource might support more than one different thing that you can create
+/// (e.g., a Project will support CreateInstance and CreateDisk).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Query, // only used for [`Database`]
@@ -35,7 +66,6 @@ pub enum Action {
     CreateOrganization,
 }
 
-// We cannot derive(PolarClass) because we need to define equality.
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
@@ -52,6 +82,11 @@ impl oso::PolarClass for Action {
     }
 }
 
+/// Describes a permission used in the Polar configuration
+///
+/// Note that Polar (appears to) require that all permissions actually be
+/// strings in the configuration.  This type is used only in Rust.  It doesn't
+/// even impl [`PolarClass`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Perm {
     Query,
@@ -71,11 +106,8 @@ impl fmt::Display for Perm {
     }
 }
 
-// Define newtypes for the various types that we want to impl PolarClass for.
-// This is needed because is_allowed() consumes these types, not references.  So
-// if we want to call is_allowed() and still reference the original type, we
-// need to have copied whatever information is_allowed() needs.
-
+/// Represents [`authn::Context`] (which is either an authenticated or
+/// unauthenticated actor) for Polar
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnyActor(bool, Option<String>);
 impl From<&authn::Context> for AnyActor {
@@ -88,7 +120,6 @@ impl From<&authn::Context> for AnyActor {
 impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            // "Actor" is reserved in Polar
             .name("AnyActor")
             .set_equality_check(|a1: &AnyActor, a2: &AnyActor| a1 == a2)
             .add_attribute_getter("authenticated", |a: &AnyActor| a.0)
@@ -98,6 +129,7 @@ impl oso::PolarClass for AnyActor {
     }
 }
 
+/// Represents an authenticated [`authn::Context`] for Polar
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthenticatedActor(String);
 impl From<&authn::Actor> for AuthenticatedActor {
@@ -112,8 +144,6 @@ impl From<&authn::Actor> for AuthenticatedActor {
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            // "Actor" is reserved in Polar
-            .name("AuthenticatedActor")
             .set_equality_check(
                 |a1: &AuthenticatedActor, a2: &AuthenticatedActor| a1 == a2,
             )
@@ -121,6 +151,20 @@ impl oso::PolarClass for AuthenticatedActor {
     }
 }
 
+//
+// Newtypes for model types that are exposed to Polar
+// These all impl [`oso::PolarClass`].
+// See the note above about why we use newtypes and why we don't use
+// derive(PolarClass).
+//
+
+/// Represents the whole Oxide fleet to Polar (used essentially to mean
+/// "global").  See RFD 24.
+#[derive(Clone, Debug, Eq, PartialEq, oso::PolarClass)]
+pub struct Fleet;
+pub const FLEET: Fleet = Fleet;
+
+/// Wraps [`db::model::Organization`] for Polar
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Organization(String);
 impl From<&db::model::Organization> for Organization {
@@ -135,10 +179,8 @@ impl oso::PolarClass for Organization {
     }
 }
 
+/// Represents the database itself to Polar (so that we can have roles with no
+/// access to the database at all)
 #[derive(Clone, Debug, Eq, PartialEq, oso::PolarClass)]
 pub struct Database;
 pub const DATABASE: Database = Database;
-
-#[derive(Clone, Debug, Eq, PartialEq, oso::PolarClass)]
-pub struct Fleet;
-pub const FLEET: Fleet = Fleet;

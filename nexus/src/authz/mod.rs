@@ -41,8 +41,7 @@ impl Context {
     }
 
     /// Check whether the actor performing this request is authorized for
-    /// `action` on `resource`.  For "read" operations, use authorize_read()
-    /// instead.
+    /// `action` on `resource`.
     pub fn authorize<Resource>(
         &self,
         action: Action,

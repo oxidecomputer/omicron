@@ -25,7 +25,7 @@ allow(actor: AnyActor, action: Action, resource) if
 # This will eventually need to be replaced with data that comes from the
 # database.
 has_role(actor: AuthenticatedActor, _role: String, _resource: Resource) if
-    actor.id == "00000000-0000-0000-0000-000000000000";
+    actor.id == "001de000-05e4-0000-0000-000000004007";
 
 
 #
@@ -33,7 +33,7 @@ has_role(actor: AuthenticatedActor, _role: String, _resource: Resource) if
 #
 
 # The "database" resource allows us to limit what users are allowed to perform
-# operations that query the database (whether those read or write).
+# operations that query the database (whether those read or write queries).
 resource Database {
 	permissions = [ "query" ];
 	roles = [ "user" ];
