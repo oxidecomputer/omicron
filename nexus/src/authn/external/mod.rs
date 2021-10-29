@@ -36,7 +36,9 @@ where
         let log = &rqctx.log;
         let request = &rqctx.request.lock().await;
         let ctx = rqctx.context();
-        self.authn_request_generic(ctx, log, request).await
+        let result = self.authn_request_generic(ctx, log, request).await;
+        trace!(log, "authn result: {:?}", result);
+        result
     }
 
     /// Authenticate an incoming HTTP request (dropshot-agnostic)

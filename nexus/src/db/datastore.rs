@@ -1544,6 +1544,16 @@ impl DataStore {
         Ok(())
     }
 
+    // TODO-correctness: fix session method errors. the map_errs turn all errors
+    // into 500s, most notably (and most frequently) session not found. they
+    // don't end up as 500 in the http response because they get turned into a
+    // 4xx error by calling code, the session cookie authn scheme. this is
+    // necessary for now in order to avoid the possibility of leaking out a
+    // too-friendly 404 to the client. once datastore has its own error type and
+    // the conversion to serializable user-facing errors happens elsewhere (see
+    // issue #347) these methods can safely return more accurate errors, and
+    // showing/hiding that info as appropriate will be handled higher up
+
     pub async fn session_fetch(
         &self,
         token: String,
@@ -1554,13 +1564,12 @@ impl DataStore {
             .select(ConsoleSession::as_select())
             .first_async(self.pool())
             .await
-            // note that this turns all errors into 500s, most notably (and most
-            // frequently) session not found. they don't end up as 500 in the
-            // response because they get turned into a 4xx error by the authn
-            // scheme. but this is necessary for now (until #347) in order to
-            // avoid the possibility of leaking out a too-friendly 404 to the
-            // client
-            .map_err(|_e| Error::internal_error("TODO: see omicron#347"))
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching session: {:?}",
+                    e
+                ))
+            })
     }
 
     pub async fn session_create(
@@ -1574,7 +1583,12 @@ impl DataStore {
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|_e| Error::internal_error("TODO: see omicron#347"))
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating session: {:?}",
+                    e
+                ))
+            })
     }
 
     pub async fn session_update_last_used(
@@ -1589,7 +1603,12 @@ impl DataStore {
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|_e| Error::internal_error("TODO: see omicron#347"))
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error renewing session: {:?}",
+                    e
+                ))
+            })
     }
 
     // putting "hard" in the name because we don't do this with any other model
@@ -1600,9 +1619,13 @@ impl DataStore {
             .filter(dsl::token.eq(token.clone()))
             .execute_async(self.pool())
             .await
-            // TODO: log attempts to delete nonexistent tokens?
             .map(|_rows_deleted| ())
-            .map_err(|_e| Error::internal_error("TODO: see omicron#347"))
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting session: {:?}",
+                    e
+                ))
+            })
     }
 }
 

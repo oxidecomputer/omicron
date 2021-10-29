@@ -68,7 +68,7 @@ where
     async fn authn(
         &self,
         ctx: &T,
-        _log: &slog::Logger,
+        log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let token = match get_token_from_cookie(request.headers()) {
@@ -90,7 +90,10 @@ where
         // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
-            ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(token.clone()).await;
+            if expired_session.is_none() {
+                debug!(log, "failed to expire session")
+            }
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -105,7 +108,10 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than absolute_timeout, it is expired and we can no longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
-            ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(token.clone()).await;
+            if expired_session.is_none() {
+                debug!(log, "failed to expire session")
+            }
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
@@ -122,7 +128,10 @@ where
         // authenticated for this request at this point. The next request might
         // be wrongly considered idle, but that's a problem for the next
         // request.
-        let _ = ctx.session_update_last_used(token.clone()).await;
+        let updated_session = ctx.session_update_last_used(token.clone()).await;
+        if updated_session.is_none() {
+            debug!(log, "failed to extend session")
+        }
 
         SchemeResult::Authenticated(Details { actor })
     }
