@@ -46,8 +46,8 @@ pub enum Error {
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
     /** The system (or part of it) is unavailable. */
-    #[error("Service Unavailable: {message}")]
-    ServiceUnavailable { message: String },
+    #[error("Service Unavailable: {internal_message}")]
+    ServiceUnavailable { internal_message: String },
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
@@ -129,7 +129,7 @@ impl Error {
      * server problem) or InvalidRequest (if it's a client problem) instead.
      */
     pub fn unavail(message: &str) -> Error {
-        Error::ServiceUnavailable { message: message.to_owned() }
+        Error::ServiceUnavailable { internal_message: message.to_owned() }
     }
 
     /**
@@ -223,10 +223,12 @@ impl From<Error> for HttpError {
                 HttpError::for_internal_error(internal_message)
             }
 
-            Error::ServiceUnavailable { message } => HttpError::for_unavail(
-                Some(String::from("ServiceNotAvailable")),
-                message,
-            ),
+            Error::ServiceUnavailable { internal_message } => {
+                HttpError::for_unavail(
+                    Some(String::from("ServiceNotAvailable")),
+                    internal_message,
+                )
+            }
         }
     }
 }

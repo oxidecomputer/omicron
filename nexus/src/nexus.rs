@@ -693,7 +693,9 @@ impl Nexus {
         sleds
             .first()
             .ok_or_else(|| Error::ServiceUnavailable {
-                message: String::from("no sleds available for new Instance"),
+                internal_message: String::from(
+                    "no sleds available for new Instance",
+                ),
             })
             .map(|s| s.id())
     }
@@ -1853,7 +1855,7 @@ impl Nexus {
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            message: String::from("no oximeter collectors available"),
+            internal_message: String::from("no oximeter collectors available"),
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
