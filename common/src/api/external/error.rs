@@ -43,8 +43,8 @@ pub enum Error {
     #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
     /** The system encountered an unhandled operational error. */
-    #[error("Internal Error: {message}")]
-    InternalError { message: String },
+    #[error("Internal Error: {internal_message}")]
+    InternalError { internal_message: String },
     /** The system (or part of it) is unavailable. */
     #[error("Service Unavailable: {message}")]
     ServiceUnavailable { message: String },
@@ -115,8 +115,8 @@ impl Error {
      * deserializing a value from the database, or finding two records for
      * something that is supposed to be unique).
      */
-    pub fn internal_error(message: &str) -> Error {
-        Error::InternalError { message: message.to_owned() }
+    pub fn internal_error(internal_message: &str) -> Error {
+        Error::InternalError { internal_message: internal_message.to_owned() }
     }
 
     /**
@@ -154,7 +154,7 @@ impl Error {
                 Error::InvalidRequest { message: error_response.message }
             }
             _ => Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "{}: unknown error from dependency: {:?}",
                     error_message_base, error_response
                 ),
@@ -219,8 +219,8 @@ impl From<Error> for HttpError {
                 )
             }
 
-            Error::InternalError { message } => {
-                HttpError::for_internal_error(message)
+            Error::InternalError { internal_message } => {
+                HttpError::for_internal_error(internal_message)
             }
 
             Error::ServiceUnavailable { message } => HttpError::for_unavail(

@@ -74,7 +74,7 @@ async fn wait_for_http_server(
     )
     .await
     .map_err(|e| Error::InternalError {
-        message: format!("Failed to wait for HTTP server: {}", e),
+        internal_message: format!("Failed to wait for HTTP server: {}", e),
     })
 }
 
@@ -263,7 +263,10 @@ impl InstanceInner {
             .instance_state_put(*self.id(), request)
             .await
             .map_err(|e| Error::InternalError {
-                message: format!("Failed to set state of instance: {}", e),
+                internal_message: format!(
+                    "Failed to set state of instance: {}",
+                    e
+                ),
             })
     }
 
@@ -292,7 +295,7 @@ impl InstanceInner {
             .instance_ensure(&request)
             .await
             .map_err(|e| Error::InternalError {
-                message: format!("Failed to ensure instance: {}", e),
+                internal_message: format!("Failed to ensure instance: {}", e),
             })?;
         Ok(())
     }
@@ -572,7 +575,10 @@ impl Instance {
                 .instance_state_monitor(id, gen)
                 .await
                 .map_err(|e| Error::InternalError {
-                    message: format!("Failed to monitor propolis: {}", e),
+                    internal_message: format!(
+                        "Failed to monitor propolis: {}",
+                        e
+                    ),
                 })?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;

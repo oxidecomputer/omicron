@@ -384,7 +384,7 @@ impl Nexus {
         result.kind.map_err(|saga_error| {
             saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
-                Error::InternalError { message: e.to_string() }
+                Error::InternalError { internal_message: e.to_string() }
             })
         })
     }
@@ -743,9 +743,10 @@ impl Nexus {
             )
             .await?;
         /* TODO-error more context would be useful  */
-        let instance_id = saga_outputs
-            .lookup_output::<Uuid>("instance_id")
-            .map_err(|e| Error::InternalError { message: e.to_string() })?;
+        let instance_id =
+            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
+                Error::InternalError { internal_message: e.to_string() }
+            })?;
         /*
          * TODO-correctness TODO-robustness TODO-design It's not quite correct
          * to take this instance id and look it up again.  It's possible that

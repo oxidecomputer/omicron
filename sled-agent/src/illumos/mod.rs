@@ -16,12 +16,12 @@ fn execute(
 ) -> Result<std::process::Output, Error> {
     let output =
         command.env_clear().output().map_err(|e| Error::InternalError {
-            message: format!("Failed to execute {:?}: {}", command, e),
+            internal_message: format!("Failed to execute {:?}: {}", command, e),
         })?;
 
     if !output.status.success() {
         return Err(Error::InternalError {
-            message: format!(
+            internal_message: format!(
                 "Command {:?} executed and failed: {}",
                 command,
                 String::from_utf8_lossy(&output.stderr)
