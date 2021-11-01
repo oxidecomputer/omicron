@@ -291,8 +291,8 @@ mod test {
 
         for (result, expected_message) in &checks {
             let error = result.as_ref().unwrap_err();
-            if let Error::InternalError { message } = error {
-                assert_eq!(*expected_message, message);
+            if let Error::InternalError { internal_message } = error {
+                assert_eq!(*expected_message, internal_message);
             } else {
                 panic!("got something other than an InternalError");
             }
