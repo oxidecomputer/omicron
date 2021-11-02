@@ -22,19 +22,13 @@ use super::collection_insert::{DatastoreCollection, InsertError};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{
+    DataPageParams, Error, LookupType, ResourceType,
+};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -55,6 +49,23 @@ use crate::db::{
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
+
+/*
+ * The type aliases below exist primarily to ensure consistency among return
+ * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
+ * type argument `T` generally implements `Object`.
+ */
+
+/** Result of a create operation for the specified type */
+pub type CreateResult<T> = Result<T, Error>;
+/** Result of a delete operation for the specified type */
+pub type DeleteResult = Result<(), Error>;
+/** Result of a list operation that returns a vector */
+pub type ListResultVec<T> = Result<Vec<T>, Error>;
+/** Result of a lookup operation for the specified type */
+pub type LookupResult<T> = Result<T, Error>;
+/** Result of an update operation for the specified type */
+pub type UpdateResult<T> = Result<T, PoolError>;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -313,13 +324,6 @@ impl DataStore {
             .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
     }
 
     /// Create a project
@@ -490,13 +494,6 @@ impl DataStore {
             .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
     }
 
     /*
@@ -1603,12 +1600,6 @@ impl DataStore {
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error renewing session: {:?}",
-                    e
-                ))
-            })
     }
 
     // putting "hard" in the name because we don't do this with any other model

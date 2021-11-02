@@ -8,7 +8,7 @@ pub mod collection_insert;
 mod config;
 // This is marked public for use by the integration tests
 pub mod datastore;
-mod error;
+pub mod error;
 mod pagination;
 mod pool;
 mod saga_recovery;
