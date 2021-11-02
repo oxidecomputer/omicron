@@ -12,6 +12,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
+use hex;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -55,6 +56,7 @@ use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -91,6 +93,11 @@ pub trait TestInterfaces {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
+
+    async fn session_create_with(
+        &self,
+        session: db::model::ConsoleSession,
+    ) -> CreateResult<db::model::ConsoleSession>;
 }
 
 /**
@@ -1861,6 +1868,47 @@ impl Nexus {
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         Ok(self.build_oximeter_client(info.id, address))
     }
+
+    pub async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<db::model::ConsoleSession> {
+        self.db_datastore.session_fetch(token).await
+    }
+
+    pub async fn session_create(
+        &self,
+        user_id: Uuid,
+    ) -> CreateResult<db::model::ConsoleSession> {
+        let session =
+            db::model::ConsoleSession::new(generate_session_token(), user_id);
+        Ok(self.db_datastore.session_create(session).await?)
+    }
+
+    // update last_used to now
+    pub async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> UpdateResult<db::model::ConsoleSession> {
+        Ok(self.db_datastore.session_update_last_used(token).await?)
+    }
+
+    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+        self.db_datastore.session_hard_delete(token).await
+    }
+}
+
+fn generate_session_token() -> String {
+    // TODO: "If getrandom is unable to provide secure entropy this method will panic."
+    // Should we explicitly handle that?
+    // TODO: store generator somewhere so we don't reseed every time
+    let mut rng = StdRng::from_entropy();
+    // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
+    // 20 bytes = 160 bits of entropy
+    // TODO: the size should be a constant somewhere, maybe even in config?
+    let mut random_bytes: [u8; 20] = [0; 20];
+    rng.fill_bytes(&mut random_bytes);
+    hex::encode(random_bytes)
 }
 
 #[async_trait]
@@ -1881,5 +1929,12 @@ impl TestInterfaces for Nexus {
         let instance_id = disk.runtime().attach_instance_id.unwrap();
         let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
+    }
+
+    async fn session_create_with(
+        &self,
+        session: db::model::ConsoleSession,
+    ) -> CreateResult<db::model::ConsoleSession> {
+        Ok(self.db_datastore.session_create(session).await?)
     }
 }
