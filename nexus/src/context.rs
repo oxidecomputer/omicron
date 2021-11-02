@@ -5,8 +5,13 @@ use super::authn;
 use super::config;
 use super::db;
 use super::Nexus;
+use crate::authn::external::session_cookie::{Session, SessionStore};
+use crate::db::model::ConsoleSession;
+use async_trait::async_trait;
+use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
+use chrono::{DateTime, Duration, Utc};
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -29,6 +34,15 @@ pub struct ServerContext {
     pub external_latencies: LatencyTracker,
     /** registry of metric producers */
     pub producer_registry: ProducerRegistry,
+    /** the whole config */
+    pub tunables: Tunables,
+}
+
+pub struct Tunables {
+    /** how long a session can be idle before expiring */
+    pub session_idle_timeout: Duration,
+    /** how long a session can exist before expiring */
+    pub session_absolute_timeout: Duration,
 }
 
 impl ServerContext {
@@ -43,13 +57,18 @@ impl ServerContext {
         config: &config::Config,
     ) -> Arc<ServerContext> {
         let nexus_schemes = config
-            .authn_schemes_external
+            .authn
+            .schemes_external
             .iter()
-            .map(|name| match name {
-                config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
-            }
-                as Box<dyn HttpAuthnScheme<Arc<ServerContext>>>)
-            .collect::<Vec<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>>>();
+            .map::<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>, _>(|name| {
+                match name {
+                    config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
+                    config::SchemeName::SessionCookie => {
+                        Box::new(HttpAuthnSessionCookie)
+                    }
+                }
+            })
+            .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
@@ -84,6 +103,54 @@ impl ServerContext {
             internal_latencies,
             external_latencies,
             producer_registry,
+            tunables: Tunables {
+                session_idle_timeout: Duration::minutes(
+                    config.authn.session_idle_timeout_minutes.into(),
+                ),
+                session_absolute_timeout: Duration::minutes(
+                    config.authn.session_absolute_timeout_minutes.into(),
+                ),
+            },
         })
+    }
+}
+
+#[async_trait]
+impl SessionStore for Arc<ServerContext> {
+    type SessionModel = ConsoleSession;
+
+    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
+        self.nexus.session_fetch(token).await.ok()
+    }
+
+    async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> Option<Self::SessionModel> {
+        self.nexus.session_update_last_used(token).await.ok()
+    }
+
+    async fn session_expire(&self, token: String) -> Option<()> {
+        self.nexus.session_hard_delete(token).await.ok()
+    }
+
+    fn session_idle_timeout(&self) -> Duration {
+        self.tunables.session_idle_timeout
+    }
+
+    fn session_absolute_timeout(&self) -> Duration {
+        self.tunables.session_absolute_timeout
+    }
+}
+
+impl Session for ConsoleSession {
+    fn user_id(&self) -> Uuid {
+        self.user_id
+    }
+    fn time_last_used(&self) -> DateTime<Utc> {
+        self.time_last_used
+    }
+    fn time_created(&self) -> DateTime<Utc> {
+        self.time_created
     }
 }

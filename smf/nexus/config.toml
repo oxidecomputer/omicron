@@ -5,7 +5,10 @@
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
-authn_schemes_external = []
+[authn]
+schemes_external = []
+session_idle_timeout_minutes = 60
+session_absolute_timeout_minutes = 480
 
 [database]
 # URL for connecting to the database
