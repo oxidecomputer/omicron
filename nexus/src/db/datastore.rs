@@ -1544,7 +1544,7 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn routers_list_routes(
+    pub async fn router_list_routes(
         &self,
         router_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
@@ -1570,7 +1570,7 @@ impl DataStore {
         &self,
         router_id: &Uuid,
         route_name: &Name,
-    ) -> LookupResult<VpcRouter> {
+    ) -> LookupResult<RouterRoute> {
         use db::schema::routerroute::dsl;
 
         dsl::routerroute
@@ -1591,12 +1591,13 @@ impl DataStore {
 
     pub async fn router_create_route(
         &self,
+        route_id: &Uuid,
         router_id: &Uuid,
         params: &api::external::RouterRouteCreateParams,
-    ) -> CreateResult<VpcRouter> {
+    ) -> CreateResult<RouterRoute> {
         use db::schema::routerroute::dsl;
 
-        let route = RouterRoute::new(*router_id, params.clone());
+        let route = RouterRoute::new(*route_id, *router_id, params.clone());
         let name = route.name().clone();
         let route = diesel::insert_into(dsl::routerroute)
             .values(route)
@@ -1638,7 +1639,7 @@ impl DataStore {
 
     pub async fn router_update_route(
         &self,
-        router_id: &Uuid,
+        route_id: &Uuid,
         params: &api::external::RouterRouteUpdateParams,
     ) -> Result<(), Error> {
         use db::schema::routerroute::dsl;
@@ -1646,15 +1647,15 @@ impl DataStore {
 
         diesel::update(dsl::routerroute)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*router_id))
+            .filter(dsl::id.eq(*route_id))
             .set(updates)
             .execute_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcRouter,
-                    LookupType::ById(*router_id),
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
                 )
             })?;
         Ok(())

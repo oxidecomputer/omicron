@@ -1017,6 +1017,83 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
     }
 }
 
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteTarget(pub external::RouteTarget);
+
+impl RouteTarget {
+    pub fn new(state: external::RouteTarget) -> Self {
+        Self(state)
+    }
+
+    pub fn state(&self) -> &external::RouteTarget {
+        &self.0
+    }
+}
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let s = String::from_sql(bytes)?;
+        let target = external::RouteTarget::try_from(s.as_str())?;
+        Ok(RouteTarget::new(target))
+    }
+}
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteDestination(pub external::RouteDestination);
+
+impl RouteDestination {
+    pub fn new(state: external::RouteDestination) -> Self {
+        Self(state)
+    }
+
+    pub fn state(&self) -> &external::RouteDestination {
+        &self.0
+    }
+}
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let s = String::from_sql(bytes)?;
+        let target = external::RouteDestination::try_from(s.as_str())?;
+        Ok(RouteDestination::new(target))
+    }
+}
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "routerroute"]
 pub struct RouterRoute {
@@ -1024,8 +1101,8 @@ pub struct RouterRoute {
     identity: RouterRouteIdentity,
 
     pub router_id: Uuid,
-    pub target: external::RouteTarget,
-    pub destination: external::RouteDestination,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 impl RouterRoute {
@@ -1061,8 +1138,8 @@ pub struct RouterRouteUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
-    pub target: external::RouteTarget,
-    pub destination: external::RouteDestination,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {

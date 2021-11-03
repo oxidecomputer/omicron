@@ -1626,7 +1626,12 @@ impl Nexus {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<RouterRoute> {
         let router = self
-            .vpc_lookup_router(organization_name, project_name, vpc_name, router_name)
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
             .await?;
         let routes = self
             .db_datastore
@@ -1647,7 +1652,12 @@ impl Nexus {
         route_name: &Name,
     ) -> LookupResult<RouterRoute> {
         let router = self
-            .vpc_lookup_router(organization_name, project_name, vpc_name, router_name)
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
             .await?;
         Ok(self
             .db_datastore
@@ -1664,10 +1674,14 @@ impl Nexus {
         router_name: &Name,
         params: &RouterRouteCreateParams,
     ) -> CreateResult<RouterRoute> {
-        // let vpc = self
-        //     .project_lookup_vpc(organization_name, project_name, vpc_name)
-        //     .await?;
-        let router = self.vpc_lookup_router(organization_name, project_name, vpc_name, router_name).await?
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
         let id = Uuid::new_v4();
         let route = self
             .db_datastore

@@ -45,6 +45,9 @@ use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Rack;
+use omicron_common::api::external::RouterRoute;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
@@ -1475,8 +1478,8 @@ async fn vpc_routers_put_router(
 async fn routers_routes_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
+    path_params: Path<RouterRoutePathParam>,
+) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -1498,7 +1501,7 @@ async fn routers_routes_get(
  * Path parameters for Router Route requests
  */
 #[derive(Deserialize, JsonSchema)]
-struct RoutersRoutesPathParam {
+struct RouterRoutePathParam {
     organization_name: Name,
     project_name: Name,
     vpc_name: Name,
@@ -1515,8 +1518,8 @@ struct RoutersRoutesPathParam {
 }]
 async fn routers_routes_get_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<RoutersRoutesPathParam>,
-) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    path_params: Path<RouterRoutePathParam>,
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1526,6 +1529,7 @@ async fn routers_routes_get_route(
             &path.project_name,
             &path.vpc_name,
             &path.router_name,
+            &path.route_name,
         )
         .await?;
     Ok(HttpResponseOk(route))
@@ -1540,9 +1544,9 @@ async fn routers_routes_get_route(
 }]
 async fn routers_routes_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcRouterCreateParams>,
-) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
+    path_params: Path<RouterRoutePathParam>,
+    create_params: TypedBody<RouterRouteCreateParams>,
+) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1551,6 +1555,7 @@ async fn routers_routes_post(
             &path.organization_name,
             &path.project_name,
             &path.vpc_name,
+            &path.router_name,
             &create_params.into_inner(),
         )
         .await?;
@@ -1566,7 +1571,7 @@ async fn routers_routes_post(
 }]
 async fn routers_routes_delete_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcRouterPathParam>,
+    path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1592,8 +1597,8 @@ async fn routers_routes_delete_route(
 }]
 async fn routers_routes_put_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcRouterPathParam>,
-    router_params: TypedBody<VpcRouterUpdateParams>,
+    path_params: Path<RouterRoutePathParam>,
+    router_params: TypedBody<RouterRouteUpdateParams>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1604,6 +1609,7 @@ async fn routers_routes_put_route(
             &path.project_name,
             &path.vpc_name,
             &path.router_name,
+            &path.route_name,
             &router_params.into_inner(),
         )
         .await?;

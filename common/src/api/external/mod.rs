@@ -1445,6 +1445,13 @@ impl TryFrom<String> for RouteTarget {
     }
 }
 
+impl TryFrom<&str> for RouteTarget {
+    type Error = String;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        RouteTarget::try_from(String::from(value))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum RouteDestination {
     Ip(IpAddr),
@@ -1478,13 +1485,19 @@ impl TryFrom<String> for RouteDestination {
             NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
             NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
             _ => Err(format!(
-                "NetworkTarget {} is not a valid RouteTarget",
+                "NetworkTarget {} is not a valid RouteDestination",
                 target
             )),
         }
     }
 }
 
+impl TryFrom<&str> for RouteDestination {
+    type Error = String;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        RouteDestination::try_from(String::from(value))
+    }
+}
 /// A route defines a rule that governs where traffic should be sent based on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
