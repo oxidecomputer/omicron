@@ -49,8 +49,8 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
-        InstanceRuntimeState, Name, Organization, OrganizationUpdate,
+        ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
+        Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
         VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
@@ -1562,26 +1562,112 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    // TODO-correctness: fix session method errors. the map_errs turn all errors
+    // into 500s, most notably (and most frequently) session not found. they
+    // don't end up as 500 in the http response because they get turned into a
+    // 4xx error by calling code, the session cookie authn scheme. this is
+    // necessary for now in order to avoid the possibility of leaking out a
+    // too-friendly 404 to the client. once datastore has its own error type and
+    // the conversion to serializable user-facing errors happens elsewhere (see
+    // issue #347) these methods can safely return more accurate errors, and
+    // showing/hiding that info as appropriate will be handled higher up
+
+    pub async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<ConsoleSession> {
+        use db::schema::consolesession::dsl;
+        dsl::consolesession
+            .filter(dsl::token.eq(token.clone()))
+            .select(ConsoleSession::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching session: {:?}",
+                    e
+                ))
+            })
+    }
+
+    pub async fn session_create(
+        &self,
+        session: ConsoleSession,
+    ) -> CreateResult<ConsoleSession> {
+        use db::schema::consolesession::dsl;
+
+        diesel::insert_into(dsl::consolesession)
+            .values(session)
+            .returning(ConsoleSession::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating session: {:?}",
+                    e
+                ))
+            })
+    }
+
+    pub async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> UpdateResult<ConsoleSession> {
+        use db::schema::consolesession::dsl;
+
+        diesel::update(dsl::consolesession)
+            .filter(dsl::token.eq(token.clone()))
+            .set((dsl::time_last_used.eq(Utc::now()),))
+            .returning(ConsoleSession::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error renewing session: {:?}",
+                    e
+                ))
+            })
+    }
+
+    // putting "hard" in the name because we don't do this with any other model
+    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+        use db::schema::consolesession::dsl;
+
+        diesel::delete(dsl::consolesession)
+            .filter(dsl::token.eq(token.clone()))
+            .execute_async(self.pool())
+            .await
+            .map(|_rows_deleted| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting session: {:?}",
+                    e
+                ))
+            })
+    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::db;
     use crate::db::identity::Resource;
-    use crate::db::model::{Organization, Project};
+    use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::db::DataStore;
+    use chrono::{Duration, Utc};
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+        Error, IdentityMetadataCreateParams, Name, OrganizationCreateParams,
         ProjectCreateParams,
     };
     use omicron_test_utils::dev;
     use std::convert::TryFrom;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_collection_not_present");
-        let db = dev::test_setup_database(&logctx.log).await;
+        let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
         let datastore = DataStore::new(Arc::new(pool));
@@ -1608,5 +1694,57 @@ mod test {
         let organization_after_project_create =
             datastore.organization_fetch(organization.name()).await.unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
+
+        let _ = db.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_session_methods() {
+        let logctx = dev::test_setup_log("test_collection_not_present");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let token = "a_token".to_string();
+        let session = ConsoleSession {
+            token: token.clone(),
+            time_created: Utc::now() - Duration::minutes(5),
+            time_last_used: Utc::now() - Duration::minutes(5),
+            user_id: Uuid::new_v4(),
+        };
+
+        let _ = datastore.session_create(session.clone()).await;
+
+        // fetch the one we just created
+        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
+        assert_eq!(session.user_id, fetched.user_id);
+
+        // trying to insert the same one again fails
+        let duplicate = datastore.session_create(session.clone()).await;
+        assert!(matches!(duplicate, Err(Error::InternalError { message: _ })));
+
+        // update last used (i.e., renew token)
+        let renewed =
+            datastore.session_update_last_used(token.clone()).await.unwrap();
+        assert!(renewed.time_last_used > session.time_last_used);
+
+        // time_last_used change persists in DB
+        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
+        assert!(fetched.time_last_used > session.time_last_used);
+
+        // delete it and fetch should come back with nothing
+        let delete = datastore.session_hard_delete(token.clone()).await;
+        assert_eq!(delete, Ok(()));
+
+        // this will be a not found after #347
+        let fetched = datastore.session_fetch(token.clone()).await;
+        assert!(matches!(fetched, Err(Error::InternalError { message: _ })));
+
+        // deleting an already nonexistent is considered a success
+        let delete_again = datastore.session_hard_delete(token.clone()).await;
+        assert_eq!(delete_again, Ok(()));
+
+        let _ = db.cleanup().await;
     }
 }

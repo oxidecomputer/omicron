@@ -266,14 +266,14 @@ function cmd_instance_reboot
 
 function cmd_instance_attach_disk
 {
-	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/projects/$1/instances/$2/disks/$3" -X PUT -T /dev/null
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X PUT -T /dev/null
 }
 
 function cmd_instance_detach_disk
 {
-	[[ $# != 3 ]] && usage "expected PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/projects/$1/instances/$2/disks/$3" -X DELETE -T /dev/null
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X DELETE -T /dev/null
 }
 
 function cmd_instance_list_disks

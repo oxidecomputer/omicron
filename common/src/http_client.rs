@@ -160,6 +160,9 @@ fn convert_error<E: Display>(
     error: E,
 ) -> Error {
     Error::ServiceUnavailable {
-        message: format!("{}: {}: {}", error_message_base, action, error),
+        internal_message: format!(
+            "{}: {}: {}",
+            error_message_base, action, error
+        ),
     }
 }

@@ -11,9 +11,11 @@ anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1a5c55d" }
+cookie = "0.15"
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.15"
+hex = "0.4.3"
 http = "0.2.5"
 hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
@@ -25,6 +27,7 @@ newtype_derive = "0.1.6"
 oso = "0.22"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+rand = "0.8.4"
 ref-cast = "1.0"
 serde_json = "1.0"
 serde_with = "1.11.0"

@@ -462,6 +462,25 @@ CREATE TABLE omicron.public.SagaNodeEvent (
 /*******************************************************************/
 
 /*
+ * Sessions for use by web console.
+ */
+CREATE TABLE omicron.public.ConsoleSession (
+    token STRING(40) PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_last_used TIMESTAMPTZ NOT NULL,
+    -- we're agnostic about what this means until work starts on users, but the
+    -- naive interpretation is that it points to a row in the User table
+    user_id UUID NOT NULL
+);
+
+-- to be used for cleaning up old tokens
+CREATE INDEX ON omicron.public.ConsoleSession (
+    time_created
+);
+
+/*******************************************************************/
+
+/*
  * Metadata for the schema itself.  This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */

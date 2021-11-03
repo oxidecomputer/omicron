@@ -61,7 +61,7 @@ pub fn public_error_from_diesel_pool(
         PoolError::Connection(error) => match error {
             ConnectionError::Checkout(error) => {
                 PublicError::ServiceUnavailable {
-                    message: format!(
+                    internal_message: format!(
                         "Failed to access connection pool: {}",
                         error
                     ),
@@ -88,7 +88,7 @@ pub fn public_error_from_diesel_pool_create(
         PoolError::Connection(error) => match error {
             ConnectionError::Checkout(error) => {
                 PublicError::ServiceUnavailable {
-                    message: format!(
+                    internal_message: format!(
                         "Failed to access connection pool: {}",
                         error
                     ),
