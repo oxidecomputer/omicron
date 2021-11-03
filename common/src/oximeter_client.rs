@@ -1,4 +1,5 @@
 //! Interface for API requests to an Oximeter metric collection server
+
 // Copyright 2021 Oxide Computer Company
 
 // use std::net::SocketAddr;
@@ -16,6 +17,14 @@ generate_logging_api!("../openapi/oximeter.json");
 
 impl From<std::time::Duration> for types::Duration {
     fn from(_: std::time::Duration) -> Self {
+        todo!()
+    }
+}
+
+impl From<crate::api::internal::nexus::ProducerEndpoint>
+    for types::ProducerEndpoint
+{
+    fn from(_: crate::api::internal::nexus::ProducerEndpoint) -> Self {
         todo!()
     }
 }

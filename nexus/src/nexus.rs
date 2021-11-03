@@ -1057,7 +1057,7 @@ impl Nexus {
                 &instance.id(),
                 &omicron_common::sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested,
+                    target: requested.into(),
                 },
             )
             //  instance_hardware, requested)
@@ -1346,7 +1346,7 @@ impl Nexus {
             .disk_put(
                 disk.id(),
                 &omicron_common::sled_agent_client::types::DiskEnsureBody {
-                    initial_runtime: disk.runtime.into(),
+                    initial_runtime: omicron_common::sled_agent_client::types::DiskRuntimeState::from(disk.runtime()),
                     target: requested,
                 },
             )
@@ -1867,7 +1867,15 @@ impl Nexus {
         let db_info =
             db::model::ProducerEndpoint::new(&producer_info, collector.id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
-        collector.register_producer(&producer_info).await?;
+        collector
+            .producers_post(
+                &omicron_common::oximeter_client::types::ProducerEndpoint::from(
+                    producer_info,
+                ),
+            )
+            // TODO error
+            .await
+            .unwrap();
         info!(
             self.log,
             "assigned collector to new producer";

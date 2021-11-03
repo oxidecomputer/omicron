@@ -23,6 +23,16 @@ use uuid::Uuid;
 
 generate_logging_api!("../openapi/sled-agent.json");
 
+impl From<crate::api::internal::sled_agent::InstanceRuntimeStateRequested>
+    for types::InstanceRuntimeStateRequested
+{
+    fn from(
+        _: crate::api::internal::sled_agent::InstanceRuntimeStateRequested,
+    ) -> Self {
+        todo!()
+    }
+}
+
 /*
 /** Client for a sled agent */
 pub struct Client {
