@@ -405,7 +405,7 @@ impl Nexus {
         new_organization: &OrganizationCreateParams,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(db_org).await
+        self.db_datastore.organization_create(db_org).await.map_err(Error::from)
     }
 
     pub async fn organization_fetch(
@@ -1883,7 +1883,9 @@ impl Nexus {
     ) -> CreateResult<db::model::ConsoleSession> {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
-        Ok(self.db_datastore.session_create(session).await?)
+        Ok(self.db_datastore.session_create(session).await.map_err(|e| {
+            Error::internal_error(&format!("error creating session: {:?}", e))
+        })?)
     }
 
     // update last_used to now

@@ -208,6 +208,18 @@ where
                 // summary, the CTE generates a division by zero intentionally
                 // if the collection doesn't exist in the database.
                 Err(InsertError::CollectionNotFound)
+                // it would simplify things elsewhere if we were willing to
+                // mislead slightly here and return a diesel error
+                // instead:
+                //
+                // Err(PoolError::Connection(
+                //     ConnectionError::Query(diesel::result::Error::NotFound),
+                // ))
+                //
+                // the downside is you loose the special info that this is a
+                // NotFound error that arose specifically while trying to pull a
+                // collection to insert into
+
             }
             Err(other) => Err(InsertError::DatabaseError(other)),
         }

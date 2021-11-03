@@ -29,7 +29,6 @@ use omicron_common::api;
 use omicron_common::api::external::{
     DataPageParams, Error, LookupType, ResourceType,
 };
-use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -50,17 +49,59 @@ use crate::db::{
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
-// TODO: rename to Error once everything is converted
+macro_rules! bail_unless {
+    ($cond:expr $(,)?) => {
+        bail_unless!($cond, "failed runtime check: {:?}", stringify!($cond))
+    };
+    ($cond:expr, $($arg:tt)+) => {
+        if !$cond {
+            return Err(DSError::Invariant { message: format!($($arg)*)
+            })
+        }
+    };
+}
+
 #[derive(Debug)]
-pub struct DSError {
-    error: PoolError,
-    resource_type: ResourceType,
-    lookup_type: LookupType,
+pub enum DSError {
+    Error {
+        error: PoolError,
+        resource_type: ResourceType,
+        lookup_type: LookupType,
+    },
+    CreateError {
+        error: InsertError,
+        resource_type: ResourceType,
+        object_name: String,
+    },
+    Invariant {
+        message: String,
+    },
 }
 
 impl From<DSError> for Error {
     fn from(e: DSError) -> Self {
-        public_error_from_diesel_pool(e.error, e.resource_type, e.lookup_type)
+        match e {
+            DSError::Error { error, resource_type, lookup_type } => {
+                public_error_from_diesel_pool(error, resource_type, lookup_type)
+            }
+            DSError::CreateError { error, resource_type, object_name } => {
+                match error {
+                    InsertError::CollectionNotFound => Error::ObjectNotFound {
+                        type_name: resource_type,
+                        // TODO: UGH
+                        lookup_type: LookupType::ById(Uuid::new_v4()),
+                    },
+                    InsertError::DatabaseError(error) => {
+                        public_error_from_diesel_pool_create(
+                            error,
+                            resource_type,
+                            &object_name,
+                        )
+                    }
+                }
+            }
+            DSError::Invariant { message } => Error::internal_error(&message),
+        }
     }
 }
 
@@ -71,7 +112,7 @@ impl From<DSError> for Error {
  */
 
 /** Result of a create operation for the specified type */
-pub type CreateResult<T> = Result<T, Error>;
+pub type CreateResult<T> = Result<T, DSError>;
 /** Result of a delete operation for the specified type */
 pub type DeleteResult = Result<(), Error>;
 /** Result of a list operation that returns a vector */
@@ -109,12 +150,10 @@ impl DataStore {
             .returning(Sled::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Sled,
-                    &sled.id().to_string(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Sled,
+                object_name: sled.id().to_string(),
             })
     }
 
@@ -165,12 +204,10 @@ impl DataStore {
             .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Organization,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Organization,
+                object_name: name,
             })
     }
 
@@ -338,7 +375,7 @@ impl DataStore {
             .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| DSError {
+            .map_err(|e| DSError::Error {
                 error: e,
                 resource_type: ResourceType::Organization,
                 lookup_type: LookupType::ByName(name.as_str().to_owned()),
@@ -360,18 +397,10 @@ impl DataStore {
         )
         .insert_and_get_result_async(self.pool())
         .await
-        .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Organization,
-                lookup_type: LookupType::ById(organization_id),
-            },
-            InsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Project,
-                    &name,
-                )
-            }
+        .map_err(|e| DSError::CreateError {
+            error: e,
+            resource_type: ResourceType::Project,
+            object_name: name,
         })
     }
 
@@ -513,7 +542,7 @@ impl DataStore {
             .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| DSError {
+            .map_err(|e| DSError::Error {
                 error: e,
                 resource_type: ResourceType::Project,
                 lookup_type: LookupType::ByName(name.as_str().to_owned()),
@@ -562,7 +591,7 @@ impl DataStore {
             params,
             runtime_initial.clone(),
         );
-        let name = instance.name().clone();
+        let name = instance.name().as_str().to_string();
         let instance: Instance = diesel::insert_into(dsl::instance)
             .values(instance)
             .on_conflict(dsl::id)
@@ -570,12 +599,10 @@ impl DataStore {
             .returning(Instance::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Instance,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Instance,
+                object_name: name,
             })?;
 
         bail_unless!(
@@ -799,7 +826,7 @@ impl DataStore {
             params.clone(),
             runtime_initial.clone(),
         );
-        let name = disk.name().clone();
+        let name = disk.name().as_str().to_string();
         let disk: Disk = diesel::insert_into(dsl::disk)
             .values(disk)
             .on_conflict(dsl::id)
@@ -807,12 +834,10 @@ impl DataStore {
             .returning(Disk::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Disk,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Disk,
+                object_name: name,
             })?;
 
         let runtime = disk.runtime();
@@ -979,12 +1004,10 @@ impl DataStore {
             ))
             .execute_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Oximeter,
-                    "Oximeter Info",
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Oximeter,
+                object_name: "Oximeter Info".to_string(),
             })?;
         Ok(())
     }
@@ -1047,12 +1070,10 @@ impl DataStore {
             ))
             .execute_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::MetricProducer,
-                    "Producer Endpoint",
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::MetricProducer,
+                object_name: "Producer Endpoint".to_string(),
             })?;
         Ok(())
     }
@@ -1071,10 +1092,10 @@ impl DataStore {
             .load_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
                     ResourceType::MetricProducer,
-                    "By Oximeter ID",
+                    LookupType::ById(oximeter_id),
                 )
             })
     }
@@ -1087,17 +1108,15 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::saga::dsl;
 
-        let name = saga.template_name.clone();
+        let name = saga.template_name.as_str().to_string();
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
             .execute_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::SagaDbg,
-                    &name,
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::SagaDbg,
+                object_name: name.as_str().to_string(),
             })?;
         Ok(())
     }
@@ -1114,12 +1133,10 @@ impl DataStore {
             .values(event.clone())
             .execute_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::SagaDbg,
-                    "Saga Event",
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::SagaDbg,
+                object_name: "Saga Event".to_string(),
             })?;
         Ok(())
     }
@@ -1246,7 +1263,7 @@ impl DataStore {
         use db::schema::vpc::dsl;
 
         let vpc = Vpc::new(*vpc_id, *project_id, params.clone());
-        let name = vpc.name().clone();
+        let name = vpc.name().as_str().to_string();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
             .on_conflict(dsl::id)
@@ -1254,12 +1271,10 @@ impl DataStore {
             .returning(Vpc::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::Vpc,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::Vpc,
+                object_name: name,
             })?;
         Ok(vpc)
     }
@@ -1385,7 +1400,7 @@ impl DataStore {
         use db::schema::vpcsubnet::dsl;
 
         let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
-        let name = subnet.name().clone();
+        let name = subnet.name().as_str().to_string();
         let subnet = diesel::insert_into(dsl::vpcsubnet)
             .values(subnet)
             .on_conflict(dsl::id)
@@ -1393,12 +1408,10 @@ impl DataStore {
             .returning(VpcSubnet::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::VpcSubnet,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::VpcSubnet,
+                object_name: name,
             })?;
         Ok(subnet)
     }
@@ -1502,7 +1515,7 @@ impl DataStore {
         use db::schema::vpcrouter::dsl;
 
         let router = VpcRouter::new(*router_id, *vpc_id, params.clone());
-        let name = router.name().clone();
+        let name = router.name().as_str().to_string();
         let router = diesel::insert_into(dsl::vpcrouter)
             .values(router)
             .on_conflict(dsl::id)
@@ -1510,12 +1523,10 @@ impl DataStore {
             .returning(VpcRouter::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_create(
-                    e,
-                    ResourceType::VpcRouter,
-                    name.as_str(),
-                )
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::VpcRouter,
+                object_name: name,
             })?;
         Ok(router)
     }
@@ -1599,16 +1610,16 @@ impl DataStore {
     ) -> CreateResult<ConsoleSession> {
         use db::schema::consolesession::dsl;
 
+        let token = session.token.clone();
         diesel::insert_into(dsl::consolesession)
             .values(session)
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating session: {:?}",
-                    e
-                ))
+            .map_err(|e| DSError::CreateError {
+                error: InsertError::DatabaseError(e),
+                resource_type: ResourceType::ConsoleSession,
+                object_name: token,
             })
     }
 
@@ -1624,7 +1635,7 @@ impl DataStore {
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| DSError {
+            .map_err(|e| DSError::Error {
                 error: e,
                 resource_type: ResourceType::ConsoleSession,
                 lookup_type: LookupType::Other(token.to_owned()),
@@ -1652,6 +1663,8 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use crate::db;
+    use crate::db::collection_insert::InsertError;
+    use crate::db::datastore::DSError;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::db::DataStore;
@@ -1722,8 +1735,16 @@ mod test {
         assert_eq!(session.user_id, fetched.user_id);
 
         // trying to insert the same one again fails
-        let duplicate = datastore.session_create(session.clone()).await;
-        assert!(matches!(duplicate, Err(Error::InternalError { message: _ })));
+        let duplicate =
+            datastore.session_create(session.clone()).await.unwrap_err();
+        assert!(matches!(
+            dbg!(duplicate),
+            DSError::CreateError {
+                error: InsertError::DatabaseError(_),
+                resource_type: _,
+                object_name: _
+            }
+        ));
 
         // update last used (i.e., renew token)
         let renewed =

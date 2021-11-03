@@ -12,6 +12,7 @@
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
@@ -151,6 +152,7 @@ async fn sic_create_instance_record(
             &runtime.into(),
         )
         .await
+        .map_err(Error::from)
         .map_err(ActionError::action_failed)?;
 
     // TODO: Populate this with an appropriate NIC.
