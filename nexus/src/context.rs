@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
-use omicron_common::api::external::Error;
 use chrono::{DateTime, Duration, Utc};
+use omicron_common::api::external::Error;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -158,6 +158,9 @@ pub enum OpKind {
     ExternalApiRequest,
     /// Background operations in Nexus
     Background,
+    #[cfg(test)]
+    /// Unit tests
+    UnitTest,
 }
 
 impl OpContext {
@@ -209,6 +212,28 @@ impl OpContext {
             created_walltime,
             metadata: BTreeMap::new(),
             kind: OpKind::Background,
+        }
+    }
+
+    /// Returns a context suitable for automated unit tests where an OpContext
+    /// is needed outside of a Dropshot context
+    #[cfg(test)]
+    pub fn for_unit_tests(log: slog::Logger) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let authn = Arc::new(authn::Context::internal_unauthenticated());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::new(authz::Authz::new()),
+        );
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata: BTreeMap::new(),
+            kind: OpKind::UnitTest,
         }
     }
 

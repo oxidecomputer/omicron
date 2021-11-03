@@ -1650,6 +1650,7 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
@@ -1667,6 +1668,7 @@ mod test {
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_collection_not_present");
+        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -1679,7 +1681,7 @@ mod test {
             },
         });
         let organization =
-            datastore.organization_create(organization).await.unwrap();
+            datastore.organization_create(&opctx, organization).await.unwrap();
 
         let project = Project::new(
             organization.id(),
