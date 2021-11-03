@@ -4,7 +4,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     consolesession, disk, instance, metricproducer, networkinterface,
-    organization, oximeter, project, rack, sled, vpc, vpcrouter, vpcsubnet,
+    organization, oximeter, project, rack, routerroute, sled, vpc, vpcrouter,
+    vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1040,7 +1041,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        self.0.as_str().to_sql(out)
+        self.0.to_string().as_str().to_sql(out)
     }
 }
 
@@ -1107,11 +1108,11 @@ pub struct RouterRoute {
 
 impl RouterRoute {
     pub fn new(
-        router_id: Uuid,
         route_id: Uuid,
+        router_id: Uuid,
         params: external::RouterRouteCreateParams,
     ) -> Self {
-        let identity = RouterRouteIdentity::new(router_id, params.identity);
+        let identity = RouterRouteIdentity::new(route_id, params.identity);
         Self {
             identity,
             router_id,

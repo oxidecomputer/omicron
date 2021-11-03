@@ -1671,7 +1671,7 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_route_fetch_by_name(&router.identity.id, router_name)
+            .router_route_fetch_by_name(&router.identity.id, route_name)
             .await?
             .into())
     }

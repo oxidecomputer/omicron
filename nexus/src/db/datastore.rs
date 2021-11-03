@@ -26,6 +26,7 @@ use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -34,13 +35,11 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::{CreateResult, RouterRoute};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db::model::{RouterRouteUpdate, VpcRouterUpdate};
 use crate::db::{
     self,
     error::{
@@ -49,8 +48,9 @@ use crate::db::{
     model::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, Vpc, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
