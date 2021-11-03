@@ -1724,7 +1724,10 @@ mod test {
 
         // trying to insert the same one again fails
         let duplicate = datastore.session_create(session.clone()).await;
-        assert!(matches!(duplicate, Err(Error::InternalError { message: _ })));
+        assert!(matches!(
+            duplicate,
+            Err(Error::InternalError { internal_message: _ })
+        ));
 
         // update last used (i.e., renew token)
         let renewed =
@@ -1741,7 +1744,10 @@ mod test {
 
         // this will be a not found after #347
         let fetched = datastore.session_fetch(token.clone()).await;
-        assert!(matches!(fetched, Err(Error::InternalError { message: _ })));
+        assert!(matches!(
+            fetched,
+            Err(Error::InternalError { internal_message: _ })
+        ));
 
         // deleting an already nonexistent is considered a success
         let delete_again = datastore.session_hard_delete(token.clone()).await;
