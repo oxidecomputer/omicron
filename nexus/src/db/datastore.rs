@@ -40,7 +40,6 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db::model::VpcRouterUpdate;
 use crate::db::{
     self,
     error::{
@@ -49,8 +48,9 @@ use crate::db::{
     model::{
         Disk, DiskAttachment, DiskRuntimeState, Generation, Instance,
         InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, Vpc, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -1529,6 +1529,122 @@ impl DataStore {
         let updates: VpcRouterUpdate = params.clone().into();
 
         diesel::update(dsl::vpcrouter)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*router_id))
+            .set(updates)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcRouter,
+                    LookupType::ById(*router_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn routers_list_routes(
+        &self,
+        router_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<RouterRoute> {
+        use db::schema::routerroute::dsl;
+
+        paginated(dsl::routerroute, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .select(RouterRoute::as_select())
+            .load_async::<db::model::RouterRoute>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn router_route_fetch_by_name(
+        &self,
+        router_id: &Uuid,
+        route_name: &Name,
+    ) -> LookupResult<VpcRouter> {
+        use db::schema::routerroute::dsl;
+
+        dsl::routerroute
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .filter(dsl::name.eq(route_name.clone()))
+            .select(RouterRoute::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ByName(route_name.as_str().to_owned()),
+                )
+            })
+    }
+
+    pub async fn router_create_route(
+        &self,
+        router_id: &Uuid,
+        params: &api::external::RouterRouteCreateParams,
+    ) -> CreateResult<VpcRouter> {
+        use db::schema::routerroute::dsl;
+
+        let route = RouterRoute::new(*router_id, params.clone());
+        let name = route.name().clone();
+        let route = diesel::insert_into(dsl::routerroute)
+            .values(route)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(RouterRoute::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::RouterRoute,
+                    name.as_str(),
+                )
+            })?;
+        Ok(route)
+    }
+
+    pub async fn router_delete_route(&self, route_id: &Uuid) -> DeleteResult {
+        use db::schema::routerroute::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::routerroute)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*route_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(RouterRoute::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn router_update_route(
+        &self,
+        router_id: &Uuid,
+        params: &api::external::RouterRouteUpdateParams,
+    ) -> Result<(), Error> {
+        use db::schema::routerroute::dsl;
+        let updates: RouterRouteUpdate = params.clone().into();
+
+        diesel::update(dsl::routerroute)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*router_id))
             .set(updates)

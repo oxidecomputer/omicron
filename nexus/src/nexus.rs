@@ -32,6 +32,9 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::RouterRoute;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
@@ -1607,6 +1610,113 @@ impl Nexus {
         Ok(self
             .db_datastore
             .vpc_update_router(&router.identity.id, params)
+            .await?)
+    }
+
+    /**
+     * VPC Router routes
+     */
+
+    pub async fn router_list_routes(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<RouterRoute> {
+        let router = self
+            .vpc_lookup_router(organization_name, project_name, vpc_name, router_name)
+            .await?;
+        let routes = self
+            .db_datastore
+            .router_list_routes(&router.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|router| router.into())
+            .collect::<Vec<VpcRouter>>();
+        Ok(routes)
+    }
+
+    pub async fn router_lookup_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+    ) -> LookupResult<RouterRoute> {
+        let router = self
+            .vpc_lookup_router(organization_name, project_name, vpc_name, router_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .router_route_fetch_by_name(&router.identity.id, router_name)
+            .await?
+            .into())
+    }
+
+    pub async fn router_create_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        params: &RouterRouteCreateParams,
+    ) -> CreateResult<RouterRoute> {
+        // let vpc = self
+        //     .project_lookup_vpc(organization_name, project_name, vpc_name)
+        //     .await?;
+        let router = self.vpc_lookup_router(organization_name, project_name, vpc_name, router_name).await?
+        let id = Uuid::new_v4();
+        let route = self
+            .db_datastore
+            .router_create_route(&id, &router.identity.id, params)
+            .await?;
+        Ok(route.into())
+    }
+
+    pub async fn router_delete_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+    ) -> DeleteResult {
+        let router = self
+            .router_lookup_route(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+                route_name,
+            )
+            .await?;
+        self.db_datastore.router_delete_route(&router.identity.id).await
+    }
+
+    pub async fn router_update_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+        params: &RouterRouteUpdateParams,
+    ) -> UpdateResult<()> {
+        let route = self
+            .router_lookup_route(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+                route_name,
+            )
+            .await?;
+        Ok(self
+            .db_datastore
+            .router_update_route(&route.identity.id, params)
             .await?)
     }
 

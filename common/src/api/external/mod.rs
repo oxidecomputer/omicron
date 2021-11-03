@@ -459,6 +459,7 @@ pub enum ResourceType {
     Vpc,
     VpcSubnet,
     VpcRouter,
+    RouterRoute,
     Oximeter,
     MetricProducer,
 }
@@ -480,6 +481,7 @@ impl Display for ResourceType {
                 ResourceType::Vpc => "vpc",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::VpcRouter => "vpc router",
+                ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
             }
@@ -1276,6 +1278,7 @@ pub struct VpcSubnetCreateParams {
     pub identity: IdentityMetadataCreateParams,
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
+    pub router_id: Option<Uuid>,
 }
 
 /**
@@ -1288,6 +1291,7 @@ pub struct VpcSubnetUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
+    pub router_id: Option<Uuid>,
 }
 
 /// A VPC router defines a series of rules that indicate where traffic
@@ -1315,6 +1319,203 @@ pub struct VpcRouterCreateParams {
 pub struct VpcRouterUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+#[derive(Debug)]
+pub enum NetworkTarget {
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    Tag(Name),
+    Ip(IpAddr),
+    InternetGateway(Name),
+    FloatingIp(Name),
+    IpPool(Name),
+}
+
+impl TryFrom<String> for NetworkTarget {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let separator_position =
+            value.chars().position(|sep| sep == ':').ok_or_else(|| {
+                return String::from(
+                    "Invalid network target, : separator not found",
+                );
+            })?;
+        let scope = &value[..separator_position];
+        let name = &value[separator_position..];
+        match scope {
+            "vpc" => Ok(NetworkTarget::Vpc(Name(name.to_string()))),
+            "subnet" => Ok(NetworkTarget::Subnet(Name(name.to_string()))),
+            "instance" => Ok(NetworkTarget::Instance(Name(name.to_string()))),
+            "tag" => Ok(NetworkTarget::Tag(Name(name.to_string()))),
+            "ip" => 
+                name.parse::<IpAddr>().map_or_else(|_| Err(format!("Invalid network target `{}:{}`: IP Address is invalid", scope, name)), |ip| Ok(NetworkTarget::Ip(ip))),
+            "inetgw" => Ok(NetworkTarget::InternetGateway(Name(name.to_string()))),
+            "fip" => Ok(NetworkTarget::FloatingIp(Name(name.to_string()))),
+            "ip_pool" => Ok(NetworkTarget::IpPool(Name(name.to_string()))),
+            _ => Err(format!(
+                "Invalid network target, unknown resource scope `{s}` in `{s}:{n}`",
+                s = scope,
+                n = name
+            )),
+        }
+    }
+}
+
+impl TryFrom<&str> for NetworkTarget {
+    type Error = String;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        NetworkTarget::try_from(String::from(value))
+    }
+}
+
+impl Display for NetworkTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        match &self {
+            NetworkTarget::Vpc(name) => write!(f, "vpc:{}", name.as_str()),
+            NetworkTarget::Subnet(name) => {
+                write!(f, "subnet:{}", name.as_str())
+            }
+            NetworkTarget::Instance(name) => {
+                write!(f, "instance:{}", name.as_str())
+            }
+            NetworkTarget::Tag(name) => write!(f, "tag:{}", name.as_str()),
+            NetworkTarget::Ip(ip) => write!(f, "ip:{}", ip.to_string()),
+            NetworkTarget::InternetGateway(name) => {
+                write!(f, "inetgw:{}", name.as_str())
+            }
+            NetworkTarget::FloatingIp(name) => {
+                write!(f, "fip:{}", name.as_str())
+            }
+            NetworkTarget::IpPool(name) => {
+                write!(f, "ip_pool:{}", name.as_str())
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum RouteTarget {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    InternetGateway(Name),
+}
+
+impl TryFrom<NetworkTarget> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
+            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(RouteTarget::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let target = NetworkTarget::try_from(value)?;
+        match target {
+            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
+            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(RouteTarget::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "NetworkTarget {} is not a valid RouteTarget",
+                target
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum RouteDestination {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+}
+
+impl TryFrom<NetworkTarget> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let target = NetworkTarget::try_from(value)?;
+        match target {
+            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
+            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
+            _ => Err(format!(
+                "NetworkTarget {} is not a valid RouteTarget",
+                target
+            )),
+        }
+    }
+}
+
+/// A route defines a rule that governs where traffic should be sent based on its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRoute {
+    /// common identifying metadata
+    pub identity: IdentityMetadata,
+
+    /// The VPC Router to which the route belongs.
+    pub router_id: Uuid,
+
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Create-time parameters for a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify

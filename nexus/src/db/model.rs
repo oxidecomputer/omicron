@@ -4,7 +4,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, sled, vpc, vpcrouter, vpcsubnet,
+    project, rack, routerroute, sled, vpc, vpcrouter, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1013,6 +1013,66 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "routerroute"]
+pub struct RouterRoute {
+    #[diesel(embed)]
+    identity: RouterRouteIdentity,
+
+    pub router_id: Uuid,
+    pub target: external::RouteTarget,
+    pub destination: external::RouteDestination,
+}
+
+impl RouterRoute {
+    pub fn new(
+        router_id: Uuid,
+        route_id: Uuid,
+        params: external::RouterRouteCreateParams,
+    ) -> Self {
+        let identity = RouterRouteIdentity::new(router_id, params.identity);
+        Self {
+            identity,
+            router_id,
+            target: params.target,
+            destination: params.destination,
+        }
+    }
+}
+
+impl Into<external::RouterRoute> for RouterRoute {
+    fn into(self) -> external::RouterRoute {
+        external::RouterRoute {
+            identity: self.identity(),
+            router_id: self.router_id,
+            target: self.target,
+            destination: self.destination,
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "routerroute"]
+pub struct RouterRouteUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub target: external::RouteTarget,
+    pub destination: external::RouteDestination,
+}
+
+impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
+    fn from(params: external::RouterRouteUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            target: params.target,
+            destination: params.destination,
         }
     }
 }

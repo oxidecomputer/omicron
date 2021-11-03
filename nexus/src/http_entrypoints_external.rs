@@ -118,6 +118,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_routers_delete_router)?;
         api.register(vpc_routers_put_router)?;
 
+        api.register(routers_routes_get)?;
+        api.register(routers_routes_get_route)?;
+        api.register(routers_routes_post)?;
+        api.register(routers_routes_delete_route)?;
+        api.register(routers_routes_put_route)?;
+
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
         api.register(hardware_sleds_get)?;
@@ -1445,6 +1451,155 @@ async fn vpc_routers_put_router(
     let path = path_params.into_inner();
     nexus
         .vpc_update_router(
+            &path.organization_name,
+            &path.project_name,
+            &path.vpc_name,
+            &path.router_name,
+            &router_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseOk(()))
+}
+
+/*
+ * Router Routes
+ */
+
+/**
+ * List a Router's routes
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+ }]
+async fn routers_routes_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let routes = nexus
+        .router_list_routes(
+            &path.organization_name,
+            &path.project_name,
+            &path.vpc_name,
+            &path.router_name,
+            &data_page_params_for(&rqctx, &query)?
+                .map_name(|n| Name::ref_cast(n)),
+        )
+        .await?;
+    Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+}
+
+/**
+ * Path parameters for Router Route requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct RoutersRoutesPathParam {
+    organization_name: Name,
+    project_name: Name,
+    vpc_name: Name,
+    router_name: Name,
+    route_name: Name,
+}
+
+/**
+ * Get a VPC Router route
+ */
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/route/{route_name}"
+}]
+async fn routers_routes_get_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RoutersRoutesPathParam>,
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let route = nexus
+        .router_lookup_route(
+            &path.organization_name,
+            &path.project_name,
+            &path.vpc_name,
+            &path.router_name,
+        )
+        .await?;
+    Ok(HttpResponseOk(route))
+}
+
+/**
+ * Create a VPC Router
+ */
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+}]
+async fn routers_routes_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<VpcRouterCreateParams>,
+) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let router = nexus
+        .router_create_route(
+            &path.organization_name,
+            &path.project_name,
+            &path.vpc_name,
+            &create_params.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponseCreated(router))
+}
+
+/**
+ * Delete a route from its router
+ */
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/route/{route_name}",
+}]
+async fn routers_routes_delete_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcRouterPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .router_delete_route(
+            &path.organization_name,
+            &path.project_name,
+            &path.vpc_name,
+            &path.router_name,
+            &path.route_name,
+        )
+        .await?;
+    Ok(HttpResponseDeleted())
+}
+
+/**
+ * Update a Router route
+ */
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+}]
+async fn routers_routes_put_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcRouterPathParam>,
+    router_params: TypedBody<VpcRouterUpdateParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    nexus
+        .router_update_route(
             &path.organization_name,
             &path.project_name,
             &path.vpc_name,
