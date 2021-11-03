@@ -1649,7 +1649,7 @@ impl Nexus {
             .await?
             .into_iter()
             .map(|router| router.into())
-            .collect::<Vec<VpcRouter>>();
+            .collect::<Vec<RouterRoute>>();
         Ok(routes)
     }
 

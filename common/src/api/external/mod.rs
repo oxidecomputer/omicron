@@ -1452,6 +1452,27 @@ impl TryFrom<&str> for RouteTarget {
     }
 }
 
+impl From<RouteTarget> for NetworkTarget {
+    fn from(target: RouteTarget) -> Self {
+        match target {
+            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
+            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
+            RouteTarget::InternetGateway(name) => {
+                NetworkTarget::InternetGateway(name)
+            }
+        }
+    }
+}
+
+impl Display for RouteTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        std::fmt::Display::fmt(&target, f)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum RouteDestination {
     Ip(IpAddr),
@@ -1498,6 +1519,24 @@ impl TryFrom<&str> for RouteDestination {
         RouteDestination::try_from(String::from(value))
     }
 }
+
+impl From<RouteDestination> for NetworkTarget {
+    fn from(target: RouteDestination) -> Self {
+        match target {
+            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
+        }
+    }
+}
+
+impl Display for RouteDestination {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        std::fmt::Display::fmt(&target, f)
+    }
+}
+
 /// A route defines a rule that governs where traffic should be sent based on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {

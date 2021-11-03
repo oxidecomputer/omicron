@@ -1040,7 +1040,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        self.as_str().to_sql(out)
+        self.0.as_str().to_sql(out)
     }
 }
 
@@ -1079,7 +1079,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        self.as_str().to_sql(out)
+        self.0.to_string().as_str().to_sql(out)
     }
 }
 
@@ -1115,8 +1115,8 @@ impl RouterRoute {
         Self {
             identity,
             router_id,
-            target: params.target,
-            destination: params.destination,
+            target: RouteTarget::new(params.target),
+            destination: RouteDestination::new(params.destination),
         }
     }
 }
@@ -1126,8 +1126,8 @@ impl Into<external::RouterRoute> for RouterRoute {
         external::RouterRoute {
             identity: self.identity(),
             router_id: self.router_id,
-            target: self.target,
-            destination: self.destination,
+            target: self.target.state().clone(),
+            destination: self.destination.state().clone(),
         }
     }
 }
@@ -1148,8 +1148,8 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
-            target: params.target,
-            destination: params.destination,
+            target: RouteTarget::new(params.target),
+            destination: RouteDestination::new(params.destination),
         }
     }
 }
