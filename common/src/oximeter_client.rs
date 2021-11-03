@@ -14,6 +14,12 @@
 
 generate_logging_api!("../openapi/oximeter.json");
 
+impl From<std::time::Duration> for types::Duration {
+    fn from(_: std::time::Duration) -> Self {
+        todo!()
+    }
+}
+
 /*
 /// Client of an oximeter server
 pub struct Client {

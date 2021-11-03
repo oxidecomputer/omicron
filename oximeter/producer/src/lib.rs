@@ -8,7 +8,6 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::{ProducerRegistry, ProducerResults};
-use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info, o};
@@ -86,7 +85,14 @@ impl Server {
         }
 
         debug!(log, "registering metric server as a producer");
-        register(config.registration_address, &config.server_info).await?;
+        register(
+            config.registration_address,
+            &log,
+            &omicron_common::nexus_client::types::ProducerEndpoint::from(
+                &config.server_info,
+            ),
+        )
+        .await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -145,23 +151,24 @@ async fn collect_endpoint(
     collect(registry, producer_id).await
 }
 
+// TODO this seems misplaced.
 /// Register a metric server to be polled for metric data.
 ///
 /// This function is used to provide consumers the flexibility to define their own Dropshot
 /// servers, rather than using the `Server` provided by this crate (which starts a _new_ server).
 pub async fn register(
     address: SocketAddr,
-    server_info: &ProducerEndpoint,
+    log: &slog::Logger,
+    server_info: &omicron_common::nexus_client::types::ProducerEndpoint,
 ) -> Result<(), Error> {
-    Client::new()
-        .post(format!("http://{}/metrics/producers", address))
-        .json(server_info)
-        .send()
+    let client = omicron_common::NexusClient::new(
+        &format!("http://{}", address),
+        log.clone(),
+    );
+    client
+        .cpapi_producers_post(server_info)
         .await
-        .map_err(|msg| Error::RegistrationError(msg.to_string()))?
-        .error_for_status()
-        .map_err(|msg| Error::RegistrationError(msg.to_string()))?;
-    Ok(())
+        .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }
 
 /// Handle a request to pull available metric data from a [`ProducerRegistry`].

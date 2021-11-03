@@ -64,6 +64,60 @@ impl From<types::InstanceState> for crate::api::external::InstanceState {
     }
 }
 
+impl From<crate::api::internal::nexus::InstanceRuntimeState>
+    for types::InstanceRuntimeState
+{
+    fn from(_: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
+        todo!()
+    }
+}
+
+impl From<&crate::api::internal::nexus::InstanceRuntimeState>
+    for types::InstanceRuntimeState
+{
+    fn from(_: &crate::api::internal::nexus::InstanceRuntimeState) -> Self {
+        todo!()
+    }
+}
+
+impl From<crate::api::internal::nexus::DiskRuntimeState>
+    for types::DiskRuntimeState
+{
+    fn from(_: crate::api::internal::nexus::DiskRuntimeState) -> Self {
+        todo!()
+    }
+}
+
+impl From<std::time::Duration> for types::Duration {
+    fn from(_: std::time::Duration) -> Self {
+        todo!()
+    }
+}
+
+impl From<&types::InstanceState> for crate::api::external::InstanceState {
+    fn from(state: &types::InstanceState) -> Self {
+        match state {
+            types::InstanceState::Creating => todo!(),
+            types::InstanceState::Starting => todo!(),
+            types::InstanceState::Running => todo!(),
+            types::InstanceState::Stopping => todo!(),
+            types::InstanceState::Stopped => todo!(),
+            types::InstanceState::Rebooting => todo!(),
+            types::InstanceState::Repairing => todo!(),
+            types::InstanceState::Failed => todo!(),
+            types::InstanceState::Destroyed => todo!(),
+        }
+    }
+}
+
+impl From<&crate::api::internal::nexus::ProducerEndpoint>
+    for types::ProducerEndpoint
+{
+    fn from(_: &crate::api::internal::nexus::ProducerEndpoint) -> Self {
+        todo!()
+    }
+}
+
 // impl From<types::InstanceRuntimeState>
 //     for crate::api::internal::common::InstanceRuntimeState
 // {

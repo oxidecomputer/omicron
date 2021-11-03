@@ -255,6 +255,7 @@ mod test {
 
     #[test]
     fn test_bail_unless() {
+        #![allow(clippy::eq_op)]
         /* Success cases */
         let no_bail = || {
             bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);

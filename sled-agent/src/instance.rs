@@ -241,8 +241,14 @@ impl InstanceInner {
 
         // Notify Nexus of the state change.
         self.nexus_client
-            .notify_instance_updated(self.id(), self.state.current())
-            .await?;
+            .cpapi_instances_put(
+                self.id(),
+                &omicron_common::nexus_client::types::InstanceRuntimeState::from(
+                    self.state.current(),
+                ),
+            )
+            .await.unwrap();
+        // TODO ^^ error
 
         // Take the next action, if any.
         if let Some(action) = action {
@@ -940,12 +946,15 @@ mod test {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         nexus_client
-            .expect_notify_instance_updated()
+            .expect_cpapi_instances_put()
             .times(1)
             .in_sequence(seq)
             .return_once(move |id, state| {
                 assert_eq!(id, &test_uuid());
-                assert_eq!(state.run_state, expected_state);
+                assert_eq!(
+                    InstanceState::from(&state.run_state),
+                    expected_state
+                );
                 tx.send(()).unwrap();
                 Ok(())
             });

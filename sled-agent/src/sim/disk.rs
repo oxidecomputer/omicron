@@ -85,6 +85,15 @@ impl Simulatable for SimDisk {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        nexus_client.notify_disk_updated(id, &current).await
+        // TODO error
+        Ok(nexus_client
+            .cpapi_disks_put(
+                id,
+                &omicron_common::nexus_client::types::DiskRuntimeState::from(
+                    current,
+                ),
+            )
+            .await
+            .unwrap())
     }
 }

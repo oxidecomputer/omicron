@@ -91,6 +91,9 @@ impl Simulatable for SimInstance {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        nexus_client.notify_instance_updated(id, &current).await
+        // TODO error
+        nexus_client.cpapi_instances_put(id,
+        &omicron_common::nexus_client::types::InstanceRuntimeState::from(current)).await.unwrap();
+        Ok(())
     }
 }
