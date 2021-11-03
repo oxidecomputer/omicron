@@ -4,7 +4,6 @@
 
 use crate::config;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
@@ -28,7 +27,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
@@ -440,15 +438,10 @@ impl Nexus {
         name: &Name,
         new_params: &OrganizationUpdateParams,
     ) -> UpdateResult<db::model::Organization> {
-        self.db_datastore.organization_update(name, &new_params).await.map_err(
-            |e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            },
-        )
+        self.db_datastore
+            .organization_update(name, &new_params)
+            .await
+            .map_err(Error::from)
     }
 
     /*
@@ -560,13 +553,7 @@ impl Nexus {
         self.db_datastore
             .project_update(&organization_id, project_name, &new_params)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::ByName(project_name.as_str().to_owned()),
-                )
-            })
+            .map_err(Error::from)
     }
 
     /*

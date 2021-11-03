@@ -461,6 +461,7 @@ pub enum ResourceType {
     VpcRouter,
     Oximeter,
     MetricProducer,
+    ConsoleSession,
 }
 
 impl Display for ResourceType {
@@ -482,6 +483,7 @@ impl Display for ResourceType {
                 ResourceType::VpcRouter => "vpc router",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::ConsoleSession => "console session",
             }
         )
     }

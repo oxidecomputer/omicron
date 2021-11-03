@@ -50,6 +50,20 @@ use crate::db::{
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
+// TODO: rename to Error once everything is converted
+#[derive(Debug)]
+pub struct DSError {
+    error: PoolError,
+    resource_type: ResourceType,
+    lookup_type: LookupType,
+}
+
+impl From<DSError> for Error {
+    fn from(e: DSError) -> Self {
+        public_error_from_diesel_pool(e.error, e.resource_type, e.lookup_type)
+    }
+}
+
 /*
  * The type aliases below exist primarily to ensure consistency among return
  * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
@@ -65,7 +79,7 @@ pub type ListResultVec<T> = Result<Vec<T>, Error>;
 /** Result of a lookup operation for the specified type */
 pub type LookupResult<T> = Result<T, Error>;
 /** Result of an update operation for the specified type */
-pub type UpdateResult<T> = Result<T, PoolError>;
+pub type UpdateResult<T> = Result<T, DSError>;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -324,6 +338,11 @@ impl DataStore {
             .returning(Organization::as_returning())
             .get_result_async(self.pool())
             .await
+            .map_err(|e| DSError {
+                error: e,
+                resource_type: ResourceType::Organization,
+                lookup_type: LookupType::ByName(name.as_str().to_owned()),
+            })
     }
 
     /// Create a project
@@ -494,6 +513,11 @@ impl DataStore {
             .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
+            .map_err(|e| DSError {
+                error: e,
+                resource_type: ResourceType::Project,
+                lookup_type: LookupType::ByName(name.as_str().to_owned()),
+            })
     }
 
     /*
@@ -1600,6 +1624,11 @@ impl DataStore {
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
             .await
+            .map_err(|e| DSError {
+                error: e,
+                resource_type: ResourceType::ConsoleSession,
+                lookup_type: LookupType::Other(token.to_owned()),
+            })
     }
 
     // putting "hard" in the name because we don't do this with any other model
