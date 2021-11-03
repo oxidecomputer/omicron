@@ -6,6 +6,8 @@
 
 pub mod common;
 
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
 use dropshot::endpoint;
 use dropshot::test_util::read_json;
 use dropshot::test_util::LogContext;
@@ -13,13 +15,16 @@ use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::HttpErrorResponseBody;
 use http::header::HeaderValue;
+use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR;
 use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -33,10 +38,14 @@ extern crate slog;
 async fn test_authn_spoof_allowed() {
     let test_name = "test_authn_spoof_allowed";
     let authn_schemes_configured: Vec<
-        Box<dyn HttpAuthnScheme<Arc<WhoamiServerState>> + 'static>,
+        Box<dyn HttpAuthnScheme<WhoamiServerState> + 'static>,
     > = vec![Box::new(HttpAuthnSpoof)];
-    let testctx =
-        start_whoami_server(test_name, authn_schemes_configured).await;
+    let testctx = start_whoami_server(
+        test_name,
+        authn_schemes_configured,
+        HashMap::new(),
+    )
+    .await;
     let tried_spoof = vec![SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
@@ -44,7 +53,7 @@ async fn test_authn_spoof_allowed() {
 
     // Typical unauthenticated request
     assert_eq!(
-        whoami_request(None, &testctx).await.unwrap(),
+        whoami_request(None, None, &testctx).await.unwrap(),
         WhoamiResponse {
             authenticated: false,
             actor: None,
@@ -56,7 +65,7 @@ async fn test_authn_spoof_allowed() {
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
     let header = HeaderValue::from_static(valid_uuid);
     assert_eq!(
-        whoami_request(Some(header), &testctx).await.unwrap(),
+        whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
             authenticated: true,
             actor: Some(valid_uuid.to_owned()),
@@ -67,7 +76,7 @@ async fn test_authn_spoof_allowed() {
     // Bad header value (malformed)
     let header = HeaderValue::from_static("not-a-uuid");
     let (status_code, error) =
-        whoami_request(Some(header), &testctx).await.unwrap_err();
+        whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_eq!(error.error_code, None);
     assert!(error.message.starts_with(
         "bad authentication credentials: parsing header value as UUID"
@@ -77,14 +86,97 @@ async fn test_authn_spoof_allowed() {
     // Unknown actor
     let header = HeaderValue::from_static(SPOOF_RESERVED_BAD_ACTOR);
     let (status_code, error) =
-        whoami_request(Some(header), &testctx).await.unwrap_err();
+        whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
 
     // Bad credentials
     let header = HeaderValue::from_static(SPOOF_RESERVED_BAD_CREDS);
     let (status_code, error) =
-        whoami_request(Some(header), &testctx).await.unwrap_err();
+        whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
+
+    testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_authn_session_cookie() {
+    let test_name = "test_authn_session_cookie";
+    let authn_schemes_configured: Vec<
+        Box<dyn HttpAuthnScheme<WhoamiServerState> + 'static>,
+    > = vec![Box::new(session_cookie::HttpAuthnSessionCookie)];
+    let valid_session = FakeSession {
+        user_id: Uuid::new_v4(),
+        time_last_used: Utc::now() - Duration::seconds(5),
+        time_created: Utc::now() - Duration::seconds(5),
+    };
+    let idle_expired_session = FakeSession {
+        user_id: Uuid::new_v4(),
+        time_last_used: Utc::now() - Duration::hours(2),
+        time_created: Utc::now() - Duration::hours(3),
+    };
+    let abs_expired_session = FakeSession {
+        user_id: Uuid::new_v4(),
+        time_last_used: Utc::now(),
+        time_created: Utc::now() - Duration::hours(10),
+    };
+    let testctx = start_whoami_server(
+        test_name,
+        authn_schemes_configured,
+        HashMap::from([
+            ("valid".to_string(), valid_session),
+            ("idle_expired".to_string(), idle_expired_session),
+            ("abs_expired".to_string(), abs_expired_session),
+        ]),
+    )
+    .await;
+
+    let tried_cookie =
+        vec![session_cookie::SESSION_COOKIE_SCHEME_NAME.to_string()];
+
+    // with valid header
+    let valid_header = HeaderValue::from_static("session=valid");
+    assert_eq!(
+        whoami_request(None, Some(valid_header), &testctx).await.unwrap(),
+        WhoamiResponse {
+            authenticated: true,
+            actor: Some(valid_session.user_id.to_string()),
+            schemes_tried: tried_cookie.clone(),
+        }
+    );
+
+    // with idle expired session token
+    let idle_expired_header = HeaderValue::from_static("session=idle_expired");
+    let (status_code, error) =
+        whoami_request(None, Some(idle_expired_header), &testctx)
+            .await
+            .unwrap_err();
+    assert_authn_failed(status_code, &error);
+
+    // with absolute expired session token
+    let abs_expired_header = HeaderValue::from_static("session=abs_expired");
+    let (status_code, error) =
+        whoami_request(None, Some(abs_expired_header), &testctx)
+            .await
+            .unwrap_err();
+    assert_authn_failed(status_code, &error);
+
+    // with nonexistent session token
+    let bad_header = HeaderValue::from_static("session=nonexistent");
+    let (status_code, error) =
+        whoami_request(None, Some(bad_header), &testctx).await.unwrap_err();
+    assert_authn_failed(status_code, &error);
+
+    // with no cookie
+    let tried_cookie =
+        vec![session_cookie::SESSION_COOKIE_SCHEME_NAME.to_string()];
+    assert_eq!(
+        whoami_request(None, None, &testctx).await.unwrap(),
+        WhoamiResponse {
+            authenticated: false,
+            actor: None,
+            schemes_tried: tried_cookie.clone(),
+        }
+    );
 
     testctx.teardown().await;
 }
@@ -94,7 +186,8 @@ async fn test_authn_spoof_allowed() {
 #[tokio::test]
 async fn test_authn_spoof_unconfigured() {
     let test_name = "test_authn_spoof_disallowed";
-    let testctx = start_whoami_server(test_name, Vec::new()).await;
+    let testctx =
+        start_whoami_server(test_name, Vec::new(), HashMap::new()).await;
 
     let values = [
         None,
@@ -106,7 +199,7 @@ async fn test_authn_spoof_unconfigured() {
 
     for v in values {
         assert_eq!(
-            whoami_request(v, &testctx).await.unwrap(),
+            whoami_request(v, None, &testctx).await.unwrap(),
             WhoamiResponse {
                 authenticated: false,
                 actor: None,
@@ -120,7 +213,8 @@ async fn test_authn_spoof_unconfigured() {
 
 async fn whoami_request(
     spoof_header: Option<hyper::header::HeaderValue>,
-    testctx: &TestContext<Arc<WhoamiServerState>>,
+    cookie_header: Option<hyper::header::HeaderValue>,
+    testctx: &TestContext<WhoamiServerState>,
 ) -> Result<WhoamiResponse, (http::StatusCode, HttpErrorResponseBody)> {
     let client_testctx = &testctx.client_testctx;
     let mut builder = hyper::Request::builder()
@@ -130,6 +224,10 @@ async fn whoami_request(
     if let Some(spoof_header_value) = spoof_header {
         builder =
             builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, spoof_header_value);
+    }
+
+    if let Some(cookie_header_value) = cookie_header {
+        builder = builder.header(http::header::COOKIE, cookie_header_value);
     }
 
     let request = builder
@@ -165,10 +263,9 @@ fn assert_authn_failed(
 
 async fn start_whoami_server(
     test_name: &str,
-    authn_schemes_configured: Vec<
-        Box<dyn HttpAuthnScheme<Arc<WhoamiServerState>>>,
-    >,
-) -> TestContext<Arc<WhoamiServerState>> {
+    authn_schemes_configured: Vec<Box<dyn HttpAuthnScheme<WhoamiServerState>>>,
+    sessions: HashMap<String, FakeSession>,
+) -> TestContext<WhoamiServerState> {
     let config = common::load_test_config();
     let logctx = LogContext::new(test_name, &config.log);
 
@@ -184,7 +281,8 @@ async fn start_whoami_server(
         let authn = omicron_nexus::authn::external::Authenticator::new(
             authn_schemes_configured,
         );
-        Arc::new(WhoamiServerState { authn })
+
+        WhoamiServerState { authn, sessions: Mutex::new(sessions) }
     };
 
     let log = logctx.log.new(o!());
@@ -198,8 +296,60 @@ async fn start_whoami_server(
 }
 
 struct WhoamiServerState {
-    authn:
-        omicron_nexus::authn::external::Authenticator<Arc<WhoamiServerState>>,
+    authn: omicron_nexus::authn::external::Authenticator<WhoamiServerState>,
+    sessions: Mutex<HashMap<String, FakeSession>>,
+}
+
+#[derive(Clone, Copy)]
+struct FakeSession {
+    user_id: Uuid,
+    time_created: DateTime<Utc>,
+    time_last_used: DateTime<Utc>,
+}
+
+impl session_cookie::Session for FakeSession {
+    fn user_id(&self) -> Uuid {
+        self.user_id
+    }
+    fn time_created(&self) -> DateTime<Utc> {
+        self.time_created
+    }
+    fn time_last_used(&self) -> DateTime<Utc> {
+        self.time_last_used
+    }
+}
+
+#[async_trait]
+impl session_cookie::SessionStore for WhoamiServerState {
+    type SessionModel = FakeSession;
+
+    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
+        self.sessions.lock().unwrap().get(&token).map(|s| *s)
+    }
+
+    async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> Option<Self::SessionModel> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = *sessions.get(&token).unwrap();
+        let new_session = FakeSession { time_last_used: Utc::now(), ..session };
+        (*sessions).insert(token, new_session)
+    }
+
+    async fn session_expire(&self, token: String) -> Option<()> {
+        let mut sessions = self.sessions.lock().unwrap();
+        (*sessions).remove(&token);
+        Some(())
+    }
+
+    fn session_idle_timeout(&self) -> Duration {
+        Duration::hours(1)
+    }
+
+    fn session_absolute_timeout(&self) -> Duration {
+        Duration::hours(8)
+    }
 }
 
 #[derive(
@@ -221,7 +371,7 @@ struct WhoamiResponse {
     path = "/whoami",
 }]
 async fn whoami_get(
-    rqctx: Arc<dropshot::RequestContext<Arc<WhoamiServerState>>>,
+    rqctx: Arc<dropshot::RequestContext<WhoamiServerState>>,
 ) -> Result<dropshot::HttpResponseOk<WhoamiResponse>, dropshot::HttpError> {
     let whoami_state = rqctx.context();
     let authn = whoami_state.authn.authn_request(&rqctx).await?;

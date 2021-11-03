@@ -135,6 +135,15 @@ table! {
 }
 
 table! {
+    consolesession (token) {
+        token -> Text,
+        time_created -> Timestamptz,
+        time_last_used -> Timestamptz,
+        user_id -> Uuid,
+    }
+}
+
+table! {
     sled (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -208,6 +217,7 @@ allow_tables_to_appear_in_same_query!(
     project,
     saga,
     saganodeevent,
+    consolesession,
     sled,
     vpc,
     vpcsubnet,

@@ -1,15 +1,15 @@
 //! Authentication for requests to the external HTTP API
 
 use crate::authn;
+use async_trait::async_trait;
 use authn::Reason;
 
+mod cookies;
+pub mod session_cookie;
 pub mod spoof;
 
 /// Authenticates incoming HTTP requests using schemes intended for use by the
 /// external API
-///
-/// (This will eventually support something like HTTP signatures and OAuth.  For
-/// now, only a dummy scheme is supported.)
 pub struct Authenticator<T> {
     allowed_schemes: Vec<Box<dyn HttpAuthnScheme<T>>>,
 }
@@ -36,7 +36,9 @@ where
         let log = &rqctx.log;
         let request = &rqctx.request.lock().await;
         let ctx = rqctx.context();
-        self.authn_request_generic(ctx, log, request).await
+        let result = self.authn_request_generic(ctx, log, request).await;
+        trace!(log, "authn result: {:?}", result);
+        result
     }
 
     /// Authenticate an incoming HTTP request (dropshot-agnostic)
@@ -52,7 +54,7 @@ where
             let scheme_name = scheme_impl.name();
             trace!(log, "authn: trying {:?}", scheme_name);
             schemes_tried.push(scheme_name);
-            let result = scheme_impl.authn(ctx, log, &request);
+            let result = scheme_impl.authn(ctx, log, &request).await;
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
@@ -76,6 +78,7 @@ where
 }
 
 /// Implements a particular HTTP authentication scheme
+#[async_trait]
 pub trait HttpAuthnScheme<T>: std::fmt::Debug + Send + Sync + 'static
 where
     T: Send + Sync + 'static,
@@ -84,7 +87,7 @@ where
     fn name(&self) -> authn::SchemeName;
 
     /// Locate credentials in the HTTP request and attempt to verify them
-    fn authn(
+    async fn authn(
         &self,
         ctx: &T,
         log: &slog::Logger,
@@ -135,12 +138,13 @@ mod test {
     const OK: u8 = 1;
     const FAIL: u8 = 2;
 
+    #[async_trait]
     impl HttpAuthnScheme<()> for GruntScheme {
         fn name(&self) -> authn::SchemeName {
             self.name
         }
 
-        fn authn(
+        async fn authn(
             &self,
             _ctx: &(),
             _log: &slog::Logger,

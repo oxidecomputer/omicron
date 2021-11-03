@@ -10,7 +10,10 @@ id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 # This is not fleshed out yet and the only reason to change it now is for
 # working on authentication or authorization.  Neither is really implemented
 # yet.
-authn_schemes_external = []
+[authn]
+schemes_external = []
+session_idle_timeout_minutes = 60
+session_absolute_timeout_minutes = 480
 
 [database]
 # URL for connecting to the database

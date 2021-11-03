@@ -3,8 +3,8 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    disk, instance, metricproducer, networkinterface, organization, oximeter,
-    project, rack, routerroute, sled, vpc, vpcrouter, vpcsubnet,
+    consolesession, disk, instance, metricproducer, networkinterface,
+    organization, oximeter, project, rack, sled, vpc, vpcrouter, vpcsubnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1164,4 +1164,22 @@ pub struct NetworkInterface {
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+}
+
+// TODO: `struct SessionToken(String)` for session token
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[table_name = "consolesession"]
+pub struct ConsoleSession {
+    pub token: String,
+    pub time_created: DateTime<Utc>,
+    pub time_last_used: DateTime<Utc>,
+    pub user_id: Uuid,
+}
+
+impl ConsoleSession {
+    pub fn new(token: String, user_id: Uuid) -> Self {
+        let now = Utc::now();
+        Self { token, user_id, time_last_used: now, time_created: now }
+    }
 }

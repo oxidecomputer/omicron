@@ -24,7 +24,10 @@ impl Dladm {
         let output = execute(cmd)?;
         let name = String::from_utf8(output.stdout)
             .map_err(|e| Error::InternalError {
-                message: format!("Cannot parse dladm output as UTF-8: {}", e),
+                internal_message: format!(
+                    "Cannot parse dladm output as UTF-8: {}",
+                    e
+                ),
             })?
             .lines()
             // TODO: This is arbitrary, but we're currently grabbing the first
@@ -33,7 +36,7 @@ impl Dladm {
             .next()
             .map(|s| s.trim())
             .ok_or_else(|| Error::InternalError {
-                message: "No physical devices found".to_string(),
+                internal_message: "No physical devices found".to_string(),
             })?
             .to_string();
         Ok(PhysicalLink(name))
@@ -85,7 +88,7 @@ impl Dladm {
 
         let vnics = String::from_utf8(output.stdout)
             .map_err(|e| Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Failed to parse UTF-8 from dladm output: {}",
                     e
                 ),
