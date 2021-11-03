@@ -27,8 +27,8 @@ use std::fmt;
 /// Polar configuration describing control plane authorization rules
 pub const OMICRON_AUTHZ_CONFIG: &str = include_str!("omicron.polar");
 
-/// Returns an Oso handle suitable for authorizing using to Omicron's
-/// authorization rules
+/// Returns an Oso handle suitable for authorizing using Omicron's authorization
+/// rules
 pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
     let classes = [

@@ -120,7 +120,7 @@ function do_curl
 	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
 }
 
-function do_curl_authz
+function do_curl_authn
 {
 	if [[ $NO_AUTHENTICATE == true ]]; then
 		do_curl "$@"
@@ -167,7 +167,7 @@ function cmd_organization_create_demo
 {
 	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
 	mkjson name="$1" description="an organization called $1" |
-		do_curl_authz "/organizations" -X POST -T -
+		do_curl_authn "/organizations" -X POST -T -
 }
 
 function cmd_organization_delete
