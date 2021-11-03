@@ -43,11 +43,11 @@ pub enum Error {
     #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
     /** The system encountered an unhandled operational error. */
-    #[error("Internal Error: {message}")]
-    InternalError { message: String },
+    #[error("Internal Error: {internal_message}")]
+    InternalError { internal_message: String },
     /** The system (or part of it) is unavailable. */
-    #[error("Service Unavailable: {message}")]
-    ServiceUnavailable { message: String },
+    #[error("Service Unavailable: {internal_message}")]
+    ServiceUnavailable { internal_message: String },
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
@@ -115,8 +115,8 @@ impl Error {
      * deserializing a value from the database, or finding two records for
      * something that is supposed to be unique).
      */
-    pub fn internal_error(message: &str) -> Error {
-        Error::InternalError { message: message.to_owned() }
+    pub fn internal_error(internal_message: &str) -> Error {
+        Error::InternalError { internal_message: internal_message.to_owned() }
     }
 
     /**
@@ -129,7 +129,7 @@ impl Error {
      * server problem) or InvalidRequest (if it's a client problem) instead.
      */
     pub fn unavail(message: &str) -> Error {
-        Error::ServiceUnavailable { message: message.to_owned() }
+        Error::ServiceUnavailable { internal_message: message.to_owned() }
     }
 
     /**
@@ -154,7 +154,7 @@ impl Error {
                 Error::InvalidRequest { message: error_response.message }
             }
             _ => Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "{}: unknown error from dependency: {:?}",
                     error_message_base, error_response
                 ),
@@ -219,14 +219,16 @@ impl From<Error> for HttpError {
                 )
             }
 
-            Error::InternalError { message } => {
-                HttpError::for_internal_error(message)
+            Error::InternalError { internal_message } => {
+                HttpError::for_internal_error(internal_message)
             }
 
-            Error::ServiceUnavailable { message } => HttpError::for_unavail(
-                Some(String::from("ServiceNotAvailable")),
-                message,
-            ),
+            Error::ServiceUnavailable { internal_message } => {
+                HttpError::for_unavail(
+                    Some(String::from("ServiceNotAvailable")),
+                    internal_message,
+                )
+            }
         }
     }
 }
@@ -289,8 +291,8 @@ mod test {
 
         for (result, expected_message) in &checks {
             let error = result.as_ref().unwrap_err();
-            if let Error::InternalError { message } = error {
-                assert_eq!(*expected_message, message);
+            if let Error::InternalError { internal_message } = error {
+                assert_eq!(*expected_message, internal_message);
             } else {
                 panic!("got something other than an InternalError");
             }

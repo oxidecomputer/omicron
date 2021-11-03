@@ -53,7 +53,7 @@ mod inner {
         )
         .await
         .map_err(|e| Error::InternalError {
-            message: format!("Failed to wait for service: {}", e),
+            internal_message: format!("Failed to wait for service: {}", e),
         })
     }
 }
