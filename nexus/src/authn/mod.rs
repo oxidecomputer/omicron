@@ -24,6 +24,9 @@ pub mod external;
 
 use uuid::Uuid;
 
+// NOTE: this user uuid is duplicated in omicron.polar.
+pub const TEST_USER_UUID: &str = "001de000-05e4-0000-0000-000000004007";
+
 /// Describes how the actor performing the current operation is authenticated
 ///
 /// This is HTTP-agnostic.  Subsystems in Nexus could create contexts for
@@ -62,6 +65,19 @@ impl Context {
     /// Returns an unauthenticated context for use internally
     pub fn internal_unauthenticated() -> Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
+    }
+
+    /// Returns an authenticated context for a special testing user
+    /// TODO-security This eventually needs to go.  But for now, this is used
+    /// in unit tests.
+    #[cfg(test)]
+    pub fn internal_test_user() -> Context {
+        Context {
+            kind: Kind::Authenticated(Details {
+                actor: Actor(TEST_USER_UUID.parse().unwrap()),
+            }),
+            schemes_tried: Vec::new(),
+        }
     }
 }
 

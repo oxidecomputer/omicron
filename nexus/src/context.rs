@@ -221,7 +221,7 @@ impl OpContext {
     pub fn for_unit_tests(log: slog::Logger) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
-        let authn = Arc::new(authn::Context::internal_unauthenticated());
+        let authn = Arc::new(authn::Context::internal_test_user());
         let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::new(authz::Authz::new()),
