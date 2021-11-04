@@ -2,6 +2,7 @@
  * Handles recovery of sagas
  */
 
+use crate::context::OpContext;
 use crate::db;
 use futures::{future::BoxFuture, TryFutureExt};
 use omicron_common::api::external::DataPageParams;
@@ -77,8 +78,9 @@ pub fn recover<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
+    let opctx = OpContext::for_background(log);
     let join_handle = tokio::spawn(async move {
-        info!(&log, "start saga recovery");
+        info!(&opctx.log, "start saga recovery");
 
         /*
          * We perform the initial list of sagas using a standard retry policy.
@@ -100,13 +102,13 @@ where
         let found_sagas = retry_notify(
             internal_service_policy(),
             || async {
-                list_unfinished_sagas(&log, &datastore, &sec_id)
+                list_unfinished_sagas(&opctx, &datastore, &sec_id)
                     .await
                     .map_err(BackoffError::Transient)
             },
             |error, duration| {
                 warn!(
-                    &log,
+                    &opctx.log,
                     "failed to list sagas (will retry after {:?}): {:#}",
                     duration,
                     error
@@ -116,7 +118,7 @@ where
         .await
         .unwrap();
 
-        info!(&log, "listed sagas ({} total)", found_sagas.len());
+        info!(&opctx.log, "listed sagas ({} total)", found_sagas.len());
 
         let recovery_futures = found_sagas.into_iter().map(|saga| async {
             /*
@@ -133,15 +135,22 @@ where
              */
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id: steno::SagaId = saga.id.into();
-            recover_saga(&log, &uctx, &datastore, &sec_client, templates, saga)
-                .map_err(|error| {
-                    warn!(
-                        &log,
-                        "failed to recover saga {}: {:#}", saga_id, error
-                    );
-                    error
-                })
-                .await
+            recover_saga(
+                &opctx,
+                &uctx,
+                &datastore,
+                &sec_client,
+                templates,
+                saga,
+            )
+            .map_err(|error| {
+                warn!(
+                    &opctx.log,
+                    "failed to recover saga {}: {:#}", saga_id, error
+                );
+                error
+            })
+            .await
         });
 
         let mut completion_futures = vec![];
@@ -190,11 +199,11 @@ fn new_page_params(
 * consumers.
 */
 async fn list_unfinished_sagas(
-    log: &slog::Logger,
+    opctx: &OpContext,
     datastore: &db::DataStore,
     sec_id: &db::SecId,
 ) -> Result<Vec<db::saga_types::Saga>, Error> {
-    trace!(&log, "listing sagas");
+    trace!(&opctx.log, "listing sagas");
 
     // Read all sagas in batches.
     //
@@ -225,7 +234,7 @@ async fn list_unfinished_sagas(
 /// regardless of this future - it is for notification purposes only,
 /// and does not need to be polled.
 async fn recover_saga<T>(
-    log: &slog::Logger,
+    opctx: &OpContext,
     uctx: &Arc<T>,
     datastore: &db::DataStore,
     sec_client: &steno::SecClient,
@@ -237,7 +246,7 @@ where
 {
     let saga_id: steno::SagaId = saga.id.into();
     let template_name = saga.template_name.as_str();
-    trace!(log, "recovering saga: start";
+    trace!(opctx.log, "recovering saga: start";
         "saga_id" => saga_id.to_string(),
         "template_name" => template_name,
     );
@@ -247,12 +256,12 @@ where
             saga_id, template_name,
         ))
     })?;
-    trace!(log, "recovering saga: found template";
+    trace!(opctx.log, "recovering saga: found template";
         "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let log_events = load_saga_log(datastore, &saga).await?;
-    trace!(log, "recovering saga: loaded log";
+    trace!(opctx.log, "recovering saga: loaded log";
         "saga_id" => ?saga_id,
         "template_name" => template_name
     );
