@@ -21,10 +21,10 @@ impl From<std::time::Duration> for types::Duration {
     }
 }
 
-impl From<crate::api::internal::nexus::ProducerEndpoint>
+impl From<&crate::api::internal::nexus::ProducerEndpoint>
     for types::ProducerEndpoint
 {
-    fn from(_: crate::api::internal::nexus::ProducerEndpoint) -> Self {
+    fn from(_: &crate::api::internal::nexus::ProducerEndpoint) -> Self {
         todo!()
     }
 }

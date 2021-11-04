@@ -42,7 +42,7 @@ macro_rules! generate_logging_api {
                 debug!(log, "client response"; "result" => ?result);
             },
         );
-	};
+    };
 }
 
 pub mod sled_agent_client;

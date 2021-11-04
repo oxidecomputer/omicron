@@ -244,7 +244,7 @@ impl Nexus {
                 "n_producers" => producers.len(),
                 "collector_id" => ?oximeter_info.collector_id,
             );
-            let client = self.build_oximeter_client(
+            let (client, _) = self.build_oximeter_client(
                 oximeter_info.collector_id,
                 oximeter_info.address,
             );
@@ -263,8 +263,10 @@ impl Nexus {
                                 Duration::from_secs_f64(producer.interval),
                             ),
                     };
-                // TODO error
-                client.producers_post(&producer_info).await.unwrap();
+                client
+                    .producers_post(&producer_info)
+                    .await
+                    .map_err(Error::from)?;
             }
         }
         Ok(())
@@ -306,7 +308,7 @@ impl Nexus {
     pub async fn oximeter_client(
         &self,
         id: Uuid,
-    ) -> Result<OximeterClient, Error> {
+    ) -> Result<(OximeterClient, Uuid), Error> {
         let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
         let address = SocketAddr::new(
             oximeter_info.ip.ip(),
@@ -321,7 +323,7 @@ impl Nexus {
         &self,
         id: Uuid,
         address: SocketAddr,
-    ) -> OximeterClient {
+    ) -> (OximeterClient, Uuid) {
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
         let client =
@@ -331,7 +333,7 @@ impl Nexus {
             "registered oximeter collector client";
             "id" => id.to_string(),
         );
-        client
+        (client, id)
     }
 
     /**
@@ -1043,12 +1045,15 @@ impl Nexus {
          * beat us to it.
          */
 
+        let runtime: nexus::InstanceRuntimeState =
+            instance.runtime().clone().into();
+
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware =
             omicron_common::sled_agent_client::types::InstanceHardware {
-                runtime: instance.runtime().clone().into(),
+                runtime: omicron_common::sled_agent_client::types::InstanceRuntimeState::from(runtime),
                 nics: vec![],
             };
 
@@ -1060,10 +1065,10 @@ impl Nexus {
                     target: requested.into(),
                 },
             )
-            //  instance_hardware, requested)
-            // TODO error
             .await
-            .unwrap();
+            .map_err(Error::from)?;
+
+        let new_runtime: nexus::InstanceRuntimeState = new_runtime.into();
 
         self.db_datastore
             .instance_update_runtime(&instance.id(), &new_runtime.into())
@@ -1338,19 +1343,25 @@ impl Nexus {
         sa: Arc<SledAgentClient>,
         requested: DiskStateRequested,
     ) -> Result<(), Error> {
+        let runtime: DiskRuntimeState = disk.runtime().into();
+
         /*
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
         let new_runtime = sa
             .disk_put(
-                disk.id(),
+                &disk.id(),
                 &omicron_common::sled_agent_client::types::DiskEnsureBody {
-                    initial_runtime: omicron_common::sled_agent_client::types::DiskRuntimeState::from(disk.runtime()),
-                    target: requested,
+                    initial_runtime: omicron_common::sled_agent_client::types::DiskRuntimeState::from(runtime),
+                    target: omicron_common::sled_agent_client::types::DiskStateRequested::from(requested),
                 },
             )
-            .await?;
+            .await
+            .map_err(Error::from)?;
+
+        let new_runtime: DiskRuntimeState = new_runtime.into();
+
         self.db_datastore
             .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
@@ -1863,24 +1874,22 @@ impl Nexus {
         &self,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let collector = self.next_collector().await?;
-        let db_info =
-            db::model::ProducerEndpoint::new(&producer_info, collector.id);
+        let (collector, id) = self.next_collector().await?;
+        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
         collector
             .producers_post(
                 &omicron_common::oximeter_client::types::ProducerEndpoint::from(
-                    producer_info,
+                    &producer_info,
                 ),
             )
-            // TODO error
             .await
-            .unwrap();
+            .map_err(Error::from)?;
         info!(
             self.log,
             "assigned collector to new producer";
             "producer_id" => ?producer_info.id,
-            "collector_id" => ?collector.id,
+            "collector_id" => ?id,
         );
         Ok(())
     }
@@ -1888,7 +1897,7 @@ impl Nexus {
     /**
      * Return an oximeter collector to assign a newly-registered producer
      */
-    async fn next_collector(&self) -> Result<OximeterClient, Error> {
+    async fn next_collector(&self) -> Result<(OximeterClient, Uuid), Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {
             marker: None,

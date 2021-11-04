@@ -11,6 +11,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
+use omicron_common::nexus_client;
 use omicron_common::NexusClient;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
@@ -91,9 +92,12 @@ impl Simulatable for SimInstance {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        // TODO error
-        nexus_client.cpapi_instances_put(id,
-        &omicron_common::nexus_client::types::InstanceRuntimeState::from(current)).await.unwrap();
-        Ok(())
+        nexus_client
+            .cpapi_instances_put(
+                id,
+                &nexus_client::types::InstanceRuntimeState::from(current),
+            )
+            .await
+            .map_err(Error::from)
     }
 }

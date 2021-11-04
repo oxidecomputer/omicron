@@ -85,8 +85,7 @@ impl Simulatable for SimDisk {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        // TODO error
-        Ok(nexus_client
+        nexus_client
             .cpapi_disks_put(
                 id,
                 &omicron_common::nexus_client::types::DiskRuntimeState::from(
@@ -94,6 +93,6 @@ impl Simulatable for SimDisk {
                 ),
             )
             .await
-            .unwrap())
+            .map_err(Error::from)
     }
 }
