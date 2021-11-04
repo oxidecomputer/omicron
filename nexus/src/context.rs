@@ -316,7 +316,7 @@ mod test {
         let error = opctx
             .authorize(Action::Query, authz::DATABASE)
             .expect_err("expected authorization error");
-        assert!(matches!(error, Error::Forbidden { .. }));
+        assert!(matches!(error, Error::Unauthenticated { .. }));
         logctx.cleanup_successful();
     }
 
