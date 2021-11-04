@@ -44,7 +44,6 @@ use uuid::Uuid;
 /// User id reserved for a test user that's granted many privileges for the
 /// purpose of running automated tests.
 // "4007" looks a bit like "root".
-// NOTE: this user uuid is duplicated in omicron.polar.
 pub const TEST_USER_UUID: &str = "001de000-05e4-0000-0000-000000004007";
 
 /// User id reserved for a test user that has no privileges.

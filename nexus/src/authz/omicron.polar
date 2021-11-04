@@ -26,8 +26,7 @@ allow(actor: AnyActor, action: Action, resource) if
 # database.
 # NOTE: this user uuid is duplicated in authn/mod.rs.
 has_role(actor: AuthenticatedActor, _role: String, _resource: Resource) if
-    #actor.id == Actor::TEST_USER_UUID;
-    actor.id == "001de000-05e4-0000-0000-000000004007"; # XXX
+    actor.is_test_user;
 
 
 
