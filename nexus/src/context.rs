@@ -6,6 +6,7 @@ use super::authz;
 use super::config;
 use super::db;
 use super::Nexus;
+use crate::authn::Actor;
 use crate::authn::external::session_cookie::{Session, SessionStore};
 use crate::db::model::ConsoleSession;
 use async_trait::async_trait;
@@ -172,7 +173,6 @@ impl OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let apictx = rqctx.context();
-        let log = apictx.log.new(o!());
         let authn = Arc::new(apictx.external_authn.authn_request(rqctx).await?);
         let authz =
             authz::Context::new(Arc::clone(&authn), Arc::clone(&apictx.authz));
@@ -183,6 +183,19 @@ impl OpContext {
         metadata
             .insert(String::from("http_method"), request.method().to_string());
         metadata.insert(String::from("http_uri"), request.uri().to_string());
+
+        let log = if let Some(Actor(actor_id)) = authn.actor() {
+            metadata
+                .insert(String::from("authenticated"), String::from("true"));
+            metadata.insert(String::from("actor"), actor_id.to_string());
+            rqctx.log.new(
+                o!("authenticated" => true, "actor" => actor_id.to_string()),
+            )
+        } else {
+            metadata
+                .insert(String::from("authenticated"), String::from("false"));
+            rqctx.log.new(o!("authenticated" => false))
+        };
 
         Ok(OpContext {
             log,
@@ -266,6 +279,65 @@ impl OpContext {
             "result" => ?result,
         );
         result
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::OpContext;
+    use crate::authz;
+    use authz::Action;
+    use dropshot::test_util::LogContext;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingLevel;
+    use omicron_common::api::external::Error;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_background_context() {
+        let logctx = LogContext::new(
+            "test_background_context",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = logctx.log.new(o!());
+        let authz = authz::Authz::new();
+        let opctx = OpContext::for_background(log, Arc::new(authz));
+
+        // This is partly a test of the authorization policy.  Today, background
+        // contexts should have no privileges.  That's misleading because in
+        // fact they do a bunch of privileged things, but we haven't yet added
+        // privilege checks to those code paths.  Eventually we'll probably want
+        // to define a particular internal user (maybe even a different one for
+        // different background contexts) with specific privileges and test
+        // those here.
+        //
+        // For now, we check what we currently expect, which is that this
+        // context has no official privileges.
+        let error = opctx
+            .authorize(Action::Query, authz::DATABASE)
+            .expect_err("expected authorization error");
+        assert!(matches!(error, Error::Forbidden { .. }));
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_test_context() {
+        let logctx = LogContext::new(
+            "test_test_context",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = logctx.log.new(o!());
+        let opctx = OpContext::for_unit_tests(log);
+
+        // Like in test_background_context(), this is essentially a test of the
+        // authorization policy.  The unit tests assume this user can do
+        // basically everything.  We don't need to verify that -- the tests
+        // themselves do that -- but it's useful to have a basic santiy test
+        // that we can construct such a context it's authorized to do something.
+        opctx
+            .authorize(Action::Query, authz::DATABASE)
+            .expect("expected authorization to succeed");
+        logctx.cleanup_successful();
     }
 }
 

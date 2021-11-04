@@ -62,11 +62,19 @@ impl Context {
         // "NotFound", but it would add a lot of boilerplate to a lot of
         // callers if we didn't return api::external::Error here.
         let actor = oso_types::AnyActor::from(&*self.authn);
+        let is_authn = self.authn.actor().is_some();
         match self.authz.oso.is_allowed(actor, action, resource) {
             Err(error) => Err(Error::internal_error(&format!(
                 "failed to compute authorization: {:#}",
                 error
             ))),
+            // If the user did not authenticate successfully, this will become a
+            // 401 rather than a 403.
+            Ok(false) if !is_authn => Err(Error::Unauthenticated {
+                internal_message: String::from(
+                    "authorization failed for unauthenticated request",
+                ),
+            }),
             Ok(false) => Err(Error::Forbidden),
             Ok(true) => Ok(()),
         }

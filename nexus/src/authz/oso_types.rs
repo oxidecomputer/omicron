@@ -122,6 +122,7 @@ impl oso::PolarClass for AnyActor {
         oso::Class::builder()
             .name("AnyActor")
             .set_equality_check(|a1: &AnyActor, a2: &AnyActor| a1 == a2)
+            .add_constant(authn::TEST_USER_UUID, "TEST_USER_UUID")
             .add_attribute_getter("authenticated", |a: &AnyActor| a.0)
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
                 a.1.as_ref().map(|a| AuthenticatedActor(a.clone()))
