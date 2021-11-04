@@ -1345,6 +1345,7 @@ dependencies = [
  "openapiv3",
  "oximeter",
  "oximeter-collector",
+ "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer",
  "pq-sys",

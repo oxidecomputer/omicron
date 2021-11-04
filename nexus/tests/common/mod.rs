@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 pub mod resource_helpers;
 
-const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
-const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
+pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
@@ -181,7 +181,7 @@ pub async fn start_oximeter(
     let db = oximeter_collector::DbConfig {
         address: SocketAddr::new("::1".parse().unwrap(), db_port),
         batch_size: 10,
-        batch_interval: 10,
+        batch_interval: 1,
     };
     let config = oximeter_collector::Config {
         id,
@@ -241,7 +241,7 @@ pub async fn start_producer_server(
         id,
         address: producer_address,
         base_route: "/collect".to_string(),
-        interval: Duration::from_secs(10),
+        interval: Duration::from_secs(1),
     };
     let config = oximeter_producer::Config {
         server_info,
