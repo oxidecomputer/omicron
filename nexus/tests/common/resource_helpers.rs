@@ -26,8 +26,9 @@ pub async fn create_organization(
             description: "an org".to_string(),
         },
     };
-    let authn_header =
-        http::HeaderValue::from_static(omicron_nexus::authn::TEST_USER_UUID);
+    let authn_header = http::HeaderValue::from_static(
+        omicron_nexus::authn::TEST_USER_UUID_PRIVILEGED,
+    );
     let uri = client.url("/organizations");
     let request = hyper::Request::builder()
         .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header)

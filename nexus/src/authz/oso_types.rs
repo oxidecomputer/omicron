@@ -145,7 +145,7 @@ impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .add_attribute_getter("is_test_user", |a: &AuthenticatedActor| {
-                a.0 == authn::TEST_USER_UUID
+                a.0 == authn::TEST_USER_UUID_PRIVILEGED
             })
             .set_equality_check(
                 |a1: &AuthenticatedActor, a2: &AuthenticatedActor| a1 == a2,

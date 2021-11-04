@@ -44,7 +44,8 @@ use uuid::Uuid;
 /// User id reserved for a test user that's granted many privileges for the
 /// purpose of running automated tests.
 // "4007" looks a bit like "root".
-pub const TEST_USER_UUID: &str = "001de000-05e4-0000-0000-000000004007";
+pub const TEST_USER_UUID_PRIVILEGED: &str =
+    "001de000-05e4-0000-0000-000000004007";
 
 /// User id reserved for a test user that has no privileges.
 // 60001 is the decimal uid for "nobody" on Helios.
@@ -96,7 +97,9 @@ impl Context {
     // in unit tests.
     #[cfg(test)]
     pub fn internal_test_user() -> Context {
-        Context::test_context_for_actor(TEST_USER_UUID.parse().unwrap())
+        Context::test_context_for_actor(
+            TEST_USER_UUID_PRIVILEGED.parse().unwrap(),
+        )
     }
 
     /// Returns an authenticated context for a specific user
@@ -114,7 +117,7 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
-    use super::TEST_USER_UUID;
+    use super::TEST_USER_UUID_PRIVILEGED;
 
     #[test]
     fn test_internal_users() {
@@ -126,7 +129,7 @@ mod test {
         // test user.  This is used in a few places.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0.to_string(), TEST_USER_UUID);
+        assert_eq!(actor.0.to_string(), TEST_USER_UUID_PRIVILEGED);
     }
 }
 
