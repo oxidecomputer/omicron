@@ -1428,20 +1428,7 @@ impl TryFrom<String> for RouteTarget {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let target = NetworkTarget::try_from(value)?;
-        match target {
-            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
-            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(RouteTarget::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "NetworkTarget {} is not a valid RouteTarget",
-                target
-            )),
-        }
+        RouteTarget::try_from(NetworkTarget::try_from(value)?)
     }
 }
 
@@ -1469,7 +1456,7 @@ impl From<RouteTarget> for NetworkTarget {
 impl Display for RouteTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         let target = NetworkTarget::from(self.clone());
-        std::fmt::Display::fmt(&target, f)
+        write!(f, "{}", target)
     }
 }
 
@@ -1500,16 +1487,7 @@ impl TryFrom<String> for RouteDestination {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let target = NetworkTarget::try_from(value)?;
-        match target {
-            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
-            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
-            _ => Err(format!(
-                "NetworkTarget {} is not a valid RouteDestination",
-                target
-            )),
-        }
+        RouteDestination::try_from(NetworkTarget::try_from(value)?)
     }
 }
 
@@ -1533,7 +1511,7 @@ impl From<RouteDestination> for NetworkTarget {
 impl Display for RouteDestination {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         let target = NetworkTarget::from(self.clone());
-        std::fmt::Display::fmt(&target, f)
+        write!(f, "{}", target)
     }
 }
 
