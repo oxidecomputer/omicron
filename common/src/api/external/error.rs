@@ -223,7 +223,9 @@ impl From<Error> for HttpError {
                 // TODO-polish We may want to rethink this error code.  This is
                 // what HTTP calls it, but it's confusing.
                 error_code: Some(String::from("Unauthorized")),
-                external_message: String::from("credentials missing or invalid"),
+                external_message: String::from(
+                    "credentials missing or invalid",
+                ),
                 internal_message,
             },
 
