@@ -80,3 +80,69 @@ impl Context {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    /*
+     * These are essentially unit tests for the policy itself.
+     * TODO-coverage This is just a start.
+     * TODO If this gets any more complicated, we could consider automatically
+     * generating the test cases.  We could precreate a bunch of resources and
+     * some users with different roles.  Then we could run through a table that
+     * says exactly which users should be able to do what to each resource.
+     */
+    use super::Action;
+    use super::Authz;
+    use super::Context;
+    use super::DATABASE;
+    use super::FLEET;
+    use crate::authn::TEST_USER_UUID;
+    use crate::authn::TEST_USER_UUID_UNPRIVILEGED;
+    use std::sync::Arc;
+
+    fn authz_context_for_actor(actor_id_str: &str) -> Context {
+        let actor_id = actor_id_str.parse().expect("bad actor uuid in test");
+        let authn = crate::authn::Context::test_context_for_actor(actor_id);
+        let authz = Authz::new();
+        Context::new(Arc::new(authn), Arc::new(authz))
+    }
+
+    fn authz_context_noauth() -> Context {
+        let authn = crate::authn::Context::internal_unauthenticated();
+        let authz = Authz::new();
+        Context::new(Arc::new(authn), Arc::new(authz))
+    }
+
+    #[test]
+    fn test_database() {
+        let authz_privileged = authz_context_for_actor(TEST_USER_UUID);
+        authz_privileged
+            .authorize(Action::Query, DATABASE)
+            .expect("expected privileged user to be able to query database");
+        let authz_nobody = authz_context_for_actor(TEST_USER_UUID_UNPRIVILEGED);
+        authz_nobody
+            .authorize(Action::Query, DATABASE)
+            .expect("expected unprivileged user to be able to query database");
+        let authz_noauth = authz_context_noauth();
+        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
+            "expected unauthenticated user not to be able to query database",
+        );
+    }
+
+    #[test]
+    fn test_organization() {
+        let authz_privileged = authz_context_for_actor(TEST_USER_UUID);
+        authz_privileged.authorize(Action::CreateOrganization, FLEET).expect(
+            "expected privileged user to be able to create organization",
+        );
+        let authz_nobody = authz_context_for_actor(TEST_USER_UUID_UNPRIVILEGED);
+        authz_nobody.authorize(Action::CreateOrganization, FLEET).expect_err(
+            "expected unprivileged user not to be able to create organization",
+        );
+        let authz_noauth = authz_context_noauth();
+        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
+            "expected unauthenticated user not to be able \
+            to create organization",
+        );
+    }
+}

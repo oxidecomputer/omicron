@@ -92,14 +92,20 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    /// TODO-security This eventually needs to go.  But for now, this is used
-    /// in unit tests.
+    // TODO-security This eventually needs to go.  But for now, this is used
+    // in unit tests.
     #[cfg(test)]
     pub fn internal_test_user() -> Context {
+        Context::test_context_for_actor(TEST_USER_UUID.parse().unwrap())
+    }
+
+    /// Returns an authenticated context for a specific user
+    ///
+    /// This is used for unit testing the authorization rules.
+    #[cfg(test)]
+    pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context {
-            kind: Kind::Authenticated(Details {
-                actor: Actor(TEST_USER_UUID.parse().unwrap()),
-            }),
+            kind: Kind::Authenticated(Details { actor: Actor(actor_id) }),
             schemes_tried: Vec::new(),
         }
     }
