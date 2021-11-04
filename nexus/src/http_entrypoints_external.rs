@@ -6,6 +6,7 @@ use super::ServerContext;
 use crate::db;
 use crate::db::model::Name;
 
+use crate::context::OpContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -227,8 +228,10 @@ async fn organizations_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
-        let organization =
-            nexus.organization_create(&new_organization.into_inner()).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organization = nexus
+            .organization_create(&opctx, &new_organization.into_inner())
+            .await?;
         Ok(HttpResponseCreated(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
