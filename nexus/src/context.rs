@@ -107,6 +107,7 @@ impl ServerContext {
                 log.new(o!("component" => "nexus")),
                 pool,
                 config,
+                Arc::clone(&authz),
             ),
             log,
             external_authn,

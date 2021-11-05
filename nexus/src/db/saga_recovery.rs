@@ -65,7 +65,7 @@ impl Future for CompletionTask {
 /// and resumed, and itself returns a [`CompletionTask`] which completes
 /// when those resumed sagas have finished.
 pub fn recover<T>(
-    log: slog::Logger,
+    opctx: OpContext,
     sec_id: db::SecId,
     uctx: Arc<T>,
     datastore: Arc<db::DataStore>,
@@ -78,7 +78,6 @@ pub fn recover<T>(
 where
     T: Send + Sync + fmt::Debug + 'static,
 {
-    let opctx = OpContext::for_background(log);
     let join_handle = tokio::spawn(async move {
         info!(&opctx.log, "start saga recovery");
 
@@ -327,6 +326,7 @@ async fn load_saga_log(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::context::OpContext;
     use crate::db::test_utils::UnpluggableCockroachDbSecStore;
     use lazy_static::lazy_static;
     use omicron_test_utils::dev;
@@ -475,6 +475,8 @@ mod test {
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_unit_tests(log);
 
         // Create and start a saga.
         //
@@ -508,15 +510,14 @@ mod test {
         //
         // We update uctx to prevent the storage system from detaching again.
         sec_client.shutdown().await;
-        let sec_client =
-            steno::sec(log.new(o!("component" => "SEC")), storage.clone());
+        let sec_client = steno::sec(sec_log, storage.clone());
         uctx.storage.set_unplug(false);
         uctx.do_unplug.store(false, Ordering::SeqCst);
 
         // Recover the saga, observing that it re-runs operations and completes.
         let sec_client = Arc::new(sec_client);
         recover(
-            log,
+            opctx,
             sec_id,
             uctx.clone(),
             db_datastore,
@@ -547,6 +548,8 @@ mod test {
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_unit_tests(log);
 
         // Create and start a saga, which we expect to complete successfully.
         let saga_id = SagaId(Uuid::new_v4());
@@ -571,13 +574,12 @@ mod test {
         // Now we "reboot", by terminating the SEC and creating a new one
         // using the same storage system.
         sec_client.shutdown().await;
-        let sec_client =
-            steno::sec(log.new(o!("component" => "SEC")), storage.clone());
+        let sec_client = steno::sec(sec_log, storage.clone());
 
         // Recover the saga, observing that it does not replay the nodes.
         let sec_client = Arc::new(sec_client);
         recover(
-            log,
+            opctx,
             sec_id,
             uctx.clone(),
             db_datastore,
