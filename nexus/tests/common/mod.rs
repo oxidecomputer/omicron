@@ -33,9 +33,9 @@ pub struct ControlPlaneTestContext {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
-    sled_agent: omicron_sled_agent::sim::Server,
-    oximeter: Oximeter,
-    producer: ProducerServer,
+    pub sled_agent: omicron_sled_agent::sim::Server,
+    pub oximeter: Oximeter,
+    pub producer: ProducerServer,
 }
 
 impl ControlPlaneTestContext {
