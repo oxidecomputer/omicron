@@ -247,8 +247,8 @@ impl InstanceInner {
                     self.state.current(),
                 ),
             )
-            .await.unwrap();
-        // TODO ^^ error
+            .await
+            .map_err(Error::from)?;
 
         // Take the next action, if any.
         if let Some(action) = action {
