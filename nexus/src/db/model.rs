@@ -1,5 +1,6 @@
 //! Structures stored to the database.
 
+use super::custom_types;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
@@ -9,9 +10,9 @@ use crate::db::schema::{
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::{Backend, BinaryRawValue, RawValue};
 use diesel::deserialize::{self, FromSql};
-use diesel::serialize::{self, ToSql};
+use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
@@ -1019,6 +1020,55 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
 }
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "custom_types::Enum"]
+pub struct RouteKind(pub external::RouteKind);
+
+impl RouteKind {
+    pub fn new(state: external::RouteKind) -> Self {
+        Self(state)
+    }
+
+    pub fn state(&self) -> &external::RouteKind {
+        &self.0
+    }
+}
+
+impl<DB> ToSql<custom_types::Enum, DB> for RouteKind
+where
+    DB: Backend,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        match *self.state() {
+            external::RouteKind::Default => out.write_all(b"default")?,
+            external::RouteKind::VpcSubnet => out.write_all(b"vpc_subnet")?,
+            external::RouteKind::VpcPeering => out.write_all(b"vpc_peering")?,
+            external::RouteKind::Custom => out.write_all(b"custom")?,
+        }
+        Ok(IsNull::No)
+    }
+}
+
+impl<DB> FromSql<custom_types::Enum, DB> for RouteKind
+where
+    DB: Backend + for<'a> BinaryRawValue<'a>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        match DB::as_bytes(bytes) {
+            b"default" => Ok(RouteKind::new(external::RouteKind::Default)),
+            b"vpc_subnet" => Ok(RouteKind::new(external::RouteKind::VpcSubnet)),
+            b"vpc_peering" => {
+                Ok(RouteKind::new(external::RouteKind::VpcPeering))
+            }
+            b"custom" => Ok(RouteKind::new(external::RouteKind::Custom)),
+            _ => Err("Unrecognized enum variant for RouteKind".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 pub struct RouteTarget(pub external::RouteTarget);
 
@@ -1101,6 +1151,7 @@ pub struct RouterRoute {
     #[diesel(embed)]
     identity: RouterRouteIdentity,
 
+    pub kind: RouteKind,
     pub router_id: Uuid,
     pub target: RouteTarget,
     pub destination: RouteDestination,
@@ -1110,12 +1161,14 @@ impl RouterRoute {
     pub fn new(
         route_id: Uuid,
         router_id: Uuid,
+        kind: external::RouteKind,
         params: external::RouterRouteCreateParams,
     ) -> Self {
         let identity = RouterRouteIdentity::new(route_id, params.identity);
         Self {
             identity,
             router_id,
+            kind: RouteKind::new(kind),
             target: RouteTarget::new(params.target),
             destination: RouteDestination::new(params.destination),
         }
@@ -1127,6 +1180,7 @@ impl Into<external::RouterRoute> for RouterRoute {
         external::RouterRoute {
             identity: self.identity(),
             router_id: self.router_id,
+            kind: self.kind.state().clone(),
             target: self.target.state().clone(),
             destination: self.destination.state().clone(),
         }

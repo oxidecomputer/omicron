@@ -3,6 +3,8 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use omicron_common::api::external::VpcRouter;
+use omicron_common::api::external::VpcRouterCreateParams;
 use std::convert::TryFrom;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -100,4 +102,28 @@ pub async fn create_vpc_with_error(
             status,
         )
         .await
+}
+
+pub async fn create_router(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+) -> VpcRouter {
+    objects_post(
+        &client,
+        format!(
+            "/organizations/{}/projects/{}/vpcs/{}/routers",
+            &organization_name, &project_name, &vpc_name
+        )
+        .as_str(),
+        VpcRouterCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from(router_name).unwrap(),
+                description: String::from("router description"),
+            },
+        },
+    )
+    .await
 }

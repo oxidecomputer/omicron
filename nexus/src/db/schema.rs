@@ -201,6 +201,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::db::custom_types::Enum,
         router_id -> Uuid,
         target -> Text,
         destination -> Text,

@@ -1593,11 +1593,13 @@ impl DataStore {
         &self,
         route_id: &Uuid,
         router_id: &Uuid,
+        kind: &api::external::RouteKind,
         params: &api::external::RouterRouteCreateParams,
     ) -> CreateResult<RouterRoute> {
         use db::schema::routerroute::dsl;
 
-        let route = RouterRoute::new(*route_id, *router_id, params.clone());
+        let route =
+            RouterRoute::new(*route_id, *router_id, *kind, params.clone());
         let name = route.name().clone();
         let route = diesel::insert_into(dsl::routerroute)
             .values(route)

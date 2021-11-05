@@ -33,6 +33,7 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::RouteKind;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
@@ -1695,7 +1696,12 @@ impl Nexus {
         let id = Uuid::new_v4();
         let route = self
             .db_datastore
-            .router_create_route(&id, &router.identity.id, params)
+            .router_create_route(
+                &id,
+                &router.identity.id,
+                &RouteKind::Custom,
+                params,
+            )
             .await?;
         Ok(route.into())
     }

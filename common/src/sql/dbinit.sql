@@ -370,6 +370,28 @@ CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE omicon.public.RouteRouteKind AS ENUM (
+    'default',
+    'vpc_subnet',
+    'vpc_peering',
+    'custom'
+)
+
+CREATE TABLE omicron.public.RouterRoute (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    router_id UUID NOT NULL,
+    kind RouteRouteKind,
+    target STRING(128) NOT NULL,
+    destination STRING(128) NOT NULL
+)
 /*******************************************************************/
 
 /*

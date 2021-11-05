@@ -1515,7 +1515,39 @@ impl Display for RouteDestination {
     }
 }
 
-/// A route defines a rule that governs where traffic should be sent based on its destination.
+/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind determines certain attributes such as if the route is modifiable
+/// and describes how or where the route was created.
+///
+/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum RouteKind {
+    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    ///
+    /// `Destination: An Internet Gateway`
+    /// `Modifiable: true`
+    Default,
+    /// Automatically added for each VPC Subnet in the VPC
+    ///
+    /// `Destination: A VPC Subnet`
+    /// `Modifiable: false`
+    VpcSubnet,
+    /// Automatically added when VPC peering is established
+    ///
+    /// `Destination: A different VPC`
+    /// `Modifiable: false`
+    VpcPeering,
+    /// Created by a user
+    /// See [`RouteTarget`]
+    ///
+    /// `Destination: User defined`
+    /// `Modifiable: true`
+    Custom,
+}
+
+///  A route defines a rule that governs where traffic should be sent based on its destination.
+///
+/// `read-only`
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
@@ -1523,6 +1555,8 @@ pub struct RouterRoute {
 
     /// The VPC Router to which the route belongs.
     pub router_id: Uuid,
+
+    pub kind: RouteKind,
 
     pub target: RouteTarget,
     pub destination: RouteDestination,
