@@ -788,10 +788,20 @@ async fn project_instances_instance_reboot(
     let handler = async {
         let instance = nexus
             .instance_reboot(&organization_name, &project_name, &instance_name)
-            .await?;
+            .await;
+        println!("reboot instance {:#?}", instance);
+        let instance = instance?;
         Ok(HttpResponseAccepted(instance.into()))
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    let x = apictx
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await;
+    match &x {
+        Ok(_) => println!("reboot result ok"),
+        Err(e) => println!("reboot result err {:#?}", e),
+    }
+    x
 }
 
 /**

@@ -360,8 +360,9 @@ pub trait TestInterfaces {
 #[async_trait]
 impl TestInterfaces for Client {
     async fn instance_finish_transition(&self, id: Uuid) {
+        let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("/instances/{}/poke", id);
+        let url = format!("{}/instances/{}/poke", baseurl, id);
         client
             .post(url)
             .send()
@@ -370,8 +371,9 @@ impl TestInterfaces for Client {
     }
 
     async fn disk_finish_transition(&self, id: Uuid) {
+        let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("/disks/{}/poke", id);
+        let url = format!("{}/disks/{}/poke", baseurl, id);
         client
             .post(url)
             .send()

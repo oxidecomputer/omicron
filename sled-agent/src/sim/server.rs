@@ -73,18 +73,19 @@ impl Server {
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
-            nexus_client
+            let x = nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,
                     &omicron_common::nexus_client::types::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
                     },
                 )
-                .await
-                .map_err(BackoffError::Transient)
+                .await;
+            println!("{:#?}", x);
+            x.map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {
-            warn!(log, "failed to contact nexus, will retry in {:?}", delay;
+            warn!(log, "1 failed to contact nexus, will retry in {:?}", delay;
                 "error" => ?error);
         };
         retry_notify(

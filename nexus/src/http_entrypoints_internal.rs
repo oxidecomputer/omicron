@@ -66,6 +66,7 @@ async fn cpapi_sled_agents_post(
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    println!("cpapi_sled_agent_post server entry");
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -75,6 +76,7 @@ async fn cpapi_sled_agents_post(
         nexus.upsert_sled(*sled_id, si.sa_address).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
+    println!("cpapi_sled_agent_post server return");
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
