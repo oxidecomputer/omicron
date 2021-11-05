@@ -19,7 +19,7 @@ slog-async = "2.6"
 slog-term = "2.8"
 structopt = "0.3"
 thiserror = "1.0.30"
-tokio = "1.12"
+tokio = "1.13"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]

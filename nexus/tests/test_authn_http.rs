@@ -253,11 +253,11 @@ fn assert_authn_failed(
     status_code: http::StatusCode,
     error: &HttpErrorResponseBody,
 ) {
-    assert_eq!(error.error_code, None);
+    assert_eq!(error.error_code, Some(String::from("Unauthorized")));
     // Be very careful in changing this message or weakening this check.  It's
     // very intentional that we do not leak information about why authentication
     // failed.
-    assert_eq!(error.message, "authentication failed");
+    assert_eq!(error.message, "credentials missing or invalid");
     assert_eq!(status_code, http::StatusCode::UNAUTHORIZED);
 }
 
