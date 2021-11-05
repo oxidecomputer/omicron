@@ -2,7 +2,9 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authz;
 use crate::config;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
@@ -144,6 +146,7 @@ impl Nexus {
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
+        authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let my_sec_id = db::SecId::from(config.id);
@@ -172,8 +175,12 @@ impl Nexus {
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        let recovery_task = db::recover(
+        let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
+            authz,
+        );
+        let recovery_task = db::recover(
+            opctx,
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
             db_datastore,
@@ -403,7 +410,7 @@ impl Nexus {
         result.kind.map_err(|saga_error| {
             saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
-                Error::InternalError { message: e.to_string() }
+                Error::InternalError { internal_message: e.to_string() }
             })
         })
     }
@@ -414,10 +421,11 @@ impl Nexus {
 
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         new_organization: &OrganizationCreateParams,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(db_org).await
+        self.db_datastore.organization_create(opctx, db_org).await
     }
 
     pub async fn organization_fetch(
@@ -712,7 +720,9 @@ impl Nexus {
         sleds
             .first()
             .ok_or_else(|| Error::ServiceUnavailable {
-                message: String::from("no sleds available for new Instance"),
+                internal_message: String::from(
+                    "no sleds available for new Instance",
+                ),
             })
             .map(|s| s.id())
     }
@@ -762,9 +772,10 @@ impl Nexus {
             )
             .await?;
         /* TODO-error more context would be useful  */
-        let instance_id = saga_outputs
-            .lookup_output::<Uuid>("instance_id")
-            .map_err(|e| Error::InternalError { message: e.to_string() })?;
+        let instance_id =
+            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
+                Error::InternalError { internal_message: e.to_string() }
+            })?;
         /*
          * TODO-correctness TODO-robustness TODO-design It's not quite correct
          * to take this instance id and look it up again.  It's possible that
@@ -1906,7 +1917,7 @@ impl Nexus {
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            message: String::from("no oximeter collectors available"),
+            internal_message: String::from("no oximeter collectors available"),
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
