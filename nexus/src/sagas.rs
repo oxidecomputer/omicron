@@ -191,8 +191,9 @@ async fn sic_instance_ensure(
                 target: runtime_params,
             },
         )
-        .await.map_err(omicron_common::api::external::Error::from)
-    .map_err(ActionError::action_failed)?;
+        .await
+        .map_err(omicron_common::api::external::Error::from)
+        .map_err(ActionError::action_failed)?;
 
     let new_runtime_state: InstanceRuntimeState = new_runtime_state.into();
 
