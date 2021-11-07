@@ -290,6 +290,7 @@ CREATE TABLE omicron.public.Vpc (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
+    system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL
 );
 
@@ -338,6 +339,11 @@ CREATE TABLE omicron.public.NetworkInterface (
 );
 
 
+CREATE TYPE omicon.public.VpcRouterKind AS ENUM (
+    'system',
+    'custom'
+);
+
 CREATE TABLE omicron.public.VpcRouter (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -347,6 +353,7 @@ CREATE TABLE omicron.public.VpcRouter (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    kind VpcRouterKind NOT NULL,
     vpc_id UUID NOT NULL
 );
 
@@ -375,7 +382,7 @@ CREATE TYPE omicon.public.RouteRouteKind AS ENUM (
     'vpc_subnet',
     'vpc_peering',
     'custom'
-)
+);
 
 CREATE TABLE omicron.public.RouterRoute (
     /* Identity metadata (resource) */
@@ -388,10 +395,11 @@ CREATE TABLE omicron.public.RouterRoute (
     time_deleted TIMESTAMPTZ,
 
     router_id UUID NOT NULL,
-    kind RouteRouteKind,
+    kind RouteRouteKind NOT NULL,
     target STRING(128) NOT NULL,
     destination STRING(128) NOT NULL
-)
+);
+
 /*******************************************************************/
 
 /*

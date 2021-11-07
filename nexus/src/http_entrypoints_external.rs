@@ -47,6 +47,7 @@ use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Rack;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
@@ -54,6 +55,7 @@ use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
@@ -1406,6 +1408,7 @@ async fn vpc_routers_post(
             &path.organization_name,
             &path.project_name,
             &path.vpc_name,
+            &VpcRouterKind::Custom,
             &create_params.into_inner(),
         )
         .await?;
@@ -1465,7 +1468,7 @@ async fn vpc_routers_put_router(
 }
 
 /*
- * Router Routes
+ * Vpc Router Routes
  */
 
 /**
@@ -1556,6 +1559,7 @@ async fn routers_routes_post(
             &path.project_name,
             &path.vpc_name,
             &path.router_name,
+            &RouterRouteKind::Custom,
             &create_params.into_inner(),
         )
         .await?;

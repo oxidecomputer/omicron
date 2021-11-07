@@ -1294,12 +1294,20 @@ pub struct VpcSubnetUpdateParams {
     pub router_id: Option<Uuid>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum VpcRouterKind {
+    System,
+    Custom,
+}
+
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
     pub identity: IdentityMetadata,
+
+    pub kind: VpcRouterKind,
 
     /// The VPC to which the router belongs.
     pub vpc_id: Uuid,
@@ -1321,6 +1329,11 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+/// Represents all possible network target strings as defined in RFD-21
+/// This enum itself isn't intended to be used directly but rather as a
+/// delegate for subset enums to not have to re-implement all the base type conversions.
+///
+/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
 #[derive(Debug)]
 pub enum NetworkTarget {
     Vpc(Name),
@@ -1521,7 +1534,7 @@ impl Display for RouteDestination {
 ///
 /// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum RouteKind {
+pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///
     /// `Destination: An Internet Gateway`
@@ -1556,7 +1569,7 @@ pub struct RouterRoute {
     /// The VPC Router to which the route belongs.
     pub router_id: Uuid,
 
-    pub kind: RouteKind,
+    pub kind: RouterRouteKind,
 
     pub target: RouteTarget,
     pub destination: RouteDestination,
