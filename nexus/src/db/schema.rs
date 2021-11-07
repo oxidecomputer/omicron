@@ -190,6 +190,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::db::model::Enum,
         vpc_id -> Uuid,
     }
 }

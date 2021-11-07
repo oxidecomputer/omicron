@@ -339,6 +339,11 @@ CREATE TABLE omicron.public.NetworkInterface (
 );
 
 
+CREATE TYPE omicron.public.VpcRouterKind AS ENUM (
+    'system',
+    'custom'
+);
+
 CREATE TABLE omicron.public.VpcRouter (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -348,6 +353,7 @@ CREATE TABLE omicron.public.VpcRouter (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    kind VpcRouterKind NOT NULL,
     vpc_id UUID NOT NULL
 );
 

@@ -40,6 +40,7 @@ use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
@@ -1385,9 +1386,10 @@ impl Nexus {
             .vpc_create_router(
                 &system_router_id,
                 &vpc_id,
+                &VpcRouterKind::System,
                 &VpcRouterCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: "system".try_into().unwrap(),
+                        name: "system".parse().unwrap(),
                         description: "Routes are automatically added to this router as vpc subnets are created".into(),
                     },
                 },
@@ -1594,6 +1596,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
+        kind: &VpcRouterKind,
         params: &VpcRouterCreateParams,
     ) -> CreateResult<VpcRouter> {
         let vpc = self
@@ -1602,7 +1605,7 @@ impl Nexus {
         let id = Uuid::new_v4();
         let router = self
             .db_datastore
-            .vpc_create_router(&id, &vpc.identity.id, params)
+            .vpc_create_router(&id, &vpc.identity.id, kind, params)
             .await?;
         Ok(router.into())
     }

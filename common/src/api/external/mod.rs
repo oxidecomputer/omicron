@@ -1294,12 +1294,20 @@ pub struct VpcSubnetUpdateParams {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum VpcRouterKind {
+    System,
+    Custom,
+}
+
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
     pub identity: IdentityMetadata,
+
+    pub kind: VpcRouterKind,
 
     /// The VPC to which the router belongs.
     pub vpc_id: Uuid,
