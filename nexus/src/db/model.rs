@@ -1171,9 +1171,12 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let target = external::RouteTarget::try_from(s.as_str())?;
-        Ok(RouteTarget::new(target))
+        Ok(RouteTarget::new(
+            String::from_sql(bytes)
+                .unwrap()
+                .parse::<external::RouteTarget>()
+                .unwrap(),
+        ))
     }
 }
 
@@ -1210,9 +1213,12 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let target = external::RouteDestination::try_from(s.as_str())?;
-        Ok(RouteDestination::new(target))
+        Ok(RouteDestination::new(
+            String::from_sql(bytes)
+                .unwrap()
+                .parse::<external::RouteDestination>()
+                .unwrap(),
+        ))
     }
 }
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]

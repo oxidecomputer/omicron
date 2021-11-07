@@ -18,6 +18,7 @@ pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
+use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,6 +30,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /*
@@ -126,8 +128,17 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
  * that's valid as a name.
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Display,
 )]
+#[display("{0}")]
 #[serde(try_from = "String")]
 pub struct Name(String);
 
@@ -173,6 +184,14 @@ impl TryFrom<String> for Name {
         }
 
         Ok(Name(value))
+    }
+}
+
+impl FromStr for Name {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Name::try_from(String::from(value))
     }
 }
 
@@ -1340,78 +1359,24 @@ pub struct VpcRouterUpdateParams {
 /// delegate for subset enums to not have to re-implement all the base type conversions.
 ///
 /// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Display, FromStr)]
 pub enum NetworkTarget {
+    #[display("vpc:{0}")]
     Vpc(Name),
+    #[display("subnet:{0}")]
     Subnet(Name),
+    #[display("instance:{0}")]
     Instance(Name),
+    #[display("tag:{0}")]
     Tag(Name),
+    #[display("ip:{0}")]
     Ip(IpAddr),
+    #[display("inetgw:{0}")]
     InternetGateway(Name),
+    #[display("fip:{0}")]
     FloatingIp(Name),
+    #[display("ip_pool:{0}")]
     IpPool(Name),
-}
-
-impl TryFrom<String> for NetworkTarget {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let separator_position =
-            value.chars().position(|sep| sep == ':').ok_or_else(|| {
-                return String::from(
-                    "Invalid network target, : separator not found",
-                );
-            })?;
-        let scope = &value[..separator_position];
-        let name = &value[separator_position..];
-        match scope {
-            "vpc" => Ok(NetworkTarget::Vpc(Name(name.to_string()))),
-            "subnet" => Ok(NetworkTarget::Subnet(Name(name.to_string()))),
-            "instance" => Ok(NetworkTarget::Instance(Name(name.to_string()))),
-            "tag" => Ok(NetworkTarget::Tag(Name(name.to_string()))),
-            "ip" => 
-                name.parse::<IpAddr>().map_or_else(|_| Err(format!("Invalid network target `{}:{}`: IP Address is invalid", scope, name)), |ip| Ok(NetworkTarget::Ip(ip))),
-            "inetgw" => Ok(NetworkTarget::InternetGateway(Name(name.to_string()))),
-            "fip" => Ok(NetworkTarget::FloatingIp(Name(name.to_string()))),
-            "ip_pool" => Ok(NetworkTarget::IpPool(Name(name.to_string()))),
-            _ => Err(format!(
-                "Invalid network target, unknown resource scope `{s}` in `{s}:{n}`",
-                s = scope,
-                n = name
-            )),
-        }
-    }
-}
-
-impl TryFrom<&str> for NetworkTarget {
-    type Error = String;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        NetworkTarget::try_from(String::from(value))
-    }
-}
-
-impl Display for NetworkTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        match &self {
-            NetworkTarget::Vpc(name) => write!(f, "vpc:{}", name.as_str()),
-            NetworkTarget::Subnet(name) => {
-                write!(f, "subnet:{}", name.as_str())
-            }
-            NetworkTarget::Instance(name) => {
-                write!(f, "instance:{}", name.as_str())
-            }
-            NetworkTarget::Tag(name) => write!(f, "tag:{}", name.as_str()),
-            NetworkTarget::Ip(ip) => write!(f, "ip:{}", ip.to_string()),
-            NetworkTarget::InternetGateway(name) => {
-                write!(f, "inetgw:{}", name.as_str())
-            }
-            NetworkTarget::FloatingIp(name) => {
-                write!(f, "fip:{}", name.as_str())
-            }
-            NetworkTarget::IpPool(name) => {
-                write!(f, "ip_pool:{}", name.as_str())
-            }
-        }
-    }
 }
 
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
@@ -1449,13 +1414,14 @@ impl TryFrom<String> for RouteTarget {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteTarget::try_from(NetworkTarget::try_from(value)?)
+        RouteTarget::try_from(value.parse::<NetworkTarget>().unwrap())
     }
 }
 
-impl TryFrom<&str> for RouteTarget {
-    type Error = String;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+impl FromStr for RouteTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         RouteTarget::try_from(String::from(value))
     }
 }
@@ -1511,13 +1477,14 @@ impl TryFrom<String> for RouteDestination {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteDestination::try_from(NetworkTarget::try_from(value)?)
+        RouteDestination::try_from(value.parse::<NetworkTarget>().unwrap())
     }
 }
 
-impl TryFrom<&str> for RouteDestination {
-    type Error = String;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+impl FromStr for RouteDestination {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         RouteDestination::try_from(String::from(value))
     }
 }
@@ -1690,7 +1657,10 @@ mod test {
     use super::ByteCount;
     use super::Name;
     use crate::api::external::Error;
+    use crate::api::external::NetworkTarget;
     use std::convert::TryFrom;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_name_parse() {
@@ -1725,7 +1695,7 @@ mod test {
 
         for (input, expected_message) in error_cases {
             eprintln!("check name \"{}\" (expecting error)", input);
-            assert_eq!(Name::try_from(input).unwrap_err(), expected_message);
+            assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
         }
 
         /*
@@ -1736,7 +1706,7 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, Name::try_from(name).unwrap().as_str());
+            assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
     }
 
@@ -1744,7 +1714,7 @@ mod test {
     fn test_name_parse_from_param() {
         let result = Name::from_param(String::from("my-name"), "the_name");
         assert!(result.is_ok());
-        assert_eq!(result, Ok(Name::try_from("my-name").unwrap()));
+        assert_eq!(result, Ok("my-name".parse().unwrap()));
 
         let result = Name::from_param(String::from(""), "the_name");
         assert!(result.is_err());
@@ -1816,5 +1786,51 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_networktarget_parsing() {
+        assert_eq!(
+            "vpc:my-vital-vpc".parse(),
+            Ok(NetworkTarget::Vpc("my-vital-vpc".parse().unwrap()))
+        );
+        assert_eq!(
+            "subnet:my-slick-subnet".parse(),
+            Ok(NetworkTarget::Subnet("my-slick-subnet".parse().unwrap()))
+        );
+        assert_eq!(
+            "instance:my-intrepid-instance".parse(),
+            Ok(NetworkTarget::Instance(
+                "my-intrepid-instance".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "tag:my-turbid-tag".parse(),
+            Ok(NetworkTarget::Tag("my-turbid-tag".parse().unwrap()))
+        );
+        assert_eq!(
+            "ip:127.0.0.1".parse(),
+            Ok(NetworkTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))))
+        );
+        assert_eq!(
+            "inetgw:my-gregarious-internet-gateway".parse(),
+            Ok(NetworkTarget::InternetGateway(
+                "my-gregarious-internet-gateway".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "fip:my-fickle-floating-ip".parse(),
+            Ok(NetworkTarget::FloatingIp(
+                "my-fickle-floating-ip".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "ip_pool:my-placid-ip-pool".parse(),
+            Ok(NetworkTarget::IpPool("my-placid-ip-pool".parse().unwrap()))
+        );
+        assert_eq!(
+            "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
+            parse_display::ParseError::new()
+        );
     }
 }
