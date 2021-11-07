@@ -10,6 +10,16 @@ generate_logging_api!("../openapi/sled-agent.json");
 
 impl From<anyhow::Error> for crate::api::external::Error {
     fn from(e: anyhow::Error) -> Self {
+        // TODO this needs to be updated when progenitor gets better error types.
+        if let Some(ee) = e.downcast_ref::<reqwest::Error>() {
+            if let Some(s) = ee.status() {
+                if s.is_client_error() {
+                    return crate::api::external::Error::InvalidRequest {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        }
         crate::api::external::Error::internal_error(&e.to_string())
     }
 }
