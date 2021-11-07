@@ -1239,11 +1239,13 @@ impl DataStore {
         &self,
         vpc_id: &Uuid,
         project_id: &Uuid,
+        system_router_id: &Uuid,
         params: &api::external::VpcCreateParams,
     ) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
-        let vpc = Vpc::new(*vpc_id, *project_id, params.clone());
+        let vpc =
+            Vpc::new(*vpc_id, *project_id, *system_router_id, params.clone());
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)

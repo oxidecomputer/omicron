@@ -869,6 +869,7 @@ pub struct Vpc {
     identity: VpcIdentity,
 
     pub project_id: Uuid,
+    pub system_router_id: Uuid,
     pub dns_name: Name,
 }
 
@@ -876,10 +877,16 @@ impl Vpc {
     pub fn new(
         vpc_id: Uuid,
         project_id: Uuid,
+        system_router_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self { identity, project_id, dns_name: params.dns_name.into() }
+        Self {
+            identity,
+            project_id,
+            system_router_id,
+            dns_name: params.dns_name.into(),
+        }
     }
 }
 
@@ -888,6 +895,7 @@ impl Into<external::Vpc> for Vpc {
         external::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
+            system_router_id: self.system_router_id,
             dns_name: self.dns_name.0,
         }
     }

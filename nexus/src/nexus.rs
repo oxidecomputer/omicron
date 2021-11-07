@@ -474,12 +474,10 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
-        let id = Uuid::new_v4();
         let _ = self
-            .db_datastore
             .project_create_vpc(
-                &id,
-                &db_project.id(),
+                &organization_name,
+                &new_project.identity.name.clone().into(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
                         name: external::Name::try_from("default").unwrap(),
@@ -1377,9 +1375,31 @@ impl Nexus {
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
         let id = Uuid::new_v4();
+        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
+        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
+        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
+        // its underlying system
+        let system_router = self
+            .vpc_create_router(
+                &organization_name,
+                &project_name,
+                &params.identity.name.clone().into(),
+                &VpcRouterCreateParams {
+                    identity: IdentityMetadataCreateParams {
+                        name: "system".try_into().unwrap(),
+                        description: "Routes are automatically added to this router as vpc subnets are created".into(),
+                    },
+                },
+            )
+            .await?;
         let vpc = self
             .db_datastore
-            .project_create_vpc(&id, &project_id, params)
+            .project_create_vpc(
+                &id,
+                &project_id,
+                &system_router.identity.id,
+                params,
+            )
             .await?;
         Ok(vpc.into())
     }
@@ -1434,6 +1454,9 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
+        // TODO: This should eventually call the networking subsystem to have it clean up
+        // and use a saga for atomicity
+        self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
         self.db_datastore.project_delete_vpc(&vpc.identity.id).await
     }
 

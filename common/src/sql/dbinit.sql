@@ -290,6 +290,7 @@ CREATE TABLE omicron.public.Vpc (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
+    system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL
 );
 

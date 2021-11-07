@@ -163,6 +163,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
+        system_router_id -> Uuid,
         dns_name -> Text,
     }
 }

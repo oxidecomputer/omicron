@@ -1107,6 +1107,9 @@ pub struct Vpc {
     /** id for the project containing this VPC */
     pub project_id: Uuid,
 
+    /// id for the system router where subnet default routes are registered
+    pub system_router_id: Uuid,
+
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
