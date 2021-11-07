@@ -39,9 +39,20 @@ pub enum Error {
      */
     #[error("Invalid Request: {message}")]
     InvalidRequest { message: String },
+    /**
+     * Authentication credentials were required but either missing or invalid.
+     * The HTTP status code is called "Unauthorized", but it's more accurate to
+     * call it "Unauthenticated".
+     */
+    #[error("Missing or invalid credentials")]
+    Unauthenticated { internal_message: String },
     /** The specified input field is not valid. */
     #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
+    /** The request is not authorized to perform the requested operation. */
+    #[error("Forbidden")]
+    Forbidden,
+
     /** The system encountered an unhandled operational error. */
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
@@ -72,8 +83,10 @@ impl Error {
 
             Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
+            | Error::Unauthenticated { .. }
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
+            | Error::Forbidden
             | Error::InternalError { .. } => false,
         }
     }
@@ -205,6 +218,17 @@ impl From<Error> for HttpError {
                 )
             }
 
+            Error::Unauthenticated { internal_message } => HttpError {
+                status_code: http::StatusCode::UNAUTHORIZED,
+                // TODO-polish We may want to rethink this error code.  This is
+                // what HTTP calls it, but it's confusing.
+                error_code: Some(String::from("Unauthorized")),
+                external_message: String::from(
+                    "credentials missing or invalid",
+                ),
+                internal_message,
+            },
+
             Error::InvalidRequest { message } => HttpError::for_bad_request(
                 Some(String::from("InvalidRequest")),
                 message,
@@ -218,6 +242,12 @@ impl From<Error> for HttpError {
                     message,
                 )
             }
+
+            Error::Forbidden => HttpError::for_client_error(
+                Some(String::from("Forbidden")),
+                http::StatusCode::FORBIDDEN,
+                String::from("Forbidden"),
+            ),
 
             Error::InternalError { internal_message } => {
                 HttpError::for_internal_error(internal_message)

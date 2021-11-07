@@ -1,10 +1,12 @@
 use dropshot::test_util::objects_post;
+use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use std::convert::TryFrom;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -20,17 +22,27 @@ pub async fn create_organization(
     client: &ClientTestContext,
     organization_name: &str,
 ) -> Organization {
-    objects_post(
-        &client,
-        "/organizations",
-        OrganizationCreateParams {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(organization_name).unwrap(),
-                description: "an org".to_string(),
-            },
+    let input = OrganizationCreateParams {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(organization_name).unwrap(),
+            description: "an org".to_string(),
         },
-    )
-    .await
+    };
+    let authn_header = http::HeaderValue::from_static(
+        omicron_nexus::authn::TEST_USER_UUID_PRIVILEGED,
+    );
+    let uri = client.url("/organizations");
+    let request = hyper::Request::builder()
+        .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header)
+        .method(Method::POST)
+        .uri(uri)
+        .body(serde_json::to_string(&input).unwrap().into())
+        .expect("attempted to construct invalid test request");
+    let mut response = client
+        .make_request_with_request(request, StatusCode::CREATED)
+        .await
+        .expect("failed to make request");
+    read_json::<Organization>(&mut response).await
 }
 
 pub async fn create_project(

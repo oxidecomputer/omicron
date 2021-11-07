@@ -2,7 +2,9 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authz;
 use crate::config;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
@@ -149,6 +151,7 @@ impl Nexus {
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
+        authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let my_sec_id = db::SecId::from(config.id);
@@ -177,8 +180,12 @@ impl Nexus {
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        let recovery_task = db::recover(
+        let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
+            authz,
+        );
+        let recovery_task = db::recover(
+            opctx,
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
             db_datastore,
@@ -407,10 +414,11 @@ impl Nexus {
 
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         new_organization: &OrganizationCreateParams,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(db_org).await
+        self.db_datastore.organization_create(opctx, db_org).await
     }
 
     pub async fn organization_fetch(

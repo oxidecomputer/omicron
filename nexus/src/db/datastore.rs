@@ -22,6 +22,8 @@ use super::collection_insert::{DatastoreCollection, InsertError};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
+use crate::authz;
+use crate::context::OpContext;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -65,8 +67,22 @@ impl DataStore {
         DataStore { pool }
     }
 
+    // TODO-security This should be deprecated in favor of pool_authorized(),
+    // which gives us the chance to do a minimal security check before hitting
+    // the database.  Eventually, this function should only be used for doing
+    // authentication in the first place (since we can't do an authz check in
+    // that case).
     fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
         self.pool.pool()
+    }
+
+    fn pool_authorized(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<&bb8::Pool<ConnectionManager<diesel::PgConnection>>, Error>
+    {
+        opctx.authorize(authz::Action::Query, authz::DATABASE)?;
+        Ok(self.pool.pool())
     }
 
     /// Stores a new sled in the database.
@@ -130,15 +146,18 @@ impl DataStore {
     /// Create a organization
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         organization: Organization,
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
+
+        opctx.authorize(authz::Action::CreateOrganization, authz::FLEET)?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
             .values(organization)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
@@ -1754,6 +1773,7 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
@@ -1771,6 +1791,7 @@ mod test {
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_collection_not_present");
+        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -1783,7 +1804,7 @@ mod test {
             },
         });
         let organization =
-            datastore.organization_create(organization).await.unwrap();
+            datastore.organization_create(&opctx, organization).await.unwrap();
 
         let project = Project::new(
             organization.id(),
