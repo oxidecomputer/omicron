@@ -1676,7 +1676,7 @@ mod test {
 
         let organization = Organization::new(OrganizationCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from("org".to_string()).unwrap(),
+                name: "org".parse().unwrap(),
                 description: "desc".to_string(),
             },
         });
@@ -1687,7 +1687,7 @@ mod test {
             organization.id(),
             ProjectCreateParams {
                 identity: IdentityMetadataCreateParams {
-                    name: Name::try_from("project".to_string()).unwrap(),
+                    name: "project".parse().unwrap(),
                     description: "desc".to_string(),
                 },
             },

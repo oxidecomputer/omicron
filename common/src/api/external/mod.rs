@@ -29,6 +29,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /*
@@ -176,19 +177,11 @@ impl TryFrom<String> for Name {
     }
 }
 
-/**
- * Convenience parse function for literal strings, primarily for the test suite.
- */
-impl TryFrom<&str> for Name {
-    type Error = String;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Name::try_from(String::from(value))
-    }
-}
+impl FromStr for Name {
+    type Err = String;
 
-impl<'a> From<&'a Name> for &'a str {
-    fn from(n: &'a Name) -> Self {
-        n.as_str()
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Name::try_from(String::from(value))
     }
 }
 
@@ -263,7 +256,7 @@ impl Name {
      * `Error`.
      */
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        Name::try_from(value).map_err(|e| Error::InvalidValue {
+        value.parse().map_err(|e| Error::InvalidValue {
             label: String::from(label),
             message: e,
         })
@@ -1033,7 +1026,7 @@ impl From<steno::SagaView> for Saga {
             identity: IdentityMetadata {
                 /* TODO-cleanup See the note in Saga above. */
                 id: Uuid::from(s.id),
-                name: Name::try_from(format!("saga-{}", s.id)).unwrap(),
+                name: format!("saga-{}", s.id).parse().unwrap(),
                 description: format!("saga {}", s.id),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
@@ -1437,7 +1430,7 @@ mod test {
 
         for (input, expected_message) in error_cases {
             eprintln!("check name \"{}\" (expecting error)", input);
-            assert_eq!(Name::try_from(input).unwrap_err(), expected_message);
+            assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
         }
 
         /*
@@ -1448,7 +1441,7 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, Name::try_from(name).unwrap().as_str());
+            assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
     }
 
@@ -1456,7 +1449,7 @@ mod test {
     fn test_name_parse_from_param() {
         let result = Name::from_param(String::from("my-name"), "the_name");
         assert!(result.is_ok());
-        assert_eq!(result, Ok(Name::try_from("my-name").unwrap()));
+        assert_eq!(result, Ok("my-name".parse().unwrap()));
 
         let result = Name::from_param(String::from(""), "the_name");
         assert!(result.is_err());

@@ -66,8 +66,8 @@ async fn test_vpc_subnets() {
         Some(Ipv6Net("2001:db8::0/96".parse::<Ipv6Network>().unwrap()));
     let new_subnet = VpcSubnetCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(subnet_name).unwrap(),
-            description: String::from("it's below the net"),
+            name: subnet_name.parse().unwrap(),
+            description: "it's below the net".to_string(),
         },
         ipv4_block,
         ipv6_block,
@@ -131,8 +131,8 @@ async fn test_vpc_subnets() {
     // create second subnet
     let new_subnet = VpcSubnetCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(subnet2_name).unwrap(),
-            description: String::from("it's also below the net"),
+            name: subnet2_name.parse().unwrap(),
+            description: "it's also below the net".to_string(),
         },
         ipv4_block: None,
         ipv6_block: None,
@@ -155,8 +155,8 @@ async fn test_vpc_subnets() {
     // update first subnet
     let update_params = VpcSubnetUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: Some(Name::try_from("new-name").unwrap()),
-            description: Some(String::from("another description")),
+            name: Some("new-name".parse().unwrap()),
+            description: Some("another description".to_string()),
         },
         ipv4_block: None,
         ipv6_block: None,

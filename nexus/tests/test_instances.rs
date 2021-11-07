@@ -96,12 +96,12 @@ async fn test_instances_create_reboot_halt() {
     let instance_url = format!("{}/just-rainsticks", url_instances);
     let new_instance = InstanceCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from("just-rainsticks").unwrap(),
-            description: String::from("sells rainsticks"),
+            name: "just-rainsticks".parse().unwrap(),
+            description: "sells rainsticks".to_string(),
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_mebibytes_u32(256),
-        hostname: String::from("rainsticks"),
+        hostname: "rainsticks".to_string(),
     };
     let instance: Instance =
         objects_post(&client, &url_instances, new_instance.clone()).await;
@@ -376,8 +376,8 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
     let instance_url = format!("{}/just-rainsticks", url_instances);
     let new_instance = InstanceCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from("just-rainsticks").unwrap(),
-            description: String::from("sells rainsticks"),
+            name: "just-rainsticks".parse().unwrap(),
+            description: "sells rainsticks".to_string(),
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_mebibytes_u32(256),

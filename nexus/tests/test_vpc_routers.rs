@@ -61,8 +61,8 @@ async fn test_vpc_routers() {
     /* Create a VPC Router. */
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router_name).unwrap(),
-            description: String::from("it's not really a router"),
+            name: router_name.parse().unwrap(),
+            description: "it's not really a router".to_string(),
         },
     };
     let router: VpcRouter =
@@ -104,8 +104,8 @@ async fn test_vpc_routers() {
     // create second router
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router2_name).unwrap(),
-            description: String::from("it's also not really a router"),
+            name: router2_name.parse().unwrap(),
+            description: "it's also not really a router".to_string(),
         },
     };
     let router2: VpcRouter =
@@ -124,8 +124,8 @@ async fn test_vpc_routers() {
     // update first router
     let update_params = VpcRouterUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: Some(Name::try_from("new-name").unwrap()),
-            description: Some(String::from("another description")),
+            name: Some("new-name".parse().unwrap()),
+            description: Some("another description".to_string()),
         },
     };
     client

@@ -78,7 +78,7 @@ async fn try_create_organization(
     let organization_name = "a-crime-family";
     let input = OrganizationCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(organization_name).unwrap(),
+            name: organization_name.parse().unwrap(),
             description: "an org".to_string(),
         },
     };

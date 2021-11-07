@@ -72,7 +72,7 @@ async fn test_disks() {
     /* Create a disk. */
     let new_disk = DiskCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from("just-rainsticks").unwrap(),
+            name: "just-rainsticks".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
@@ -125,7 +125,7 @@ async fn test_disks() {
         &url_instances,
         InstanceCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from("just-rainsticks").unwrap(),
+                name: "just-rainsticks".parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
             ncpus: InstanceCpuCount(4),
@@ -240,12 +240,12 @@ async fn test_disks() {
         &url_instances,
         InstanceCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from("instance2").unwrap(),
-                description: String::from("instance2"),
+                name: "instance2".parse().unwrap(),
+                description: "instance2".to_string(),
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
-            hostname: String::from("instance2"),
+            hostname: "instance2".to_string(),
         },
     )
     .await;
