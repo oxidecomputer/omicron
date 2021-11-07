@@ -46,6 +46,14 @@ panic = "abort"
 #steno = { path = "../steno" }
 
 #
+# Local client generation during development.
+#
+#[patch."https://github.com/oxidecomputer/progenitor"]
+#progenitor = { path = "../progenitor/progenitor" }
+#[patch."https://github.com/oxidecomputer/typify"]
+#typify = { path = "../typify/typify" }
+
+#
 # We maintain a fork of pq-sys to address upstream issues.  See the
 # README.oxide.md in the "oxide" branch of our fork for details.
 #
@@ -53,8 +61,3 @@ panic = "abort"
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
 
-[patch."https://github.com/oxidecomputer/progenitor"]
-progenitor = { path = "../progenitor/progenitor" }
-
-[patch."https://github.com/oxidecomputer/typify"]
-typify = { path = "../typify/typify" }

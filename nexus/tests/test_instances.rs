@@ -222,7 +222,7 @@ async fn test_instances_create_reboot_halt() {
     /*
      * Attempt to reboot the halted instance.  This should fail.
      */
-    let error = client
+    let _error = client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),
@@ -288,7 +288,7 @@ async fn test_instances_create_reboot_halt() {
             > instance.runtime.time_run_state_updated
     );
 
-    let error = client
+    let _error = client
         .make_request_error(
             Method::POST,
             &format!("{}/reboot", instance_url),

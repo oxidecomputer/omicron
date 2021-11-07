@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0.44"
 async-trait = "0.1.51"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -13,7 +14,10 @@ http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
 omicron-common = { path = "../common" }
+percent-encoding = "2.1.0"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+reqwest = "0.11.5"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
@@ -26,10 +30,6 @@ tokio = { version = "1.13", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"
-progenitor = { path = "../../progenitor/progenitor" }
-reqwest = "0.11.5"
-anyhow = "1.0.44"
-percent-encoding = "2.1.0"
 
 [dev-dependencies]
 expectorate = "1.0.4"
