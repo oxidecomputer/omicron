@@ -83,7 +83,7 @@ impl Server {
                 .await).map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {
-            warn!(log, "1 failed to contact nexus, will retry in {:?}", delay;
+            warn!(log, "failed to contact nexus, will retry in {:?}", delay;
                 "error" => ?error);
         };
         retry_notify(

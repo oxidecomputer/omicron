@@ -409,7 +409,7 @@ impl Oximeter {
         let log_notification_failure = |error, delay| {
             warn!(
                 log,
-                "3 failed to contact nexus, will retry in {:?}", delay;
+                "failed to contact nexus, will retry in {:?}", delay;
                 "error" => ?error
             );
         };

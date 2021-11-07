@@ -7,7 +7,6 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
-use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -143,36 +142,6 @@ impl Error {
      */
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
-    }
-
-    /**
-     * Given an error returned in an HTTP response, reconstitute an `Error`
-     * that describes that error.  This is intended for use when returning an
-     * error from one control plane service to another while preserving
-     * information about the error.  If the error is of an unknown kind or
-     * doesn't match the expected form, an internal error will be returned.
-     */
-    pub fn from_response(
-        error_message_base: String,
-        error_response: HttpErrorResponseBody,
-    ) -> Error {
-        /*
-         * We currently only handle the simple case of an InvalidRequest because
-         * that's the only case that we currently use.  If we want to preserve
-         * others of these (e.g., ObjectNotFound), we will probably need to
-         * include more information in the HttpErrorResponseBody.
-         */
-        match error_response.error_code.as_deref() {
-            Some("InvalidRequest") => {
-                Error::InvalidRequest { message: error_response.message }
-            }
-            _ => Error::InternalError {
-                internal_message: format!(
-                    "{}: unknown error from dependency: {:?}",
-                    error_message_base, error_response
-                ),
-            },
-        }
     }
 }
 
