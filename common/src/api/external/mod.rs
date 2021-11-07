@@ -1294,6 +1294,11 @@ pub struct VpcSubnetUpdateParams {
     pub router_id: Option<Uuid>,
 }
 
+/// Defines the type of a router as set out in RFD-21. A `System`
+/// router is automatically created when a VPC is created. A `Custom`
+/// router is any that's created by a user.
+///
+/// See https://rfd.shared.oxide.computer/rfd/0021#concept-router for more details.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum VpcRouterKind {
     System,
@@ -1307,6 +1312,7 @@ pub struct VpcRouter {
     /// common identifying metadata
     pub identity: IdentityMetadata,
 
+    /// Describes the kind of router (either System or Custom). Set at creation. `read-only`
     pub kind: VpcRouterKind,
 
     /// The VPC to which the router belongs.
@@ -1408,6 +1414,8 @@ impl Display for NetworkTarget {
     }
 }
 
+/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
+/// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum RouteTarget {
     Ip(IpAddr),
@@ -1473,6 +1481,9 @@ impl Display for RouteTarget {
     }
 }
 
+/// A subset of [`NetworkTarget`], `RouteDestination` specifies
+/// the kind of network traffic that will be matched to be forwarded
+/// to the [`RouteTarget`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum RouteDestination {
     Ip(IpAddr),
@@ -1559,8 +1570,6 @@ pub enum RouterRouteKind {
 }
 
 ///  A route defines a rule that governs where traffic should be sent based on its destination.
-///
-/// `read-only`
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
@@ -1569,6 +1578,7 @@ pub struct RouterRoute {
     /// The VPC Router to which the route belongs.
     pub router_id: Uuid,
 
+    /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
 
     pub target: RouteTarget,
