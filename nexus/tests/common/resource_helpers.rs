@@ -5,10 +5,8 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-use std::convert::TryFrom;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::Organization;
 use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::Project;

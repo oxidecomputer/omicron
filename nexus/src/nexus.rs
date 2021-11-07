@@ -60,7 +60,7 @@ use omicron_common::SledAgentClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

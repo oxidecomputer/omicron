@@ -5,7 +5,6 @@
 use super::model::Name;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
-use std::convert::TryFrom;
 use uuid::Uuid;
 
 /// Identity-related accessors for resources.

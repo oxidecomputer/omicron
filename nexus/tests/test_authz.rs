@@ -1,7 +1,7 @@
 //! Basic end-to-end tests for authorization
 use dropshot::HttpErrorResponseBody;
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+    IdentityMetadataCreateParams, OrganizationCreateParams,
 };
 
 pub mod common;

@@ -20,7 +20,6 @@ use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Sled;
-use std::convert::TryFrom;
 use uuid::Uuid;
 
 pub mod common;

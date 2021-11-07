@@ -1657,11 +1657,10 @@ mod test {
     use crate::db::DataStore;
     use chrono::{Duration, Utc};
     use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+        Error, IdentityMetadataCreateParams, OrganizationCreateParams,
         ProjectCreateParams,
     };
     use omicron_test_utils::dev;
-    use std::convert::TryFrom;
     use std::sync::Arc;
     use uuid::Uuid;
 

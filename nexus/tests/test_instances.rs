@@ -10,11 +10,9 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Name;
 use omicron_common::SledAgentTestInterfaces as _;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
-use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 

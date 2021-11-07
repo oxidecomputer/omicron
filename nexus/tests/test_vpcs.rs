@@ -1,10 +1,8 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcUpdateParams;
-use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
