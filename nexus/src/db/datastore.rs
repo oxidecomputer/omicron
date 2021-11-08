@@ -162,6 +162,7 @@ impl DataStore {
         })
     }
 
+    /// Stores a new dataset in the database.
     pub async fn dataset_upsert(
         &self,
         dataset: Dataset,
@@ -180,6 +181,7 @@ impl DataStore {
                     dsl::pool_id.eq(excluded(dsl::id)),
                     dsl::ip.eq(excluded(dsl::ip)),
                     dsl::port.eq(excluded(dsl::port)),
+                    dsl::flavor.eq(excluded(dsl::flavor)),
                 )),
         )
         .insert_and_get_result_async(self.pool())

@@ -9,11 +9,14 @@ use crate::illumos::{
     zpool::ZpoolInfo,
 };
 use crate::vnic::{interface_name, IdAllocator, Vnic};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
 use omicron_common::api::internal::nexus::{
     DatasetFlavor, DatasetPostRequest, ZpoolPostRequest,
 };
+use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -153,75 +156,103 @@ impl StorageWorker {
         Zones::create_storage_base(&self.log)?;
         info!(self.log, "StorageWorker creating storage base zone - DONE");
 
-        while let Some(pool_name) = self.new_pools_rx.recv().await {
-            let mut pools = self.pools.lock().await;
-            // TODO: when would this not exist? It really should...
-            let pool = pools.get_mut(&pool_name).unwrap();
+        let mut futures = FuturesUnordered::new();
 
-            info!(
-                &self.log,
-                "Storage manager processing zpool: {:#?}", pool.info
-            );
+        tokio::select! {
+            _ = futures.next() => {}
+            Some(pool_name) = self.new_pools_rx.recv() => {
+                let mut pools = self.pools.lock().await;
+                // TODO: when would this not exist? It really should...
+                let pool = pools.get_mut(&pool_name).unwrap();
 
-            let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
-                Error::InternalError {
-                    message: format!("Invalid pool size: {}", e),
+                info!(
+                    &self.log,
+                    "Storage manager processing zpool: {:#?}", pool.info
+                );
+
+                let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
+                    Error::InternalError {
+                        message: format!("Invalid pool size: {}", e),
+                    }
+                })?;
+
+                // TODO: Notify nexus
+                // TODO: retry on failure
+                let log = self.log.clone();
+                let pool_id = pool.id();
+                let sled_id = self.sled_id;
+                let nexus_client = self.nexus_client.clone();
+                let zpool_post_fut = async move {
+                    let fut = || async {
+                        let _ = nexus_client
+                            .zpool_post(pool_id, sled_id, ZpoolPostRequest { size })
+                            .await?;
+                        Ok(())
+                    };
+
+                    let log_post_failure = |error, delay| {
+                        warn!(
+                            log,
+                            "failed to post zpool to nexus, will retry in {:?}", delay;
+                            "error" => ?error,
+                        );
+                    };
+
+                    backoff::retry_notify(
+                        backoff::internal_service_policy(),
+                        fut,
+                        log_post_failure,
+                    ).await
+                };
+                futures.push(zpool_post_fut);
+
+                // For now, we place all "expected" filesystems on each new zpool
+                // we see. The decision of "whether or not to actually use the
+                // filesystem" is a decision left to both the bootstrapping protocol
+                // and Nexus.
+                //
+                // If we had a better signal - from the bootstrapping system - about
+                // where Cockroach nodes should exist, we could be more selective
+                // about this placement.
+
+                // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
+                // and start zones for each of them.
+                for partition in PARTITIONS {
+                    let name = format!("{}/{}", pool.info.name(), partition.name);
+
+                    info!(&self.log, "Ensuring filesystem {} exists", name);
+                    let id = StorageWorker::ensure_filesystem_with_id(&name)?;
+
+                    info!(&self.log, "Creating zone for {}", name);
+                    let network = self
+                        .create_zone(
+                            partition.zone_prefix,
+                            &name,
+                            partition.data_directory,
+                            partition.svc_directory,
+                        )
+                        .await?;
+
+                    let address = SocketAddr::new(network.ip(), partition.port);
+                    info!(&self.log, "Created zone with address {}", address);
+                    pool.add_filesystem(id, Filesystem { name, address });
+
+                    // TODO: Retry on failure
+                    // TODO: Apply allocation advice from Nexus (setting reservation /
+                    // quota properties).
+                    let _ = self
+                        .nexus_client
+                        .dataset_post(
+                            id,
+                            pool.id(),
+                            DatasetPostRequest {
+                                address,
+                                flavor: partition.flavor,
+                            },
+                        )
+                        .await?;
                 }
-            })?;
-
-            // TODO: Notify nexus
-            // TODO: retry on failure
-            let _ = self
-                .nexus_client
-                .zpool_post(pool.id(), self.sled_id, ZpoolPostRequest { size })
-                .await?;
-
-            // For now, we place all "expected" filesystems on each new zpool
-            // we see. The decision of "whether or not to actually use the
-            // filesystem" is a decision left to both the bootstrapping protocol
-            // and Nexus.
-            //
-            // If we had a better signal - from the bootstrapping system - about
-            // where Cockroach nodes should exist, we could be more selective
-            // about this placement.
-
-            // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
-            // and start zones for each of them.
-            for partition in PARTITIONS {
-                let name = format!("{}/{}", pool.info.name(), partition.name);
-
-                info!(&self.log, "Ensuring filesystem {} exists", name);
-                let id = StorageWorker::ensure_filesystem_with_id(&name)?;
-
-                info!(&self.log, "Creating zone for {}", name);
-                let network = self
-                    .create_zone(
-                        partition.zone_prefix,
-                        &name,
-                        partition.data_directory,
-                        partition.svc_directory,
-                    )
-                    .await?;
-
-                let address = SocketAddr::new(network.ip(), partition.port);
-                info!(&self.log, "Created zone with address {}", address);
-                pool.add_filesystem(id, Filesystem { name, address });
-
-                // TODO: Retry on failure
-                // TODO: Apply allocation advice from Nexus (setting reservation /
-                // quota properties).
-                let _ = self
-                    .nexus_client
-                    .dataset_post(
-                        id,
-                        pool.id(),
-                        DatasetPostRequest {
-                            address,
-                            flavor: partition.flavor,
-                        },
-                    )
-                    .await?;
-            }
+            },
         }
         Ok(())
     }
