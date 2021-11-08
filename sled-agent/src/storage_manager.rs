@@ -138,6 +138,8 @@ impl StorageWorker {
         Ok(id)
     }
 
+    // Small wrapper around `Self::do_work_internal` that ensures we always
+    // emit info to the log when we exit.
     async fn do_work(&mut self) -> Result<(), Error> {
         self.do_work_internal()
             .await
@@ -182,14 +184,19 @@ impl StorageWorker {
                 let pool_id = pool.id();
                 let sled_id = self.sled_id;
                 let nexus_client = self.nexus_client.clone();
-                let zpool_post_fut = async move {
-                    let fut = || async {
+
+                let zpool_post_with_retry_fut = async move {
+                    // This is the future we actually want to perform. Note that
+                    // it's idempotent - it may be called repeatedly upon
+                    // failure.
+                    let zpool_post_fut = || async {
                         let _ = nexus_client
                             .zpool_post(pool_id, sled_id, ZpoolPostRequest { size })
                             .await?;
                         Ok(())
                     };
 
+                    // This is retry logic for `zpool_post_fut`.
                     let log_post_failure = |error, delay| {
                         warn!(
                             log,
@@ -197,14 +204,13 @@ impl StorageWorker {
                             "error" => ?error,
                         );
                     };
-
                     backoff::retry_notify(
                         backoff::internal_service_policy(),
-                        fut,
+                        zpool_post_fut,
                         log_post_failure,
                     ).await
                 };
-                futures.push(zpool_post_fut);
+                futures.push(zpool_post_with_retry_fut);
 
                 // For now, we place all "expected" filesystems on each new zpool
                 // we see. The decision of "whether or not to actually use the
