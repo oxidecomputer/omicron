@@ -66,9 +66,7 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::Name::try_from(String::from_sql(bytes)?)
-            .map(Name)
-            .map_err(|e| e.into())
+        String::from_sql(bytes)?.parse().map(Name).map_err(|e| e.into())
     }
 }
 
