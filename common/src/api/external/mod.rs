@@ -187,6 +187,12 @@ impl FromStr for Name {
     }
 }
 
+impl<'a> From<&'a Name> for &'a str {
+    fn from(n: &'a Name) -> Self {
+        n.as_str()
+    }
+}
+
 /**
  * `Name` instances are comparable like Strings, primarily so that they can
  * be used as keys in trees.
