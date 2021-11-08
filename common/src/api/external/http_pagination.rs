@@ -516,7 +516,6 @@ mod test {
     use schemars::schema_for;
     use serde::Serialize;
     use serde_json::to_string_pretty;
-    use std::convert::TryFrom;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -576,7 +575,7 @@ mod test {
         let scan_by_nameid_id =
             ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
-        let name = Name::try_from(String::from("bort")).unwrap();
+        let name: Name = "bort".parse().unwrap();
         let examples = vec![
             /* scan parameters only */
             ("scan by id ascending", to_string_pretty(&scan_by_id).unwrap()),
@@ -646,7 +645,7 @@ mod test {
     fn list_of_things() -> Vec<MyThing> {
         (0..20)
             .map(|i| {
-                let name = Name::try_from(format!("thing{}", i)).unwrap();
+                let name = format!("thing{}", i).parse().unwrap();
                 let now = Utc::now();
                 MyThing {
                     identity: IdentityMetadata {
@@ -746,8 +745,8 @@ mod test {
             &list,
             &scan,
             "sort_by=name-ascending",
-            &Name::try_from(String::from("thing0")).unwrap(),
-            &Name::try_from(String::from("thing19")).unwrap(),
+            &"thing0".parse().unwrap(),
+            &"thing19".parse().unwrap(),
             &scan,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
@@ -845,10 +844,8 @@ mod test {
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
         let list = list_of_things();
-        let thing0_marker = NameOrIdMarker::Name(
-            Name::try_from(String::from("thing0")).unwrap(),
-        );
-        let thinglast_name = Name::try_from(String::from("thing19")).unwrap();
+        let thing0_marker = NameOrIdMarker::Name("thing0".parse().unwrap());
+        let thinglast_name: Name = "thing19".parse().unwrap();
         let thinglast_marker = NameOrIdMarker::Name(thinglast_name.clone());
         let (p0, p1) = test_scan_param_common(
             &list,

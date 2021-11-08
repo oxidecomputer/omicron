@@ -60,7 +60,7 @@ use omicron_common::SledAgentClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -480,12 +480,12 @@ impl Nexus {
                 &new_project.identity.name.clone().into(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
-                        name: external::Name::try_from("default").unwrap(),
+                        name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
                     },
                     // TODO-robustness this will need to be None if we decide to handle
                     // the logic around name and dns_name by making dns_name optional
-                    dns_name: external::Name::try_from("default").unwrap(),
+                    dns_name: "default".parse().unwrap(),
                 },
             )
             .await?;

@@ -5,7 +5,6 @@
 use super::model::Name;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
-use std::convert::TryFrom;
 use uuid::Uuid;
 
 /// Identity-related accessors for resources.
@@ -50,7 +49,7 @@ pub trait Asset {
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
             id: self.id(),
-            name: external::Name::try_from("no-name").unwrap(),
+            name: "no-name".parse().unwrap(),
             description: "no description".to_string(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),

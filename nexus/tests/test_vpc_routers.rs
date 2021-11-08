@@ -2,11 +2,9 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterUpdateParams;
-use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -61,8 +59,8 @@ async fn test_vpc_routers() {
     /* Create a VPC Router. */
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router_name).unwrap(),
-            description: String::from("it's not really a router"),
+            name: router_name.parse().unwrap(),
+            description: "it's not really a router".to_string(),
         },
     };
     let router: VpcRouter =
@@ -104,8 +102,8 @@ async fn test_vpc_routers() {
     // create second custom router
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router2_name).unwrap(),
-            description: String::from("it's also not really a router"),
+            name: router2_name.parse().unwrap(),
+            description: "it's also not really a router".to_string(),
         },
     };
     let router2: VpcRouter =
@@ -124,8 +122,8 @@ async fn test_vpc_routers() {
     // update first router
     let update_params = VpcRouterUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: Some(Name::try_from("new-name").unwrap()),
-            description: Some(String::from("another description")),
+            name: Some("new-name".parse().unwrap()),
+            description: Some("another description".to_string()),
         },
     };
     client
