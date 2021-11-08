@@ -71,7 +71,6 @@ async fn test_vpc_subnets() {
         },
         ipv4_block,
         ipv6_block,
-        router_id: None,
     };
     let subnet: VpcSubnet =
         objects_post(&client, &subnets_url, new_subnet.clone()).await;
@@ -137,7 +136,6 @@ async fn test_vpc_subnets() {
         },
         ipv4_block: None,
         ipv6_block: None,
-        router_id: None,
     };
     let subnet2: VpcSubnet =
         objects_post(&client, &subnets_url, new_subnet.clone()).await;
@@ -162,7 +160,6 @@ async fn test_vpc_subnets() {
         },
         ipv4_block: None,
         ipv6_block: None,
-        router_id: None,
     };
     client
         .make_request(

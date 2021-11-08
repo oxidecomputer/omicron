@@ -871,7 +871,6 @@ pub struct Vpc {
     identity: VpcIdentity,
 
     pub project_id: Uuid,
-    pub system_router_id: Uuid,
     pub dns_name: Name,
 }
 
@@ -879,16 +878,10 @@ impl Vpc {
     pub fn new(
         vpc_id: Uuid,
         project_id: Uuid,
-        system_router_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self {
-            identity,
-            project_id,
-            system_router_id,
-            dns_name: params.dns_name.into(),
-        }
+        Self { identity, project_id, dns_name: params.dns_name.into() }
     }
 }
 
@@ -982,53 +975,6 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "custom_types::Enum"]
-pub struct VpcRouterKind(pub external::VpcRouterKind);
-
-impl VpcRouterKind {
-    pub fn new(state: external::VpcRouterKind) -> Self {
-        Self(state)
-    }
-
-    pub fn state(&self) -> &external::VpcRouterKind {
-        &self.0
-    }
-}
-
-impl<DB> ToSql<custom_types::Enum, DB> for VpcRouterKind
-where
-    DB: Backend,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        match *self.state() {
-            external::VpcRouterKind::System => out.write_all(b"system")?,
-            external::VpcRouterKind::Custom => out.write_all(b"custom")?,
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl<DB> FromSql<custom_types::Enum, DB> for VpcRouterKind
-where
-    DB: Backend + for<'a> BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        match DB::as_bytes(bytes) {
-            b"system" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::System))
-            }
-            b"custom" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::Custom))
-            }
-            _ => Err("Unrecognized enum variant for VpcRouterKind".into()),
-        }
-    }
-}
-
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpcrouter"]
 pub struct VpcRouter {
@@ -1036,28 +982,22 @@ pub struct VpcRouter {
     identity: VpcRouterIdentity,
 
     pub vpc_id: Uuid,
-    pub kind: VpcRouterKind,
 }
 
 impl VpcRouter {
     pub fn new(
         router_id: Uuid,
         vpc_id: Uuid,
-        kind: external::VpcRouterKind,
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind::new(kind) }
+        Self { identity, vpc_id }
     }
 }
 
 impl Into<external::VpcRouter> for VpcRouter {
     fn into(self) -> external::VpcRouter {
-        external::VpcRouter {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            kind: self.kind.state().clone(),
-        }
+        external::VpcRouter { identity: self.identity(), vpc_id: self.vpc_id }
     }
 }
 

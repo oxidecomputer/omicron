@@ -1297,7 +1297,6 @@ pub struct VpcSubnetCreateParams {
     pub identity: IdentityMetadataCreateParams,
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
-    pub router_id: Option<Uuid>,
 }
 
 /**
@@ -1310,18 +1309,6 @@ pub struct VpcSubnetUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
-    pub router_id: Option<Uuid>,
-}
-
-/// Defines the type of a router as set out in RFD-21. A `System`
-/// router is automatically created when a VPC is created. A `Custom`
-/// router is any that's created by a user.
-///
-/// See https://rfd.shared.oxide.computer/rfd/0021#concept-router for more details.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum VpcRouterKind {
-    System,
-    Custom,
 }
 
 /// A VPC router defines a series of rules that indicate where traffic
@@ -1330,9 +1317,6 @@ pub enum VpcRouterKind {
 pub struct VpcRouter {
     /// common identifying metadata
     pub identity: IdentityMetadata,
-
-    /// Describes the kind of router (either System or Custom). Set at creation. `read-only`
-    pub kind: VpcRouterKind,
 
     /// The VPC to which the router belongs.
     pub vpc_id: Uuid,
@@ -1695,7 +1679,7 @@ mod test {
 
         for (input, expected_message) in error_cases {
             eprintln!("check name \"{}\" (expecting error)", input);
-            assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
+            assert_eq!(Name::try_from(input).unwrap_err(), expected_message);
         }
 
         /*
@@ -1706,7 +1690,7 @@ mod test {
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
-            assert_eq!(name, name.parse::<Name>().unwrap().as_str());
+            assert_eq!(name, Name::try_from(name).unwrap().as_str());
         }
     }
 
@@ -1714,7 +1698,7 @@ mod test {
     fn test_name_parse_from_param() {
         let result = Name::from_param(String::from("my-name"), "the_name");
         assert!(result.is_ok());
-        assert_eq!(result, Ok("my-name".parse().unwrap()));
+        assert_eq!(result, Ok(Name::try_from("my-name").unwrap()));
 
         let result = Name::from_param(String::from(""), "the_name");
         assert!(result.is_err());

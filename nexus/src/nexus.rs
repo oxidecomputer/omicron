@@ -44,7 +44,6 @@ use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
@@ -1380,32 +1379,9 @@ impl Nexus {
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
         let id = Uuid::new_v4();
-        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
-        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
-        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
-        // its underlying system
-        let system_router = self
-            .vpc_create_router(
-                &organization_name,
-                &project_name,
-                &params.identity.name.clone().into(),
-                &VpcRouterKind::System,
-                &VpcRouterCreateParams {
-                    identity: IdentityMetadataCreateParams {
-                        name: "system".try_into().unwrap(),
-                        description: "Routes are automatically added to this router as vpc subnets are created".into(),
-                    },
-                },
-            )
-            .await?;
         let vpc = self
             .db_datastore
-            .project_create_vpc(
-                &id,
-                &project_id,
-                &system_router.identity.id,
-                params,
-            )
+            .project_create_vpc(&id, &project_id, params)
             .await?;
         Ok(vpc.into())
     }
@@ -1601,7 +1577,6 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        kind: &VpcRouterKind,
         params: &VpcRouterCreateParams,
     ) -> CreateResult<VpcRouter> {
         let vpc = self
@@ -1610,7 +1585,7 @@ impl Nexus {
         let id = Uuid::new_v4();
         let router = self
             .db_datastore
-            .vpc_create_router(&id, &vpc.identity.id, kind, params)
+            .vpc_create_router(&id, &vpc.identity.id, params)
             .await?;
         Ok(router.into())
     }
