@@ -42,7 +42,7 @@ impl Zfs {
         if let Ok(output) = execute(cmd) {
             let stdout = String::from_utf8(output.stdout).map_err(|e| {
                 Error::InternalError {
-                    message: format!(
+                    internal_message: format!(
                         "Cannot parse 'zfs list' output as UTF-8: {}",
                         e
                     ),
@@ -51,7 +51,7 @@ impl Zfs {
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if values != &[name, "filesystem", &mountpoint.to_string()] {
                 return Err(Error::InternalError {
-                    message: format!(
+                    internal_message: format!(
                         "{} exists, but has unexpected values: {:?}",
                         name, values
                     ),
@@ -107,7 +107,7 @@ impl Zfs {
         let output = execute(cmd)?;
         let stdout = String::from_utf8(output.stdout).map_err(|e| {
             Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Cannot parse 'zfs get' output as UTF-8: {}",
                     e
                 ),
@@ -116,7 +116,7 @@ impl Zfs {
         let value = stdout.trim();
         if value == "-" {
             return Err(Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Property {} does not exist for {}",
                     name, filesystem_name
                 ),

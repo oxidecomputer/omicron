@@ -2,6 +2,7 @@
  * Handles recovery of sagas
  */
 
+use crate::context::OpContext;
 use crate::db;
 use futures::{future::BoxFuture, TryFutureExt};
 use omicron_common::api::external::DataPageParams;
@@ -64,7 +65,7 @@ impl Future for CompletionTask {
 /// and resumed, and itself returns a [`CompletionTask`] which completes
 /// when those resumed sagas have finished.
 pub fn recover<T>(
-    log: slog::Logger,
+    opctx: OpContext,
     sec_id: db::SecId,
     uctx: Arc<T>,
     datastore: Arc<db::DataStore>,
@@ -78,7 +79,7 @@ where
     T: Send + Sync + fmt::Debug + 'static,
 {
     let join_handle = tokio::spawn(async move {
-        info!(&log, "start saga recovery");
+        info!(&opctx.log, "start saga recovery");
 
         /*
          * We perform the initial list of sagas using a standard retry policy.
@@ -100,13 +101,13 @@ where
         let found_sagas = retry_notify(
             internal_service_policy(),
             || async {
-                list_unfinished_sagas(&log, &datastore, &sec_id)
+                list_unfinished_sagas(&opctx, &datastore, &sec_id)
                     .await
                     .map_err(BackoffError::Transient)
             },
             |error, duration| {
                 warn!(
-                    &log,
+                    &opctx.log,
                     "failed to list sagas (will retry after {:?}): {:#}",
                     duration,
                     error
@@ -116,7 +117,7 @@ where
         .await
         .unwrap();
 
-        info!(&log, "listed sagas ({} total)", found_sagas.len());
+        info!(&opctx.log, "listed sagas ({} total)", found_sagas.len());
 
         let recovery_futures = found_sagas.into_iter().map(|saga| async {
             /*
@@ -133,15 +134,22 @@ where
              */
             /* TODO-debug want visibility into "abandoned" sagas */
             let saga_id: steno::SagaId = saga.id.into();
-            recover_saga(&log, &uctx, &datastore, &sec_client, templates, saga)
-                .map_err(|error| {
-                    warn!(
-                        &log,
-                        "failed to recover saga {}: {:#}", saga_id, error
-                    );
-                    error
-                })
-                .await
+            recover_saga(
+                &opctx,
+                &uctx,
+                &datastore,
+                &sec_client,
+                templates,
+                saga,
+            )
+            .map_err(|error| {
+                warn!(
+                    &opctx.log,
+                    "failed to recover saga {}: {:#}", saga_id, error
+                );
+                error
+            })
+            .await
         });
 
         let mut completion_futures = vec![];
@@ -190,11 +198,11 @@ fn new_page_params(
 * consumers.
 */
 async fn list_unfinished_sagas(
-    log: &slog::Logger,
+    opctx: &OpContext,
     datastore: &db::DataStore,
     sec_id: &db::SecId,
 ) -> Result<Vec<db::saga_types::Saga>, Error> {
-    trace!(&log, "listing sagas");
+    trace!(&opctx.log, "listing sagas");
 
     // Read all sagas in batches.
     //
@@ -225,7 +233,7 @@ async fn list_unfinished_sagas(
 /// regardless of this future - it is for notification purposes only,
 /// and does not need to be polled.
 async fn recover_saga<T>(
-    log: &slog::Logger,
+    opctx: &OpContext,
     uctx: &Arc<T>,
     datastore: &db::DataStore,
     sec_client: &steno::SecClient,
@@ -237,7 +245,7 @@ where
 {
     let saga_id: steno::SagaId = saga.id.into();
     let template_name = saga.template_name.as_str();
-    trace!(log, "recovering saga: start";
+    trace!(opctx.log, "recovering saga: start";
         "saga_id" => saga_id.to_string(),
         "template_name" => template_name,
     );
@@ -247,12 +255,12 @@ where
             saga_id, template_name,
         ))
     })?;
-    trace!(log, "recovering saga: found template";
+    trace!(opctx.log, "recovering saga: found template";
         "saga_id" => ?saga_id,
         "template_name" => template_name
     );
     let log_events = load_saga_log(datastore, &saga).await?;
-    trace!(log, "recovering saga: loaded log";
+    trace!(opctx.log, "recovering saga: loaded log";
         "saga_id" => ?saga_id,
         "template_name" => template_name
     );
@@ -318,6 +326,7 @@ async fn load_saga_log(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::context::OpContext;
     use crate::db::test_utils::UnpluggableCockroachDbSecStore;
     use lazy_static::lazy_static;
     use omicron_test_utils::dev;
@@ -466,6 +475,8 @@ mod test {
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_unit_tests(log);
 
         // Create and start a saga.
         //
@@ -499,15 +510,14 @@ mod test {
         //
         // We update uctx to prevent the storage system from detaching again.
         sec_client.shutdown().await;
-        let sec_client =
-            steno::sec(log.new(o!("component" => "SEC")), storage.clone());
+        let sec_client = steno::sec(sec_log, storage.clone());
         uctx.storage.set_unplug(false);
         uctx.do_unplug.store(false, Ordering::SeqCst);
 
         // Recover the saga, observing that it re-runs operations and completes.
         let sec_client = Arc::new(sec_client);
         recover(
-            log,
+            opctx,
             sec_id,
             uctx.clone(),
             db_datastore,
@@ -538,6 +548,8 @@ mod test {
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_unit_tests(log);
 
         // Create and start a saga, which we expect to complete successfully.
         let saga_id = SagaId(Uuid::new_v4());
@@ -562,13 +574,12 @@ mod test {
         // Now we "reboot", by terminating the SEC and creating a new one
         // using the same storage system.
         sec_client.shutdown().await;
-        let sec_client =
-            steno::sec(log.new(o!("component" => "SEC")), storage.clone());
+        let sec_client = steno::sec(sec_log, storage.clone());
 
         // Recover the saga, observing that it does not replay the nodes.
         let sec_client = Arc::new(sec_client);
         recover(
-            log,
+            opctx,
             sec_id,
             uctx.clone(),
             db_datastore,

@@ -28,7 +28,7 @@ pub const COCKROACH_ZONE_PREFIX: &str = "oxz_cockroach_instance_";
 fn get_zone(name: &str) -> Result<Option<zone::Zone>, Error> {
     Ok(zone::Adm::list()
         .map_err(|e| Error::InternalError {
-            message: format!("Cannot list zones: {}", e),
+            internal_message: format!("Cannot list zones: {}", e),
         })?
         .into_iter()
         .find(|zone| zone.name() == name))
@@ -46,18 +46,24 @@ impl Zones {
             if zone.state() == zone::State::Running {
                 zone::Adm::new(name).halt().map_err(|e| {
                     Error::InternalError {
-                        message: format!("Cannot halt zone {}: {}", name, e),
+                        internal_message: format!(
+                            "Cannot halt zone {}: {}",
+                            name, e
+                        ),
                     }
                 })?;
             }
             zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
                 Error::InternalError {
-                    message: format!("Cannot uninstall {}: {}", name, e),
+                    internal_message: format!(
+                        "Cannot uninstall {}: {}",
+                        name, e
+                    ),
                 }
             })?;
             zone::Config::new(name).delete(/* force= */ true).run().map_err(
                 |e| Error::InternalError {
-                    message: format!("Cannot delete {}: {}", name, e),
+                    internal_message: format!("Cannot delete {}: {}", name, e),
                 },
             )?;
         }
@@ -109,14 +115,14 @@ impl Zones {
             cfg.add_device(device);
         }
         cfg.run().map_err(|e| Error::InternalError {
-            message: format!("Failed to create base zone: {}", e),
+            internal_message: format!("Failed to create base zone: {}", e),
         })?;
 
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
         zone::Adm::new(name).install(&[]).map_err(|e| {
             Error::InternalError {
-                message: format!("Failed to install base zone: {}", e),
+                internal_message: format!("Failed to install base zone: {}", e),
             }
         })?;
 
@@ -182,7 +188,7 @@ impl Zones {
             });
         }
         cfg.run().map_err(|e| Error::InternalError {
-            message: format!("Failed to create child zone: {}", e),
+            internal_message: format!("Failed to create child zone: {}", e),
         })?;
 
         Ok(())
@@ -218,7 +224,7 @@ impl Zones {
     /// Clones a zone (named `name`) from the base Propolis zone.
     fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
         zone::Adm::new(name).clone(base).map_err(|e| Error::InternalError {
-            message: format!("Failed to clone zone: {}", e),
+            internal_message: format!("Failed to clone zone: {}", e),
         })?;
         Ok(())
     }
@@ -236,7 +242,7 @@ impl Zones {
     /// Boots a zone (named `name`).
     pub fn boot(name: &str) -> Result<(), Error> {
         zone::Adm::new(name).boot().map_err(|e| Error::InternalError {
-            message: format!("Failed to boot zone: {}", e),
+            internal_message: format!("Failed to boot zone: {}", e),
         })?;
         Ok(())
     }
@@ -245,7 +251,7 @@ impl Zones {
     pub fn get() -> Result<Vec<zone::Zone>, Error> {
         Ok(zone::Adm::list()
             .map_err(|e| Error::InternalError {
-                message: format!("Failed to list zones: {}", e),
+                internal_message: format!("Failed to list zones: {}", e),
             })?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
@@ -284,12 +290,15 @@ impl Zones {
         let output = execute(cmd)?;
         String::from_utf8(output.stdout)
             .map_err(|e| Error::InternalError {
-                message: format!("Cannot parse ipadm output as UTF-8: {}", e),
+                internal_message: format!(
+                    "Cannot parse ipadm output as UTF-8: {}",
+                    e
+                ),
             })?
             .lines()
             .find_map(|s| s.parse().ok())
             .ok_or(Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Cannot find a valid IP address on {}",
                     interface
                 ),

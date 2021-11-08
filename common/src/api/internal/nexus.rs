@@ -96,7 +96,7 @@ impl FromStr for DatasetFlavor {
             "cockroach" => Ok(Cockroach),
             "clickhouse" => Ok(Clickhouse),
             _ => Err(Self::Err::InternalError {
-                message: format!("Unknown dataset flavor: {}", s),
+                internal_message: format!("Unknown dataset flavor: {}", s),
             }),
         }
     }

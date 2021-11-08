@@ -2,7 +2,9 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authz;
 use crate::config;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetFlavor;
@@ -13,6 +15,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
+use hex;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -57,6 +60,7 @@ use omicron_common::bail_unless;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
@@ -93,6 +97,11 @@ pub trait TestInterfaces {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
+
+    async fn session_create_with(
+        &self,
+        session: db::model::ConsoleSession,
+    ) -> CreateResult<db::model::ConsoleSession>;
 }
 
 /**
@@ -139,6 +148,7 @@ impl Nexus {
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
+        authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
         let my_sec_id = db::SecId::from(config.id);
@@ -167,8 +177,12 @@ impl Nexus {
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
         let nexus_arc = Arc::new(nexus);
-        let recovery_task = db::recover(
+        let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
+            authz,
+        );
+        let recovery_task = db::recover(
+            opctx,
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
             db_datastore,
@@ -410,7 +424,7 @@ impl Nexus {
         result.kind.map_err(|saga_error| {
             saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
                 /* TODO-error more context would be useful */
-                Error::InternalError { message: e.to_string() }
+                Error::InternalError { internal_message: e.to_string() }
             })
         })
     }
@@ -421,10 +435,11 @@ impl Nexus {
 
     pub async fn organization_create(
         &self,
+        opctx: &OpContext,
         new_organization: &OrganizationCreateParams,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(db_org).await
+        self.db_datastore.organization_create(opctx, db_org).await
     }
 
     pub async fn organization_fetch(
@@ -719,7 +734,9 @@ impl Nexus {
         sleds
             .first()
             .ok_or_else(|| Error::ServiceUnavailable {
-                message: String::from("no sleds available for new Instance"),
+                internal_message: String::from(
+                    "no sleds available for new Instance",
+                ),
             })
             .map(|s| s.id())
     }
@@ -769,9 +786,10 @@ impl Nexus {
             )
             .await?;
         /* TODO-error more context would be useful  */
-        let instance_id = saga_outputs
-            .lookup_output::<Uuid>("instance_id")
-            .map_err(|e| Error::InternalError { message: e.to_string() })?;
+        let instance_id =
+            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
+                Error::InternalError { internal_message: e.to_string() }
+            })?;
         /*
          * TODO-correctness TODO-robustness TODO-design It's not quite correct
          * to take this instance id and look it up again.  It's possible that
@@ -1878,12 +1896,53 @@ impl Nexus {
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            message: String::from("no oximeter collectors available"),
+            internal_message: String::from("no oximeter collectors available"),
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         Ok(self.build_oximeter_client(info.id, address))
     }
+
+    pub async fn session_fetch(
+        &self,
+        token: String,
+    ) -> LookupResult<db::model::ConsoleSession> {
+        self.db_datastore.session_fetch(token).await
+    }
+
+    pub async fn session_create(
+        &self,
+        user_id: Uuid,
+    ) -> CreateResult<db::model::ConsoleSession> {
+        let session =
+            db::model::ConsoleSession::new(generate_session_token(), user_id);
+        Ok(self.db_datastore.session_create(session).await?)
+    }
+
+    // update last_used to now
+    pub async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> UpdateResult<db::model::ConsoleSession> {
+        Ok(self.db_datastore.session_update_last_used(token).await?)
+    }
+
+    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+        self.db_datastore.session_hard_delete(token).await
+    }
+}
+
+fn generate_session_token() -> String {
+    // TODO: "If getrandom is unable to provide secure entropy this method will panic."
+    // Should we explicitly handle that?
+    // TODO: store generator somewhere so we don't reseed every time
+    let mut rng = StdRng::from_entropy();
+    // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
+    // 20 bytes = 160 bits of entropy
+    // TODO: the size should be a constant somewhere, maybe even in config?
+    let mut random_bytes: [u8; 20] = [0; 20];
+    rng.fill_bytes(&mut random_bytes);
+    hex::encode(random_bytes)
 }
 
 #[async_trait]
@@ -1904,5 +1963,12 @@ impl TestInterfaces for Nexus {
         let instance_id = disk.runtime().attach_instance_id.unwrap();
         let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
+    }
+
+    async fn session_create_with(
+        &self,
+        session: db::model::ConsoleSession,
+    ) -> CreateResult<db::model::ConsoleSession> {
+        Ok(self.db_datastore.session_create(session).await?)
     }
 }

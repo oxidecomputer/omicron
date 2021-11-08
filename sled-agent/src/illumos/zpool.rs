@@ -20,7 +20,10 @@ impl From<ZpoolError> for Error {
     fn from(error: ZpoolError) -> Error {
         match error {
             ZpoolError::Parse(s) => Error::InternalError {
-                message: format!("Failed to parse zpool output: {}", s),
+                internal_message: format!(
+                    "Failed to parse zpool output: {}",
+                    s
+                ),
             },
             ZpoolError::Command(e) => e,
         }
@@ -161,7 +164,7 @@ impl Zpool {
         let output = execute(cmd)?;
         let stdout = String::from_utf8(output.stdout).map_err(|e| {
             Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Cannot parse 'zpool list' output as UTF-8: {}",
                     e
                 ),

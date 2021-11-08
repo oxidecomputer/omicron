@@ -64,7 +64,7 @@ impl Pool {
         // We could be more flexible...
         let id: Uuid =
             info.name().parse().map_err(|e| Error::InternalError {
-                message: format!(
+                internal_message: format!(
                     "Zpool's name cannot be parsed as UUID: {}",
                     e
                 ),
@@ -172,7 +172,7 @@ impl StorageWorker {
 
                 let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
                     Error::InternalError {
-                        message: format!("Invalid pool size: {}", e),
+                        internal_message: format!("Invalid pool size: {}", e),
                     }
                 })?;
 

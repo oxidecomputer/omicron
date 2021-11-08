@@ -8,6 +8,7 @@ use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
 use anyhow::Context;
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
@@ -33,6 +34,7 @@ lazy_static! {
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
+#[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
     T: Send + Sync + 'static,
@@ -41,7 +43,7 @@ where
         SPOOF_SCHEME_NAME
     }
 
-    fn authn(
+    async fn authn(
         &self,
         _ctx: &T,
         _log: &slog::Logger,

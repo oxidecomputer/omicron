@@ -14,7 +14,7 @@ serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 structopt = "0.3"
 thiserror = "1.0.30"
-tokio = "1.12"
+tokio = "1.13"
 toml = "0.5.8"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
