@@ -9,7 +9,6 @@ use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-use std::convert::TryFrom;
 
 extern crate slog;
 
