@@ -6,7 +6,8 @@
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
 [authn]
-schemes_external = []
+# TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
+schemes_external = ["spoof"]
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
 
