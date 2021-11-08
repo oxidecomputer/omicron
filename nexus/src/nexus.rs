@@ -1374,16 +1374,17 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        let id = Uuid::new_v4();
+        let vpc_id = Uuid::new_v4();
+        let system_router_id = Uuid::new_v4();
         // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
-        let system_router = self
+        let _ = self
+            .db_datastore
             .vpc_create_router(
-                &organization_name,
-                &project_name,
-                &params.identity.name.clone().into(),
+                &system_router_id,
+                &vpc_id,
                 &VpcRouterCreateParams {
                     identity: IdentityMetadataCreateParams {
                         name: "system".try_into().unwrap(),
@@ -1394,12 +1395,7 @@ impl Nexus {
             .await?;
         let vpc = self
             .db_datastore
-            .project_create_vpc(
-                &id,
-                &project_id,
-                &system_router.identity.id,
-                params,
-            )
+            .project_create_vpc(&vpc_id, &project_id, &system_router_id, params)
             .await?;
         Ok(vpc.into())
     }

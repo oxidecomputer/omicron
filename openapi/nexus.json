@@ -3200,6 +3200,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "systemRouterId": {
+            "description": "id for the system router where subnet default routes are registered",
+            "type": "string",
+            "format": "uuid"
+          },
           "timeCreated": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -3217,6 +3222,7 @@
           "id",
           "name",
           "projectId",
+          "systemRouterId",
           "timeCreated",
           "timeModified"
         ]
