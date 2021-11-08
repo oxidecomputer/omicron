@@ -791,8 +791,7 @@ async fn project_instances_instance_reboot(
     let handler = async {
         let instance = nexus
             .instance_reboot(&organization_name, &project_name, &instance_name)
-            .await;
-        let instance = instance?;
+            .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
