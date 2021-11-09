@@ -85,10 +85,6 @@ CREATE TABLE omicron.public.Zpool (
     total_size INT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Zpool (
-    sled_id
-);
-
 /*
  * A dataset of allocated space within a zpool.
  */
@@ -112,10 +108,6 @@ CREATE TABLE omicron.public.Dataset (
     /* We are eyeing "Crucible datasets" to start, but these could be used for e.g. clickhouse */
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Dataset (
-    pool_id
-);
-
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -135,11 +127,6 @@ CREATE TABLE omicron.public.Region (
     block_size INT NOT NULL,
     extent_size INT NOT NULL,
     extent_count INT NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.Region (
-    dataset_id,
-    disk_id
 );
 
 /*

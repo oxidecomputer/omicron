@@ -9,8 +9,7 @@ use crate::illumos::{
     zpool::ZpoolInfo,
 };
 use crate::vnic::{interface_name, IdAllocator, Vnic};
-use futures::future::join_all;
-use futures::stream::FuturesUnordered;
+use futures::stream::FuturesOrdered;
 use futures::StreamExt;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{ByteCount, Error};
@@ -21,7 +20,6 @@ use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -115,80 +113,6 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
     },
 ];
 
-async fn with_retry<Callback, Fut>(
-    log: Logger,
-    f: Callback,
-    description: &str,
-) -> Result<(), Error>
-where
-    Callback: FnMut() -> Fut,
-    Fut: Future<Output = Result<(), backoff::BackoffError<Error>>>,
-{
-    let log_post_failure = |error, delay| {
-        warn!(
-            log,
-            "failed to perform operation '{}', will retry in {:?}", description, delay;
-            "error" => ?error,
-        );
-    };
-    backoff::retry_notify(
-        backoff::internal_service_policy(),
-        f,
-        log_post_failure,
-    )
-    .await
-}
-
-async fn zpool_post(
-    log: Logger,
-    nexus: Arc<NexusClient>,
-    pool_id: Uuid,
-    sled_id: Uuid,
-    request: ZpoolPostRequest
-) -> Result<(), Error> {
-    with_retry(
-        log,
-        move || {
-            let nexus = nexus.clone();
-            let request = request.clone();
-            async move {
-                nexus
-                    .zpool_post(pool_id, sled_id, request)
-                    .await
-                    .map_err(backoff::BackoffError::Transient)?;
-                Ok(())
-            }
-        },
-        "zpool post",
-    ).await
-}
-
-async fn dataset_post(
-    log: Logger,
-    nexus: Arc<NexusClient>,
-    dataset_id: Uuid,
-    pool_id: Uuid,
-    request: DatasetPostRequest
-) -> Result<(), Error> {
-    with_retry(
-        log,
-        move || {
-            let nexus = nexus.clone();
-            let request = request.clone();
-            async move {
-                nexus
-                    .dataset_post(dataset_id, pool_id, request)
-                    .await
-                    .map_err(backoff::BackoffError::Transient)?;
-                // TODO: Apply allocation advice from Nexus (setting reservation /
-                // quota properties).
-                Ok(())
-            }
-        },
-        "dataset post",
-    ).await
-}
-
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
@@ -212,20 +136,6 @@ impl StorageWorker {
         let id = Uuid::new_v4();
         Zfs::set_oxide_value(&fs_name, "uuid", &id.to_string())?;
         Ok(id)
-    }
-
-    // Small wrapper around `Self::do_work_internal` that ensures we always
-    // emit info to the log when we exit.
-    async fn do_work(&mut self) -> Result<(), Error> {
-        self.do_work_internal()
-            .await
-            .map(|()| {
-                info!(self.log, "StorageWorker exited successfully");
-            })
-            .map_err(|e| {
-                warn!(self.log, "StorageWorker exited unexpectedly: {}", e);
-                e
-            })
     }
 
     // Formats a partition within a zpool, starting a zone for it.
@@ -264,22 +174,31 @@ impl StorageWorker {
         Ok((id, address))
     }
 
+    // Small wrapper around `Self::do_work_internal` that ensures we always
+    // emit info to the log when we exit.
+    async fn do_work(&mut self) -> Result<(), Error> {
+        self.do_work_internal()
+            .await
+            .map(|()| {
+                info!(self.log, "StorageWorker exited successfully");
+            })
+            .map_err(|e| {
+                warn!(self.log, "StorageWorker exited unexpectedly: {}", e);
+                e
+            })
+    }
+
     async fn do_work_internal(&mut self) -> Result<(), Error> {
         info!(self.log, "StorageWorker creating storage base zone");
         // Create a base zone, from which all running storage zones are cloned.
         Zones::create_storage_base(&self.log)?;
         info!(self.log, "StorageWorker creating storage base zone - DONE");
 
-        let mut futures = FuturesUnordered::new();
+        let mut nexus_notifications = FuturesOrdered::new();
 
         loop {
             tokio::select! {
-                _ = futures.next() => {
-                    info!(
-                        &self.log,
-                        "Storage manager finished processing future"
-                    );
-                },
+                _ = nexus_notifications.next(), if !nexus_notifications.is_empty() => {},
                 Some(pool_name) = self.new_pools_rx.recv() => {
                     let mut pools = self.pools.lock().await;
                     // TODO: when would this not exist? It really should...
@@ -296,48 +215,57 @@ impl StorageWorker {
                         }
                     })?;
 
+                    // Initialize all sled-local state.
                     let mut partitions = vec![];
                     for partition in PARTITIONS {
                         let (id, address) = self.initialize_partition(pool, partition).await?;
                         partitions.push((id, address, partition.flavor));
                     }
 
+                    // Notify Nexus of the zpool and all datasets within.
+                    let pool_id = pool.id();
+                    let sled_id = self.sled_id;
+                    let nexus = self.nexus_client.clone();
+                    let notify_nexus = move || {
+                        let zpool_request = ZpoolPostRequest { size };
+                        let nexus = nexus.clone();
+                        let partitions = partitions.clone();
+                        async move {
+                            nexus
+                                .zpool_post(pool_id, sled_id, zpool_request)
+                                .await
+                                .map_err(backoff::BackoffError::Transient)?;
 
-                    // Create a future to notify nexus of the new zpool.
-                    // Don't await yet.
-                    let zpool_post_fut = zpool_post(
-                        self.log.clone(),
-                        self.nexus_client.clone(),
-                        pool.id(),
-                        self.sled_id,
-                        ZpoolPostRequest { size },
-                    );
+                            for (id, address, flavor) in partitions {
+                                let request = DatasetPostRequest {
+                                    address,
+                                    flavor,
+                                };
+                                nexus
+                                    .dataset_post(id, pool_id, request)
+                                    .await
+                                    .map_err(backoff::BackoffError::Transient)?;
+                            }
 
-                    let mut dataset_futures = vec![];
-                    for (id, address, flavor) in partitions {
-                        // Create futures to notify nexus of the new datasets.
-                        // Don't await yet.
-                        let dataset_post_fut = dataset_post(
-                            self.log.clone(),
-                            self.nexus_client.clone(),
-                            id,
-                            pool.id(),
-                            DatasetPostRequest {
-                                address,
-                                flavor,
-                            },
+                            Ok::<(), backoff::BackoffError<Error>>(())
+
+                        }
+                    };
+                    let log = self.log.clone();
+                    let log_post_failure = move |error, delay| {
+                        warn!(
+                            log,
+                            "failed to notify nexus, will retry in {:?}", delay;
+                            "error" => ?error,
                         );
-                        dataset_futures.push(dataset_post_fut);
-                    }
-
-                    futures.push(async {
-                        zpool_post_fut.await?;
-                        join_all(dataset_futures)
-                            .await
-                            .into_iter()
-                            .collect::<Result<_, Error>>()?;
-                        Ok::<(), Error>(())
-                    })
+                    };
+                    nexus_notifications.push(
+                        backoff::retry_notify(
+                            backoff::internal_service_policy(),
+                            notify_nexus,
+                            log_post_failure,
+                        )
+                    );
                 },
             }
         }
