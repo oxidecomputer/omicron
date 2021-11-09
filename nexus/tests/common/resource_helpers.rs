@@ -130,7 +130,7 @@ pub async fn create_router(
         .as_str(),
         VpcRouterCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from(router_name).unwrap(),
+                name: router_name.parse().unwrap(),
                 description: String::from("router description"),
             },
         },

@@ -370,7 +370,7 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicon.public.route_route_kind AS ENUM (
+CREATE TYPE omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
     'vpc_peering',
@@ -388,7 +388,7 @@ CREATE TABLE omicron.public.router_route (
     time_deleted TIMESTAMPTZ,
 
     router_id UUID NOT NULL,
-    kind route_route_kind NOT NULL,
+    kind router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
     destination STRING(128) NOT NULL
 );

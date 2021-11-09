@@ -1568,9 +1568,9 @@ impl DataStore {
         router_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<RouterRoute> {
-        use db::schema::routerroute::dsl;
+        use db::schema::router_route::dsl;
 
-        paginated(dsl::routerroute, dsl::name, pagparams)
+        paginated(dsl::router_route, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::router_id.eq(*router_id))
             .select(RouterRoute::as_select())
@@ -1590,9 +1590,9 @@ impl DataStore {
         router_id: &Uuid,
         route_name: &Name,
     ) -> LookupResult<RouterRoute> {
-        use db::schema::routerroute::dsl;
+        use db::schema::router_route::dsl;
 
-        dsl::routerroute
+        dsl::router_route
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::router_id.eq(*router_id))
             .filter(dsl::name.eq(route_name.clone()))
@@ -1615,12 +1615,12 @@ impl DataStore {
         kind: &api::external::RouterRouteKind,
         params: &api::external::RouterRouteCreateParams,
     ) -> CreateResult<RouterRoute> {
-        use db::schema::routerroute::dsl;
+        use db::schema::router_route::dsl;
 
         let route =
             RouterRoute::new(*route_id, *router_id, *kind, params.clone());
         let name = route.name().clone();
-        let route = diesel::insert_into(dsl::routerroute)
+        let route = diesel::insert_into(dsl::router_route)
             .values(route)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -1638,10 +1638,10 @@ impl DataStore {
     }
 
     pub async fn router_delete_route(&self, route_id: &Uuid) -> DeleteResult {
-        use db::schema::routerroute::dsl;
+        use db::schema::router_route::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::routerroute)
+        diesel::update(dsl::router_route)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*route_id))
             .set(dsl::time_deleted.eq(now))
@@ -1663,10 +1663,10 @@ impl DataStore {
         route_id: &Uuid,
         params: &api::external::RouterRouteUpdateParams,
     ) -> Result<(), Error> {
-        use db::schema::routerroute::dsl;
+        use db::schema::router_route::dsl;
         let updates: RouterRouteUpdate = params.clone().into();
 
-        diesel::update(dsl::routerroute)
+        diesel::update(dsl::router_route)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*route_id))
             .set(updates)

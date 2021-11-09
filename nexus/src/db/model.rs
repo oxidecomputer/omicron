@@ -1017,7 +1017,7 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
 }
 
 #[derive(SqlType, Debug)]
-#[postgres(type_name = "routerroutekind", type_schema = "public")]
+#[postgres(type_name = "router_routekind", type_schema = "public")]
 pub struct RouterRouteKindEnum;
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
