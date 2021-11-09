@@ -1,6 +1,5 @@
 //! Structures stored to the database.
 
-use super::custom_types;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
@@ -1019,8 +1018,12 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
     }
 }
 
+#[derive(SqlType, Debug)]
+#[postgres(type_name = "routerroutekind", type_schema = "public")]
+pub struct RouterRouteKindEnum;
+
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "custom_types::Enum"]
+#[sql_type = "RouterRouteKindEnum"]
 pub struct RouterRouteKind(pub external::RouterRouteKind);
 
 impl RouterRouteKind {
@@ -1033,7 +1036,7 @@ impl RouterRouteKind {
     }
 }
 
-impl<DB> ToSql<custom_types::Enum, DB> for RouterRouteKind
+impl<DB> ToSql<RouterRouteKindEnum, DB> for RouterRouteKind
 where
     DB: Backend,
 {
@@ -1055,7 +1058,7 @@ where
     }
 }
 
-impl<DB> FromSql<custom_types::Enum, DB> for RouterRouteKind
+impl<DB> FromSql<RouterRouteKindEnum, DB> for RouterRouteKind
 where
     DB: Backend + for<'a> BinaryRawValue<'a>,
 {

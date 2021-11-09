@@ -7,7 +7,6 @@
 pub mod collection_insert;
 mod config;
 
-pub mod custom_types;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod error;
