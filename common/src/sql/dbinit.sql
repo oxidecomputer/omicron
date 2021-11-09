@@ -290,6 +290,7 @@ CREATE TABLE omicron.public.vpc (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
+    system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL
 );
 
@@ -338,6 +339,11 @@ CREATE TABLE omicron.public.network_interface (
 );
 
 
+CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
+    'system',
+    'custom'
+);
+
 CREATE TABLE omicron.public.vpc_router (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -347,6 +353,7 @@ CREATE TABLE omicron.public.vpc_router (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    kind vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL
 );
 
