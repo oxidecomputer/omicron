@@ -1502,8 +1502,7 @@ impl DataStore {
     ) -> CreateResult<VpcRouter> {
         use db::schema::vpcrouter::dsl;
 
-        let router =
-            VpcRouter::new(*router_id, *vpc_id, kind.clone(), params.clone());
+        let router = VpcRouter::new(*router_id, *vpc_id, *kind, params.clone());
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpcrouter)
             .values(router)

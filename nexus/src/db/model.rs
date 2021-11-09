@@ -24,10 +24,6 @@ use uuid::Uuid;
 
 // TODO: Break up types into multiple files
 
-/// Custom Enum type for Diesel
-#[derive(SqlType)]
-#[postgres(type_name = "enum")]
-pub struct Enum;
 /// Newtype wrapper around [external::Name].
 #[derive(
     Clone,
@@ -983,8 +979,14 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
+/// Custom Enum type for Diesel. Note that the type_name _must_ be all lowercase
+/// or it'll fail.
+#[derive(SqlType, Debug)]
+#[postgres(type_name = "vpcrouterkind", type_schema = "public")]
+pub struct VpcRouterKindEnum;
+
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "Enum"]
+#[sql_type = "VpcRouterKindEnum"]
 pub struct VpcRouterKind(pub external::VpcRouterKind);
 
 impl VpcRouterKind {
@@ -997,7 +999,7 @@ impl VpcRouterKind {
     }
 }
 
-impl<DB> ToSql<Enum, DB> for VpcRouterKind
+impl<DB> ToSql<VpcRouterKindEnum, DB> for VpcRouterKind
 where
     DB: Backend,
 {
@@ -1013,7 +1015,7 @@ where
     }
 }
 
-impl<DB> FromSql<Enum, DB> for VpcRouterKind
+impl<DB> FromSql<VpcRouterKindEnum, DB> for VpcRouterKind
 where
     DB: Backend + for<'a> BinaryRawValue<'a>,
 {

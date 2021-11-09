@@ -3280,6 +3280,9 @@
               }
             ]
           },
+          "kind": {
+            "$ref": "#/components/schemas/VpcRouterKind"
+          },
           "vpc_id": {
             "description": "The VPC to which the router belongs.",
             "type": "string",
@@ -3288,6 +3291,7 @@
         },
         "required": [
           "identity",
+          "kind",
           "vpc_id"
         ]
       },
@@ -3305,6 +3309,13 @@
         "required": [
           "description",
           "name"
+        ]
+      },
+      "VpcRouterKind": {
+        "type": "string",
+        "enum": [
+          "system",
+          "custom"
         ]
       },
       "VpcRouterResultsPage": {
