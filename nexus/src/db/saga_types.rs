@@ -10,7 +10,7 @@
  * conversions.
  */
 
-use super::schema::{saga, saganodeevent};
+use super::schema::{saga, saga_node_event};
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
@@ -213,7 +213,7 @@ impl Saga {
 
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug)]
-#[table_name = "saganodeevent"]
+#[table_name = "saga_node_event"]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,
     pub node_id: SagaNodeId,
