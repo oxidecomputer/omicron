@@ -14,7 +14,7 @@ async fn test_oximeter_database_records() {
 
     // Verify that the Oximeter instance lives in the DB.
     let result = conn
-        .query("SELECT * FROM omicron.public.Oximeter;", &[])
+        .query("SELECT * FROM omicron.public.oximeter;", &[])
         .await
         .unwrap();
     assert_eq!(
@@ -31,7 +31,7 @@ async fn test_oximeter_database_records() {
 
     // Verify that the producer lives in the DB.
     let result = conn
-        .query("SELECT * FROM omicron.public.MetricProducer;", &[])
+        .query("SELECT * FROM omicron.public.metric_producer;", &[])
         .await
         .unwrap();
     assert_eq!(

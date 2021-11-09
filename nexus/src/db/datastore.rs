@@ -1029,10 +1029,10 @@ impl DataStore {
         &self,
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
-        use db::schema::metricproducer::dsl;
+        use db::schema::metric_producer::dsl;
 
         // TODO: see https://github.com/oxidecomputer/omicron/issues/323
-        diesel::insert_into(dsl::metricproducer)
+        diesel::insert_into(dsl::metric_producer)
             .values(producer.clone())
             .on_conflict(dsl::id)
             .do_update()
@@ -1061,8 +1061,8 @@ impl DataStore {
         oximeter_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
-        use db::schema::metricproducer::dsl;
-        paginated(dsl::metricproducer, dsl::id, &pagparams)
+        use db::schema::metric_producer::dsl;
+        paginated(dsl::metric_producer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
@@ -1104,11 +1104,11 @@ impl DataStore {
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        use db::schema::saganodeevent::dsl;
+        use db::schema::saga_node_event::dsl;
 
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
-        diesel::insert_into(dsl::saganodeevent)
+        diesel::insert_into(dsl::saga_node_event)
             .values(event.clone())
             .execute_async(self.pool())
             .await
@@ -1194,8 +1194,8 @@ impl DataStore {
         id: db::saga_types::SagaId,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<steno::SagaNodeEvent> {
-        use db::schema::saganodeevent::dsl;
-        paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
+        use db::schema::saga_node_event::dsl;
+        paginated(dsl::saga_node_event, dsl::saga_id, &pagparams)
             .filter(dsl::saga_id.eq(id))
             .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
             .await
@@ -1335,9 +1335,9 @@ impl DataStore {
         vpc_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
-        paginated(dsl::vpcsubnet, dsl::name, &pagparams)
+        paginated(dsl::vpc_subnet, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .select(VpcSubnet::as_select())
@@ -1356,9 +1356,9 @@ impl DataStore {
         vpc_id: &Uuid,
         subnet_name: &Name,
     ) -> LookupResult<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
-        dsl::vpcsubnet
+        dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(subnet_name.clone()))
@@ -1380,11 +1380,11 @@ impl DataStore {
         vpc_id: &Uuid,
         params: &api::external::VpcSubnetCreateParams,
     ) -> CreateResult<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
         let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
         let name = subnet.name().clone();
-        let subnet = diesel::insert_into(dsl::vpcsubnet)
+        let subnet = diesel::insert_into(dsl::vpc_subnet)
             .values(subnet)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -1402,10 +1402,10 @@ impl DataStore {
     }
 
     pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::vpcsubnet)
+        diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(dsl::time_deleted.eq(now))
@@ -1427,10 +1427,10 @@ impl DataStore {
         subnet_id: &Uuid,
         params: &api::external::VpcSubnetUpdateParams,
     ) -> Result<(), Error> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
         let updates: VpcSubnetUpdate = params.clone().into();
 
-        diesel::update(dsl::vpcsubnet)
+        diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(updates)
@@ -1451,9 +1451,9 @@ impl DataStore {
         vpc_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
-        paginated(dsl::vpcrouter, dsl::name, pagparams)
+        paginated(dsl::vpc_router, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .select(VpcRouter::as_select())
@@ -1473,9 +1473,9 @@ impl DataStore {
         vpc_id: &Uuid,
         router_name: &Name,
     ) -> LookupResult<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
-        dsl::vpcrouter
+        dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(router_name.clone()))
@@ -1497,11 +1497,11 @@ impl DataStore {
         vpc_id: &Uuid,
         params: &api::external::VpcRouterCreateParams,
     ) -> CreateResult<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
         let router = VpcRouter::new(*router_id, *vpc_id, params.clone());
         let name = router.name().clone();
-        let router = diesel::insert_into(dsl::vpcrouter)
+        let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -1519,10 +1519,10 @@ impl DataStore {
     }
 
     pub async fn vpc_delete_router(&self, router_id: &Uuid) -> DeleteResult {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::vpcrouter)
+        diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*router_id))
             .set(dsl::time_deleted.eq(now))
@@ -1544,10 +1544,10 @@ impl DataStore {
         router_id: &Uuid,
         params: &api::external::VpcRouterUpdateParams,
     ) -> Result<(), Error> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
         let updates: VpcRouterUpdate = params.clone().into();
 
-        diesel::update(dsl::vpcrouter)
+        diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*router_id))
             .set(updates)
@@ -1577,8 +1577,8 @@ impl DataStore {
         &self,
         token: String,
     ) -> LookupResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
-        dsl::consolesession
+        use db::schema::console_session::dsl;
+        dsl::console_session
             .filter(dsl::token.eq(token.clone()))
             .select(ConsoleSession::as_select())
             .first_async(self.pool())
@@ -1595,9 +1595,9 @@ impl DataStore {
         &self,
         session: ConsoleSession,
     ) -> CreateResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::insert_into(dsl::consolesession)
+        diesel::insert_into(dsl::console_session)
             .values(session)
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
@@ -1614,9 +1614,9 @@ impl DataStore {
         &self,
         token: String,
     ) -> UpdateResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::update(dsl::consolesession)
+        diesel::update(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
@@ -1632,9 +1632,9 @@ impl DataStore {
 
     // putting "hard" in the name because we don't do this with any other model
     pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::delete(dsl::consolesession)
+        diesel::delete(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
             .execute_async(self.pool())
             .await
