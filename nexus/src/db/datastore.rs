@@ -1657,11 +1657,10 @@ mod test {
     use crate::db::DataStore;
     use chrono::{Duration, Utc};
     use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, Name, OrganizationCreateParams,
+        Error, IdentityMetadataCreateParams, OrganizationCreateParams,
         ProjectCreateParams,
     };
     use omicron_test_utils::dev;
-    use std::convert::TryFrom;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -1676,7 +1675,7 @@ mod test {
 
         let organization = Organization::new(OrganizationCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from("org".to_string()).unwrap(),
+                name: "org".parse().unwrap(),
                 description: "desc".to_string(),
             },
         });
@@ -1687,7 +1686,7 @@ mod test {
             organization.id(),
             ProjectCreateParams {
                 identity: IdentityMetadataCreateParams {
-                    name: Name::try_from("project".to_string()).unwrap(),
+                    name: "project".parse().unwrap(),
                     description: "desc".to_string(),
                 },
             },
