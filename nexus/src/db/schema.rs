@@ -40,7 +40,7 @@ table! {
 }
 
 table! {
-    metricproducer (id) {
+    metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
@@ -53,7 +53,7 @@ table! {
 }
 
 table! {
-    networkinterface (id) {
+    network_interface (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -116,7 +116,7 @@ table! {
 }
 
 table! {
-    saganodeevent (saga_id, node_id, event_type) {
+    saga_node_event (saga_id, node_id, event_type) {
         saga_id -> Uuid,
         node_id -> Int8,
         event_type -> Text,
@@ -135,7 +135,7 @@ table! {
 }
 
 table! {
-    consolesession (token) {
+    console_session (token) {
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
@@ -169,7 +169,7 @@ table! {
 }
 
 table! {
-    vpcsubnet (id) {
+    vpc_subnet (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -183,7 +183,7 @@ table! {
 }
 
 table! {
-    vpcrouter (id) {
+    vpc_router (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -198,16 +198,16 @@ table! {
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
-    metricproducer,
-    networkinterface,
+    metric_producer,
+    network_interface,
     organization,
     oximeter,
     project,
     saga,
-    saganodeevent,
-    consolesession,
+    saga_node_event,
+    console_session,
     sled,
     vpc,
-    vpcsubnet,
-    vpcrouter
+    vpc_subnet,
+    vpc_router
 );
