@@ -1370,6 +1370,8 @@ pub enum NetworkTarget {
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
 pub enum RouteTarget {
     Ip(IpAddr),
     Vpc(Name),
@@ -1439,6 +1441,8 @@ impl Display for RouteTarget {
 /// the kind of network traffic that will be matched to be forwarded
 /// to the [`RouteTarget`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
 pub enum RouteDestination {
     Ip(IpAddr),
     Vpc(Name),

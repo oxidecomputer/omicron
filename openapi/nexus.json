@@ -3266,39 +3266,57 @@
           {
             "type": "object",
             "properties": {
-              "Ip": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
             "required": [
-              "Ip"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Vpc": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "Vpc"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Subnet": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "Subnet"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -3308,63 +3326,93 @@
           {
             "type": "object",
             "properties": {
-              "Ip": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
             "required": [
-              "Ip"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Vpc": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "Vpc"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Subnet": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "Subnet"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Instance": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "Instance"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "InternetGateway": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internetGateway"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
             "required": [
-              "InternetGateway"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },
