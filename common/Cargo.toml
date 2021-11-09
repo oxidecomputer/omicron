@@ -27,7 +27,7 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 percent-encoding = "2.1.0"
 
 [dependencies.api_identity]
-path = "src/api/external/api_identity"
+path = "../api_identity"
 
 [dependencies.backoff]
 version = "0.3.0"
