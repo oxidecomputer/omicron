@@ -71,7 +71,7 @@ async fn test_oximeter_reregistration() {
     // Helper to get a record for a single metric producer
     let get_record = || async {
         let result = conn
-            .query("SELECT * FROM omicron.public.MetricProducer;", &[])
+            .query("SELECT * FROM omicron.public.metric_producer;", &[])
             .await
             .unwrap();
         assert_eq!(
