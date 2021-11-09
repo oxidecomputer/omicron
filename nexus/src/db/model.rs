@@ -1059,7 +1059,7 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: self.kind.state().clone(),
+            kind: *self.kind.state(),
         }
     }
 }
