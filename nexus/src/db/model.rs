@@ -3,8 +3,8 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    consolesession, disk, instance, metricproducer, networkinterface,
-    organization, oximeter, project, rack, sled, vpc, vpcrouter, vpcsubnet,
+    console_session, disk, instance, metric_producer, network_interface,
+    organization, oximeter, project, rack, sled, vpc, vpc_router, vpc_subnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -797,7 +797,7 @@ impl Into<external::DiskAttachment> for DiskAttachment {
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "metricproducer"]
+#[table_name = "metric_producer"]
 pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
@@ -912,7 +912,7 @@ impl From<external::VpcUpdateParams> for VpcUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnet {
     #[diesel(embed)]
     identity: VpcSubnetIdentity,
@@ -950,7 +950,7 @@ impl Into<external::VpcSubnet> for VpcSubnet {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -972,7 +972,7 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
@@ -998,7 +998,7 @@ impl Into<external::VpcRouter> for VpcRouter {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouterUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1016,7 +1016,7 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Resource)]
-#[table_name = "networkinterface"]
+#[table_name = "network_interface"]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
@@ -1030,7 +1030,7 @@ pub struct NetworkInterface {
 // TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "consolesession"]
+#[table_name = "console_session"]
 pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
