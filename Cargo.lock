@@ -1446,6 +1446,7 @@ dependencies = [
  "oso",
  "oximeter",
  "oximeter-collector",
+ "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer",
  "pq-sys",

@@ -116,6 +116,11 @@ impl Server {
     pub fn registry(&self) -> &ProducerRegistry {
         &self.registry
     }
+
+    /// Return the server's local listening address
+    pub fn address(&self) -> std::net::SocketAddr {
+        self.server.local_addr()
+    }
 }
 
 // Register API endpoints of the `Server`.

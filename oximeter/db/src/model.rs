@@ -685,14 +685,14 @@ pub(crate) fn parse_measurement_from_row(
 }
 
 /// Information about a target, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<types::Field>,
 }
 
 /// Information about a metric, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Metric {
     pub name: String,
     pub fields: Vec<types::Field>,
@@ -700,7 +700,7 @@ pub struct Metric {
 }
 
 /// A list of timestamped measurements from a timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Timeseries {
     pub timeseries_name: String,
     pub timeseries_key: String,

@@ -251,64 +251,80 @@ impl TimeseriesFilter {
 
     /// Generate a select query for this filter
     pub(crate) fn as_select_query(&self, datum_type: DatumType) -> String {
-        let select_queries = self.field_select_queries();
-        let query = if select_queries.len() == 1 {
-            // We only have one subquery, just use it directly
-            select_queries[0].clone()
-        } else {
-            // We have a list of subqueries, which must be JOIN'd.
-            // The JOIN occurs using equality between the timeseries keys and timestamps, with the
-            // previous subquery alias.
-            let subqueries = select_queries
-                .into_iter()
-                .enumerate()
-                .map(|(i, subquery)| {
-                    let on_fragment = if i == 0 {
-                        String::new()
-                    } else {
-                        format!(
-                            " ON filter{i}.timeseries_name = filter{j}.timeseries_name \
-                            AND filter{i}.timeseries_key = filter{j}.timeseries_key",
-                            i = i, j = i - 1,
-                        )
-                    };
-                    format!(
-                        "(\n{subquery}\n) AS filter{i}{on_fragment}",
-                        subquery = indent(&subquery, 4),
-                        i = i,
-                        on_fragment = on_fragment,
-                    )
-                })
-            .collect::<Vec<_>>().join("\nINNER JOIN\n");
-
-            // We also need to write an _additional_ first select statement to extract the columns
-            // from the subquery aliased as filter0.
-            format!(
-                "SELECT\n\
-                {timeseries_name},\n\
-                {timeseries_key}\n\
-                FROM\n\
-                {subqueries}",
-                timeseries_name = indent("filter0.timeseries_name", 4),
-                timeseries_key = indent("filter0.timeseries_key", 4),
-                subqueries = subqueries,
-            )
-        };
-
         let timestamp_filter = self
             .time_filter
             .map(|f| format!("AND {}", f.as_where_fragment()))
             .unwrap_or_else(String::new);
 
+        let select_queries = self.field_select_queries();
+        let (filter_columns, query) = match select_queries.len() {
+            0 => (
+                String::from("timeseries_name"),
+                format!("'{}'", self.timeseries_name),
+            ),
+            1 => {
+                // We only have one subquery, just use it directly
+                (
+                    String::from("timeseries_name, timeseries_key"),
+                    select_queries[0].clone(),
+                )
+            }
+            _ => {
+                // We have a list of subqueries, which must be JOIN'd.
+                // The JOIN occurs using equality between the timeseries keys and timestamps, with the
+                // previous subquery alias.
+                let subqueries = select_queries
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, subquery)| {
+                        let on_fragment = if i == 0 {
+                            String::new()
+                        } else {
+                            format!(
+                                " ON filter{i}.timeseries_name = filter{j}.timeseries_name \
+                                AND filter{i}.timeseries_key = filter{j}.timeseries_key",
+                                i = i, j = i - 1,
+                            )
+                        };
+                        format!(
+                            "(\n{subquery}\n) AS filter{i}{on_fragment}",
+                            subquery = indent(&subquery, 4),
+                            i = i,
+                            on_fragment = on_fragment,
+                        )
+                    })
+                .collect::<Vec<_>>().join("\nINNER JOIN\n");
+
+                // We also need to write an _additional_ first select statement to extract the columns
+                // from the subquery aliased as filter0.
+                (
+                    String::from("timeseries_name, timeseries_key"),
+                    format!(
+                        "SELECT\n\
+                        {timeseries_name},\n\
+                        {timeseries_key}\n\
+                        FROM\n\
+                        {subqueries}",
+                        timeseries_name = indent("filter0.timeseries_name", 4),
+                        timeseries_key = indent("filter0.timeseries_key", 4),
+                        subqueries = subqueries,
+                    ),
+                )
+            }
+        };
+
         // Format the top-level query
         format!(
             "SELECT *\n\
             FROM {db_name}.measurements_{data_type}\n\
-            WHERE (timeseries_name, timeseries_key) IN (\n\
+            WHERE ({filter_columns}) IN (\n\
             {query}\n\
-            ){timestamp_filter} FORMAT JSONEachRow;",
+            ){timestamp_filter}\n\
+            ORDER BY (timeseries_key, timestamp)\n\
+            FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
             data_type = db_type_name_for_datum(&datum_type),
+            filter_columns = filter_columns,
             query = indent(&query, 4),
             timestamp_filter = timestamp_filter,
         )
@@ -437,6 +453,62 @@ mod tests {
         assert!(query
             .contains("AND filter1.timeseries_key = filter0.timeseries_key"));
         println!("{}", filter.as_select_query(DatumType::F64));
+    }
+
+    #[test]
+    fn test_timeseries_filter_empty() {
+        let filter = TimeseriesFilter {
+            timeseries_name: String::from("virtual_machine:cpu_busy"),
+            filters: Vec::new(),
+            time_filter: None,
+        };
+        let query = filter.as_select_query(DatumType::F64);
+        let expected = "SELECT * FROM oximeter.measurements_f64 \
+            WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
+            ORDER BY (timeseries_key, timestamp) \
+            FORMAT JSONEachRow;"
+            .replace(" ", "");
+        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected);
+    }
+
+    #[test]
+    fn test_timeseries_filter_empty_field_filters() {
+        let time = TimeFilter::Before(Utc::now());
+        let filter = TimeseriesFilter {
+            timeseries_name: String::from("virtual_machine:cpu_busy"),
+            filters: Vec::new(),
+            time_filter: Some(time),
+        };
+        let query = filter.as_select_query(DatumType::F64);
+        let expected = format!(
+            "SELECT * FROM oximeter.measurements_f64 \
+            WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
+            AND {} \
+            ORDER BY (timeseries_key, timestamp) \
+            FORMAT JSONEachRow;",
+            time.as_where_fragment(),
+        )
+        .replace(" ", "");
+        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected,);
+    }
+
+    #[test]
+    fn test_timeseries_filter_empty_time_filter() {
+        let filter = TimeseriesFilter {
+            timeseries_name: String::from("virtual_machine:cpu_busy"),
+            filters: vec![FieldFilter::new("cpu_id", &[0i64]).unwrap()],
+            time_filter: None,
+        };
+        let query = filter.as_select_query(DatumType::F64);
+        let expected = "SELECT * FROM oximeter.measurements_f64 \
+            WHERE (timeseries_name, timeseries_key) IN ( \
+                SELECT timeseries_name, timeseries_key \
+                FROM oximeter.fields_i64 \
+                WHERE (field_name = 'cpu_id' AND ((field_value = 0)))) \
+            ORDER BY (timeseries_key, timestamp) \
+            FORMAT JSONEachRow;"
+            .replace(" ", "");
+        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected,);
     }
 
     #[test]
