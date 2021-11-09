@@ -68,8 +68,8 @@ async fn test_oximeter_reregistration() {
     // Get a handle to the DB, for various tests
     let conn = db.connect().await.unwrap();
 
-    // Check that there's one record for the producer.
-    let get_port = || async {
+    // Helper to get a record for a single metric producer
+    let get_record = || async {
         let result = conn
             .query("SELECT * FROM omicron.public.MetricProducer;", &[])
             .await
@@ -84,9 +84,14 @@ async fn test_oximeter_reregistration() {
             actual_id, producer_id,
             "Producer ID does not match the ID returned from the database"
         );
-        result[0].get::<&str, i32>("port") as u16
+        result
     };
-    let _ = get_port().await;
+
+    // Get the original time modified, for comparison later.
+    let original_time_modified = {
+        let result = get_record().await;
+        result[0].get::<&str, chrono::DateTime<chrono::Utc>>("time_modified")
+    };
 
     // ClickHouse client for verifying collection.
     let ch_address = net::SocketAddrV6::new(
@@ -192,9 +197,22 @@ async fn test_oximeter_reregistration() {
 
     // Also verify that the producer's port is still correct, because we've updated it.
     // Note that it's _probably_ not the case that the port is the same as the original, but it is
-    // possible.
-    let new_port = get_port().await;
+    // possible. We can verify that the modification time has been changed.
+    let (new_port, new_time_modified) = {
+        let result = get_record().await;
+        (
+            result[0].get::<&str, i32>("port") as u16,
+            result[0]
+                .get::<&str, chrono::DateTime<chrono::Utc>>("time_modified"),
+        )
+    };
     assert_eq!(new_port, context.producer.address().port());
+    assert!(
+        new_time_modified > original_time_modified,
+        "Expected the modification time of the producer record to have changed"
+    );
+
+    // Verify that the time modified has changed as well.
 
     // Drop oximeter and verify that we've still got the same data, because there's no collector
     // running.
