@@ -1,10 +1,8 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcUpdateParams;
-use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -92,10 +90,10 @@ async fn test_vpcs() {
     /* Update the VPC */
     let update_params = VpcUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: Some(Name::try_from("new-name").unwrap()),
-            description: Some(String::from("another description")),
+            name: Some("new-name".parse().unwrap()),
+            description: Some("another description".to_string()),
         },
-        dns_name: Some(Name::try_from("def").unwrap()),
+        dns_name: Some("def".parse().unwrap()),
     };
     vpc_put(&client, &vpc_url, update_params).await;
 
