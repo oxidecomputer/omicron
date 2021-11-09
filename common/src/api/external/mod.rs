@@ -1120,6 +1120,9 @@ pub struct Vpc {
     /** id for the project containing this VPC */
     pub project_id: Uuid,
 
+    /// id for the system router where subnet default routes are registered
+    pub system_router_id: Uuid,
+
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
@@ -1303,12 +1306,21 @@ pub struct VpcSubnetUpdateParams {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcRouterKind {
+    System,
+    Custom,
+}
+
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
     pub identity: IdentityMetadata,
+
+    pub kind: VpcRouterKind,
 
     /// The VPC to which the router belongs.
     pub vpc_id: Uuid,

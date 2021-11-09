@@ -1239,11 +1239,13 @@ impl DataStore {
         &self,
         vpc_id: &Uuid,
         project_id: &Uuid,
+        system_router_id: &Uuid,
         params: &api::external::VpcCreateParams,
     ) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
-        let vpc = Vpc::new(*vpc_id, *project_id, params.clone());
+        let vpc =
+            Vpc::new(*vpc_id, *project_id, *system_router_id, params.clone());
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
@@ -1495,11 +1497,12 @@ impl DataStore {
         &self,
         router_id: &Uuid,
         vpc_id: &Uuid,
+        kind: &api::external::VpcRouterKind,
         params: &api::external::VpcRouterCreateParams,
     ) -> CreateResult<VpcRouter> {
         use db::schema::vpc_router::dsl;
 
-        let router = VpcRouter::new(*router_id, *vpc_id, params.clone());
+        let router = VpcRouter::new(*router_id, *vpc_id, *kind, params.clone());
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
