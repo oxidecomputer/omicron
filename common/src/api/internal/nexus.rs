@@ -55,7 +55,7 @@ pub struct SledAgentStartupInfo {
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPostRequest {
     /// Total size of the pool.
     pub size: ByteCount,
@@ -103,7 +103,7 @@ impl FromStr for DatasetFlavor {
 }
 
 /// Describes a dataset within a pool.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetPostRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.

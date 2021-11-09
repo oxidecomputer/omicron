@@ -9,6 +9,7 @@ use crate::illumos::{
     zpool::ZpoolInfo,
 };
 use crate::vnic::{interface_name, IdAllocator, Vnic};
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use ipnetwork::IpNetwork;
@@ -20,6 +21,7 @@ use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -113,6 +115,80 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
     },
 ];
 
+async fn with_retry<Callback, Fut>(
+    log: Logger,
+    f: Callback,
+    description: &str,
+) -> Result<(), Error>
+where
+    Callback: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), backoff::BackoffError<Error>>>,
+{
+    let log_post_failure = |error, delay| {
+        warn!(
+            log,
+            "failed to perform operation '{}', will retry in {:?}", description, delay;
+            "error" => ?error,
+        );
+    };
+    backoff::retry_notify(
+        backoff::internal_service_policy(),
+        f,
+        log_post_failure,
+    )
+    .await
+}
+
+async fn zpool_post(
+    log: Logger,
+    nexus: Arc<NexusClient>,
+    pool_id: Uuid,
+    sled_id: Uuid,
+    request: ZpoolPostRequest
+) -> Result<(), Error> {
+    with_retry(
+        log,
+        move || {
+            let nexus = nexus.clone();
+            let request = request.clone();
+            async move {
+                nexus
+                    .zpool_post(pool_id, sled_id, request)
+                    .await
+                    .map_err(backoff::BackoffError::Transient)?;
+                Ok(())
+            }
+        },
+        "zpool post",
+    ).await
+}
+
+async fn dataset_post(
+    log: Logger,
+    nexus: Arc<NexusClient>,
+    dataset_id: Uuid,
+    pool_id: Uuid,
+    request: DatasetPostRequest
+) -> Result<(), Error> {
+    with_retry(
+        log,
+        move || {
+            let nexus = nexus.clone();
+            let request = request.clone();
+            async move {
+                nexus
+                    .dataset_post(dataset_id, pool_id, request)
+                    .await
+                    .map_err(backoff::BackoffError::Transient)?;
+                // TODO: Apply allocation advice from Nexus (setting reservation /
+                // quota properties).
+                Ok(())
+            }
+        },
+        "dataset post",
+    ).await
+}
+
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
@@ -152,6 +228,42 @@ impl StorageWorker {
             })
     }
 
+    // Formats a partition within a zpool, starting a zone for it.
+    //
+    // For now, we place all "expected" filesystems on each new zpool
+    // we see. The decision of "whether or not to actually use the
+    // filesystem" is a decision left to both the bootstrapping protocol
+    // and Nexus.
+    //
+    // If we had a better signal - from the bootstrapping system - about
+    // where Cockroach nodes should exist, we could be more selective
+    // about this placement.
+    async fn initialize_partition(
+        &self,
+        pool: &mut Pool,
+        partition: &PartitionInfo<'static>,
+    ) -> Result<(Uuid, SocketAddr), Error> {
+        let name = format!("{}/{}", pool.info.name(), partition.name);
+
+        info!(&self.log, "Ensuring filesystem {} exists", name);
+        let id = StorageWorker::ensure_filesystem_with_id(&name)?;
+
+        info!(&self.log, "Creating zone for {}", name);
+        let network = self
+            .create_zone(
+                partition.zone_prefix,
+                &name,
+                partition.data_directory,
+                partition.svc_directory,
+            )
+            .await?;
+
+        let address = SocketAddr::new(network.ip(), partition.port);
+        info!(&self.log, "Created zone with address {}", address);
+        pool.add_filesystem(id, Filesystem { name, address });
+        Ok((id, address))
+    }
+
     async fn do_work_internal(&mut self) -> Result<(), Error> {
         info!(self.log, "StorageWorker creating storage base zone");
         // Create a base zone, from which all running storage zones are cloned.
@@ -160,107 +272,75 @@ impl StorageWorker {
 
         let mut futures = FuturesUnordered::new();
 
-        tokio::select! {
-            _ = futures.next() => {}
-            Some(pool_name) = self.new_pools_rx.recv() => {
-                let mut pools = self.pools.lock().await;
-                // TODO: when would this not exist? It really should...
-                let pool = pools.get_mut(&pool_name).unwrap();
+        loop {
+            tokio::select! {
+                _ = futures.next() => {
+                    info!(
+                        &self.log,
+                        "Storage manager finished processing future"
+                    );
+                },
+                Some(pool_name) = self.new_pools_rx.recv() => {
+                    let mut pools = self.pools.lock().await;
+                    // TODO: when would this not exist? It really should...
+                    let pool = pools.get_mut(&pool_name).unwrap();
 
-                info!(
-                    &self.log,
-                    "Storage manager processing zpool: {:#?}", pool.info
-                );
+                    info!(
+                        &self.log,
+                        "Storage manager processing zpool: {:#?}", pool.info
+                    );
 
-                let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
-                    Error::InternalError {
-                        internal_message: format!("Invalid pool size: {}", e),
+                    let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
+                        Error::InternalError {
+                            internal_message: format!("Invalid pool size: {}", e),
+                        }
+                    })?;
+
+                    let mut partitions = vec![];
+                    for partition in PARTITIONS {
+                        let (id, address) = self.initialize_partition(pool, partition).await?;
+                        partitions.push((id, address, partition.flavor));
                     }
-                })?;
 
-                // TODO: Notify nexus
-                // TODO: retry on failure
-                let log = self.log.clone();
-                let pool_id = pool.id();
-                let sled_id = self.sled_id;
-                let nexus_client = self.nexus_client.clone();
 
-                let zpool_post_with_retry_fut = async move {
-                    // This is the future we actually want to perform. Note that
-                    // it's idempotent - it may be called repeatedly upon
-                    // failure.
-                    let zpool_post_fut = || async {
-                        let _ = nexus_client
-                            .zpool_post(pool_id, sled_id, ZpoolPostRequest { size })
-                            .await?;
-                        Ok(())
-                    };
+                    // Create a future to notify nexus of the new zpool.
+                    // Don't await yet.
+                    let zpool_post_fut = zpool_post(
+                        self.log.clone(),
+                        self.nexus_client.clone(),
+                        pool.id(),
+                        self.sled_id,
+                        ZpoolPostRequest { size },
+                    );
 
-                    // This is retry logic for `zpool_post_fut`.
-                    let log_post_failure = |error, delay| {
-                        warn!(
-                            log,
-                            "failed to post zpool to nexus, will retry in {:?}", delay;
-                            "error" => ?error,
-                        );
-                    };
-                    backoff::retry_notify(
-                        backoff::internal_service_policy(),
-                        zpool_post_fut,
-                        log_post_failure,
-                    ).await
-                };
-                futures.push(zpool_post_with_retry_fut);
-
-                // For now, we place all "expected" filesystems on each new zpool
-                // we see. The decision of "whether or not to actually use the
-                // filesystem" is a decision left to both the bootstrapping protocol
-                // and Nexus.
-                //
-                // If we had a better signal - from the bootstrapping system - about
-                // where Cockroach nodes should exist, we could be more selective
-                // about this placement.
-
-                // Ensure the necessary filesystems exist (Cockroach, Crucible, etc),
-                // and start zones for each of them.
-                for partition in PARTITIONS {
-                    let name = format!("{}/{}", pool.info.name(), partition.name);
-
-                    info!(&self.log, "Ensuring filesystem {} exists", name);
-                    let id = StorageWorker::ensure_filesystem_with_id(&name)?;
-
-                    info!(&self.log, "Creating zone for {}", name);
-                    let network = self
-                        .create_zone(
-                            partition.zone_prefix,
-                            &name,
-                            partition.data_directory,
-                            partition.svc_directory,
-                        )
-                        .await?;
-
-                    let address = SocketAddr::new(network.ip(), partition.port);
-                    info!(&self.log, "Created zone with address {}", address);
-                    pool.add_filesystem(id, Filesystem { name, address });
-
-                    // TODO: Retry on failure
-                    // TODO: Apply allocation advice from Nexus (setting reservation /
-                    // quota properties).
-                    let _ = self
-                        .nexus_client
-                        .dataset_post(
+                    let mut dataset_futures = vec![];
+                    for (id, address, flavor) in partitions {
+                        // Create futures to notify nexus of the new datasets.
+                        // Don't await yet.
+                        let dataset_post_fut = dataset_post(
+                            self.log.clone(),
+                            self.nexus_client.clone(),
                             id,
                             pool.id(),
                             DatasetPostRequest {
                                 address,
-                                flavor: partition.flavor,
+                                flavor,
                             },
-                        )
-                        .await?;
-                }
-            },
+                        );
+                        dataset_futures.push(dataset_post_fut);
+                    }
+
+                    futures.push(async {
+                        zpool_post_fut.await?;
+                        join_all(dataset_futures)
+                            .await
+                            .into_iter()
+                            .collect::<Result<_, Error>>()?;
+                        Ok::<(), Error>(())
+                    })
+                },
+            }
         }
-        Ok(())
     }
 
     // Creates a new zone, injecting the associated ZFS filesystem.
