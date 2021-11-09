@@ -1484,7 +1484,7 @@ async fn vpc_routers_put_router(
 async fn routers_routes_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
-    path_params: Path<RouterRoutePathParam>,
+    path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1520,7 +1520,7 @@ struct RouterRoutePathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/route/{route_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}"
 }]
 async fn routers_routes_get_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1550,7 +1550,7 @@ async fn routers_routes_get_route(
 }]
 async fn routers_routes_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<RouterRoutePathParam>,
+    path_params: Path<VpcRouterPathParam>,
     create_params: TypedBody<RouterRouteCreateParams>,
 ) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
@@ -1574,7 +1574,7 @@ async fn routers_routes_post(
  */
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/route/{route_name}",
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
 }]
 async fn routers_routes_delete_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
