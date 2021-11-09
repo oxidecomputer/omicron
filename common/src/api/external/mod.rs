@@ -1294,7 +1294,7 @@ pub struct VpcSubnetUpdateParams {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcRouterKind {
     System,

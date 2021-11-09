@@ -4,6 +4,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
 
 use dropshot::test_util::object_get;
@@ -46,6 +47,7 @@ async fn test_vpc_routers() {
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
     assert_eq!(routers.len(), 1);
+    assert_eq!(routers[0].kind, VpcRouterKind::System);
 
     let router_name = "router1";
     let router_url = format!("{}/{}", routers_url, router_name);
@@ -68,6 +70,7 @@ async fn test_vpc_routers() {
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "it's not really a router");
     assert_eq!(router.vpc_id, vpc.identity.id);
+    assert_eq!(router.kind, VpcRouterKind::Custom);
 
     // get router, should be the same
     let same_router = object_get::<VpcRouter>(client, &router_url).await;
@@ -111,6 +114,7 @@ async fn test_vpc_routers() {
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.identity.description, "it's also not really a router");
     assert_eq!(router2.vpc_id, vpc.identity.id);
+    assert_eq!(router2.kind, VpcRouterKind::Custom);
 
     // routers list should now have two custom and one system
     let routers =
