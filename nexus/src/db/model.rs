@@ -1072,7 +1072,7 @@ impl VpcRouter {
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind::new(kind) }
+        Self { identity, vpc_id, kind: VpcRouterKind(kind) }
     }
 }
 
@@ -1081,7 +1081,7 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: *self.kind.state(),
+            kind: self.kind.0,
         }
     }
 }
