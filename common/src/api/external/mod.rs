@@ -21,7 +21,7 @@ use futures::stream::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -1330,32 +1330,60 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/// TODO
+/// A single rule in a VPC firewall
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// common identifying metadata */
     pub identity: IdentityMetadata,
-
     /// whether this rule is in effect
     pub status: VpcFirewallStatus,
-
     /// whether this rule is for incoming or outgoing traffic
     pub direction: VpcFirewallDirection,
-
     /// list of sets of instances that the rule applies to
     pub targets: Vec<NetworkTarget>,
-
     /// reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
-
     /// whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallAction,
-
     /// the relative priority of this rule
     pub priority: u16,
 }
 
-/// TODO
+/// A single rule in a VPC firewall
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleUpdate {
+    // In an update, the name is encoded as a key in the JSON object, so we
+    // don't include one here
+    /// human-readable free-form text about a resource
+    pub description: String,
+    /// whether this rule is in effect
+    pub status: VpcFirewallStatus,
+    /// whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallDirection,
+    /// list of sets of instances that the rule applies to
+    pub targets: Vec<NetworkTarget>,
+    /// reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+    /// whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallAction,
+    /// the relative priority of this rule
+    pub priority: u16,
+}
+
+/**
+ * Updateable properties of a [`Vpc`]'s firewall
+ * Note that VpcFirewalls are implicitly created along with a Vpc,
+ * so there is no explicit creation.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcFirewallUpdateParams {
+    #[serde(flatten)]
+    pub rules: HashMap<String, VpcFirewallRuleUpdate>,
+}
+
+/// Filter for a firewall rule. A given packet must match every field that is
+/// present for the rule to apply to it.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
     /// If present, the sources (if incoming) or destinations (if outgoing)
@@ -1561,20 +1589,6 @@ impl JsonSchema for NetworkTarget {
             ..Default::default()
         })
     }
-}
-
-/**
- * Updateable properties of a [`VpcFirewall`]
- * Note that VpcFirewalls are implicitly created along with a Vpc,
- * so there is no explicit creation.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcFirewallUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
