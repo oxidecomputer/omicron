@@ -1441,7 +1441,7 @@ impl JsonSchema for IpPortRange {
             )),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(11),  // 5 digits for each port and the dash
-                min_length: Some(1), 
+                min_length: Some(1),
                 pattern: Some(
                     r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
                 ),
@@ -1451,9 +1451,117 @@ impl JsonSchema for IpPortRange {
     }
 }
 
-/// TODO
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum NetworkTarget {}
+/// Target strings for networking APIs
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+pub enum NetworkTarget {
+    /// Target all networking traffic from the specified VPC. This is
+    /// either the current VPC or a peered VPC.
+    Vpc(Name),
+    /// Target all networking traffic from the specified VPC Subnet.
+    Subnet(Name),
+    /// Target all of the IP addresses that are assigned to the specified
+    /// instance.
+    Instance(Name),
+    /// Target all instances that have the same tag.
+    /// Target the specified Internet Gateway.
+    InternetGateway(Name),
+    // TODO: tag, ip, fip, ip_pool
+}
+
+impl TryFrom<String> for NetworkTarget {
+    type Error = String;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        let (scope, identifier) =
+            range.split_once(':').ok_or("target specifier missing ':'")?;
+        match scope {
+            "vpc" => {
+                Ok(NetworkTarget::Vpc(Name::try_from(identifier.to_string())?))
+            }
+            "subnet" => Ok(NetworkTarget::Subnet(Name::try_from(
+                identifier.to_string(),
+            )?)),
+            "instance" => Ok(NetworkTarget::Instance(Name::try_from(
+                identifier.to_string(),
+            )?)),
+            "inetgw" => Ok(NetworkTarget::InternetGateway(Name::try_from(
+                identifier.to_string(),
+            )?)),
+            _ => Err(format!("unsupported resource scope '{}'", scope)),
+        }
+    }
+}
+
+impl Into<String> for NetworkTarget {
+    fn into(self) -> String {
+        match self {
+            NetworkTarget::Vpc(name) => format!("vpc:{}", name.0),
+            NetworkTarget::Subnet(name) => {
+                format!("subnet:{}", name.0)
+            }
+            NetworkTarget::Instance(name) => {
+                format!("instance:{}", name.0)
+            }
+            NetworkTarget::InternetGateway(name) => {
+                format!("inetgw:{}", name.0)
+            }
+        }
+    }
+}
+
+impl JsonSchema for NetworkTarget {
+    fn schema_name() -> String {
+        "NetworkTarget".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A network target specifier".to_string()),
+                // TODO: This should maybe contain more of the contents of RFD
+                // 21's definition of this type
+                description: Some(
+                    "A network target specifier consists of a resource scope \
+                    and a resource identifier, separated by a colon.  Valid \
+                    scopes are: vpc, subnet, instance, tag, ip, inetgw, fip, \
+                    ip_pool"
+                        .to_string(),
+                ),
+                examples: vec![
+                    "vpc:default".into(),
+                    "subnet:databases".into(),
+                    "instance:frontdoor-lb".into(),
+                    "tag:https".into(),
+                    "ip:10.20.30.00/24".into(),
+                    "ip:2600:3c00::f03c:91ff:fe96:a264".into(),
+                    "inetgw:default".into(),
+                    "fip:foobazco.org".into(),
+                    "ip_pool:vlan33".into(),
+                ],
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: None,
+                min_length: None,
+                // This regex could be much more precise by including validation
+                // of the specific resource identifiers, but would be a lot
+                // more complicated.
+                pattern: Some(
+                    r#"^(vpc|subnet|instance|tag|ip|inetgw|fip|ip_pool):"#
+                        .to_string(),
+                ),
+            })),
+            ..Default::default()
+        })
+    }
+}
 
 /**
  * Updateable properties of a [`VpcFirewall`]
