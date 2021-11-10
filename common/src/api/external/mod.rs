@@ -1383,7 +1383,7 @@ impl JsonSchema for MacAddr {
                 max_length: Some(17), // 12 hex characters and 5 ":"-separators
                 min_length: Some(17),
                 pattern: Some(
-                    r#"^([0-8a-fA-F]{2}:){5}[0-8a-fA-F]{2}$"#.to_string(),
+                    r#"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"#.to_string(),
                 ),
             })),
             ..Default::default()
