@@ -7,7 +7,9 @@
 
 mod error;
 pub mod http_pagination;
+pub mod identifier;
 pub use error::*;
+pub use identifier::*;
 
 use anyhow::anyhow;
 use anyhow::Context;
@@ -21,7 +23,6 @@ use futures::stream::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -30,7 +31,6 @@ use std::fmt::Result as FormatResult;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::str::FromStr;
-use uuid::Uuid;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
@@ -116,165 +116,6 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
             direction: self.direction,
             limit: self.limit,
         }
-    }
-}
-
-/**
- * A name used in the API
- *
- * Names are generally user-provided unique identifiers, highly constrained as
- * described in RFD 4.  An `Name` can only be constructed with a string
- * that's valid as a name.
- */
-#[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
-)]
-#[serde(try_from = "String")]
-pub struct Name(String);
-
-/**
- * `Name::try_from(String)` is the primary method for constructing an Name
- * from an input string.  This validates the string according to our
- * requirements for a name.
- * TODO-cleanup why shouldn't callers use TryFrom<&str>?
- */
-impl TryFrom<String> for Name {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() > 63 {
-            return Err(String::from("name may contain at most 63 characters"));
-        }
-
-        let mut iter = value.chars();
-
-        let first = iter.next().ok_or_else(|| {
-            String::from("name requires at least one character")
-        })?;
-        if !first.is_ascii_lowercase() {
-            return Err(String::from(
-                "name must begin with an ASCII lowercase character",
-            ));
-        }
-
-        let mut last = first;
-        for c in iter {
-            last = c;
-
-            if !c.is_ascii_lowercase() && !c.is_digit(10) && c != '-' {
-                return Err(format!(
-                    "name contains invalid character: \"{}\" (allowed \
-                     characters are lowercase ASCII, digits, and \"-\")",
-                    c
-                ));
-            }
-        }
-
-        if last == '-' {
-            return Err(String::from("name cannot end with \"-\""));
-        }
-
-        Ok(Name(value))
-    }
-}
-
-impl FromStr for Name {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Name::try_from(String::from(value))
-    }
-}
-
-impl<'a> From<&'a Name> for &'a str {
-    fn from(n: &'a Name) -> Self {
-        n.as_str()
-    }
-}
-
-/**
- * `Name` instances are comparable like Strings, primarily so that they can
- * be used as keys in trees.
- */
-impl<S> PartialEq<S> for Name
-where
-    S: AsRef<str>,
-{
-    fn eq(&self, other: &S) -> bool {
-        self.0 == other.as_ref()
-    }
-}
-
-/**
- * Custom JsonSchema implementation to encode the constraints on Name
- */
-/*
- * TODO: 1. make this part of schemars w/ rename and maxlen annotations
- * TODO: 2. integrate the regex with `try_from`
- */
-impl JsonSchema for Name {
-    fn schema_name() -> String {
-        "Name".to_string()
-    }
-    fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
-                title: Some("A name used in the API".to_string()),
-                description: Some(
-                    "Names must begin with a lower case ASCII letter, be \
-                     composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'."
-                        .to_string(),
-                ),
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
-            })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: None,
-                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
-            })),
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
-        })
-    }
-}
-
-impl Name {
-    /**
-     * Parse an `Name`.  This is a convenience wrapper around
-     * `Name::try_from(String)` that marshals any error into an appropriate
-     * `Error`.
-     */
-    pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
-            label: String::from(label),
-            message: e,
-        })
-    }
-
-    /**
-     * Return the `&str` representing the actual name.
-     */
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
     }
 }
 
