@@ -1330,6 +1330,145 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+/// TODO
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRule {
+    /// common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    /// whether this rule is in effect
+    pub status: VpcFirewallStatus,
+
+    /// whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallDirection,
+
+    /// list of sets of instances that the rule applies to
+    pub targets: Vec<NetworkTarget>,
+
+    /// reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+
+    /// whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallAction,
+
+    /// the relative priority of this rule
+    pub priority: u16,
+}
+
+/// TODO
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleFilter {
+    /// If present, the sources (if incoming) or destinations (if outgoing)
+    /// this rule applies to.
+    pub hosts: Option<Vec<NetworkTarget>>,
+
+    /// If present, the networking protocols this rule applies to.
+    pub protocols: Option<Vec<VpcFirewallRuleProtocols>>,
+
+    /// If present, the destination ports this rule applies to.
+    pub ports: Option<Vec<IpPortRange>>,
+}
+
+/// The protocols that may be specified in a firewall rule's filter
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum VpcFirewallRuleProtocols {
+    Tcp,
+    Udp,
+    Icmp,
+}
+
+/// A range of IP ports
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+pub struct IpPortRange {
+    /// The first port in the range
+    pub first: u16,
+    /// The last port in the range
+    pub last: u16,
+}
+
+impl TryFrom<String> for IpPortRange {
+    type Error = anyhow::Error;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        match range.split_once('-') {
+            None => {
+                let port = range.parse::<u16>()?;
+                Ok(IpPortRange { first: port, last: port })
+            }
+            Some((left, right)) => {
+                let first = left.parse::<u16>()?;
+                let last = right.parse::<u16>()?;
+                Ok(IpPortRange { first, last })
+            }
+        }
+    }
+}
+
+impl Into<String> for IpPortRange {
+    fn into(self) -> String {
+        if self.first == self.last {
+            self.first.to_string()
+        } else {
+            format!("{}-{}", self.first, self.last).to_string()
+        }
+    }
+}
+
+impl JsonSchema for IpPortRange {
+    fn schema_name() -> String {
+        "IpPortRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of IP ports".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of IP ports. The second port \
+                    may be omitted to represent a single port"
+                        .to_string(),
+                ),
+                examples: vec!["22".into(), "6667-7000".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(11),  // 5 digits for each port and the dash
+                min_length: Some(1), 
+                pattern: Some(
+                    r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+/// TODO
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum NetworkTarget {}
+
+/**
+ * Updateable properties of a [`VpcFirewall`]
+ * Note that VpcFirewalls are implicitly created along with a Vpc,
+ * so there is no explicit creation.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcFirewallUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcFirewallStatus {
