@@ -5,10 +5,8 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-use std::convert::TryFrom;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::Organization;
 use omicron_common::api::external::OrganizationCreateParams;
 use omicron_common::api::external::Project;
@@ -22,7 +20,7 @@ pub async fn create_organization(
 ) -> Organization {
     let input = OrganizationCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(organization_name).unwrap(),
+            name: organization_name.parse().unwrap(),
             description: "an org".to_string(),
         },
     };
@@ -53,7 +51,7 @@ pub async fn create_project(
         format!("/organizations/{}/projects", &organization_name).as_str(),
         ProjectCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from(project_name).unwrap(),
+                name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
         },
@@ -76,10 +74,10 @@ pub async fn create_vpc(
         .as_str(),
         VpcCreateParams {
             identity: IdentityMetadataCreateParams {
-                name: Name::try_from(vpc_name).unwrap(),
-                description: String::from("vpc description"),
+                name: vpc_name.parse().unwrap(),
+                description: "vpc description".to_string(),
             },
-            dns_name: Name::try_from("abc").unwrap(),
+            dns_name: "abc".parse().unwrap(),
         },
     )
     .await
@@ -104,10 +102,10 @@ pub async fn create_vpc_with_error(
             .as_str(),
             VpcCreateParams {
                 identity: IdentityMetadataCreateParams {
-                    name: Name::try_from(vpc_name).unwrap(),
+                    name: vpc_name.parse().unwrap(),
                     description: String::from("vpc description"),
                 },
-                dns_name: Name::try_from("abc").unwrap(),
+                dns_name: "abc".parse().unwrap(),
             },
             status,
         )
