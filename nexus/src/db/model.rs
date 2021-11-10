@@ -1114,6 +1114,45 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
     }
 }
 
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_status", type_schema = "public")]
+    pub struct VpcFirewallStatusEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallStatusEnum"]
+    pub struct VpcFirewallStatus(pub external::VpcFirewallStatus);
+
+    Disabled => b"disabled"
+    Enabled => b"enabled"
+);
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_direction", type_schema = "public")]
+    pub struct VpcFirewallDirectionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallDirectionEnum"]
+    pub struct VpcFirewallDirection(pub external::VpcFirewallDirection);
+
+    Incoming => b"incoming"
+    Outgoing => b"outgoing"
+);
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_action", type_schema = "public")]
+    pub struct VpcFirewallActionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallActionEnum"]
+    pub struct VpcFirewallAction(pub external::VpcFirewallAction);
+
+    Allow => b"allow"
+    Drop => b"drop"
+);
+
 #[derive(Queryable, Insertable, Clone, Debug, Resource)]
 #[table_name = "network_interface"]
 pub struct NetworkInterface {

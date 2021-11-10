@@ -338,6 +338,19 @@ CREATE TABLE omicron.public.network_interface (
     ip INET NOT NULL
 );
 
+/* TODO-completeness
+
+ * We currently have a NetworkInterface table with the IP and MAC addresses inline.
+ * Eventually, we'll probably want to move these to their own tables, and
+ * refer to them here, most notably to support multiple IPs per NIC, as well
+ * as moving IPs between NICs on different instances, etc.
+ */
+
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
@@ -363,15 +376,43 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_router (
 ) WHERE
     time_deleted IS NULL;
 
-/* TODO-completeness
+CREATE TYPE omicron.public.vpc_firewall_status AS ENUM (
+    'disabled',
+    'enabled'
+);
 
- * We currently have a NetworkInterface table with the IP and MAC addresses inline.
- * Eventually, we'll probably want to move these to their own tables, and
- * refer to them here, most notably to support multiple IPs per NIC, as well
- * as moving IPs between NICs on different instances, etc.
- */
+CREATE TYPE omicron.public.vpc_firewall_direction AS ENUM (
+    'incoming',
+    'outgoing'
+);
 
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE TYPE omicron.public.vpc_firewall_action AS ENUM (
+    'allow',
+    'drop'
+);
+
+CREATE TABLE omicron.public.vpc_firewall (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    vpc_id UUID NOT NULL,
+    status vpc_firewall_status NOT NULL,
+    direction vpc_firewall_direction NOT NULL,
+    /* Array of targets. 128 was picked to include plenty of space for
+       a tag, colon, and resource identifier. */
+    targets STRING(128)[] NOT NULL,
+    filters JSONB NOT NULL,
+    action vpc_firewall_action NOT NULL,
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.vpc_router (
     vpc_id,
     name
 ) WHERE

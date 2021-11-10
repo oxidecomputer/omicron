@@ -195,6 +195,24 @@ table! {
     }
 }
 
+table! {
+    vpc_firewall (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        status -> crate::db::model::VpcFirewallStatusEnum,
+        direction -> crate::db::model::VpcFirewallDirectionEnum,
+        targets -> Array<Text>,
+        filters -> Jsonb,
+        action -> crate::db::model::VpcFirewallActionEnum,
+        priority -> Int4,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
@@ -209,5 +227,6 @@ allow_tables_to_appear_in_same_query!(
     sled,
     vpc,
     vpc_subnet,
-    vpc_router
+    vpc_router,
+    vpc_firewall,
 );

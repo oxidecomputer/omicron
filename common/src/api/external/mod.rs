@@ -1330,6 +1330,27 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallStatus {
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallDirection {
+    Incoming,
+    Outgoing,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallAction {
+    Allow,
+    Drop,
+}
+
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
