@@ -1091,16 +1091,6 @@ pub struct RouterRouteKindEnum;
 #[sql_type = "RouterRouteKindEnum"]
 pub struct RouterRouteKind(pub external::RouterRouteKind);
 
-impl RouterRouteKind {
-    pub fn new(state: external::RouterRouteKind) -> Self {
-        Self(state)
-    }
-
-    pub fn state(&self) -> &external::RouterRouteKind {
-        &self.0
-    }
-}
-
 impl<DB> ToSql<RouterRouteKindEnum, DB> for RouterRouteKind
 where
     DB: Backend,
@@ -1109,7 +1099,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        match *self.state() {
+        match self.0 {
             external::RouterRouteKind::Default => out.write_all(b"default")?,
             external::RouterRouteKind::VpcSubnet => {
                 out.write_all(b"vpc_subnet")?
@@ -1130,17 +1120,15 @@ where
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         match DB::as_bytes(bytes) {
             b"default" => {
-                Ok(RouterRouteKind::new(external::RouterRouteKind::Default))
+                Ok(RouterRouteKind(external::RouterRouteKind::Default))
             }
             b"vpc_subnet" => {
-                Ok(RouterRouteKind::new(external::RouterRouteKind::VpcSubnet))
+                Ok(RouterRouteKind(external::RouterRouteKind::VpcSubnet))
             }
             b"vpc_peering" => {
-                Ok(RouterRouteKind::new(external::RouterRouteKind::VpcPeering))
+                Ok(RouterRouteKind(external::RouterRouteKind::VpcPeering))
             }
-            b"custom" => {
-                Ok(RouterRouteKind::new(external::RouterRouteKind::Custom))
-            }
+            b"custom" => Ok(RouterRouteKind(external::RouterRouteKind::Custom)),
             _ => Err("Unrecognized enum variant for RouteKind".into()),
         }
     }
@@ -1149,16 +1137,6 @@ where
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 pub struct RouteTarget(pub external::RouteTarget);
-
-impl RouteTarget {
-    pub fn new(state: external::RouteTarget) -> Self {
-        Self(state)
-    }
-
-    pub fn state(&self) -> &external::RouteTarget {
-        &self.0
-    }
-}
 
 impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
 where
@@ -1179,7 +1157,7 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        Ok(RouteTarget::new(
+        Ok(RouteTarget(
             String::from_sql(bytes)
                 .unwrap()
                 .parse::<external::RouteTarget>()
@@ -1252,8 +1230,8 @@ impl RouterRoute {
         Self {
             identity,
             router_id,
-            kind: RouterRouteKind::new(kind),
-            target: RouteTarget::new(params.target),
+            kind: RouterRouteKind(kind),
+            target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
         }
     }
@@ -1264,8 +1242,8 @@ impl Into<external::RouterRoute> for RouterRoute {
         external::RouterRoute {
             identity: self.identity(),
             router_id: self.router_id,
-            kind: self.kind.state().clone(),
-            target: self.target.state().clone(),
+            kind: self.kind.0.clone(),
+            target: self.target.0.clone(),
             destination: self.destination.state().clone(),
         }
     }
@@ -1287,7 +1265,7 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
-            target: RouteTarget::new(params.target),
+            target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
         }
     }
