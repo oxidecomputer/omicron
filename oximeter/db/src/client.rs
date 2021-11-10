@@ -13,7 +13,6 @@ use std::sync::Mutex;
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
-    address: SocketAddr,
     log: Logger,
     url: String,
     client: reqwest::Client,
@@ -25,13 +24,8 @@ impl Client {
     pub async fn new(address: SocketAddr, log: Logger) -> Result<Self, Error> {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
-        let out = Self {
-            address,
-            log,
-            url,
-            client,
-            schema: Mutex::new(BTreeMap::new()),
-        };
+        let out =
+            Self { log, url, client, schema: Mutex::new(BTreeMap::new()) };
         // TODO-robustness: We may want to remove this init_db call.
         //
         // The call will always succeed (assuming the DB can be reached), since the statements for

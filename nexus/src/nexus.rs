@@ -53,9 +53,7 @@ use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
@@ -256,21 +254,29 @@ impl Nexus {
                 "n_producers" => producers.len(),
                 "collector_id" => ?oximeter_info.collector_id,
             );
-            let client = self.build_oximeter_client(
+            let (client, _) = self.build_oximeter_client(
                 oximeter_info.collector_id,
                 oximeter_info.address,
             );
             for producer in producers.into_iter() {
-                let producer_info = ProducerEndpoint {
-                    id: producer.id(),
-                    address: SocketAddr::new(
-                        producer.ip.ip(),
-                        producer.port.try_into().unwrap(),
-                    ),
-                    base_route: producer.base_route,
-                    interval: Duration::from_secs_f64(producer.interval),
-                };
-                client.register_producer(&producer_info).await?;
+                let producer_info =
+                    omicron_common::oximeter_client::types::ProducerEndpoint {
+                        id: producer.id(),
+                        address: SocketAddr::new(
+                            producer.ip.ip(),
+                            producer.port.try_into().unwrap(),
+                        )
+                        .to_string(),
+                        base_route: producer.base_route,
+                        interval:
+                            omicron_common::oximeter_client::types::Duration::from(
+                                Duration::from_secs_f64(producer.interval),
+                            ),
+                    };
+                client
+                    .producers_post(&producer_info)
+                    .await
+                    .map_err(Error::from)?;
             }
         }
         Ok(())
@@ -278,15 +284,18 @@ impl Nexus {
 
     /// Register as a metric producer with the oximeter metric collection server.
     pub async fn register_as_producer(&self, address: SocketAddr) {
-        let producer_endpoint = ProducerEndpoint {
-            id: self.id,
-            address,
-            base_route: String::from("/metrics/collect"),
-            interval: Duration::from_secs(10),
-        };
+        let producer_endpoint =
+            omicron_common::nexus_client::types::ProducerEndpoint {
+                id: self.id,
+                address: address.to_string(),
+                base_route: String::from("/metrics/collect"),
+                interval: omicron_common::nexus_client::types::Duration::from(
+                    Duration::from_secs(10),
+                ),
+            };
         let register = || async {
             debug!(self.log, "registering nexus as metric producer");
-            register(address, &producer_endpoint)
+            register(address, &self.log, &producer_endpoint)
                 .await
                 .map_err(backoff::BackoffError::Transient)
         };
@@ -309,7 +318,7 @@ impl Nexus {
     pub async fn oximeter_client(
         &self,
         id: Uuid,
-    ) -> Result<OximeterClient, Error> {
+    ) -> Result<(OximeterClient, Uuid), Error> {
         let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
         let address = SocketAddr::new(
             oximeter_info.ip.ip(),
@@ -324,16 +333,17 @@ impl Nexus {
         &self,
         id: Uuid,
         address: SocketAddr,
-    ) -> OximeterClient {
+    ) -> (OximeterClient, Uuid) {
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
-        let client = OximeterClient::new(id, address, client_log);
+        let client =
+            OximeterClient::new(&format!("http://{}", address), client_log);
         info!(
             self.log,
             "registered oximeter collector client";
             "id" => id.to_string(),
         );
-        client
+        (client, id)
     }
 
     /**
@@ -913,7 +923,10 @@ impl Nexus {
         let sled = self.sled_lookup(id).await?;
 
         let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        Ok(Arc::new(SledAgentClient::new(id, sled.address(), log)))
+        Ok(Arc::new(SledAgentClient::new(
+            &format!("http://{}", sled.address()),
+            log,
+        )))
     }
 
     /**
@@ -1044,17 +1057,30 @@ impl Nexus {
          * beat us to it.
          */
 
+        let runtime: nexus::InstanceRuntimeState =
+            instance.runtime().clone().into();
+
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
-        let instance_hardware = InstanceHardware {
-            runtime: instance.runtime().clone().into(),
-            nics: vec![],
-        };
+        let instance_hardware =
+            omicron_common::sled_agent_client::types::InstanceHardware {
+                runtime: omicron_common::sled_agent_client::types::InstanceRuntimeState::from(runtime),
+                nics: vec![],
+            };
 
         let new_runtime = sa
-            .instance_ensure(instance.id(), instance_hardware, requested)
-            .await?;
+            .instance_put(
+                &instance.id(),
+                &omicron_common::sled_agent_client::types::InstanceEnsureBody {
+                    initial: instance_hardware,
+                    target: requested.into(),
+                },
+            )
+            .await
+            .map_err(Error::from)?;
+
+        let new_runtime: nexus::InstanceRuntimeState = new_runtime.into();
 
         self.db_datastore
             .instance_update_runtime(&instance.id(), &new_runtime.into())
@@ -1329,12 +1355,25 @@ impl Nexus {
         sa: Arc<SledAgentClient>,
         requested: DiskStateRequested,
     ) -> Result<(), Error> {
+        let runtime: DiskRuntimeState = disk.runtime().into();
+
         /*
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime =
-            sa.disk_ensure(disk.id(), disk.runtime().into(), requested).await?;
+        let new_runtime = sa
+            .disk_put(
+                &disk.id(),
+                &omicron_common::sled_agent_client::types::DiskEnsureBody {
+                    initial_runtime: omicron_common::sled_agent_client::types::DiskRuntimeState::from(runtime),
+                    target: omicron_common::sled_agent_client::types::DiskStateRequested::from(requested),
+                },
+            )
+            .await
+            .map_err(Error::from)?;
+
+        let new_runtime: DiskRuntimeState = new_runtime.into();
+
         self.db_datastore
             .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
@@ -1990,18 +2029,24 @@ impl Nexus {
      */
     pub async fn assign_producer(
         &self,
-        producer_info: ProducerEndpoint,
+        producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let collector = self.next_collector().await?;
-        let db_info =
-            db::model::ProducerEndpoint::new(&producer_info, collector.id);
+        let (collector, id) = self.next_collector().await?;
+        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
-        collector.register_producer(&producer_info).await?;
+        collector
+            .producers_post(
+                &omicron_common::oximeter_client::types::ProducerEndpoint::from(
+                    &producer_info,
+                ),
+            )
+            .await
+            .map_err(Error::from)?;
         info!(
             self.log,
             "assigned collector to new producer";
             "producer_id" => ?producer_info.id,
-            "collector_id" => ?collector.id,
+            "collector_id" => ?id,
         );
         Ok(())
     }
@@ -2009,7 +2054,7 @@ impl Nexus {
     /**
      * Return an oximeter collector to assign a newly-registered producer
      */
-    async fn next_collector(&self) -> Result<OximeterClient, Error> {
+    async fn next_collector(&self) -> Result<(OximeterClient, Uuid), Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {
             marker: None,

@@ -24,6 +24,8 @@ thiserror = "1.0"
 toml = "0.5.6"
 walkdir = "2.3"
 parse-display = "0.5.3"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+percent-encoding = "2.1.0"
 
 [dependencies.api_identity]
 path = "src/api/external/api_identity"

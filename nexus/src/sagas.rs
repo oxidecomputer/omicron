@@ -17,8 +17,6 @@ use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -168,8 +166,8 @@ async fn sic_instance_ensure(
      * TODO-correctness is this idempotent?
      */
     let osagactx = sagactx.user_data();
-    let runtime_params = InstanceRuntimeStateRequested {
-        run_state: InstanceStateRequested::Running,
+    let runtime_params = omicron_common::sled_agent_client::types::InstanceRuntimeStateRequested {
+        run_state: omicron_common::sled_agent_client::types::InstanceStateRequested::Running,
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
@@ -186,9 +184,18 @@ async fn sic_instance_ensure(
      * one, that's fine.  That might just mean the sled agent beat us to it.
      */
     let new_runtime_state = sa
-        .instance_ensure(instance_id, initial_runtime, runtime_params)
+        .instance_put(
+            &instance_id,
+            &omicron_common::sled_agent_client::types::InstanceEnsureBody {
+                initial: omicron_common::sled_agent_client::types::InstanceHardware::from(initial_runtime),
+                target: runtime_params,
+            },
+        )
         .await
+        .map_err(omicron_common::api::external::Error::from)
         .map_err(ActionError::action_failed)?;
+
+    let new_runtime_state: InstanceRuntimeState = new_runtime_state.into();
 
     osagactx
         .datastore()
