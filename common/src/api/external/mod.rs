@@ -458,6 +458,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    VpcFirewallRule,
     VpcSubnet,
     VpcRouter,
     Oximeter,
@@ -479,6 +480,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::VpcFirewallRule => "vpc firewall rule",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::VpcRouter => "vpc router",
                 ResourceType::Oximeter => "oximeter",
@@ -1336,15 +1338,15 @@ pub struct VpcFirewallRule {
     /// common identifying metadata */
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
-    pub status: VpcFirewallStatus,
+    pub status: VpcFirewallRuleStatus,
     /// whether this rule is for incoming or outgoing traffic
-    pub direction: VpcFirewallDirection,
+    pub direction: VpcFirewallRuleDirection,
     /// list of sets of instances that the rule applies to
     pub targets: Vec<NetworkTarget>,
     /// reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
     /// whether traffic matching the rule should be allowed or dropped
-    pub action: VpcFirewallAction,
+    pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
     pub priority: u16,
 }
@@ -1357,27 +1359,27 @@ pub struct VpcFirewallRuleUpdate {
     /// human-readable free-form text about a resource
     pub description: String,
     /// whether this rule is in effect
-    pub status: VpcFirewallStatus,
+    pub status: VpcFirewallRuleStatus,
     /// whether this rule is for incoming or outgoing traffic
-    pub direction: VpcFirewallDirection,
+    pub direction: VpcFirewallRuleDirection,
     /// list of sets of instances that the rule applies to
     pub targets: Vec<NetworkTarget>,
     /// reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
     /// whether traffic matching the rule should be allowed or dropped
-    pub action: VpcFirewallAction,
+    pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
     pub priority: u16,
 }
 
 /**
  * Updateable properties of a [`Vpc`]'s firewall
- * Note that VpcFirewalls are implicitly created along with a Vpc,
+ * Note that VpcFirewallRules are implicitly created along with a Vpc,
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct VpcFirewallUpdateParams {
+pub struct VpcFirewallRuleUpdateParams {
     #[serde(flatten)]
     pub rules: HashMap<String, VpcFirewallRuleUpdate>,
 }
@@ -1391,7 +1393,7 @@ pub struct VpcFirewallRuleFilter {
     pub hosts: Option<Vec<NetworkTarget>>,
 
     /// If present, the networking protocols this rule applies to.
-    pub protocols: Option<Vec<VpcFirewallRuleProtocols>>,
+    pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
     /// If present, the destination ports this rule applies to.
     pub ports: Option<Vec<IpPortRange>>,
@@ -1400,7 +1402,7 @@ pub struct VpcFirewallRuleFilter {
 /// The protocols that may be specified in a firewall rule's filter
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "UPPERCASE")]
-pub enum VpcFirewallRuleProtocols {
+pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
     Icmp,
@@ -1601,21 +1603,21 @@ impl JsonSchema for NetworkTarget {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub enum VpcFirewallStatus {
+pub enum VpcFirewallRuleStatus {
     Disabled,
     Enabled,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub enum VpcFirewallDirection {
+pub enum VpcFirewallRuleDirection {
     Incoming,
     Outgoing,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub enum VpcFirewallAction {
+pub enum VpcFirewallRuleAction {
     Allow,
     Drop,
 }

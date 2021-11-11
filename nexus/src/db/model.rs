@@ -4,7 +4,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, sled, vpc, vpc_router, vpc_subnet,
+    organization, oximeter, project, rack, sled, vpc, vpc_firewall_rule,
+    vpc_router, vpc_subnet,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -140,6 +141,47 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+/// Representation of an IP port in the database
+/// This handles converting from the database's i32 to the actual u16.
+#[derive(
+    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+)]
+#[sql_type = "sql_types::Int4"]
+#[repr(transparent)]
+pub struct SqlU16(pub u16);
+
+NewtypeFrom! { () pub struct SqlU16(u16); }
+NewtypeDeref! { () pub struct SqlU16(u16); }
+
+impl SqlU16 {
+    pub fn new(port: u16) -> Self {
+        Self(port)
+    }
+}
+
+impl<DB> ToSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i32::from(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        u16::try_from(i32::from_sql(bytes)?).map(SqlU16).map_err(|e| e.into())
     }
 }
 
@@ -301,6 +343,7 @@ pub struct Sled {
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
@@ -803,6 +846,7 @@ pub struct ProducerEndpoint {
     identity: ProducerEndpointIdentity,
 
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
     pub interval: f64,
     pub base_route: String,
@@ -844,6 +888,7 @@ pub struct OximeterInfo {
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
@@ -869,6 +914,10 @@ pub struct Vpc {
     pub project_id: Uuid,
     pub system_router_id: Uuid,
     pub dns_name: Name,
+
+    /// firewall generation number, used as a child resource generation number
+    /// per RFD 192
+    pub firewall_gen: Generation,
 }
 
 impl Vpc {
@@ -884,6 +933,7 @@ impl Vpc {
             project_id,
             system_router_id,
             dns_name: params.dns_name.into(),
+            firewall_gen: Generation::new(),
         }
     }
 }
@@ -897,6 +947,13 @@ impl Into<external::Vpc> for Vpc {
             dns_name: self.dns_name.0,
         }
     }
+}
+
+impl DatastoreCollection<VpcFirewallRule> for Vpc {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc::dsl::firewall_gen;
+    type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;
+    type CollectionIdColumn = vpc_firewall_rule::dsl::vpc_id;
 }
 
 #[derive(AsChangeset)]
@@ -1105,42 +1162,187 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_status", type_schema = "public")]
-    pub struct VpcFirewallStatusEnum;
+    #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
+    pub struct VpcFirewallRuleStatusEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallStatusEnum"]
-    pub struct VpcFirewallStatus(pub external::VpcFirewallStatus);
+    #[sql_type = "VpcFirewallRuleStatusEnum"]
+    pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
     Disabled => b"disabled"
     Enabled => b"enabled"
 );
+NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
+NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_direction", type_schema = "public")]
-    pub struct VpcFirewallDirectionEnum;
+    #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
+    pub struct VpcFirewallRuleDirectionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallDirectionEnum"]
-    pub struct VpcFirewallDirection(pub external::VpcFirewallDirection);
+    #[sql_type = "VpcFirewallRuleDirectionEnum"]
+    pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
     Incoming => b"incoming"
     Outgoing => b"outgoing"
 );
+NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
+NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_action", type_schema = "public")]
-    pub struct VpcFirewallActionEnum;
+    #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
+    pub struct VpcFirewallRuleActionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallActionEnum"]
-    pub struct VpcFirewallAction(pub external::VpcFirewallAction);
+    #[sql_type = "VpcFirewallRuleActionEnum"]
+    pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
     Allow => b"allow"
     Drop => b"drop"
 );
+NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+
+/// Newtype wrapper around [`external::NetworkTarget`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Deserialize, JsonSchema)]
+#[sql_type = "sql_types::Text"]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct NetworkTarget(pub external::NetworkTarget);
+NewtypeFrom! { () pub struct NetworkTarget(external::NetworkTarget); }
+NewtypeDeref! { () pub struct NetworkTarget(external::NetworkTarget); }
+
+impl<DB> ToSql<sql_types::Text, DB> for NetworkTarget
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        let as_string: String = self.0.clone().into();
+        as_string.to_sql(out)
+    }
+}
+
+// Deserialize the "Name" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for NetworkTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        external::NetworkTarget::try_from(String::from_sql(bytes)?)
+            .map(NetworkTarget)
+            .map_err(|e| e.into())
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRuleFilter`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Deserialize, JsonSchema)]
+#[sql_type = "sql_types::Jsonb"]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct VpcFirewallRuleFilter(pub external::VpcFirewallRuleFilter);
+NewtypeFrom! { () pub struct VpcFirewallRuleFilter(external::VpcFirewallRuleFilter); }
+NewtypeDeref! { () pub struct VpcFirewallRuleFilter(external::VpcFirewallRuleFilter); }
+
+impl<DB> ToSql<sql_types::Jsonb, DB> for VpcFirewallRuleFilter
+where
+    DB: Backend,
+    serde_json::Value: ToSql<sql_types::Jsonb, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        serde_json::to_value(self.0.clone())?.to_sql(out)
+    }
+}
+
+// Deserialize the "Name" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Jsonb, DB> for VpcFirewallRuleFilter
+where
+    DB: Backend,
+    serde_json::Value: FromSql<sql_types::Jsonb, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        serde_json::from_value::<external::VpcFirewallRuleFilter>(
+            serde_json::Value::from_sql(bytes)?,
+        )
+        .map(VpcFirewallRuleFilter)
+        .map_err(|e| e.into())
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "vpc_firewall_rule"]
+pub struct VpcFirewallRule {
+    #[diesel(embed)]
+    pub identity: VpcFirewallRuleIdentity,
+
+    pub vpc_id: Uuid,
+    pub status: VpcFirewallRuleStatus,
+    pub direction: VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkTarget>,
+    pub filters: VpcFirewallRuleFilter,
+    pub action: VpcFirewallRuleAction,
+    pub priority: SqlU16,
+}
+
+impl VpcFirewallRule {
+    pub fn new(
+        rule_id: Uuid,
+        vpc_id: Uuid,
+        rule_name: external::Name,
+        rule: external::VpcFirewallRuleUpdate,
+    ) -> Self {
+        let identity = VpcFirewallRuleIdentity::new(
+            rule_id,
+            external::IdentityMetadataCreateParams {
+                name: rule_name,
+                description: rule.description,
+            },
+        );
+        Self {
+            identity,
+            vpc_id,
+            status: rule.status.into(),
+            direction: rule.direction.into(),
+            targets: rule
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filters: rule.filters.into(),
+            action: rule.action.into(),
+            priority: rule.priority.into(),
+        }
+    }
+}
+
+impl Into<external::VpcFirewallRule> for VpcFirewallRule {
+    fn into(self) -> external::VpcFirewallRule {
+        external::VpcFirewallRule {
+            identity: self.identity(),
+            status: self.status.into(),
+            direction: self.direction.into(),
+            targets: self
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filters: self.filters.into(),
+            action: self.action.into(),
+            priority: self.priority.into(),
+        }
+    }
+}
 
 #[derive(Queryable, Insertable, Clone, Debug, Resource)]
 #[table_name = "network_interface"]

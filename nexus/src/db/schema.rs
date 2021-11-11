@@ -165,6 +165,7 @@ table! {
         project_id -> Uuid,
         system_router_id -> Uuid,
         dns_name -> Text,
+        firewall_gen -> Int8,
     }
 }
 
@@ -196,7 +197,7 @@ table! {
 }
 
 table! {
-    vpc_firewall (id) {
+    vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -204,11 +205,11 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
-        status -> crate::db::model::VpcFirewallStatusEnum,
-        direction -> crate::db::model::VpcFirewallDirectionEnum,
+        status -> crate::db::model::VpcFirewallRuleStatusEnum,
+        direction -> crate::db::model::VpcFirewallRuleDirectionEnum,
         targets -> Array<Text>,
         filters -> Jsonb,
-        action -> crate::db::model::VpcFirewallActionEnum,
+        action -> crate::db::model::VpcFirewallRuleActionEnum,
         priority -> Int4,
     }
 }
@@ -228,5 +229,5 @@ allow_tables_to_appear_in_same_query!(
     vpc,
     vpc_subnet,
     vpc_router,
-    vpc_firewall,
+    vpc_firewall_rule,
 );

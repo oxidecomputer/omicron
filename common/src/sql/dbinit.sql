@@ -291,7 +291,11 @@ CREATE TABLE omicron.public.vpc (
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
     system_router_id UUID NOT NULL,
-    dns_name STRING(63) NOT NULL
+    dns_name STRING(63) NOT NULL,
+
+    /* Used to ensure that two requests do not concurrently modify the
+       VPC's firewall */
+    firewall_gen INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -376,22 +380,22 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_router (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.vpc_firewall_status AS ENUM (
+CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
     'enabled'
 );
 
-CREATE TYPE omicron.public.vpc_firewall_direction AS ENUM (
+CREATE TYPE omicron.public.vpc_firewall_rule_direction AS ENUM (
     'incoming',
     'outgoing'
 );
 
-CREATE TYPE omicron.public.vpc_firewall_action AS ENUM (
+CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
     'allow',
     'drop'
 );
 
-CREATE TABLE omicron.public.vpc_firewall (
+CREATE TABLE omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -402,13 +406,13 @@ CREATE TABLE omicron.public.vpc_firewall (
     time_deleted TIMESTAMPTZ,
 
     vpc_id UUID NOT NULL,
-    status vpc_firewall_status NOT NULL,
-    direction vpc_firewall_direction NOT NULL,
+    status vpc_firewall_rule_status NOT NULL,
+    direction vpc_firewall_rule_direction NOT NULL,
     /* Array of targets. 128 was picked to include plenty of space for
        a tag, colon, and resource identifier. */
     targets STRING(128)[] NOT NULL,
     filters JSONB NOT NULL,
-    action vpc_firewall_action NOT NULL,
+    action vpc_firewall_rule_action NOT NULL,
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 

@@ -18,14 +18,17 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{DatastoreCollection, InsertError};
+use super::collection_insert::{
+    AsyncInsertError, DatastoreCollection, SyncInsertError,
+};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
+use diesel::prelude::*;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -52,7 +55,7 @@ use crate::db::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        VpcFirewallRule, VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -357,11 +360,11 @@ impl DataStore {
         .insert_and_get_result_async(self.pool())
         .await
         .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Organization,
                 lookup_type: LookupType::ById(organization_id),
             },
-            InsertError::DatabaseError(e) => {
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
@@ -1313,14 +1316,38 @@ impl DataStore {
 
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
         use db::schema::vpc::dsl;
+        use db::schema::vpc_firewall_rule::dsl as vfr_dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::vpc)
+        let delete_vpc = diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(dsl::time_deleted.eq(now))
-            .returning(Vpc::as_returning())
-            .get_result_async(self.pool())
+            .returning(Vpc::as_returning());
+        let delete_firewall = diesel::update(vfr_dsl::vpc_firewall_rule)
+            .filter(vfr_dsl::time_deleted.is_null())
+            .filter(vfr_dsl::vpc_id.eq(*vpc_id))
+            .set(vfr_dsl::time_deleted.eq(now));
+
+        // Ideally this would be a CTE so we don't need to hold a transaction
+        // open across multiple roundtrips from the database, but for now we're
+        // using a transaction due to the severely decreased legibility of
+        // CTEs via diesel right now.
+        self.pool()
+            .transaction(move |conn| {
+                delete_vpc.execute(conn)?;
+                // We delete the firewall rules in the same transaction as the
+                // VPC for two reasons:
+                // 1) The VPC row must be deleted before the firewall rules, to
+                //    prevent new firewall rules from being added between the
+                //    deletion of the firewall rules and the deletion of the
+                //    VPC.
+                // 2) If the process were to die after the VPC deletion but
+                //    before the firewall deletion, the firewall rules would be
+                //    orphaned in the database.
+                delete_firewall.execute(conn)?;
+                Ok(())
+            })
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1328,8 +1355,77 @@ impl DataStore {
                     ResourceType::Vpc,
                     LookupType::ById(*vpc_id),
                 )
-            })?;
-        Ok(())
+            })
+    }
+
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcFirewallRule> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        paginated(dsl::vpc_firewall_rule, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .select(VpcFirewallRule::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        rules: Vec<VpcFirewallRule>,
+    ) -> UpdateResult<Vec<VpcFirewallRule>> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now));
+
+        let insert_new_query = Vpc::insert_resource(
+            *vpc_id,
+            diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
+        );
+
+        // Ideally this would be a CTE so we don't need to hold a transaction
+        // open across multiple roundtrips from the database, but for now we're
+        // using a transaction due to the severely decreased legibility of
+        // CTEs via diesel right now.
+        self.pool()
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+
+                // The generation count update on the vpc table row will take a
+                // write lock on the row, ensuring that the vpc was not deleted
+                // concurently.
+                insert_new_query.insert_and_get_results(conn).map_err(|e| {
+                    match e {
+                        SyncInsertError::CollectionNotFound => {
+                            diesel::result::Error::RollbackTransaction
+                        }
+                        SyncInsertError::DatabaseError(e) => e,
+                    }
+                })
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::ById(*vpc_id),
+                )
+            })
     }
 
     pub async fn vpc_list_subnets(
