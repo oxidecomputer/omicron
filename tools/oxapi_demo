@@ -3,7 +3,7 @@
 # prototype server.
 #
 
-OXAPI_URL='http://127.0.0.1:12220'
+OXAPI_URL="${OXAPI_URL:-http://127.0.0.1:12220}"
 ARG0="$(basename "${BASH_SOURCE[0]}")"
 NO_AUTHENTICATE=false
 HELP="$(cat <<EOF

@@ -11,13 +11,11 @@ use crate::running_zone::RunningZone;
 use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
-use omicron_common::api::external::{
-    ByteCount, ByteCountRangeError, Error as ExternalError,
-};
-use omicron_common::api::internal::nexus::{
+use omicron_common::api::external::{ByteCount, ByteCountRangeError};
+use omicron_common::backoff;
+use omicron_common::nexus_client::types::{
     DatasetFlavor, DatasetPostRequest, ZpoolPostRequest,
 };
-use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -180,7 +178,8 @@ fn configure_zone(
         ],
         &[],
         vec![nic.name().to_string()],
-    ).map_err(|e| Error::ZoneConfiguration(e))?;
+    )
+    .map_err(|e| Error::ZoneConfiguration(e))?;
 
     // Clone from the base zone installation.
     Zones::clone_from_base_storage(&zname)
@@ -311,7 +310,7 @@ impl StorageWorker {
                     let mut partitions = vec![];
                     for partition in PARTITIONS {
                         let (id, zone) = self.initialize_partition(pool, partition).await?;
-                        partitions.push((id, zone.address(), partition.flavor));
+                        partitions.push((id, zone.address(), partition.flavor.clone()));
                     }
 
                     // Notify Nexus of the zpool and all datasets within.
@@ -319,27 +318,27 @@ impl StorageWorker {
                     let sled_id = self.sled_id;
                     let nexus = self.nexus_client.clone();
                     let notify_nexus = move || {
-                        let zpool_request = ZpoolPostRequest { size };
+                        let zpool_request = ZpoolPostRequest { size: size.into() };
                         let nexus = nexus.clone();
                         let partitions = partitions.clone();
                         async move {
                             nexus
-                                .zpool_post(pool_id, sled_id, zpool_request)
+                                .zpool_post(&pool_id, &sled_id, &zpool_request)
                                 .await
                                 .map_err(backoff::BackoffError::Transient)?;
 
                             for (id, address, flavor) in partitions {
                                 let request = DatasetPostRequest {
-                                    address,
+                                    address: address.to_string(),
                                     flavor,
                                 };
                                 nexus
-                                    .dataset_post(id, pool_id, request)
+                                    .dataset_post(&id, &pool_id, &request)
                                     .await
                                     .map_err(backoff::BackoffError::Transient)?;
                             }
 
-                            Ok::<(), backoff::BackoffError<ExternalError>>(())
+                            Ok::<(), backoff::BackoffError<anyhow::Error>>(())
                         }
                     };
                     let log = self.log.clone();

@@ -102,7 +102,7 @@ impl RunningZone {
         Ok(Self {
             log: log.clone(),
             name: zone_name.to_string(),
-            _nic: Vnic::wrap_existing(vnic_name.to_string()),
+            _nic: Vnic::wrap_existing(vnic_name),
             address: SocketAddr::new(network.ip(), port),
         })
     }

@@ -95,6 +95,7 @@ bytes = "1.0.1"
 expectorate = "1.0.4"
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"
+oximeter-db = { path = "../oximeter/db" }
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

@@ -258,6 +258,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f92cfa0fd5690b3cf8c1ef2cabbd9b7ef22fa53cf5e1f92b05103f6d5d1cf6e7"
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "cookie"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,7 +538,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3",
+ "openapiv3 0.5.0",
  "paste",
  "percent-encoding",
  "proc-macro2",
@@ -816,6 +822,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -889,6 +904,15 @@ checksum = "2a2a2320eb7ec0ebe8da8f744d7812d9fc4cb4d09344ac01898dbcb6a20ae69b"
 dependencies = [
  "crypto-mac",
  "digest 0.9.0",
+]
+
+[[package]]
+name = "home"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2456aef2e6b6a9784192ae780c0f15bc57df0e918585282325e8c8ac27737654"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -1390,6 +1414,8 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "macaddr",
+ "percent-encoding",
+ "progenitor",
  "propolis-server",
  "rayon",
  "reqwest",
@@ -1442,10 +1468,11 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 0.5.0",
  "oso",
  "oximeter",
  "oximeter-collector",
+ "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer",
  "pq-sys",
@@ -1474,6 +1501,7 @@ version = "0.1.0"
 name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "cfg-if",
  "chrono",
@@ -1487,8 +1515,11 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 0.5.0",
+ "percent-encoding",
+ "progenitor",
  "propolis-client",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
@@ -1551,7 +1582,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ca2947b52139b58a3f07cfb17f2257b3ebd50b63"
 dependencies = [
  "indexmap",
- "openapiv3",
+ "openapiv3 0.5.0",
 ]
 
 [[package]]
@@ -1559,6 +1590,18 @@ name = "openapiv3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90228d34f20d9fff3174d19b0d41e67f52711045270b540a2a2c2dc41ccb4085"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "openapiv3"
+version = "1.0.0-beta.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791f5f66415ca5d11fb29e8dcf0b923adff5b2c9bd1cf54621777494c8f8f688"
 dependencies = [
  "indexmap",
  "serde",
@@ -1653,7 +1696,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 0.5.0",
  "oximeter",
  "oximeter-db",
  "reqwest",
@@ -2055,6 +2098,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+dependencies = [
+ "anyhow",
+ "getopts",
+ "openapiv3 1.0.0-beta.2",
+ "progenitor-impl",
+ "progenitor-macro",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "progenitor-impl"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+dependencies = [
+ "anyhow",
+ "convert_case",
+ "getopts",
+ "indexmap",
+ "openapiv3 1.0.0-beta.2",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustfmt-wrapper",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "typify",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+dependencies = [
+ "openapiv3 1.0.0-beta.2",
+ "proc-macro2",
+ "progenitor-impl",
+ "quote",
+ "serde_json",
+ "syn",
+]
+
+[[package]]
 name = "propolis"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
@@ -2332,6 +2423,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfmt-wrapper"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7733577fb5b13c8b256232e7ca84aa424f915efae6ec980082d60a03f99da3f8"
+dependencies = [
+ "tempfile",
+ "thiserror",
+ "toolchain_find",
+]
+
+[[package]]
 name = "rustls"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2462,7 +2564,16 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
 dependencies = [
- "semver-parser",
+ "semver-parser 0.7.0",
+]
+
+[[package]]
+name = "semver"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f301af10236f6df4160f7c3f04eec6dbc70ace82d23326abad5edee88801c6b6"
+dependencies = [
+ "semver-parser 0.10.2",
 ]
 
 [[package]]
@@ -2470,6 +2581,15 @@ name = "semver-parser"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
+
+[[package]]
+name = "semver-parser"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00b0bef5b7f9e0df16536d3961cfb6e84331c065b4066afb39768d0e319411f7"
+dependencies = [
+ "pest",
+]
 
 [[package]]
 name = "serde"
@@ -2504,9 +2624,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f690853975602e1bfe1ccbf50504d67174e3bcf340f23b5ea9992e0587a52d8"
+checksum = "e466864e431129c7e0d3476b92f20458e5879919a0596c6472738d9fa2d342f8"
 dependencies = [
  "itoa",
  "ryu",
@@ -3231,6 +3351,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "toolchain_find"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e85654a10e7a07a47c6f19d93818f3f343e22927f2fa280c84f7c8042743413"
+dependencies = [
+ "home",
+ "lazy_static",
+ "regex",
+ "semver 0.11.0",
+ "walkdir",
+]
+
+[[package]]
 name = "tower-service"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3325,6 +3458,42 @@ name = "typenum"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
+
+[[package]]
+name = "typify"
+version = "0.0.2"
+source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+dependencies = [
+ "typify-impl",
+ "typify-macro",
+]
+
+[[package]]
+name = "typify-impl"
+version = "0.0.2"
+source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "schemars",
+ "serde_json",
+ "syn",
+ "thiserror",
+]
+
+[[package]]
+name = "typify-macro"
+version = "0.0.2"
+source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "schemars",
+ "serde_json",
+ "syn",
+ "typify-impl",
+]
 
 [[package]]
 name = "ucd-trie"

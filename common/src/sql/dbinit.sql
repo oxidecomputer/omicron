@@ -42,7 +42,7 @@ GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 /*
  * Racks
  */
-CREATE TABLE omicron.public.Rack (
+CREATE TABLE omicron.public.rack (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE omicron.public.Rack (
  * Sleds
  */
 
-CREATE TABLE omicron.public.Sled (
+CREATE TABLE omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -133,7 +133,7 @@ CREATE TABLE omicron.public.Region (
  * Organizations
  */
 
-CREATE TABLE omicron.public.Organization (
+CREATE TABLE omicron.public.organization (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -147,7 +147,7 @@ CREATE TABLE omicron.public.Organization (
     rcgen INT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Organization (
+CREATE UNIQUE INDEX ON omicron.public.organization (
     name
 ) WHERE
     time_deleted IS NULL;
@@ -156,7 +156,7 @@ CREATE UNIQUE INDEX ON omicron.public.Organization (
  * Projects
  */
 
-CREATE TABLE omicron.public.Project (
+CREATE TABLE omicron.public.project (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -170,7 +170,7 @@ CREATE TABLE omicron.public.Project (
     organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Project (
+CREATE UNIQUE INDEX ON omicron.public.project (
     organization_id,
     name
 ) WHERE
@@ -201,7 +201,7 @@ CREATE UNIQUE INDEX ON omicron.public.Project (
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
  * like.  Or changing # of CPUs or memory size.
  */
-CREATE TABLE omicron.public.Instance (
+CREATE TABLE omicron.public.instance (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -239,7 +239,7 @@ CREATE TABLE omicron.public.Instance (
     hostname STRING(63) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Instance (
+CREATE UNIQUE INDEX ON omicron.public.instance (
     project_id,
     name
 ) WHERE
@@ -263,7 +263,7 @@ CREATE UNIQUE INDEX ON omicron.public.Instance (
 --     'faulted'
 -- );
 
-CREATE TABLE omicron.public.Disk (
+CREATE TABLE omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -297,13 +297,13 @@ CREATE TABLE omicron.public.Disk (
     origin_snapshot UUID
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Disk (
+CREATE UNIQUE INDEX ON omicron.public.disk (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.Disk (
+CREATE INDEX ON omicron.public.disk (
     attach_instance_id
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
@@ -312,7 +312,7 @@ CREATE INDEX ON omicron.public.Disk (
 /*
  * Oximeter collector servers.
  */
-CREATE TABLE omicron.public.Oximeter (
+CREATE TABLE omicron.public.oximeter (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -323,7 +323,7 @@ CREATE TABLE omicron.public.Oximeter (
 /*
  * Information about registered metric producers.
  */
-CREATE TABLE omicron.public.MetricProducer (
+CREATE TABLE omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -336,7 +336,7 @@ CREATE TABLE omicron.public.MetricProducer (
     oximeter_id UUID NOT NULL
 );
 
-CREATE INDEX ON omicron.public.MetricProducer (
+CREATE INDEX ON omicron.public.metric_producer (
     oximeter_id,
     id
 );
@@ -346,7 +346,7 @@ CREATE INDEX ON omicron.public.MetricProducer (
  */
 
 
-CREATE TABLE omicron.public.Vpc (
+CREATE TABLE omicron.public.vpc (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -356,16 +356,17 @@ CREATE TABLE omicron.public.Vpc (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
+    system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.Vpc (
+CREATE UNIQUE INDEX ON omicron.public.vpc (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.VpcSubnet (
+CREATE TABLE omicron.public.vpc_subnet (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -380,13 +381,13 @@ CREATE TABLE omicron.public.VpcSubnet (
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
-CREATE UNIQUE INDEX ON omicron.public.VpcSubnet (
+CREATE UNIQUE INDEX ON omicron.public.vpc_subnet (
     vpc_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.NetworkInterface (
+CREATE TABLE omicron.public.network_interface (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -404,7 +405,12 @@ CREATE TABLE omicron.public.NetworkInterface (
 );
 
 
-CREATE TABLE omicron.public.VpcRouter (
+CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
+    'system',
+    'custom'
+);
+
+CREATE TABLE omicron.public.vpc_router (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -413,10 +419,11 @@ CREATE TABLE omicron.public.VpcRouter (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    kind vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.VpcRouter (
+CREATE UNIQUE INDEX ON omicron.public.vpc_router (
     vpc_id,
     name
 ) WHERE
@@ -430,7 +437,7 @@ CREATE UNIQUE INDEX ON omicron.public.VpcRouter (
  * as moving IPs between NICs on different instances, etc.
  */
 
-CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
     vpc_id,
     name
 ) WHERE
@@ -454,7 +461,7 @@ CREATE UNIQUE INDEX ON omicron.public.NetworkInterface (
 -- );
 
 
-CREATE TABLE omicron.public.Saga (
+CREATE TABLE omicron.public.saga (
     /* immutable fields */
 
     /* unique identifier for this execution */
@@ -485,7 +492,7 @@ CREATE TABLE omicron.public.Saga (
  * For recovery (and probably takeover), we need to be able to list running
  * sagas by SEC.  We need to paginate this list by the id.
  */
-CREATE UNIQUE INDEX ON omicron.public.Saga (
+CREATE UNIQUE INDEX ON omicron.public.saga (
     current_sec, id
 ) WHERE saga_state != 'done';
 
@@ -506,7 +513,7 @@ CREATE UNIQUE INDEX ON omicron.public.Saga (
 --     'undo_finished'
 -- );
 
-CREATE TABLE omicron.public.SagaNodeEvent (
+CREATE TABLE omicron.public.saga_node_event (
     saga_id UUID NOT NULL,
     node_id INT NOT NULL,
     event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
@@ -530,7 +537,7 @@ CREATE TABLE omicron.public.SagaNodeEvent (
 /*
  * Sessions for use by web console.
  */
-CREATE TABLE omicron.public.ConsoleSession (
+CREATE TABLE omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
@@ -540,7 +547,7 @@ CREATE TABLE omicron.public.ConsoleSession (
 );
 
 -- to be used for cleaning up old tokens
-CREATE INDEX ON omicron.public.ConsoleSession (
+CREATE INDEX ON omicron.public.console_session (
     time_created
 );
 
@@ -551,12 +558,12 @@ CREATE INDEX ON omicron.public.ConsoleSession (
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */
 
-CREATE TABLE omicron.public.DbMetadata (
+CREATE TABLE omicron.public.db_metadata (
     name  STRING(63) NOT NULL,
     value STRING(1023) NOT NULL
 );
 
-INSERT INTO omicron.public.DbMetadata (
+INSERT INTO omicron.public.db_metadata (
     name,
     value
 ) VALUES (

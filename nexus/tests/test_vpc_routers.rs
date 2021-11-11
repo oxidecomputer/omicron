@@ -2,11 +2,10 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
-use std::convert::TryFrom;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -44,10 +43,11 @@ async fn test_vpc_routers() {
     let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
     let routers_url = format!("{}/routers", vpc_url);
 
-    // get routers should be empty
+    // get routers should have only the system router created w/ the VPC
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
-    assert_eq!(routers.len(), 0);
+    assert_eq!(routers.len(), 1);
+    assert_eq!(routers[0].kind, VpcRouterKind::System);
 
     let router_name = "router1";
     let router_url = format!("{}/{}", routers_url, router_name);
@@ -61,8 +61,8 @@ async fn test_vpc_routers() {
     /* Create a VPC Router. */
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router_name).unwrap(),
-            description: String::from("it's not really a router"),
+            name: router_name.parse().unwrap(),
+            description: "it's not really a router".to_string(),
         },
     };
     let router: VpcRouter =
@@ -70,6 +70,7 @@ async fn test_vpc_routers() {
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "it's not really a router");
     assert_eq!(router.vpc_id, vpc.identity.id);
+    assert_eq!(router.kind, VpcRouterKind::Custom);
 
     // get router, should be the same
     let same_router = object_get::<VpcRouter>(client, &router_url).await;
@@ -78,7 +79,7 @@ async fn test_vpc_routers() {
     // routers list should now have the one in it
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
-    assert_eq!(routers.len(), 1);
+    assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router);
 
     // creating another router in the same VPC with the same name fails
@@ -101,11 +102,11 @@ async fn test_vpc_routers() {
         .await;
     assert_eq!(error.message, "not found: vpc router with name \"router2\"");
 
-    // create second router
+    // create second custom router
     let new_router = VpcRouterCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(router2_name).unwrap(),
-            description: String::from("it's also not really a router"),
+            name: router2_name.parse().unwrap(),
+            description: "it's also not really a router".to_string(),
         },
     };
     let router2: VpcRouter =
@@ -113,19 +114,20 @@ async fn test_vpc_routers() {
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.identity.description, "it's also not really a router");
     assert_eq!(router2.vpc_id, vpc.identity.id);
+    assert_eq!(router2.kind, VpcRouterKind::Custom);
 
-    // routers list should now have two in it
+    // routers list should now have two custom and one system
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
-    assert_eq!(routers.len(), 2);
+    assert_eq!(routers.len(), 3);
     routers_eq(&routers[0], &router);
     routers_eq(&routers[1], &router2);
 
     // update first router
     let update_params = VpcRouterUpdateParams {
         identity: IdentityMetadataUpdateParams {
-            name: Some(Name::try_from("new-name").unwrap()),
-            description: Some(String::from("another description")),
+            name: Some("new-name".parse().unwrap()),
+            description: Some("another description".to_string()),
         },
     };
     client
@@ -153,7 +155,7 @@ async fn test_vpc_routers() {
     // fetching list should show updated one
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
-    assert_eq!(routers.len(), 2);
+    assert_eq!(routers.len(), 3);
     routers_eq(&routers[0], &updated_router);
 
     // delete first router
@@ -166,10 +168,10 @@ async fn test_vpc_routers() {
         .await
         .unwrap();
 
-    // routers list should now have one again, the second one
+    // routers list should now have two again, one system and one custom
     let routers =
         objects_list_page::<VpcRouter>(client, &routers_url).await.items;
-    assert_eq!(routers.len(), 1);
+    assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router2);
 
     // get router should 404

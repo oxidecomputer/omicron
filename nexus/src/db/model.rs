@@ -3,15 +3,15 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    consolesession, dataset, disk, instance, metricproducer, networkinterface,
-    organization, oximeter, project, rack, region, sled, vpc, vpcrouter,
-    vpcsubnet, zpool,
+    console_session, dataset, disk, instance, metric_producer,
+    network_interface, organization, oximeter, project, rack, region, sled,
+    vpc, vpc_router, vpc_subnet, zpool,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::{Backend, BinaryRawValue, RawValue};
 use diesel::deserialize::{self, FromSql};
-use diesel::serialize::{self, ToSql};
+use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
@@ -68,9 +68,7 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::Name::try_from(String::from_sql(bytes)?)
-            .map(Name)
-            .map_err(|e| e.into())
+        String::from_sql(bytes)?.parse().map(Name).map_err(|e| e.into())
     }
 }
 
@@ -967,7 +965,7 @@ impl Into<external::DiskAttachment> for DiskAttachment {
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "metricproducer"]
+#[table_name = "metric_producer"]
 pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
@@ -1037,6 +1035,7 @@ pub struct Vpc {
     identity: VpcIdentity,
 
     pub project_id: Uuid,
+    pub system_router_id: Uuid,
     pub dns_name: Name,
 }
 
@@ -1044,10 +1043,16 @@ impl Vpc {
     pub fn new(
         vpc_id: Uuid,
         project_id: Uuid,
+        system_router_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self { identity, project_id, dns_name: params.dns_name.into() }
+        Self {
+            identity,
+            project_id,
+            system_router_id,
+            dns_name: params.dns_name.into(),
+        }
     }
 }
 
@@ -1056,6 +1061,7 @@ impl Into<external::Vpc> for Vpc {
         external::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
+            system_router_id: self.system_router_id,
             dns_name: self.dns_name.0,
         }
     }
@@ -1082,7 +1088,7 @@ impl From<external::VpcUpdateParams> for VpcUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnet {
     #[diesel(embed)]
     identity: VpcSubnetIdentity,
@@ -1120,7 +1126,7 @@ impl Into<external::VpcSubnet> for VpcSubnet {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1141,34 +1147,115 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
+    pub struct VpcRouterKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcRouterKindEnum"]
+    pub struct VpcRouterKind(pub external::VpcRouterKind);
+
+    // Enum values
+    System => b"system"
+    Custom => b"custom"
+);
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
 
     pub vpc_id: Uuid,
+    pub kind: VpcRouterKind,
 }
 
 impl VpcRouter {
     pub fn new(
         router_id: Uuid,
         vpc_id: Uuid,
+        kind: external::VpcRouterKind,
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id }
+        Self { identity, vpc_id, kind: VpcRouterKind(kind) }
     }
 }
 
 impl Into<external::VpcRouter> for VpcRouter {
     fn into(self) -> external::VpcRouter {
-        external::VpcRouter { identity: self.identity(), vpc_id: self.vpc_id }
+        external::VpcRouter {
+            identity: self.identity(),
+            vpc_id: self.vpc_id,
+            kind: self.kind.0,
+        }
     }
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouterUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1186,7 +1273,7 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Resource)]
-#[table_name = "networkinterface"]
+#[table_name = "network_interface"]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
@@ -1200,7 +1287,7 @@ pub struct NetworkInterface {
 // TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "consolesession"]
+#[table_name = "console_session"]
 pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
