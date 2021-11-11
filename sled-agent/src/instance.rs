@@ -579,7 +579,7 @@ mod test {
         zone::MockZones,
     };
     use crate::mocks::MockNexusClient;
-    use crate::vnic::vnic_name;
+    use crate::vnic::control_vnic_name;
     use chrono::Utc;
     use dropshot::{
         endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
@@ -798,7 +798,7 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
                 assert_eq!(phys.0, "physical");
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnic, control_vnic_name(0));
                 Ok(())
             });
 
@@ -811,7 +811,7 @@ mod test {
             .returning(|_, zone, vnics| {
                 assert_eq!(zone, propolis_zone_name(&test_uuid()));
                 assert_eq!(vnics.len(), 1);
-                assert_eq!(vnics[0], vnic_name(0));
+                assert_eq!(vnics[0], control_vnic_name(0));
                 Ok(())
             });
 
@@ -851,7 +851,7 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|zone, iface| {
                 assert_eq!(zone, propolis_zone_name(&test_uuid()));
-                assert_eq!(iface, interface_name(&vnic_name(0)));
+                assert_eq!(iface, interface_name(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
 
@@ -1011,7 +1011,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|vnic| {
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnic, control_vnic_name(0));
                 Ok(())
             });
         inst.transition(InstanceRuntimeStateRequested {
