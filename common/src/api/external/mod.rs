@@ -1369,7 +1369,7 @@ pub enum NetworkTarget {
 
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
 /// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "type", content = "value")]
 pub enum RouteTarget {
@@ -1440,7 +1440,7 @@ impl Display for RouteTarget {
 /// A subset of [`NetworkTarget`], `RouteDestination` specifies
 /// the kind of network traffic that will be matched to be forwarded
 /// to the [`RouteTarget`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "type", content = "value")]
 pub enum RouteDestination {
@@ -1503,7 +1503,7 @@ impl Display for RouteDestination {
 /// and describes how or where the route was created.
 ///
 /// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///

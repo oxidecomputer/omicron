@@ -35,6 +35,8 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -1420,6 +1422,7 @@ impl Nexus {
             .await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
+        let default_route_id = Uuid::new_v4();
         // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
@@ -1435,6 +1438,28 @@ impl Nexus {
                         name: "system".parse().unwrap(),
                         description: "Routes are automatically added to this router as vpc subnets are created".into(),
                     },
+                },
+            )
+            .await?;
+        // TODO: This is both fake an utter nonsense. It should be eventually replaced with the proper behavior for creating
+        // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
+        // should all be apart of the same transaction.
+        self.db_datastore
+            .router_create_route(
+                &default_route_id,
+                &system_router_id,
+                &RouterRouteKind::Default,
+                &RouterRouteCreateParams {
+                    identity: IdentityMetadataCreateParams {
+                        name: "default".parse().unwrap(),
+                        description: "The default route of a vpc".to_string(),
+                    },
+                    target: RouteTarget::InternetGateway(
+                        "outbound".parse().unwrap(),
+                    ),
+                    destination: RouteDestination::Vpc(
+                        params.identity.name.clone(),
+                    ),
                 },
             )
             .await?;
@@ -1779,7 +1804,7 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> DeleteResult {
-        let router = self
+        let route = self
             .router_lookup_route(
                 organization_name,
                 project_name,
@@ -1788,7 +1813,14 @@ impl Nexus {
                 route_name,
             )
             .await?;
-        self.db_datastore.router_delete_route(&router.identity.id).await
+        // Only custom routes can be deleted
+        if route.kind != RouterRouteKind::Custom {
+            return Err(Error::MethodNotAllowed {
+                internal_message: "DELETE not allowed on system routes"
+                    .to_string(),
+            });
+        }
+        self.db_datastore.router_delete_route(&route.identity.id).await
     }
 
     pub async fn router_update_route(
