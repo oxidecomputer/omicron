@@ -919,8 +919,15 @@ impl Nexus {
         let sled = self.sled_lookup(id).await?;
 
         let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        Ok(Arc::new(SledAgentClient::new(
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .unwrap();
+        Ok(Arc::new(SledAgentClient::new_with_client(
             &format!("http://{}", sled.address()),
+            client,
             log,
         )))
     }
