@@ -2806,14 +2806,6 @@
           "destroyed"
         ]
       },
-      "IpPortRange": {
-        "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
-        "type": "string",
-        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
-        "minLength": 1,
-        "maxLength": 11
-      },
       "Ipv4Net": {
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
@@ -2827,6 +2819,14 @@
         "type": "string",
         "pattern": "^(fd|FD)00:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
+      },
+      "L4PortRange": {
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
       },
       "Name": {
         "title": "A name used in the API",
@@ -3466,14 +3466,14 @@
         "type": "string",
         "enum": [
           "allow",
-          "drop"
+          "deny"
         ]
       },
       "VpcFirewallRuleDirection": {
         "type": "string",
         "enum": [
-          "incoming",
-          "outgoing"
+          "inbound",
+          "outbound"
         ]
       },
       "VpcFirewallRuleFilter": {
@@ -3493,7 +3493,7 @@
             "description": "If present, the destination ports this rule applies to.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpPortRange"
+              "$ref": "#/components/schemas/L4PortRange"
             }
           },
           "protocols": {

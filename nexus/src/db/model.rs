@@ -1185,8 +1185,8 @@ impl_enum_type!(
     #[sql_type = "VpcFirewallRuleDirectionEnum"]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
-    Incoming => b"incoming"
-    Outgoing => b"outgoing"
+    Inbound => b"inbound"
+    Outbound => b"outbound"
 );
 NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
@@ -1201,7 +1201,7 @@ impl_enum_type!(
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
     Allow => b"allow"
-    Drop => b"drop"
+    Deny => b"deny"
 );
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
@@ -1258,16 +1258,16 @@ where
     }
 }
 
-/// Newtype wrapper around [`external::IpPortRange`] so we can derive
+/// Newtype wrapper around [`external::L4PortRange`] so we can derive
 /// diesel traits for it
 #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 #[repr(transparent)]
-pub struct IpPortRange(pub external::IpPortRange);
-NewtypeFrom! { () pub struct IpPortRange(external::IpPortRange); }
-NewtypeDeref! { () pub struct IpPortRange(external::IpPortRange); }
+pub struct L4PortRange(pub external::L4PortRange);
+NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
+NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
 
-impl<DB> ToSql<sql_types::Text, DB> for IpPortRange
+impl<DB> ToSql<sql_types::Text, DB> for L4PortRange
 where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
@@ -1281,15 +1281,15 @@ where
     }
 }
 
-// Deserialize the "IpPortRange" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for IpPortRange
+// Deserialize the "L4PortRange" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for L4PortRange
 where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::IpPortRange::try_from(String::from_sql(bytes)?)
-            .map(IpPortRange)
+        external::L4PortRange::try_from(String::from_sql(bytes)?)
+            .map(L4PortRange)
             .map_err(|e| e.into())
     }
 }
@@ -1305,7 +1305,7 @@ pub struct VpcFirewallRule {
     pub direction: VpcFirewallRuleDirection,
     pub targets: Vec<NetworkTarget>,
     pub filter_hosts: Option<Vec<NetworkTarget>>,
-    pub filter_ports: Option<Vec<IpPortRange>>,
+    pub filter_ports: Option<Vec<L4PortRange>>,
     pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: VpcFirewallRuleAction,
     pub priority: SqlU16,
@@ -1342,7 +1342,7 @@ impl VpcFirewallRule {
                     .collect()
             }),
             filter_ports: rule.filters.ports.as_ref().map(|ports| {
-                ports.iter().map(|range| IpPortRange(*range)).collect()
+                ports.iter().map(|range| L4PortRange(*range)).collect()
             }),
             filter_protocols: rule.filters.protocols.as_ref().map(|protos| {
                 protos.iter().map(|proto| (*proto).into()).collect()

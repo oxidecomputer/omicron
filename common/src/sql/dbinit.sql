@@ -386,13 +386,13 @@ CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
 );
 
 CREATE TYPE omicron.public.vpc_firewall_rule_direction AS ENUM (
-    'incoming',
-    'outgoing'
+    'inbound',
+    'outbound'
 );
 
 CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
     'allow',
-    'drop'
+    'deny'
 );
 
 CREATE TYPE omicron.public.vpc_firewall_rule_protocol AS ENUM (

@@ -1452,7 +1452,7 @@ impl Nexus {
         const DEFAULT_FIREWALL_RULES: &'static str = r#"{
             "allow-internal-inbound": {
                 "status": "enabled",
-                "direction": "incoming",
+                "direction": "inbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "hosts": [ "vpc:default" ] },
                 "action": "allow",
@@ -1461,7 +1461,7 @@ impl Nexus {
             },
             "allow-ssh": {
                 "status": "enabled",
-                "direction": "incoming",
+                "direction": "inbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
                 "action": "allow",
@@ -1470,7 +1470,7 @@ impl Nexus {
             },
             "allow-icmp": {
                 "status": "enabled",
-                "direction": "incoming",
+                "direction": "inbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "protocols": [ "ICMP" ] },
                 "action": "allow",
@@ -1479,7 +1479,7 @@ impl Nexus {
             },
             "allow-rdp": {
                 "status": "enabled",
-                "direction": "incoming",
+                "direction": "inbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
                 "action": "allow",

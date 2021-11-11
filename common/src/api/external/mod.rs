@@ -1421,7 +1421,7 @@ pub struct VpcFirewallRuleFilter {
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
     /// If present, the destination ports this rule applies to.
-    pub ports: Option<Vec<IpPortRange>>,
+    pub ports: Option<Vec<L4PortRange>>,
 }
 
 /// The protocols that may be specified in a firewall rule's filter
@@ -1433,18 +1433,18 @@ pub enum VpcFirewallRuleProtocol {
     Icmp,
 }
 
-/// A range of IP ports
+/// A range of transport layer ports
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
-pub struct IpPortRange {
+pub struct L4PortRange {
     /// The first port in the range
     pub first: u16,
     /// The last port in the range
     pub last: u16,
 }
 
-impl TryFrom<String> for IpPortRange {
+impl TryFrom<String> for L4PortRange {
     type Error = String;
 
     fn try_from(range: String) -> Result<Self, Self::Error> {
@@ -1455,7 +1455,7 @@ impl TryFrom<String> for IpPortRange {
                 let port = range
                     .parse::<u16>()
                     .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
-                Ok(IpPortRange { first: port, last: port })
+                Ok(L4PortRange { first: port, last: port })
             }
             Some((left, right)) => {
                 let first = left
@@ -1464,13 +1464,13 @@ impl TryFrom<String> for IpPortRange {
                 let last = right
                     .parse::<u16>()
                     .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
-                Ok(IpPortRange { first, last })
+                Ok(L4PortRange { first, last })
             }
         }
     }
 }
 
-impl Into<String> for IpPortRange {
+impl Into<String> for L4PortRange {
     fn into(self) -> String {
         if self.first == self.last {
             self.first.to_string()
@@ -1480,9 +1480,9 @@ impl Into<String> for IpPortRange {
     }
 }
 
-impl JsonSchema for IpPortRange {
+impl JsonSchema for L4PortRange {
     fn schema_name() -> String {
-        "IpPortRange".to_string()
+        "L4PortRange".to_string()
     }
 
     fn json_schema(
@@ -1636,15 +1636,15 @@ pub enum VpcFirewallRuleStatus {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcFirewallRuleDirection {
-    Incoming,
-    Outgoing,
+    Inbound,
+    Outbound,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcFirewallRuleAction {
     Allow,
-    Drop,
+    Deny,
 }
 
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
@@ -1730,7 +1730,7 @@ pub struct NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::{
-        ByteCount, IpPortRange, Name, NetworkTarget, VpcFirewallRuleAction,
+        ByteCount, L4PortRange, Name, NetworkTarget, VpcFirewallRuleAction,
         VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
         VpcFirewallRuleUpdateParams,
@@ -1867,38 +1867,38 @@ mod test {
     #[test]
     fn test_ip_port_range_from_str() {
         assert_eq!(
-            IpPortRange::try_from("65532".to_string()),
-            Ok(IpPortRange { first: 65532, last: 65532 })
+            L4PortRange::try_from("65532".to_string()),
+            Ok(L4PortRange { first: 65532, last: 65532 })
         );
         assert_eq!(
-            IpPortRange::try_from("22-53".to_string()),
-            Ok(IpPortRange { first: 22, last: 53 })
+            L4PortRange::try_from("22-53".to_string()),
+            Ok(L4PortRange { first: 22, last: 53 })
         );
 
         assert_eq!(
-            IpPortRange::try_from("".to_string()),
+            L4PortRange::try_from("".to_string()),
             Err("invalid port number".to_string())
         );
         assert_eq!(
-            IpPortRange::try_from("65536".to_string()),
+            L4PortRange::try_from("65536".to_string()),
             Err("invalid port number".to_string())
         );
         assert_eq!(
-            IpPortRange::try_from("65535-65536".to_string()),
+            L4PortRange::try_from("65535-65536".to_string()),
             Err("invalid port number".to_string())
         );
         assert_eq!(
-            IpPortRange::try_from("0x23".to_string()),
+            L4PortRange::try_from("0x23".to_string()),
             Err("invalid port number".to_string())
         );
     }
 
     #[test]
     fn test_ip_port_range_into_str() {
-        let range: String = IpPortRange { first: 12345, last: 12345 }.into();
+        let range: String = L4PortRange { first: 12345, last: 12345 }.into();
         assert_eq!(range, "12345");
 
-        let range: String = IpPortRange { first: 1, last: 1024 }.into();
+        let range: String = L4PortRange { first: 1, last: 1024 }.into();
         assert_eq!(range, "1-1024");
     }
 
@@ -1974,7 +1974,7 @@ mod test {
             {
             "allow-internal-inbound": {
                 "status": "enabled",
-                "direction": "incoming",
+                "direction": "inbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "hosts": [ "vpc:default" ] },
                 "action": "allow",
@@ -1983,10 +1983,10 @@ mod test {
             },
             "rule2": {
                 "status": "disabled",
-                "direction": "outgoing",
+                "direction": "outbound",
                 "targets": [ "vpc:default" ],
                 "filters": { "ports": [ "22-25", "27" ], "protocols": [ "UDP" ] },
-                "action": "drop",
+                "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
             }
@@ -2002,7 +2002,7 @@ mod test {
                 .unwrap()],
             VpcFirewallRuleUpdate {
                 status: VpcFirewallRuleStatus::Enabled,
-                direction: VpcFirewallRuleDirection::Incoming,
+                direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![default_vpc.clone()],
                 filters: VpcFirewallRuleFilter {
                     hosts: Some(vec![default_vpc.clone()]),
@@ -2019,17 +2019,17 @@ mod test {
             params.rules[&Name::try_from("rule2".to_string()).unwrap()],
             VpcFirewallRuleUpdate {
                 status: VpcFirewallRuleStatus::Disabled,
-                direction: VpcFirewallRuleDirection::Outgoing,
+                direction: VpcFirewallRuleDirection::Outbound,
                 targets: vec![default_vpc.clone()],
                 filters: VpcFirewallRuleFilter {
                     hosts: None,
                     ports: Some(vec![
-                        IpPortRange { first: 22, last: 25 },
-                        IpPortRange { first: 27, last: 27 }
+                        L4PortRange { first: 22, last: 25 },
+                        L4PortRange { first: 27, last: 27 }
                     ]),
                     protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
                 },
-                action: VpcFirewallRuleAction::Drop,
+                action: VpcFirewallRuleAction::Deny,
                 priority: 65533,
                 description: "second rule".to_string(),
             }
