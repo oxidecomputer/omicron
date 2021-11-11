@@ -18,7 +18,7 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{DatastoreCollection, InsertError};
+use super::collection_insert::{AsyncInsertError, DatastoreCollection};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
@@ -357,11 +357,11 @@ impl DataStore {
         .insert_and_get_result_async(self.pool())
         .await
         .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Organization,
                 lookup_type: LookupType::ById(organization_id),
             },
-            InsertError::DatabaseError(e) => {
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
