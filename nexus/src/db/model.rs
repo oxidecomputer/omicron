@@ -981,7 +981,7 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
 
 /// This macro implements serialization and deserialization of an enum type
 /// from our database into our model types.
-/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
 macro_rules! impl_enum_type {
     (
         $(#[$enum_meta:meta])*
@@ -998,16 +998,6 @@ macro_rules! impl_enum_type {
         $(#[$model_meta])*
         pub struct $model_type(pub $ext_type);
 
-        impl $model_type {
-            pub fn new(state: $ext_type) -> Self {
-                Self(state)
-            }
-
-            pub fn state(&self) -> &$ext_type {
-                &self.0
-            }
-        }
-
         impl<DB> ToSql<$diesel_type, DB> for $model_type
         where
             DB: Backend,
@@ -1016,7 +1006,7 @@ macro_rules! impl_enum_type {
                 &self,
                 out: &mut serialize::Output<W, DB>,
             ) -> serialize::Result {
-                match *self.state() {
+                match self.0 {
                     $(
                     <$ext_type>::$enum_item => {
                         out.write_all($sql_value)?
@@ -1035,7 +1025,7 @@ macro_rules! impl_enum_type {
                 match DB::as_bytes(bytes) {
                     $(
                     $sql_value => {
-                        Ok($model_type::new(<$ext_type>::$enum_item))
+                        Ok($model_type(<$ext_type>::$enum_item))
                     }
                     )*
                     _ => {
@@ -1050,7 +1040,6 @@ macro_rules! impl_enum_type {
 }
 
 impl_enum_type!(
-    /// Note that the type_name _must_ be all lowercase or it'll fail.
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
     pub struct VpcRouterKindEnum;
@@ -1082,7 +1071,7 @@ impl VpcRouter {
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind::new(kind) }
+        Self { identity, vpc_id, kind: VpcRouterKind(kind) }
     }
 }
 
@@ -1091,7 +1080,7 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: *self.kind.state(),
+            kind: self.kind.0,
         }
     }
 }
