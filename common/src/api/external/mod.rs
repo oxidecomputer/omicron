@@ -1407,7 +1407,7 @@ pub enum VpcFirewallRuleProtocols {
 }
 
 /// A range of IP ports
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct IpPortRange {
@@ -1418,17 +1418,25 @@ pub struct IpPortRange {
 }
 
 impl TryFrom<String> for IpPortRange {
-    type Error = anyhow::Error;
+    type Error = String;
 
     fn try_from(range: String) -> Result<Self, Self::Error> {
+        const INVALID_PORT_NUMBER_MSG: &'static str = "invalid port number";
+
         match range.split_once('-') {
             None => {
-                let port = range.parse::<u16>()?;
+                let port = range
+                    .parse::<u16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
                 Ok(IpPortRange { first: port, last: port })
             }
             Some((left, right)) => {
-                let first = left.parse::<u16>()?;
-                let last = right.parse::<u16>()?;
+                let first = left
+                    .parse::<u16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
+                let last = right
+                    .parse::<u16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
                 Ok(IpPortRange { first, last })
             }
         }
@@ -1480,7 +1488,7 @@ impl JsonSchema for IpPortRange {
 }
 
 /// Target strings for networking APIs
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub enum NetworkTarget {
@@ -1694,8 +1702,7 @@ pub struct NetworkInterface {
 
 #[cfg(test)]
 mod test {
-    use super::ByteCount;
-    use super::Name;
+    use super::{ByteCount, IpPortRange, Name, NetworkTarget};
     use crate::api::external::Error;
     use std::convert::TryFrom;
 
@@ -1823,5 +1830,109 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_ip_port_range_from_str() {
+        assert_eq!(
+            IpPortRange::try_from("65532".to_string()),
+            Ok(IpPortRange { first: 65532, last: 65532 })
+        );
+        assert_eq!(
+            IpPortRange::try_from("22-53".to_string()),
+            Ok(IpPortRange { first: 22, last: 53 })
+        );
+
+        assert_eq!(
+            IpPortRange::try_from("".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            IpPortRange::try_from("65536".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            IpPortRange::try_from("65535-65536".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            IpPortRange::try_from("0x23".to_string()),
+            Err("invalid port number".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ip_port_range_into_str() {
+        let range: String = IpPortRange { first: 12345, last: 12345 }.into();
+        assert_eq!(range, "12345");
+
+        let range: String = IpPortRange { first: 1, last: 1024 }.into();
+        assert_eq!(range, "1-1024");
+    }
+
+    #[test]
+    fn test_network_target_from_str() {
+        assert_eq!(
+            NetworkTarget::try_from("vpc:default".to_string()),
+            Ok(NetworkTarget::Vpc(
+                Name::try_from("default".to_string()).unwrap()
+            ))
+        );
+
+        assert_eq!(
+            NetworkTarget::try_from("subnet:databases".to_string()),
+            Ok(NetworkTarget::Subnet(
+                Name::try_from("databases".to_string()).unwrap()
+            ))
+        );
+
+        assert_eq!(
+            NetworkTarget::try_from("instance:frontdoor-lb".to_string()),
+            Ok(NetworkTarget::Instance(
+                Name::try_from("frontdoor-lb".to_string()).unwrap()
+            ))
+        );
+
+        assert_eq!(
+            NetworkTarget::try_from("inetgw:default".to_string()),
+            Ok(NetworkTarget::InternetGateway(
+                Name::try_from("default".to_string()).unwrap()
+            ))
+        );
+
+        assert_eq!(
+            NetworkTarget::try_from("unknown:default".to_string()),
+            Err("unsupported resource scope 'unknown'".to_string())
+        );
+
+        assert_eq!(
+            NetworkTarget::try_from("nocolon".to_string()),
+            Err("target specifier missing ':'".to_string())
+        );
+    }
+    #[test]
+    fn test_network_target_into_str() {
+        let target: String =
+            NetworkTarget::Vpc(Name::try_from("default".to_string()).unwrap())
+                .into();
+        assert_eq!(target, "vpc:default");
+
+        let target: String = NetworkTarget::Subnet(
+            Name::try_from("databases".to_string()).unwrap(),
+        )
+        .into();
+        assert_eq!(target, "subnet:databases");
+
+        let target: String = NetworkTarget::Instance(
+            Name::try_from("frontdoor-lb".to_string()).unwrap(),
+        )
+        .into();
+        assert_eq!(target, "instance:frontdoor-lb");
+
+        let target: String = NetworkTarget::InternetGateway(
+            Name::try_from("other-gw".to_string()).unwrap(),
+        )
+        .into();
+        assert_eq!(target, "inetgw:other-gw");
     }
 }
