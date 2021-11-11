@@ -1841,6 +1841,18 @@ impl Nexus {
                 route_name,
             )
             .await?;
+        // TODO: Write a test for this once there's a way to test it (i.e. subnets automatically register to the system router table)
+        match route.kind {
+            RouterRouteKind::Custom | RouterRouteKind::Default => (),
+            _ => {
+                return Err(Error::MethodNotAllowed {
+                    internal_message: format!(
+                        "routes of type {} from the system table of VPC {0} are not modifiable",
+                        route.kind
+                    ),
+                })
+            }
+        }
         Ok(self
             .db_datastore
             .router_update_route(&route.identity.id, params)

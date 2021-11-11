@@ -1503,7 +1503,10 @@ impl Display for RouteDestination {
 /// and describes how or where the route was created.
 ///
 /// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
+)]
+#[display("{}")]
 pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///

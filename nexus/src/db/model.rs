@@ -1229,7 +1229,7 @@ impl Into<external::RouterRoute> for RouterRoute {
         external::RouterRoute {
             identity: self.identity(),
             router_id: self.router_id,
-            kind: self.kind.0.clone(),
+            kind: self.kind.0,
             target: self.target.0.clone(),
             destination: self.destination.state().clone(),
         }
