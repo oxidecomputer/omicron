@@ -1206,54 +1206,21 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
-#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
-#[repr(transparent)]
-pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
+    pub struct VpcFirewallRuleProtocolEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleProtocolEnum"]
+    pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
+
+    Tcp => b"TCP"
+    Udp => b"UDP"
+    Icmp => b"ICMP"
+);
 NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
-
-impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleProtocol
-where
-    DB: Backend,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        match self.0 {
-            external::VpcFirewallRuleProtocol::Tcp => out.write_all(b"TCP")?,
-            external::VpcFirewallRuleProtocol::Udp => out.write_all(b"UDP")?,
-            external::VpcFirewallRuleProtocol::Icmp => {
-                out.write_all(b"ICMP")?
-            }
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleProtocol
-where
-    DB: Backend + for<'a> BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        match DB::as_bytes(bytes) {
-            b"TCP" => Ok(VpcFirewallRuleProtocol(
-                external::VpcFirewallRuleProtocol::Tcp,
-            )),
-            b"UDP" => Ok(VpcFirewallRuleProtocol(
-                external::VpcFirewallRuleProtocol::Udp,
-            )),
-            b"ICMP" => Ok(VpcFirewallRuleProtocol(
-                external::VpcFirewallRuleProtocol::Icmp,
-            )),
-            _ => {
-                Err("Unrecognized enum variant for VpcFirewallRuleProtocol"
-                    .into())
-            }
-        }
-    }
-}
 
 /// Newtype wrapper around [`external::NetworkTarget`] so we can derive
 /// diesel traits for it

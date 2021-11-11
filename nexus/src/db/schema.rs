@@ -210,7 +210,7 @@ table! {
         targets -> Array<Text>,
         filter_hosts -> Nullable<Array<Text>>,
         filter_ports -> Nullable<Array<Text>>,
-        filter_protocols -> Nullable<Array<Text>>,
+        filter_protocols -> Nullable<Array<crate::db::model::VpcFirewallRuleProtocolEnum>>,
         action -> crate::db::model::VpcFirewallRuleActionEnum,
         priority -> Int4,
     }
