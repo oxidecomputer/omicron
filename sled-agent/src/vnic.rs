@@ -1,8 +1,9 @@
 //! API for controlling a single instance.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX};
-use omicron_common::api::external::Error;
+use crate::illumos::dladm::{
+    PhysicalLink, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
+};
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -14,12 +15,14 @@ use crate::illumos::dladm::Dladm;
 #[cfg(test)]
 use crate::illumos::dladm::MockDladm as Dladm;
 
+type Error = crate::illumos::dladm::Error;
+
 fn guest_vnic_name(id: u64) -> String {
-    format!("{}_guest{}", VNIC_PREFIX, id)
+    format!("{}{}", VNIC_PREFIX_GUEST, id)
 }
 
-pub fn vnic_name(id: u64) -> String {
-    format!("{}{}", VNIC_PREFIX, id)
+pub fn control_vnic_name(id: u64) -> String {
+    format!("{}{}", VNIC_PREFIX_CONTROL, id)
 }
 
 pub fn interface_name(vnic_name: &str) -> String {
@@ -57,7 +60,12 @@ pub struct Vnic {
 }
 
 impl Vnic {
-    // Creates a new NIC, intended for usage by the guest.
+    /// Takes ownership of an existing VNIC.
+    pub fn wrap_existing(name: String) -> Self {
+        Vnic { name, deleted: false }
+    }
+
+    /// Creates a new NIC, intended for usage by the guest.
     pub fn new_guest(
         allocator: &IdAllocator,
         physical_dl: &PhysicalLink,
@@ -69,14 +77,14 @@ impl Vnic {
         Ok(Vnic { name, deleted: false })
     }
 
-    // Creates a new NIC, intended for allowing Propolis to communicate
+    /// Creates a new NIC, intended for allowing Propolis to communicate
     // with the control plane.
     pub fn new_control(
         allocator: &IdAllocator,
         physical_dl: &PhysicalLink,
         mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
-        let name = vnic_name(allocator.next());
+        let name = control_vnic_name(allocator.next());
         Dladm::create_vnic(physical_dl, &name, mac, None)?;
         Ok(Vnic { name, deleted: false })
     }
@@ -98,6 +106,9 @@ impl Vnic {
 
 impl Drop for Vnic {
     fn drop(&mut self) {
-        let _ = self.delete();
+        let r = self.delete();
+        if let Err(e) = r {
+            eprintln!("Failed to delete VNIC: {}", e);
+        }
     }
 }

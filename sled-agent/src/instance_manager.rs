@@ -2,7 +2,6 @@
 
 use crate::common::vlan::VlanID;
 use crate::vnic::IdAllocator;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -22,6 +21,15 @@ use crate::{
 };
 #[cfg(not(test))]
 use crate::{illumos::zone::Zones, instance::Instance};
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Instance error: {0}")]
+    Instance(#[from] crate::instance::Error),
+
+    #[error(transparent)]
+    Zone(#[from] crate::illumos::zone::Error),
+}
 
 struct InstanceManagerInternal {
     log: Logger,
@@ -117,7 +125,7 @@ impl InstanceManager {
             instance.start(instance_ticket).await?;
         }
 
-        instance.transition(target).await
+        instance.transition(target).await.map_err(|e| e.into())
     }
 }
 

@@ -7,8 +7,7 @@ use crate::illumos::zfs::{
 use crate::instance_manager::InstanceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
-    external::Error, internal::nexus::DiskRuntimeState,
-    internal::nexus::InstanceRuntimeState,
+    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
@@ -33,6 +32,32 @@ use {
 
 // TODO: I wanna make a task that continually reports the storage status
 // upward to nexus.
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Datalink(#[from] crate::illumos::dladm::Error),
+
+    #[error(transparent)]
+    Zone(#[from] crate::illumos::zone::Error),
+
+    #[error(transparent)]
+    Zfs(#[from] crate::illumos::zfs::Error),
+
+    #[error("Error managing instances: {0}")]
+    Instance(#[from] crate::instance_manager::Error),
+
+    #[error("Error managing storage: {0}")]
+    Storage(#[from] crate::storage_manager::Error),
+}
+
+impl From<Error> for omicron_common::api::external::Error {
+    fn from(err: Error) -> Self {
+        omicron_common::api::external::Error::InternalError {
+            internal_message: err.to_string(),
+        }
+    }
+}
 
 /// Describes an executing Sled Agent object.
 ///
@@ -110,7 +135,10 @@ impl SledAgent {
         initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
-        self.instances.ensure(instance_id, initial, target).await
+        self.instances
+            .ensure(instance_id, initial, target)
+            .await
+            .map_err(|e| Error::Instance(e))
     }
 
     /// Idempotently ensures that the given virtual disk is attached (or not) as

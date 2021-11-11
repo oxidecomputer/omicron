@@ -6,27 +6,33 @@ pub mod zfs;
 pub mod zone;
 pub mod zpool;
 
-use omicron_common::api::external::Error;
-
 const PFEXEC: &str = "/usr/bin/pfexec";
+
+#[derive(thiserror::Error, Debug)]
+pub enum ExecutionError {
+    #[error("Failed to start execution of process: {0}")]
+    ExecutionStart(std::io::Error),
+
+    #[error(
+        "Command executed and failed with status: {status}. Output: {stderr}"
+    )]
+    CommandFailure { status: std::process::ExitStatus, stderr: String },
+}
 
 // Helper function for starting the process and checking the
 // exit code result.
 fn execute(
     command: &mut std::process::Command,
-) -> Result<std::process::Output, Error> {
-    let output =
-        command.env_clear().output().map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to execute {:?}: {}", command, e),
-        })?;
+) -> Result<std::process::Output, ExecutionError> {
+    let output = command
+        .env_clear()
+        .output()
+        .map_err(|e| ExecutionError::ExecutionStart(e))?;
 
     if !output.status.success() {
-        return Err(Error::InternalError {
-            internal_message: format!(
-                "Command {:?} executed and failed: {}",
-                command,
-                String::from_utf8_lossy(&output.stderr)
-            ),
+        return Err(ExecutionError::CommandFailure {
+            status: output.status,
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
 

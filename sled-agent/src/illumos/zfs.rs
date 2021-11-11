@@ -1,13 +1,27 @@
 //! Utilities for poking at ZFS.
 
 use crate::illumos::{execute, PFEXEC};
-use omicron_common::api::external::Error;
 use std::fmt;
 use std::path::PathBuf;
 
 pub const ZONE_ZFS_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("ZFS execution error: {0}")]
+    Execution(#[from] crate::illumos::ExecutionError),
+
+    #[error("Does not exist: {0}")]
+    NotFound(String),
+
+    #[error("Unexpected output from ZFS commands: {0}")]
+    Output(String),
+
+    #[error("Failed to parse output: {0}")]
+    Parse(#[from] std::string::FromUtf8Error),
+}
 
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
@@ -40,22 +54,10 @@ impl Zfs {
 
         // If the list command returns any valid output, validate it.
         if let Ok(output) = execute(cmd) {
-            let stdout = String::from_utf8(output.stdout).map_err(|e| {
-                Error::InternalError {
-                    internal_message: format!(
-                        "Cannot parse 'zfs list' output as UTF-8: {}",
-                        e
-                    ),
-                }
-            })?;
+            let stdout = String::from_utf8(output.stdout)?;
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if values != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(Error::InternalError {
-                    internal_message: format!(
-                        "{} exists, but has unexpected values: {:?}",
-                        name, values
-                    ),
-                });
+                return Err(Error::Output(stdout));
             }
             return Ok(());
         }
@@ -105,22 +107,13 @@ impl Zfs {
         let cmd =
             command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
         let output = execute(cmd)?;
-        let stdout = String::from_utf8(output.stdout).map_err(|e| {
-            Error::InternalError {
-                internal_message: format!(
-                    "Cannot parse 'zfs get' output as UTF-8: {}",
-                    e
-                ),
-            }
-        })?;
+        let stdout = String::from_utf8(output.stdout)?;
         let value = stdout.trim();
         if value == "-" {
-            return Err(Error::InternalError {
-                internal_message: format!(
-                    "Property {} does not exist for {}",
-                    name, filesystem_name
-                ),
-            });
+            return Err(Error::NotFound(format!(
+                "Property {}, within filesystem {}",
+                name, filesystem_name
+            )));
         }
         Ok(value.to_string())
     }

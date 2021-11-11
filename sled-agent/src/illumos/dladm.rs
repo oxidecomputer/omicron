@@ -1,12 +1,26 @@
 //! Utilities for poking at data links.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::{execute, PFEXEC};
-use omicron_common::api::external::Error;
+use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 
-pub const VNIC_PREFIX: &str = "vnic_propolis";
+pub const VNIC_PREFIX: &str = "ox_vnic_";
+pub const VNIC_PREFIX_GUEST: &str = "ox_vnic_guest";
+pub const VNIC_PREFIX_CONTROL: &str = "ox_vnic_control";
+
 pub const DLADM: &str = "/usr/sbin/dladm";
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Device not found")]
+    NotFound,
+
+    #[error("Subcommand failure: {0}")]
+    Execution(#[from] ExecutionError),
+
+    #[error("Failed to parse output: {0}")]
+    Parse(#[from] std::string::FromUtf8Error),
+}
 
 /// The name of a physical datalink.
 #[derive(Debug, Clone)]
@@ -22,22 +36,14 @@ impl Dladm {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
-        let name = String::from_utf8(output.stdout)
-            .map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Cannot parse dladm output as UTF-8: {}",
-                    e
-                ),
-            })?
+        let name = String::from_utf8(output.stdout)?
             .lines()
             // TODO: This is arbitrary, but we're currently grabbing the first
             // physical device. Should we have a more sophisticated method for
             // selection?
             .next()
             .map(|s| s.trim())
-            .ok_or_else(|| Error::InternalError {
-                internal_message: "No physical devices found".to_string(),
-            })?
+            .ok_or_else(|| Error::NotFound)?
             .to_string();
         Ok(PhysicalLink(name))
     }
@@ -86,13 +92,7 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
 
-        let vnics = String::from_utf8(output.stdout)
-            .map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Failed to parse UTF-8 from dladm output: {}",
-                    e
-                ),
-            })?
+        let vnics = String::from_utf8(output.stdout)?
             .lines()
             .filter(|vnic| vnic.starts_with(VNIC_PREFIX))
             .map(|s| s.to_owned())

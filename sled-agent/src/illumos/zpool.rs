@@ -1,33 +1,30 @@
 //! Utilities for managing Zpools.
 
 use crate::illumos::execute;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::Error as ExternalError;
 use std::str::FromStr;
-use thiserror::Error;
 
 const ZPOOL: &str = "/usr/sbin/zpool";
 
-#[derive(Error, Debug)]
-pub enum ZpoolError {
+#[derive(thiserror::Error, Debug)]
+pub enum ParseError {
+    #[error("Failed to parse output as UTF-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+
     #[error("Failed to parse output: {0}")]
     Parse(String),
-
-    #[error("Failed to execute subcommand: {0}")]
-    Command(Error),
 }
 
-impl From<ZpoolError> for Error {
-    fn from(error: ZpoolError) -> Error {
-        match error {
-            ZpoolError::Parse(s) => Error::InternalError {
-                internal_message: format!(
-                    "Failed to parse zpool output: {}",
-                    s
-                ),
-            },
-            ZpoolError::Command(e) => e,
-        }
-    }
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Zpool execution error: {0}")]
+    Execution(#[from] crate::illumos::ExecutionError),
+
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+
+    #[error("Failed to execute subcommand: {0}")]
+    Command(ExternalError),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,7 +46,7 @@ pub enum ZpoolHealth {
 }
 
 impl FromStr for ZpoolHealth {
-    type Err = ZpoolError;
+    type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -59,7 +56,7 @@ impl FromStr for ZpoolHealth {
             "OFFLINE" => Ok(ZpoolHealth::Offline),
             "REMOVED" => Ok(ZpoolHealth::Removed),
             "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ZpoolError::Parse(format!(
+            _ => Err(ParseError::Parse(format!(
                 "Unrecognized zpool 'health': {}",
                 s
             ))),
@@ -103,18 +100,18 @@ impl ZpoolInfo {
 }
 
 impl FromStr for ZpoolInfo {
-    type Err = ZpoolError;
+    type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
         let expected_field = |name| {
-            ZpoolError::Parse(format!(
+            ParseError::Parse(format!(
                 "Missing '{}' value in zpool list output",
                 name
             ))
         };
         let failed_to_parse = |name, err| {
-            ZpoolError::Parse(format!(
+            ParseError::Parse(format!(
                 "Failed to parse field '{}': {}",
                 name, err
             ))
@@ -162,14 +159,8 @@ impl Zpool {
         ]);
 
         let output = execute(cmd)?;
-        let stdout = String::from_utf8(output.stdout).map_err(|e| {
-            Error::InternalError {
-                internal_message: format!(
-                    "Cannot parse 'zpool list' output as UTF-8: {}",
-                    e
-                ),
-            }
-        })?;
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|e| ParseError::Utf8(e))?;
 
         let zpool = stdout.parse::<ZpoolInfo>()?;
         Ok(zpool)

@@ -1,11 +1,11 @@
 //! API for interacting with Zones running Propolis.
 
 use ipnetwork::IpNetwork;
-use omicron_common::api::external::Error;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+use crate::illumos::dladm::VNIC_PREFIX_CONTROL;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -14,6 +14,7 @@ const STORAGE_BASE_ZONE: &str = "storage_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 pub const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
 
+const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 const SVCADM: &str = "/usr/sbin/svcadm";
 const SVCCFG: &str = "/usr/sbin/svccfg";
@@ -25,13 +26,42 @@ pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_instance_";
 pub const CRUCIBLE_ZONE_PREFIX: &str = "oxz_crucible_instance_";
 pub const COCKROACH_ZONE_PREFIX: &str = "oxz_cockroach_instance_";
 
-fn get_zone(name: &str) -> Result<Option<zone::Zone>, Error> {
-    Ok(zone::Adm::list()
-        .map_err(|e| Error::InternalError {
-            internal_message: format!("Cannot list zones: {}", e),
-        })?
-        .into_iter()
-        .find(|zone| zone.name() == name))
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    // TODO: These could be grouped into an "operation" error with an enum
+    // variant, if we want...
+    #[error("Cannot halt zone: {0}")]
+    Halt(zone::ZoneError),
+
+    #[error("Cannot uninstall zone: {0}")]
+    Uninstall(zone::ZoneError),
+
+    #[error("Cannot delete zone: {0}")]
+    Delete(zone::ZoneError),
+
+    #[error("Cannot install zone: {0}")]
+    Install(zone::ZoneError),
+
+    #[error("Cannot configure zone: {0}")]
+    Configure(zone::ZoneError),
+
+    #[error("Cannot clone zone: {0}")]
+    Clone(zone::ZoneError),
+
+    #[error("Cannot boot zone: {0}")]
+    Boot(zone::ZoneError),
+
+    #[error("Cannot list zones: {0}")]
+    List(zone::ZoneError),
+
+    #[error("Zone execution error: {0}")]
+    Execution(#[from] crate::illumos::ExecutionError),
+
+    #[error("Failed to parse output: {0}")]
+    Parse(#[from] std::string::FromUtf8Error),
+
+    #[error("Value not found")]
+    NotFound,
 }
 
 /// Wraps commands for interacting with Zones.
@@ -41,31 +71,18 @@ pub struct Zones {}
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
-        if let Some(zone) = get_zone(name)? {
+        if let Some(zone) = Self::find(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
             if zone.state() == zone::State::Running {
-                zone::Adm::new(name).halt().map_err(|e| {
-                    Error::InternalError {
-                        internal_message: format!(
-                            "Cannot halt zone {}: {}",
-                            name, e
-                        ),
-                    }
-                })?;
+                zone::Adm::new(name).halt().map_err(|e| Error::Halt(e))?;
             }
-            zone::Adm::new(name).uninstall(/* force= */ true).map_err(|e| {
-                Error::InternalError {
-                    internal_message: format!(
-                        "Cannot uninstall {}: {}",
-                        name, e
-                    ),
-                }
-            })?;
-            zone::Config::new(name).delete(/* force= */ true).run().map_err(
-                |e| Error::InternalError {
-                    internal_message: format!("Cannot delete {}: {}", name, e),
-                },
-            )?;
+            zone::Adm::new(name)
+                .uninstall(/* force= */ true)
+                .map_err(|e| Error::Uninstall(e))?;
+            zone::Config::new(name)
+                .delete(/* force= */ true)
+                .run()
+                .map_err(|e| Error::Delete(e))?;
         }
         Ok(())
     }
@@ -77,7 +94,7 @@ impl Zones {
         devices: &[zone::Device],
     ) -> Result<(), Error> {
         info!(log, "Querying for prescence of zone: {}", name);
-        if let Some(zone) = get_zone(name)? {
+        if let Some(zone) = Self::find(name)? {
             info!(
                 log,
                 "Found zone: {} in state {:?}",
@@ -114,17 +131,11 @@ impl Zones {
         for device in devices {
             cfg.add_device(device);
         }
-        cfg.run().map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to create base zone: {}", e),
-        })?;
+        cfg.run().map_err(|e| Error::Configure(e))?;
 
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
-        zone::Adm::new(name).install(&[]).map_err(|e| {
-            Error::InternalError {
-                internal_message: format!("Failed to install base zone: {}", e),
-            }
-        })?;
+        zone::Adm::new(name).install(&[]).map_err(|e| Error::Install(e))?;
 
         Ok(())
     }
@@ -187,10 +198,7 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to create child zone: {}", e),
-        })?;
-
+        cfg.run().map_err(|e| Error::Configure(e))?;
         Ok(())
     }
 
@@ -223,9 +231,7 @@ impl Zones {
 
     /// Clones a zone (named `name`) from the base Propolis zone.
     fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
-        zone::Adm::new(name).clone(base).map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to clone zone: {}", e),
-        })?;
+        zone::Adm::new(name).clone(base).map_err(|e| Error::Clone(e))?;
         Ok(())
     }
 
@@ -241,27 +247,92 @@ impl Zones {
 
     /// Boots a zone (named `name`).
     pub fn boot(name: &str) -> Result<(), Error> {
-        zone::Adm::new(name).boot().map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to boot zone: {}", e),
-        })?;
+        zone::Adm::new(name).boot().map_err(|e| Error::Boot(e))?;
         Ok(())
     }
 
     /// Returns all zones that may be managed by the Sled Agent.
+    ///
+    /// These zones must have names starting with [`ZONE_PREFIX`].
     pub fn get() -> Result<Vec<zone::Zone>, Error> {
         Ok(zone::Adm::list()
-            .map_err(|e| Error::InternalError {
-                internal_message: format!("Failed to list zones: {}", e),
-            })?
+            .map_err(|e| Error::List(e))?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
     }
 
+    /// Finds a zone with a specified name.
+    ///
+    /// Can only return zones that start with [`ZONE_PREFIX`], as they
+    /// are managed by the Sled Agent.
+    pub fn find(name: &str) -> Result<Option<zone::Zone>, Error> {
+        Ok(Self::get()?.into_iter().find(|zone| zone.name() == name))
+    }
+
+    /// Returns the name of the VNIC used to communicate with the control plane.
+    pub fn get_control_interface(zone: &str) -> Result<String, Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            DLADM,
+            "show-vnic",
+            "-p",
+            "-o",
+            "LINK",
+        ]);
+        let output = execute(cmd)?;
+        String::from_utf8(output.stdout)
+            .map_err(|e| Error::Parse(e))?
+            .lines()
+            .find_map(|name| {
+                if name.starts_with(VNIC_PREFIX_CONTROL) {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            })
+            .ok_or(Error::NotFound)
+    }
+
+    /// Gets the address if one exists, creates one if one does not exist.
+    pub fn ensure_address(
+        zone: &str,
+        addrobj: &str,
+    ) -> Result<IpNetwork, Error> {
+        match Zones::get_address(zone, addrobj) {
+            Ok(addr) => Ok(addr),
+            Err(_) => Zones::create_address(zone, addrobj),
+        }
+    }
+
+    /// Gets the IP address of an interface within a Zone.
+    ///
+    /// TODO: Use types to distinguish "addrobj" from "interface" objects.
+    pub fn get_address(zone: &str, addrobj: &str) -> Result<IpNetwork, Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            IPADM,
+            "show-addr",
+            "-p",
+            "-o",
+            "ADDR",
+            addrobj,
+        ]);
+        let output = execute(cmd)?;
+        String::from_utf8(output.stdout)?
+            .lines()
+            .find_map(|s| s.parse().ok())
+            .ok_or(Error::NotFound)
+    }
+
     /// Creates an IP address within a Zone.
     pub fn create_address(
         zone: &str,
-        interface: &str,
+        addrobj: &str,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
@@ -272,37 +343,10 @@ impl Zones {
             "-t",
             "-T",
             "dhcp",
-            interface,
+            addrobj,
         ]);
         execute(cmd)?;
-
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZLOGIN,
-            zone,
-            IPADM,
-            "show-addr",
-            "-p",
-            "-o",
-            "ADDR",
-            interface,
-        ]);
-        let output = execute(cmd)?;
-        String::from_utf8(output.stdout)
-            .map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Cannot parse ipadm output as UTF-8: {}",
-                    e
-                ),
-            })?
-            .lines()
-            .find_map(|s| s.parse().ok())
-            .ok_or(Error::InternalError {
-                internal_message: format!(
-                    "Cannot find a valid IP address on {}",
-                    interface
-                ),
-            })
+        Self::get_address(zone, addrobj)
     }
 
     /// Configures and initializes a Propolis server within the specified Zone.

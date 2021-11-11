@@ -1,18 +1,19 @@
 //! Management of sled-local storage.
 
 use crate::illumos::{
-    svc::wait_for_service,
     zfs::Mountpoint,
     zone::{
         COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY, CRUCIBLE_ZONE_PREFIX,
     },
     zpool::ZpoolInfo,
 };
-use crate::vnic::{interface_name, IdAllocator, Vnic};
+use crate::running_zone::RunningZone;
+use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
-use ipnetwork::IpNetwork;
-use omicron_common::api::external::{ByteCount, Error};
+use omicron_common::api::external::{
+    ByteCount, ByteCountRangeError, Error as ExternalError,
+};
 use omicron_common::api::internal::nexus::{
     DatasetFlavor, DatasetPostRequest, ZpoolPostRequest,
 };
@@ -39,6 +40,36 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Datalink(#[from] crate::illumos::dladm::Error),
+
+    #[error(transparent)]
+    Zfs(#[from] crate::illumos::zfs::Error),
+
+    #[error(transparent)]
+    Zpool(#[from] crate::illumos::zpool::Error),
+
+    #[error("Failed to create base zone: {0}")]
+    BaseZoneCreation(crate::illumos::zone::Error),
+
+    #[error("Failed to configure a zone: {0}")]
+    ZoneConfiguration(crate::illumos::zone::Error),
+
+    #[error("Failed to manage a running zone: {0}")]
+    ZoneManagement(#[from] crate::running_zone::Error),
+
+    #[error("Error parsing pool size: {0}")]
+    BadPoolSize(#[from] ByteCountRangeError),
+
+    #[error("Failed to parse as UUID: {0}")]
+    Parse(uuid::Error),
+
+    #[error("Timed out waiting for service: {0}")]
+    Timeout(String),
+}
+
 /// A ZFS filesystem dataset within a zpool.
 #[allow(dead_code)]
 struct Filesystem {
@@ -62,13 +93,7 @@ impl Pool {
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        let id: Uuid =
-            info.name().parse().map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Zpool's name cannot be parsed as UUID: {}",
-                    e
-                ),
-            })?;
+        let id: Uuid = info.name().parse().map_err(|e| Error::Parse(e))?;
         Ok(Pool { id, info, filesystems: HashMap::new() })
     }
 
@@ -90,6 +115,78 @@ struct PartitionInfo<'a> {
     svc_directory: &'a str,
     port: u16,
     flavor: DatasetFlavor,
+}
+
+async fn ensure_running_zone(
+    log: &Logger,
+    vnic_id_allocator: &IdAllocator,
+    partition_info: &PartitionInfo<'_>,
+    filesystem_name: &str,
+) -> Result<RunningZone, Error> {
+    match RunningZone::get(log, partition_info.zone_prefix, partition_info.port)
+        .await
+    {
+        Ok(zone) => {
+            info!(log, "Zone for {} is already running", filesystem_name);
+            Ok(zone)
+        }
+        Err(_) => {
+            info!(log, "Zone for {} is not running: Booting", filesystem_name);
+            let (nic, zname) = configure_zone(
+                log,
+                vnic_id_allocator,
+                partition_info,
+                filesystem_name,
+            )?;
+            RunningZone::boot(log, zname, nic, partition_info.port)
+                .await
+                .map_err(|e| e.into())
+        }
+    }
+}
+
+// Creates a VNIC and configures a zone.
+fn configure_zone(
+    log: &Logger,
+    vnic_id_allocator: &IdAllocator,
+    partition_info: &PartitionInfo<'_>,
+    filesystem_name: &str,
+) -> Result<(Vnic, String), Error> {
+    let physical_dl = Dladm::find_physical()?;
+    let nic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
+    let id = Uuid::new_v4();
+    let zname = format!("{}{}", partition_info.zone_prefix, id);
+
+    // Configure the new zone - this should be identical to the base zone,
+    // but with a specified VNIC and pool.
+    Zones::configure_zone(
+        log,
+        &zname,
+        &[
+            zone::Fs {
+                ty: "lofs".to_string(),
+                dir: partition_info.svc_directory.to_string(),
+                special: partition_info.svc_directory.to_string(),
+                options: vec!["ro".to_string()],
+                ..Default::default()
+            },
+            zone::Fs {
+                ty: "zfs".to_string(),
+                dir: partition_info.data_directory.to_string(),
+                special: filesystem_name.to_string(),
+                options: vec!["rw".to_string()],
+                ..Default::default()
+            },
+        ],
+        &[],
+        vec![nic.name().to_string()],
+    ).map_err(|e| Error::ZoneConfiguration(e))?;
+
+    // Clone from the base zone installation.
+    Zones::clone_from_base_storage(&zname)
+        .map_err(|e| Error::BaseZoneCreation(e))?;
+
+    Ok((nic, zname))
 }
 
 const PARTITIONS: &[PartitionInfo<'static>] = &[
@@ -152,26 +249,24 @@ impl StorageWorker {
         &self,
         pool: &mut Pool,
         partition: &PartitionInfo<'static>,
-    ) -> Result<(Uuid, SocketAddr), Error> {
+    ) -> Result<(Uuid, RunningZone), Error> {
         let name = format!("{}/{}", pool.info.name(), partition.name);
 
         info!(&self.log, "Ensuring filesystem {} exists", name);
         let id = StorageWorker::ensure_filesystem_with_id(&name)?;
 
         info!(&self.log, "Creating zone for {}", name);
-        let network = self
-            .create_zone(
-                partition.zone_prefix,
-                &name,
-                partition.data_directory,
-                partition.svc_directory,
-            )
-            .await?;
+        let zone = ensure_running_zone(
+            &self.log,
+            &self.vnic_id_allocator,
+            partition,
+            &name,
+        )
+        .await?;
 
-        let address = SocketAddr::new(network.ip(), partition.port);
-        info!(&self.log, "Created zone with address {}", address);
-        pool.add_filesystem(id, Filesystem { name, address });
-        Ok((id, address))
+        info!(&self.log, "Created zone with address {}", zone.address());
+        pool.add_filesystem(id, Filesystem { name, address: zone.address() });
+        Ok((id, zone))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
@@ -191,7 +286,8 @@ impl StorageWorker {
     async fn do_work_internal(&mut self) -> Result<(), Error> {
         info!(self.log, "StorageWorker creating storage base zone");
         // Create a base zone, from which all running storage zones are cloned.
-        Zones::create_storage_base(&self.log)?;
+        Zones::create_storage_base(&self.log)
+            .map_err(|e| Error::BaseZoneCreation(e))?;
         info!(self.log, "StorageWorker creating storage base zone - DONE");
 
         let mut nexus_notifications = FuturesOrdered::new();
@@ -209,17 +305,13 @@ impl StorageWorker {
                         "Storage manager processing zpool: {:#?}", pool.info
                     );
 
-                    let size = ByteCount::try_from(pool.info.size()).map_err(|e| {
-                        Error::InternalError {
-                            internal_message: format!("Invalid pool size: {}", e),
-                        }
-                    })?;
+                    let size = ByteCount::try_from(pool.info.size())?;
 
                     // Initialize all sled-local state.
                     let mut partitions = vec![];
                     for partition in PARTITIONS {
-                        let (id, address) = self.initialize_partition(pool, partition).await?;
-                        partitions.push((id, address, partition.flavor));
+                        let (id, zone) = self.initialize_partition(pool, partition).await?;
+                        partitions.push((id, zone.address(), partition.flavor));
                     }
 
                     // Notify Nexus of the zpool and all datasets within.
@@ -247,8 +339,7 @@ impl StorageWorker {
                                     .map_err(backoff::BackoffError::Transient)?;
                             }
 
-                            Ok::<(), backoff::BackoffError<Error>>(())
-
+                            Ok::<(), backoff::BackoffError<ExternalError>>(())
                         }
                     };
                     let log = self.log.clone();
@@ -269,71 +360,6 @@ impl StorageWorker {
                 },
             }
         }
-    }
-
-    // Creates a new zone, injecting the associated ZFS filesystem.
-    //
-    // * zone_name_prefix: Describes the newly created zone name (prefix + ID)
-    // * filesystem_name: Name of ZFS filesystem to inject.
-    // * data_directory: Path to mounted ZFS filesytem within the zone.
-    // * svc_directory: Auxiliary filesystem to inject as read-only loopback.
-    //      (This is useful for injecting paths to binaries).
-    //
-    // TODO: Should this be idempotent? Can we "create a zone if it doesn't
-    // already exist"?
-    async fn create_zone(
-        &self,
-        zone_name_prefix: &str,
-        filesystem_name: &str,
-        data_directory: &str,
-        svc_directory: &str,
-    ) -> Result<IpNetwork, Error> {
-        let physical_dl = Dladm::find_physical()?;
-        let nic =
-            Vnic::new_control(&self.vnic_id_allocator, &physical_dl, None)?;
-        let id = Uuid::new_v4();
-        let zname = format!("{}{}", zone_name_prefix, id);
-
-        // Configure the new zone - this should be identical to the base zone,
-        // but with a specified VNIC and pool.
-        Zones::configure_zone(
-            &self.log,
-            &zname,
-            &[
-                zone::Fs {
-                    ty: "lofs".to_string(),
-                    dir: svc_directory.to_string(),
-                    special: svc_directory.to_string(),
-                    options: vec!["ro".to_string()],
-                    ..Default::default()
-                },
-                zone::Fs {
-                    ty: "zfs".to_string(),
-                    dir: data_directory.to_string(),
-                    special: filesystem_name.to_string(),
-                    options: vec!["rw".to_string()],
-                    ..Default::default()
-                },
-            ],
-            &[],
-            vec![nic.name().to_string()],
-        )?;
-
-        // Clone from the base zone installation.
-        Zones::clone_from_base_storage(&zname)?;
-
-        // Boot the new zone.
-        info!(&self.log, "Zone {} booting", zname);
-        Zones::boot(&zname)?;
-
-        // Wait for the network services to come online, then create an address
-        // to use for communicating with the newly created zone.
-        wait_for_service(Some(&zname), "svc:/milestone/network:default")
-            .await?;
-
-        let network =
-            Zones::create_address(&zname, &interface_name(&nic.name()))?;
-        Ok(network)
     }
 }
 

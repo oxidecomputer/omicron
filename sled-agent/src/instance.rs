@@ -9,7 +9,6 @@ use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
 use crate::instance_manager::InstanceTicket;
 use crate::vnic::{interface_name, IdAllocator, Vnic};
 use futures::lock::Mutex;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -31,6 +30,29 @@ use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use omicron_common::NexusClient;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Failed to wait for service: {0}")]
+    Timeout(String),
+
+    #[error("Failure accessing data links: {0}")]
+    Datalink(#[from] crate::illumos::dladm::Error),
+
+    #[error("Error accessing zones: {0}")]
+    Zone(#[from] crate::illumos::zone::Error),
+
+    #[error("Failure from Propolis Client: {0}")]
+    Propolis(#[from] propolis_client::Error),
+
+    // TODO: Remove this error; prefer to retry notifications.
+    #[error("Notifying Nexus failed: {0}")]
+    Notification(omicron_common::api::external::Error),
+
+    // TODO: This error type could become more specific
+    #[error("Error performing a state transition: {0}")]
+    Transition(omicron_common::api::external::Error),
+}
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -70,9 +92,7 @@ async fn wait_for_http_server(
         log_notification_failure,
     )
     .await
-    .map_err(|e| Error::InternalError {
-        internal_message: format!("Failed to wait for HTTP server: {}", e),
-    })
+    .map_err(|_| Error::Timeout("Propolis".to_string()))
 }
 
 fn service_name() -> &'static str {
@@ -173,7 +193,8 @@ impl InstanceInner {
         // Notify Nexus of the state change.
         self.nexus_client
             .notify_instance_updated(self.id(), self.state.current())
-            .await?;
+            .await
+            .map_err(|e| Error::Notification(e))?;
 
         // Take the next action, if any.
         if let Some(action) = action {
@@ -192,13 +213,8 @@ impl InstanceInner {
             .expect("Propolis client should be initialized before usage")
             .client
             .instance_state_put(*self.id(), request)
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Failed to set state of instance: {}",
-                    e
-                ),
-            })
+            .await?;
+        Ok(())
     }
 
     async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
@@ -224,10 +240,7 @@ impl InstanceInner {
             .expect("Propolis client should be initialized before usage")
             .client
             .instance_ensure(&request)
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!("Failed to ensure instance: {}", e),
-            })?;
+            .await?;
         Ok(())
     }
 
@@ -376,6 +389,7 @@ impl Instance {
                     Some(nic.mac),
                     inner.vlan,
                 )
+                .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
@@ -404,8 +418,10 @@ impl Instance {
         info!(inner.log, "Booted zone: {}", zname);
 
         // Wait for the network services to come online, then create an address.
-        wait_for_service(Some(&zname), "svc:/milestone/network:default")
-            .await?;
+        let fmri = "svc:/milestone/network:default";
+        wait_for_service(Some(&zname), fmri)
+            .await
+            .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
         let network = Zones::create_address(
@@ -424,7 +440,9 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name(inner.id());
-        wait_for_service(Some(&zname), &fmri).await?;
+        wait_for_service(Some(&zname), &fmri)
+            .await
+            .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let client = Arc::new(PropolisClient::new(
             server_addr,
@@ -508,15 +526,7 @@ impl Instance {
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response = client
-                .instance_state_monitor(id, gen)
-                .await
-                .map_err(|e| Error::InternalError {
-                    internal_message: format!(
-                        "Failed to monitor propolis: {}",
-                        e
-                    ),
-                })?;
+            let response = client.instance_state_monitor(id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -546,8 +556,10 @@ impl Instance {
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
-        if let Some(action) =
-            inner.state.request_transition(target.run_state)?
+        if let Some(action) = inner
+            .state
+            .request_transition(target.run_state)
+            .map_err(|e| Error::Transition(e))?
         {
             info!(
                 &inner.log,
