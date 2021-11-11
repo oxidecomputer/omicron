@@ -982,6 +982,7 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
 /// This macro implements serialization and deserialization of an enum type
 /// from our database into our model types.
 /// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
 macro_rules! impl_enum_type {
     (
         $(#[$enum_meta:meta])*
@@ -1040,7 +1041,6 @@ macro_rules! impl_enum_type {
 }
 
 impl_enum_type!(
-    /// Note that the type_name _must_ be all lowercase or it'll fail.
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
     pub struct VpcRouterKindEnum;
