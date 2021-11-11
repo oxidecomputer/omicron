@@ -980,58 +980,80 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
-/// Custom Enum type for Diesel. Note that the type_name _must_ be all lowercase
-/// or it'll fail.
-#[derive(SqlType, Debug)]
-#[postgres(type_name = "vpc_router_kind", type_schema = "public")]
-pub struct VpcRouterKindEnum;
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
 
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "VpcRouterKindEnum"]
-pub struct VpcRouterKind(pub external::VpcRouterKind);
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
 
-impl VpcRouterKind {
-    pub fn new(state: external::VpcRouterKind) -> Self {
-        Self(state)
-    }
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
 
-    pub fn state(&self) -> &external::VpcRouterKind {
-        &self.0
-    }
-}
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
 
-impl<DB> ToSql<VpcRouterKindEnum, DB> for VpcRouterKind
-where
-    DB: Backend,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        match *self.state() {
-            external::VpcRouterKind::System => out.write_all(b"system")?,
-            external::VpcRouterKind::Custom => out.write_all(b"custom")?,
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl<DB> FromSql<VpcRouterKindEnum, DB> for VpcRouterKind
-where
-    DB: Backend + for<'a> BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        match DB::as_bytes(bytes) {
-            b"system" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::System))
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
             }
-            b"custom" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::Custom))
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
             }
-            _ => Err("Unrecognized enum variant for VpcRouterKind".into()),
         }
     }
 }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
+    pub struct VpcRouterKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcRouterKindEnum"]
+    pub struct VpcRouterKind(pub external::VpcRouterKind);
+
+    // Enum values
+    System => b"system"
+    Custom => b"custom"
+);
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpc_router"]
@@ -1051,7 +1073,7 @@ impl VpcRouter {
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind::new(kind) }
+        Self { identity, vpc_id, kind: VpcRouterKind(kind) }
     }
 }
 
@@ -1060,7 +1082,7 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: *self.kind.state(),
+            kind: self.kind.0,
         }
     }
 }

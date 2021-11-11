@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use common::test_setup;
 use dropshot::test_util::{
-    object_delete, object_get, objects_list_page, objects_post, read_json,
+    object_delete, object_get, objects_list_page, objects_post,
 };
 use dropshot::Method;
 use http::StatusCode;
