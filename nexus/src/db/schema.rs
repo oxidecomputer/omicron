@@ -208,7 +208,9 @@ table! {
         status -> crate::db::model::VpcFirewallRuleStatusEnum,
         direction -> crate::db::model::VpcFirewallRuleDirectionEnum,
         targets -> Array<Text>,
-        filters -> Jsonb,
+        filter_hosts -> Nullable<Array<Text>>,
+        filter_ports -> Nullable<Array<Text>>,
+        filter_protocols -> Nullable<Array<Text>>,
         action -> crate::db::model::VpcFirewallRuleActionEnum,
         priority -> Int4,
     }

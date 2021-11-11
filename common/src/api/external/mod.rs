@@ -1425,7 +1425,7 @@ pub struct VpcFirewallRuleFilter {
 }
 
 /// The protocols that may be specified in a firewall rule's filter
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum VpcFirewallRuleProtocol {
     Tcp,
@@ -1434,7 +1434,7 @@ pub enum VpcFirewallRuleProtocol {
 }
 
 /// A range of IP ports
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct IpPortRange {

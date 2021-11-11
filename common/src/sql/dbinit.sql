@@ -395,6 +395,16 @@ CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
     'drop'
 );
 
+/* Unused due to cockroachdb/cockroach#61046 preventing arrays
+   of enums from functioning properly. Ideally, we should use this
+   in the type of filter_protocols below.
+CREATE TYPE omicron.public.vpc_firewall_rule_protocol AS ENUM (
+    'TCP',
+    'UDP',
+    'ICMP'
+);
+*/
+
 CREATE TABLE omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -411,7 +421,10 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     /* Array of targets. 128 was picked to include plenty of space for
        a tag, colon, and resource identifier. */
     targets STRING(128)[] NOT NULL,
-    filters JSONB NOT NULL,
+    /* Also an array of targets */
+    filter_hosts STRING(128)[],
+    filter_ports STRING(11)[],
+    filter_protocols STRING(4)[],
     action vpc_firewall_rule_action NOT NULL,
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
