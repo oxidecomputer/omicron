@@ -1105,56 +1105,21 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
     }
 }
 
-#[derive(SqlType, Debug)]
-#[postgres(type_name = "router_route_kind", type_schema = "public")]
-pub struct RouterRouteKindEnum;
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "router_route_kind", type_schema = "public")]
+    pub struct RouterRouteKindEnum;
 
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "RouterRouteKindEnum"]
-pub struct RouterRouteKind(pub external::RouterRouteKind);
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "RouterRouteKindEnum"]
+    pub struct RouterRouteKind(pub external::RouterRouteKind);
 
-impl<DB> ToSql<RouterRouteKindEnum, DB> for RouterRouteKind
-where
-    DB: Backend,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        match self.0 {
-            external::RouterRouteKind::Default => out.write_all(b"default")?,
-            external::RouterRouteKind::VpcSubnet => {
-                out.write_all(b"vpc_subnet")?
-            }
-            external::RouterRouteKind::VpcPeering => {
-                out.write_all(b"vpc_peering")?
-            }
-            external::RouterRouteKind::Custom => out.write_all(b"custom")?,
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl<DB> FromSql<RouterRouteKindEnum, DB> for RouterRouteKind
-where
-    DB: Backend + for<'a> BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        match DB::as_bytes(bytes) {
-            b"default" => {
-                Ok(RouterRouteKind(external::RouterRouteKind::Default))
-            }
-            b"vpc_subnet" => {
-                Ok(RouterRouteKind(external::RouterRouteKind::VpcSubnet))
-            }
-            b"vpc_peering" => {
-                Ok(RouterRouteKind(external::RouterRouteKind::VpcPeering))
-            }
-            b"custom" => Ok(RouterRouteKind(external::RouterRouteKind::Custom)),
-            _ => Err("Unrecognized enum variant for RouteKind".into()),
-        }
-    }
-}
+    // Enum values
+    Default => b"default"
+    VpcSubnet => b"vpc_subnet"
+    VpcPeering => b"vpc_peering"
+    Custom => b"custom"
+);
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
