@@ -27,6 +27,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
+use std::iter::FromIterator;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::str::FromStr;
@@ -127,7 +128,7 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
  * that's valid as a name.
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[serde(try_from = "String")]
 pub struct Name(String);
@@ -1333,7 +1334,7 @@ pub struct VpcRouterUpdateParams {
 }
 
 /// A single rule in a VPC firewall
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// common identifying metadata */
     pub identity: IdentityMetadata,
@@ -1352,7 +1353,7 @@ pub struct VpcFirewallRule {
 }
 
 /// A single rule in a VPC firewall
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
     // In an update, the name is encoded as a key in the JSON object, so we
     // don't include one here
@@ -1381,12 +1382,36 @@ pub struct VpcFirewallRuleUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct VpcFirewallRuleUpdateParams {
     #[serde(flatten)]
-    pub rules: HashMap<String, VpcFirewallRuleUpdate>,
+    pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
+}
+
+/**
+ * Response to an update replacing [`Vpc`]'s firewall
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcFirewallRuleUpdateResult {
+    #[serde(flatten)]
+    pub rules: HashMap<Name, VpcFirewallRule>,
+}
+
+impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = VpcFirewallRule>,
+    {
+        Self {
+            rules: iter
+                .into_iter()
+                .map(|rule| (rule.identity.name.clone(), rule))
+                .collect(),
+        }
+    }
 }
 
 /// Filter for a firewall rule. A given packet must match every field that is
 /// present for the rule to apply to it.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
     /// If present, the sources (if incoming) or destinations (if outgoing)
     /// this rule applies to.
@@ -1400,7 +1425,7 @@ pub struct VpcFirewallRuleFilter {
 }
 
 /// The protocols that may be specified in a firewall rule's filter
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum VpcFirewallRuleProtocol {
     Tcp,
@@ -1704,7 +1729,12 @@ pub struct NetworkInterface {
 
 #[cfg(test)]
 mod test {
-    use super::{ByteCount, IpPortRange, Name, NetworkTarget};
+    use super::{
+        ByteCount, IpPortRange, Name, NetworkTarget, VpcFirewallRuleAction,
+        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        VpcFirewallRuleUpdateParams,
+    };
     use crate::api::external::Error;
     use std::convert::TryFrom;
 
@@ -1936,5 +1966,73 @@ mod test {
         )
         .into();
         assert_eq!(target, "inetgw:other-gw");
+    }
+
+    #[test]
+    fn test_firewall_deserialization() {
+        let json = r#"
+            {
+            "allow-internal-inbound": {
+                "status": "enabled",
+                "direction": "incoming",
+                "targets": [ "vpc:default" ],
+                "filters": { "hosts": [ "vpc:default" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic between instances"
+            },
+            "rule2": {
+                "status": "disabled",
+                "direction": "outgoing",
+                "targets": [ "vpc:default" ],
+                "filters": { "ports": [ "22-25", "27" ], "protocols": [ "UDP" ] },
+                "action": "drop",
+                "priority": 65533,
+                "description": "second rule"
+            }
+            }
+            "#;
+        let params =
+            serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
+        assert_eq!(params.rules.len(), 2);
+        let default_vpc =
+            NetworkTarget::Vpc(Name::try_from("default".to_string()).unwrap());
+        assert_eq!(
+            params.rules[&Name::try_from("allow-internal-inbound".to_string())
+                .unwrap()],
+            VpcFirewallRuleUpdate {
+                status: VpcFirewallRuleStatus::Enabled,
+                direction: VpcFirewallRuleDirection::Incoming,
+                targets: vec![default_vpc.clone()],
+                filters: VpcFirewallRuleFilter {
+                    hosts: Some(vec![default_vpc.clone()]),
+                    ports: None,
+                    protocols: None,
+                },
+                action: VpcFirewallRuleAction::Allow,
+                priority: 65534,
+                description: "allow inbound traffic between instances"
+                    .to_string(),
+            }
+        );
+        assert_eq!(
+            params.rules[&Name::try_from("rule2".to_string()).unwrap()],
+            VpcFirewallRuleUpdate {
+                status: VpcFirewallRuleStatus::Disabled,
+                direction: VpcFirewallRuleDirection::Outgoing,
+                targets: vec![default_vpc.clone()],
+                filters: VpcFirewallRuleFilter {
+                    hosts: None,
+                    ports: Some(vec![
+                        IpPortRange { first: 22, last: 25 },
+                        IpPortRange { first: 27, last: 27 }
+                    ]),
+                    protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
+                },
+                action: VpcFirewallRuleAction::Drop,
+                priority: 65533,
+                description: "second rule".to_string(),
+            }
+        );
     }
 }

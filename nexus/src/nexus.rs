@@ -38,6 +38,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcFirewallRule;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
@@ -1438,7 +1441,58 @@ impl Nexus {
             .db_datastore
             .project_create_vpc(&vpc_id, &project_id, &system_router_id, params)
             .await?;
+        self.create_default_vpc_firewall(&vpc_id).await?;
         Ok(vpc.into())
+    }
+
+    async fn create_default_vpc_firewall(
+        &self,
+        vpc_id: &Uuid,
+    ) -> CreateResult<()> {
+        const DEFAULT_FIREWALL_RULES: &'static str = r#"{
+            "allow-internal-inbound": {
+                "status": "enabled",
+                "direction": "incoming",
+                "targets": [ "vpc:default" ],
+                "filters": { "hosts": [ "vpc:default" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
+            },
+            "allow-ssh": {
+                "status": "enabled",
+                "direction": "incoming",
+                "targets": [ "vpc:default" ],
+                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 22 from anywhere"
+            },
+            "allow-icmp": {
+                "status": "enabled",
+                "direction": "incoming",
+                "targets": [ "vpc:default" ],
+                "filters": { "protocols": [ "ICMP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound ICMP traffic from anywhere"
+            },
+            "allow-rdp": {
+                "status": "enabled",
+                "direction": "incoming",
+                "targets": [ "vpc:default" ],
+                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 3389 from anywhere"
+            }
+        }"#;
+        let params = serde_json::from_str::<
+            external::VpcFirewallRuleUpdateParams,
+        >(DEFAULT_FIREWALL_RULES)
+        .unwrap();
+        self.db_datastore.vpc_update_firewall_rules(&vpc_id, &params).await?;
+        Ok(())
     }
 
     pub async fn project_lookup_vpc(
@@ -1494,7 +1548,51 @@ impl Nexus {
         // TODO: This should eventually call the networking subsystem to have it clean up
         // and use a saga for atomicity
         self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
-        self.db_datastore.project_delete_vpc(&vpc.identity.id).await
+        self.db_datastore.project_delete_vpc(&vpc.identity.id).await?;
+
+        // Delete all firewall rules after deleting the VPC, to ensure no
+        // firewall rules get added between rules deletion and VPC deletion.
+        self.db_datastore.vpc_delete_all_firewall_rules(&vpc.identity.id).await
+    }
+
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcFirewallRule> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let subnets = self
+            .db_datastore
+            .vpc_list_firewall_rules(&vpc.identity.id, pagparams)
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect::<Vec<VpcFirewallRule>>();
+        Ok(subnets)
+    }
+
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcFirewallRuleUpdateParams,
+    ) -> UpdateResult<VpcFirewallRuleUpdateResult> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let result = self
+            .db_datastore
+            .vpc_update_firewall_rules(&vpc.identity.id, &params)
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect();
+        Ok(result)
     }
 
     pub async fn vpc_list_subnets(

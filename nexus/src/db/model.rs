@@ -1300,13 +1300,13 @@ impl VpcFirewallRule {
         rule_id: Uuid,
         vpc_id: Uuid,
         rule_name: external::Name,
-        rule: external::VpcFirewallRuleUpdate,
+        rule: &external::VpcFirewallRuleUpdate,
     ) -> Self {
         let identity = VpcFirewallRuleIdentity::new(
             rule_id,
             external::IdentityMetadataCreateParams {
                 name: rule_name,
-                description: rule.description,
+                description: rule.description.clone(),
             },
         );
         Self {
@@ -1319,10 +1319,23 @@ impl VpcFirewallRule {
                 .iter()
                 .map(|target| target.clone().into())
                 .collect(),
-            filters: rule.filters.into(),
+            filters: rule.filters.clone().into(),
             action: rule.action.into(),
             priority: rule.priority.into(),
         }
+    }
+
+    pub fn vec_from_params(
+        vpc_id: Uuid,
+        params: external::VpcFirewallRuleUpdateParams,
+    ) -> Vec<VpcFirewallRule> {
+        params
+            .rules
+            .iter()
+            .map(|(name, rule)| {
+                VpcFirewallRule::new(Uuid::new_v4(), vpc_id, name.clone(), rule)
+            })
+            .collect()
     }
 }
 

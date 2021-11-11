@@ -1316,38 +1316,17 @@ impl DataStore {
 
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
         use db::schema::vpc::dsl;
-        use db::schema::vpc_firewall_rule::dsl as vfr_dsl;
+
+        // Note that we don't ensure the firewall rules are empty here, because
+        // we allow deleting VPCs with firewall rules present
 
         let now = Utc::now();
-        let delete_vpc = diesel::update(dsl::vpc)
+        diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*vpc_id))
             .set(dsl::time_deleted.eq(now))
-            .returning(Vpc::as_returning());
-        let delete_firewall = diesel::update(vfr_dsl::vpc_firewall_rule)
-            .filter(vfr_dsl::time_deleted.is_null())
-            .filter(vfr_dsl::vpc_id.eq(*vpc_id))
-            .set(vfr_dsl::time_deleted.eq(now));
-
-        // Ideally this would be a CTE so we don't need to hold a transaction
-        // open across multiple roundtrips from the database, but for now we're
-        // using a transaction due to the severely decreased legibility of
-        // CTEs via diesel right now.
-        self.pool()
-            .transaction(move |conn| {
-                delete_vpc.execute(conn)?;
-                // We delete the firewall rules in the same transaction as the
-                // VPC for two reasons:
-                // 1) The VPC row must be deleted before the firewall rules, to
-                //    prevent new firewall rules from being added between the
-                //    deletion of the firewall rules and the deletion of the
-                //    VPC.
-                // 2) If the process were to die after the VPC deletion but
-                //    before the firewall deletion, the firewall rules would be
-                //    orphaned in the database.
-                delete_firewall.execute(conn)?;
-                Ok(())
-            })
+            .returning(Vpc::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1355,7 +1334,8 @@ impl DataStore {
                     ResourceType::Vpc,
                     LookupType::ById(*vpc_id),
                 )
-            })
+            })?;
+        Ok(())
     }
 
     pub async fn vpc_list_firewall_rules(
@@ -1380,13 +1360,37 @@ impl DataStore {
             })
     }
 
+    pub async fn vpc_delete_all_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
+    }
+
     pub async fn vpc_update_firewall_rules(
         &self,
         vpc_id: &Uuid,
-        rules: Vec<VpcFirewallRule>,
+        params: &api::external::VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<VpcFirewallRule>> {
         use db::schema::vpc_firewall_rule::dsl;
 
+        let rules = VpcFirewallRule::vec_from_params(*vpc_id, params.clone());
         let now = Utc::now();
         let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())
