@@ -192,6 +192,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         kind -> crate::db::model::VpcRouterKindEnum,
         vpc_id -> Uuid,
+        rcgen -> Int8,
     }
 }
 

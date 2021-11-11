@@ -354,7 +354,8 @@ CREATE TABLE omicron.public.vpc_router (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     kind vpc_router_kind NOT NULL,
-    vpc_id UUID NOT NULL
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc_router (

@@ -1619,25 +1619,29 @@ impl DataStore {
         params: &api::external::RouterRouteCreateParams,
     ) -> CreateResult<RouterRoute> {
         use db::schema::router_route::dsl;
-
         let route =
             RouterRoute::new(*route_id, *router_id, *kind, params.clone());
         let name = route.name().clone();
-        let route = diesel::insert_into(dsl::router_route)
-            .values(route)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(RouterRoute::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+
+        VpcRouter::insert_resource(
+            *router_id,
+            diesel::insert_into(dsl::router_route).values(route),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            InsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::VpcRouter,
+                lookup_type: LookupType::ById(*router_id),
+            },
+            InsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::RouterRoute,
                     name.as_str(),
                 )
-            })?;
-        Ok(route)
+            }
+        })
     }
 
     pub async fn router_delete_route(&self, route_id: &Uuid) -> DeleteResult {

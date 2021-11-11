@@ -1063,6 +1063,7 @@ pub struct VpcRouter {
 
     pub vpc_id: Uuid,
     pub kind: VpcRouterKind,
+    pub rcgen: Generation,
 }
 
 impl VpcRouter {
@@ -1073,8 +1074,20 @@ impl VpcRouter {
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind(kind) }
+        Self {
+            identity,
+            vpc_id,
+            kind: VpcRouterKind(kind),
+            rcgen: Generation::new(),
+        }
     }
+}
+
+impl DatastoreCollection<RouterRoute> for VpcRouter {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc_router::dsl::rcgen;
+    type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
+    type CollectionIdColumn = router_route::dsl::router_id;
 }
 
 impl Into<external::VpcRouter> for VpcRouter {
