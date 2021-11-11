@@ -159,16 +159,28 @@ where
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-/// Result of [`InsertIntoCollectionStatement`].
-pub type InsertIntoCollectionResult<Q> = Result<Q, InsertError>;
+/// Result of [`InsertIntoCollectionStatement`] when executed asynchronously
+pub type AsyncInsertIntoCollectionResult<Q> = Result<Q, AsyncInsertError>;
+
+/// Result of [`InsertIntoCollectionStatement`] when executed synchronously
+pub type SyncInsertIntoCollectionResult<Q> = Result<Q, SyncInsertError>;
 
 /// Errors returned by [`InsertIntoCollectionStatement`].
 #[derive(Debug)]
-pub enum InsertError {
+pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// Other database error
     DatabaseError(PoolError),
+}
+
+/// Errors returned by [`InsertIntoCollectionStatement`].
+#[derive(Debug)]
+pub enum SyncInsertError {
+    /// The collection that the query was inserting into does not exist
+    CollectionNotFound,
+    /// Other database error
+    DatabaseError(diesel::result::Error),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -180,36 +192,116 @@ where
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
-    /// Issues the CTE and parses the result.
+    /// Issues the CTE asynchronously and parses the result.
     ///
     /// The three outcomes are:
-    /// - Ok(Row was inserted)
+    /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
     pub async fn insert_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<PgConnection>>,
-    ) -> InsertIntoCollectionResult<ResourceType>
+    ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<PgConnection, ResourceType>,
     {
-        match self.get_result_async::<ResourceType>(pool).await {
-            Ok(row) => Ok(row),
-            Err(PoolError::Connection(ConnectionError::Query(
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::Unknown,
-                    info,
-                ),
-            ))) if info.message() == "division by zero" => {
-                // See
-                // https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators
-                // for a full explanation of why we're checking for this. In
-                // summary, the CTE generates a division by zero intentionally
-                // if the collection doesn't exist in the database.
-                Err(InsertError::CollectionNotFound)
+        self.get_result_async::<ResourceType>(pool)
+            .await
+            .map_err(Self::translate_async_error)
+    }
+
+    /// Issues the CTE asynchronously and parses the result.
+    ///
+    /// The three outcomes are:
+    /// - Ok(Vec of new rows)
+    /// - Error(collection not found)
+    /// - Error(other diesel error)
+    pub async fn insert_and_get_results_async(
+        self,
+        pool: &bb8::Pool<ConnectionManager<PgConnection>>,
+    ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
+    where
+        // We require this bound to ensure that "Self" is runnable as query.
+        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+    {
+        self.get_results_async::<ResourceType>(pool)
+            .await
+            .map_err(Self::translate_async_error)
+    }
+
+    /// Issues the CTE synchronously and parses the result.
+    ///
+    /// The three outcomes are:
+    /// - Ok(new row)
+    /// - Error(collection not found)
+    /// - Error(other diesel error)
+    pub fn insert_and_get_result(
+        self,
+        conn: &mut PgConnection,
+    ) -> SyncInsertIntoCollectionResult<ResourceType>
+    where
+        // We require this bound to ensure that "Self" is runnable as query.
+        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+    {
+        self.get_result::<ResourceType>(conn)
+            .map_err(Self::translate_sync_error)
+    }
+
+    /// Issues the CTE synchronously and parses the result.
+    ///
+    /// The three outcomes are:
+    /// - Ok(Vec of new rows)
+    /// - Error(collection not found)
+    /// - Error(other diesel error)
+    pub fn insert_and_get_results(
+        self,
+        conn: &mut PgConnection,
+    ) -> SyncInsertIntoCollectionResult<Vec<ResourceType>>
+    where
+        // We require this bound to ensure that "Self" is runnable as query.
+        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+    {
+        self.get_results::<ResourceType>(conn)
+            .map_err(Self::translate_sync_error)
+    }
+
+    /// Check for the intentional division by zero error
+    fn error_is_division_by_zero(err: &diesel::result::Error) -> bool {
+        match err {
+            // See
+            // https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators
+            // for a full explanation of why we're checking for this. In
+            // summary, the CTE generates a division by zero intentionally
+            // if the collection doesn't exist in the database.
+            diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::Unknown,
+                info,
+            ) if info.message() == "division by zero" => true,
+            _ => false,
+        }
+    }
+
+    /// Translate from diesel errors into AsyncInsertError, handling the
+    /// intentional division-by-zero error in the CTE.
+    fn translate_async_error(err: PoolError) -> AsyncInsertError {
+        match err {
+            PoolError::Connection(ConnectionError::Query(err))
+                if Self::error_is_division_by_zero(&err) =>
+            {
+                AsyncInsertError::CollectionNotFound
             }
-            Err(other) => Err(InsertError::DatabaseError(other)),
+            other => AsyncInsertError::DatabaseError(other),
+        }
+    }
+
+    /// Translate from diesel errors into SyncInsertError, handling the
+    /// intentional division-by-zero error in the CTE.
+    fn translate_sync_error(err: diesel::result::Error) -> SyncInsertError {
+        if Self::error_is_division_by_zero(&err) {
+            SyncInsertError::CollectionNotFound
+        } else {
+            SyncInsertError::DatabaseError(err)
         }
     }
 }
@@ -383,10 +475,13 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreCollection, InsertError};
+    use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
     use crate::db;
     use crate::db::identity::Resource as IdentityResource;
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        ConnectionError, PoolError,
+    };
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -555,7 +650,42 @@ mod test {
         )
         .insert_and_get_result_async(pool.pool())
         .await;
-        assert!(matches!(insert, Err(InsertError::CollectionNotFound)));
+        assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
+
+        let insert_query = Collection::insert_resource(
+            collection_id,
+            diesel::insert_into(resource::table).values((
+                resource::dsl::id.eq(resource_id),
+                resource::dsl::name.eq("test"),
+                resource::dsl::description.eq("desc"),
+                resource::dsl::time_created.eq(Utc::now()),
+                resource::dsl::time_modified.eq(Utc::now()),
+                resource::dsl::collection_id.eq(collection_id),
+            )),
+        );
+
+        let not_found = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let not_found_ref = not_found.clone();
+        let result = pool
+            .pool()
+            .transaction(move |conn| {
+                insert_query.insert_and_get_result(conn).map_err(|e| match e {
+                    SyncInsertError::CollectionNotFound => {
+                        *not_found_ref.lock().unwrap() = true;
+                        diesel::result::Error::RollbackTransaction
+                    }
+                    SyncInsertError::DatabaseError(err) => err,
+                })
+            })
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PoolError::Connection(ConnectionError::Query(
+                diesel::result::Error::RollbackTransaction
+            )))
+        ));
+        assert!(*not_found.lock().unwrap());
 
         db.cleanup().await.unwrap();
     }
