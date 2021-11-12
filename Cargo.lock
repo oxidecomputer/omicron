@@ -1479,6 +1479,7 @@ dependencies = [
  "pq-sys",
  "rand",
  "ref-cast",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
