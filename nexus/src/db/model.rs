@@ -7,6 +7,7 @@ use crate::db::schema::{
     organization, oximeter, project, rack, sled, vpc, vpc_router, vpc_subnet,
 };
 use crate::external_api::params;
+use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, BinaryRawValue, RawValue};
@@ -831,7 +832,7 @@ pub struct OximeterInfo {
 }
 
 impl OximeterInfo {
-    pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
+    pub fn new(info: &internal_api::params::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
             id: info.collector_id,

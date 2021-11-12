@@ -3,6 +3,7 @@
  */
 use crate::ServerContext;
 
+use super::params::{OximeterInfo, SledAgentStartupInfo};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -13,9 +14,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
