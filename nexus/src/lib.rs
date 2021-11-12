@@ -17,6 +17,7 @@ mod authz;
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
+mod http_entrypoints_console;
 mod http_entrypoints_external;
 mod http_entrypoints_internal;
 mod nexus;
@@ -25,6 +26,7 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
+use http_entrypoints_console::api as console_api;
 use http_entrypoints_external::external_api;
 use http_entrypoints_internal::internal_api;
 pub use nexus::Nexus;
@@ -75,6 +77,8 @@ pub struct Server {
     pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /** dropshot server for internal API */
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+    /** dropshot server for console API */
+    pub http_server_console: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
 impl Server {
@@ -111,10 +115,25 @@ impl Server {
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
 
+        let c2 = Arc::clone(&apictx);
+        let http_server_starter_console = dropshot::HttpServerStarter::new(
+            &config.dropshot_console,
+            console_api(),
+            c2,
+            &log.new(o!("component" => "dropshot_console")),
+        )
+        .map_err(|error| format!("initializing console server: {}", error))?;
+
         let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
+        let http_server_console = http_server_starter_console.start();
 
-        Ok(Server { apictx, http_server_external, http_server_internal })
+        Ok(Server {
+            apictx,
+            http_server_external,
+            http_server_internal,
+            http_server_console,
+        })
     }
 
     /**
@@ -125,22 +144,27 @@ impl Server {
      * or until something else initiates a graceful shutdown.
      */
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        let result_external = self.http_server_external.await;
-        let result_internal = self.http_server_internal.await;
+        let errors = vec![
+            self.http_server_external
+                .await
+                .map_err(|e| format!("external: {}", e)),
+            self.http_server_internal
+                .await
+                .map_err(|e| format!("internal: {}", e)),
+            self.http_server_console
+                .await
+                .map_err(|e| format!("console: {}", e)),
+        ]
+        .into_iter()
+        .filter(Result::is_err)
+        .map(|r| r.unwrap_err())
+        .collect::<Vec<String>>();
 
-        match (result_external, result_internal) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error_external), Err(error_internal)) => Err(format!(
-                "errors from both external and internal HTTP \
-                 servers(external: \"{}\", internal: \"{}\"",
-                error_external, error_internal
-            )),
-            (Err(error_external), Ok(())) => {
-                Err(format!("external server: {}", error_external))
-            }
-            (Ok(()), Err(error_internal)) => {
-                Err(format!("internal server: {}", error_internal))
-            }
+        if errors.len() > 0 {
+            let msg = format!("errors shutting down: ({})", errors.join(", "));
+            Err(msg)
+        } else {
+            Ok(())
         }
     }
 
