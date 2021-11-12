@@ -1158,10 +1158,9 @@ where
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         Ok(RouteTarget(
-            String::from_sql(bytes)
-                .unwrap()
+            String::from_sql(bytes)?
                 .parse::<external::RouteTarget>()
-                .unwrap(),
+                .map_err(|e| e.into()),
         ))
     }
 }
