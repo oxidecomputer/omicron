@@ -1530,6 +1530,7 @@ dependencies = [
  "structopt",
  "subprocess",
  "tar",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml",
