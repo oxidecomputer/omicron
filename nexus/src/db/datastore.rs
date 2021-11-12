@@ -1353,14 +1353,14 @@ impl DataStore {
         Ok(())
     }
 
+    /// Replace all firewall rules with the given rules
     pub async fn vpc_update_firewall_rules(
         &self,
         vpc_id: &Uuid,
-        params: &api::external::VpcFirewallRuleUpdateParams,
+        rules: Vec<VpcFirewallRule>,
     ) -> UpdateResult<Vec<VpcFirewallRule>> {
         use db::schema::vpc_firewall_rule::dsl;
 
-        let rules = VpcFirewallRule::vec_from_params(*vpc_id, params.clone());
         let now = Utc::now();
         let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())

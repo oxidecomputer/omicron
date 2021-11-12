@@ -1504,7 +1504,9 @@ impl Nexus {
             external::VpcFirewallRuleUpdateParams,
         >(DEFAULT_FIREWALL_RULES)
         .unwrap();
-        self.db_datastore.vpc_update_firewall_rules(&vpc_id, &params).await?;
+        let rules =
+            db::model::VpcFirewallRule::vec_from_params(*vpc_id, params);
+        self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
         Ok(())
     }
 
@@ -1601,9 +1603,13 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
+        let rules = db::model::VpcFirewallRule::vec_from_params(
+            vpc.identity.id,
+            params.clone(),
+        );
         let result = self
             .db_datastore
-            .vpc_update_firewall_rules(&vpc.identity.id, &params)
+            .vpc_update_firewall_rules(&vpc.identity.id, rules)
             .await?
             .into_iter()
             .map(|rule| rule.into())
