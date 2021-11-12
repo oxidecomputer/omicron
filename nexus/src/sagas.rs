@@ -9,6 +9,7 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
+use crate::db;
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
@@ -140,14 +141,16 @@ async fn sic_create_instance_record(
         time_updated: Utc::now(),
     };
 
+    let new_instance = db::model::Instance::new(
+        instance_id?,
+        params.project_id,
+        &params.create_params,
+        runtime.into(),
+    );
+
     let instance = osagactx
         .datastore()
-        .project_create_instance(
-            &instance_id?,
-            &params.project_id,
-            &params.create_params,
-            &runtime.into(),
-        )
+        .project_create_instance(new_instance)
         .await
         .map_err(ActionError::action_failed)?;
 

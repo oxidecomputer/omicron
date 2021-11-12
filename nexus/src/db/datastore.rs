@@ -320,10 +320,9 @@ impl DataStore {
     pub async fn organization_update(
         &self,
         name: &Name,
-        update_params: &api::external::OrganizationUpdateParams,
+        updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
-        let updates: OrganizationUpdate = update_params.clone().into();
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
@@ -496,10 +495,9 @@ impl DataStore {
         &self,
         organization_id: &Uuid,
         name: &Name,
-        update_params: &api::external::ProjectUpdateParams,
+        updates: ProjectUpdate,
     ) -> UpdateResult<Project> {
         use db::schema::project::dsl;
-        let updates: ProjectUpdate = update_params.clone().into();
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
@@ -547,19 +545,11 @@ impl DataStore {
      */
     pub async fn project_create_instance(
         &self,
-        instance_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::InstanceCreateParams,
-        runtime_initial: &InstanceRuntimeState,
+        instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
 
-        let instance = Instance::new(
-            *instance_id,
-            *project_id,
-            params,
-            runtime_initial.clone(),
-        );
+        let gen = instance.runtime().gen;
         let name = instance.name().clone();
         let instance: Instance = diesel::insert_into(dsl::instance)
             .values(instance)
@@ -583,7 +573,7 @@ impl DataStore {
             instance.runtime().state
         );
         bail_unless!(
-            instance.runtime().gen == runtime_initial.gen,
+            instance.runtime().gen == gen,
             "newly-created Instance has unexpected generation: {:?}",
             instance.runtime().gen
         );
@@ -782,21 +772,10 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_disk(
-        &self,
-        disk_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::DiskCreateParams,
-        runtime_initial: &DiskRuntimeState,
-    ) -> CreateResult<Disk> {
+    pub async fn project_create_disk(&self, disk: Disk) -> CreateResult<Disk> {
         use db::schema::disk::dsl;
 
-        let disk = Disk::new(
-            *disk_id,
-            *project_id,
-            params.clone(),
-            runtime_initial.clone(),
-        );
+        let gen = disk.runtime().gen;
         let name = disk.name().clone();
         let disk: Disk = diesel::insert_into(dsl::disk)
             .values(disk)
@@ -820,7 +799,7 @@ impl DataStore {
             runtime.disk_state
         );
         bail_unless!(
-            runtime.gen == runtime_initial.gen,
+            runtime.gen == gen,
             "newly-created Disk has unexpected generation: {:?}",
             runtime.gen
         );
@@ -1235,17 +1214,9 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_vpc(
-        &self,
-        vpc_id: &Uuid,
-        project_id: &Uuid,
-        system_router_id: &Uuid,
-        params: &api::external::VpcCreateParams,
-    ) -> Result<Vpc, Error> {
+    pub async fn project_create_vpc(&self, vpc: Vpc) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
-        let vpc =
-            Vpc::new(*vpc_id, *project_id, *system_router_id, params.clone());
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
@@ -1267,10 +1238,9 @@ impl DataStore {
     pub async fn project_update_vpc(
         &self,
         vpc_id: &Uuid,
-        params: &api::external::VpcUpdateParams,
+        updates: VpcUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc::dsl;
-        let updates: VpcUpdate = params.clone().into();
 
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1378,13 +1348,10 @@ impl DataStore {
 
     pub async fn vpc_create_subnet(
         &self,
-        subnet_id: &Uuid,
-        vpc_id: &Uuid,
-        params: &api::external::VpcSubnetCreateParams,
+        subnet: VpcSubnet,
     ) -> CreateResult<VpcSubnet> {
         use db::schema::vpc_subnet::dsl;
 
-        let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
         let name = subnet.name().clone();
         let subnet = diesel::insert_into(dsl::vpc_subnet)
             .values(subnet)
@@ -1427,10 +1394,9 @@ impl DataStore {
     pub async fn vpc_update_subnet(
         &self,
         subnet_id: &Uuid,
-        params: &api::external::VpcSubnetUpdateParams,
+        updates: VpcSubnetUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc_subnet::dsl;
-        let updates: VpcSubnetUpdate = params.clone().into();
 
         diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
@@ -1495,14 +1461,10 @@ impl DataStore {
 
     pub async fn vpc_create_router(
         &self,
-        router_id: &Uuid,
-        vpc_id: &Uuid,
-        kind: &api::external::VpcRouterKind,
-        params: &api::external::VpcRouterCreateParams,
+        router: VpcRouter,
     ) -> CreateResult<VpcRouter> {
         use db::schema::vpc_router::dsl;
 
-        let router = VpcRouter::new(*router_id, *vpc_id, *kind, params.clone());
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
@@ -1545,10 +1507,9 @@ impl DataStore {
     pub async fn vpc_update_router(
         &self,
         router_id: &Uuid,
-        params: &api::external::VpcRouterUpdateParams,
+        updates: VpcRouterUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc_router::dsl;
-        let updates: VpcRouterUpdate = params.clone().into();
 
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())

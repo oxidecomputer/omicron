@@ -457,7 +457,9 @@ impl Nexus {
         name: &Name,
         new_params: &OrganizationUpdateParams,
     ) -> UpdateResult<db::model::Organization> {
-        self.db_datastore.organization_update(name, &new_params).await
+        self.db_datastore
+            .organization_update(name, new_params.clone().into())
+            .await
     }
 
     /*
@@ -565,7 +567,11 @@ impl Nexus {
             .organization_lookup_id_by_name(organization_name)
             .await?;
         self.db_datastore
-            .project_update(&organization_id, project_name, &new_params)
+            .project_update(
+                &organization_id,
+                project_name,
+                new_params.clone().into(),
+            )
             .await
     }
 
@@ -611,15 +617,13 @@ impl Nexus {
         }
 
         let disk_id = Uuid::new_v4();
-        let disk_created = self
-            .db_datastore
-            .project_create_disk(
-                &disk_id,
-                &project.id(),
-                params,
-                &db::model::DiskRuntimeState::new(),
-            )
-            .await?;
+        let disk = db::model::Disk::new(
+            disk_id,
+            project.id(),
+            params.clone(),
+            db::model::DiskRuntimeState::new(),
+        );
+        let disk_created = self.db_datastore.project_create_disk(disk).await?;
 
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
@@ -1427,24 +1431,26 @@ impl Nexus {
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
-        let _ = self
-            .db_datastore
-            .vpc_create_router(
-                &system_router_id,
-                &vpc_id,
-                &VpcRouterKind::System,
-                &VpcRouterCreateParams {
-                    identity: IdentityMetadataCreateParams {
-                        name: "system".parse().unwrap(),
-                        description: "Routes are automatically added to this router as vpc subnets are created".into(),
-                    },
+        let system_router = db::model::VpcRouter::new(
+            system_router_id,
+            vpc_id,
+            VpcRouterKind::System,
+            VpcRouterCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "system".parse().unwrap(),
+                    description: "Routes are automatically added to this router as vpc subnets are created".into(),
                 },
-            )
-            .await?;
-        let vpc = self
-            .db_datastore
-            .project_create_vpc(&vpc_id, &project_id, &system_router_id, params)
-            .await?;
+            },
+        );
+
+        let _ = self.db_datastore.vpc_create_router(system_router).await?;
+        let vpc = db::model::Vpc::new(
+            vpc_id,
+            project_id,
+            system_router_id,
+            params.clone(),
+        );
+        let vpc = self.db_datastore.project_create_vpc(vpc).await?;
         Ok(vpc.into())
     }
 
@@ -1486,7 +1492,10 @@ impl Nexus {
             .await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self.db_datastore.project_update_vpc(&vpc.id(), params).await?)
+        Ok(self
+            .db_datastore
+            .project_update_vpc(&vpc.id(), params.clone().into())
+            .await?)
     }
 
     pub async fn project_delete_vpc(
@@ -1553,10 +1562,9 @@ impl Nexus {
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let subnet = self
-            .db_datastore
-            .vpc_create_subnet(&id, &vpc.identity.id, params)
-            .await?;
+        let subnet =
+            db::model::VpcSubnet::new(id, vpc.identity.id, params.clone());
+        let subnet = self.db_datastore.vpc_create_subnet(subnet).await?;
         Ok(subnet.into())
     }
 
@@ -1596,7 +1604,7 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .vpc_update_subnet(&subnet.identity.id, params)
+            .vpc_update_subnet(&subnet.identity.id, params.clone().into())
             .await?)
     }
 
@@ -1649,10 +1657,13 @@ impl Nexus {
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let router = self
-            .db_datastore
-            .vpc_create_router(&id, &vpc.identity.id, kind, params)
-            .await?;
+        let router = db::model::VpcRouter::new(
+            id,
+            vpc.identity.id,
+            *kind,
+            params.clone(),
+        );
+        let router = self.db_datastore.vpc_create_router(router).await?;
         Ok(router.into())
     }
 
@@ -1692,7 +1703,7 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .vpc_update_router(&router.identity.id, params)
+            .vpc_update_router(&router.identity.id, params.clone().into())
             .await?)
     }
 
