@@ -3,6 +3,7 @@
  */
 use super::ServerContext;
 
+use crate::authn::external::cookies::Cookies;
 use crate::context::OpContext;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseUpdatedNoContent, Path,
@@ -44,6 +45,7 @@ pub fn api() -> NexusApiDescription {
  }]
 async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    cookies: Cookies,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
     if let Ok(_opctx) = opctx {
