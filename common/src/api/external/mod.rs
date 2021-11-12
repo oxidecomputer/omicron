@@ -1568,8 +1568,6 @@ pub enum NetworkTarget {
     InternetGateway(Name),
     #[display("fip:{0}")]
     FloatingIp(Name),
-    #[display("ip_pool:{0}")]
-    IpPool(Name),
 }
 
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
@@ -1795,6 +1793,7 @@ mod test {
     use crate::api::external::NetworkTarget;
     use std::convert::TryFrom;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_name_parse() {
@@ -2063,10 +2062,6 @@ mod test {
             Ok(NetworkTarget::FloatingIp(
                 "my-fickle-floating-ip".parse().unwrap()
             ))
-        );
-        assert_eq!(
-            "ip_pool:my-placid-ip-pool".parse(),
-            Ok(NetworkTarget::IpPool("my-placid-ip-pool".parse().unwrap()))
         );
         assert_eq!(
             "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
