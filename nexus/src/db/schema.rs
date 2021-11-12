@@ -197,6 +197,9 @@ table! {
 }
 
 table! {
+    use crate::db::model;
+    use diesel::sql_types::*;
+
     vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
@@ -205,13 +208,13 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
-        status -> crate::db::model::VpcFirewallRuleStatusEnum,
-        direction -> crate::db::model::VpcFirewallRuleDirectionEnum,
+        status -> model::VpcFirewallRuleStatusEnum,
+        direction -> model::VpcFirewallRuleDirectionEnum,
         targets -> Array<Text>,
         filter_hosts -> Nullable<Array<Text>>,
         filter_ports -> Nullable<Array<Text>>,
-        filter_protocols -> Nullable<Array<crate::db::model::VpcFirewallRuleProtocolEnum>>,
-        action -> crate::db::model::VpcFirewallRuleActionEnum,
+        filter_protocols -> Nullable<Array<model::VpcFirewallRuleProtocolEnum>>,
+        action -> model::VpcFirewallRuleActionEnum,
         priority -> Int4,
     }
 }
