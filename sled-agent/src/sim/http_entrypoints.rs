@@ -2,7 +2,7 @@
  * HTTP entrypoint functions for the sled agent's exposed API
  */
 
-use super::super::params::DiskEnsureBody;
+use crate::params::DiskEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
