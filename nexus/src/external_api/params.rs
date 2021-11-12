@@ -1,5 +1,5 @@
 /*!
- * Params define the public API for creating or changing resources.
+ * Params define the request bodies of API endpoints for creating or updating resources.
  */
 
 use omicron_common::api::external::{

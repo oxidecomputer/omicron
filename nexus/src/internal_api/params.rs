@@ -1,3 +1,6 @@
+/*!
+ * Params define the request bodies of API endpoints for creating or updating resources.
+ */
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
