@@ -1,11 +1,19 @@
+/*!
+ * Handler functions (entrypoints) for console-related routes.
+ */
 use super::ServerContext;
 
 use crate::context::OpContext;
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseUpdatedNoContent,
+    endpoint, ApiDescription, HttpError, HttpResponseUpdatedNoContent, Path,
     RequestContext,
 };
-use std::sync::Arc;
+use http::{Response, StatusCode};
+use hyper::Body;
+use mime_guess;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use std::{path::PathBuf, sync::Arc};
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -15,6 +23,8 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(logout)?;
+        api.register(console_page)?;
+        api.register(asset)?;
         Ok(())
     }
 
@@ -60,7 +70,101 @@ async fn logout(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-// TODO:
-// - POST login
-// - /* route for serving bundle (redirect to configured IdP if unauthed)
-// - /assets/* for images and fonts
+#[derive(Deserialize, JsonSchema)]
+struct RestPathParam {
+    path: Vec<String>,
+}
+
+// TODO: /c/ prefix is def not what we want long-term but it makes things easy for now
+#[endpoint {
+     method = GET,
+     path = "/c/{path:.*}",
+ }]
+async fn console_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    let _opctx = OpContext::for_external_api(&rqctx).await;
+    // redirect to IdP if not logged in
+
+    // otherwise serve HTML page with bundle in script tag
+
+    // HTML doesn't need to be static -- we'll probably find a reason to do some minimal
+    // templating, e.g., putting a CSRF token in the page
+
+    // amusingly, at least to start out, I don't think we care about the path
+    // because the real routing is all client-side. we serve the same HTML
+    // regardless, the app starts on the client and renders the right page and
+    // makes the right API requests.
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+        .body("".into())?)
+}
+
+#[endpoint {
+     method = GET,
+     path = "/assets/{path:.*}",
+     // don't want this to show up in the OpenAPI spec (which we don't generate anyway)
+     unpublished = true,
+ }]
+async fn asset(
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    // we *could* auth gate the static assets but it would be kind of weird. prob not necessary
+    let path = path_params.into_inner().path;
+    let file = find_file(path, PathBuf::new());
+
+    if file.is_none() {
+        // 404
+    }
+
+    let file = file.unwrap();
+
+    // Derive the MIME type from the file name
+    let content_type = mime_guess::from_path(&file) // should be the actual file
+        .first()
+        .map_or("text/plain".to_string(), |m| m.to_string());
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, &content_type)
+        .body("".into())?)
+}
+
+// This is a bit stripped down from the dropshot example. For example, we don't
+// want to tell the user why the request failed, we just 404 on everything.
+
+// TODO: we should probably return a Result so we can at least log the problems
+// internally. it would also clean up the control flow
+fn find_file(path: Vec<String>, root_dir: PathBuf) -> Option<PathBuf> {
+    // start from `root_dir`
+    let mut current = root_dir;
+    for component in &path {
+        // The previous iteration needs to have resulted in a directory.
+        if !current.is_dir() {
+            return None;
+        }
+        // Dropshot won't ever give us dot-components.
+        assert_ne!(component, ".");
+        assert_ne!(component, "..");
+        current.push(component);
+
+        // block symlinks
+        match current.symlink_metadata() {
+            Ok(m) => {
+                if m.file_type().is_symlink() {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+    // if we've landed on a directory, we can't serve that so it's a 404 again
+    if current.is_dir() {
+        return None;
+    }
+
+    Some(current)
+}
