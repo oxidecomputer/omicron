@@ -18,6 +18,8 @@ pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
+use parse_display::Display;
+use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -127,8 +129,17 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
  * that's valid as a name.
  */
 #[derive(
-    Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
 )]
+#[display("{0}")]
 #[serde(try_from = "String")]
 pub struct Name(String);
 
@@ -1330,6 +1341,162 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+/// Represents all possible network target strings as defined in RFD-21
+/// This enum itself isn't intended to be used directly but rather as a
+/// delegate for subset enums to not have to re-implement all the base type conversions.
+///
+/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
+#[derive(Debug, PartialEq, Display, FromStr)]
+pub enum NetworkTarget {
+    #[display("vpc:{0}")]
+    Vpc(Name),
+    #[display("subnet:{0}")]
+    Subnet(Name),
+    #[display("instance:{0}")]
+    Instance(Name),
+    #[display("tag:{0}")]
+    Tag(Name),
+    #[display("ip:{0}")]
+    Ip(IpAddr),
+    #[display("inetgw:{0}")]
+    InternetGateway(Name),
+    #[display("fip:{0}")]
+    FloatingIp(Name),
+    #[display("ip_pool:{0}")]
+    IpPool(Name),
+}
+
+/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
+/// possible targets that a route can forward to.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum RouteTarget {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    InternetGateway(Name),
+}
+
+impl TryFrom<NetworkTarget> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
+            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(RouteTarget::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, and subnet, instance, and inetgw are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        RouteTarget::try_from(value.parse::<NetworkTarget>().unwrap())
+    }
+}
+
+impl FromStr for RouteTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        RouteTarget::try_from(String::from(value))
+    }
+}
+
+impl From<RouteTarget> for NetworkTarget {
+    fn from(target: RouteTarget) -> Self {
+        match target {
+            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
+            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
+            RouteTarget::InternetGateway(name) => {
+                NetworkTarget::InternetGateway(name)
+            }
+        }
+    }
+}
+
+impl Display for RouteTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
+/// A subset of [`NetworkTarget`], `RouteDestination` specifies
+/// the kind of network traffic that will be matched to be forwarded
+/// to the [`RouteTarget`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum RouteDestination {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+}
+
+impl TryFrom<NetworkTarget> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        RouteDestination::try_from(value.parse::<NetworkTarget>().unwrap())
+    }
+}
+
+impl FromStr for RouteDestination {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        RouteDestination::try_from(String::from(value))
+    }
+}
+
+impl From<RouteDestination> for NetworkTarget {
+    fn from(target: RouteDestination) -> Self {
+        match target {
+            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
+        }
+    }
+}
+
+impl Display for RouteDestination {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
@@ -1415,7 +1582,9 @@ mod test {
     use super::ByteCount;
     use super::Name;
     use crate::api::external::Error;
+    use crate::api::external::NetworkTarget;
     use std::convert::TryFrom;
+    use std::net::IpAddr;
 
     #[test]
     fn test_name_parse() {
@@ -1541,5 +1710,51 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_networktarget_parsing() {
+        assert_eq!(
+            "vpc:my-vital-vpc".parse(),
+            Ok(NetworkTarget::Vpc("my-vital-vpc".parse().unwrap()))
+        );
+        assert_eq!(
+            "subnet:my-slick-subnet".parse(),
+            Ok(NetworkTarget::Subnet("my-slick-subnet".parse().unwrap()))
+        );
+        assert_eq!(
+            "instance:my-intrepid-instance".parse(),
+            Ok(NetworkTarget::Instance(
+                "my-intrepid-instance".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "tag:my-turbid-tag".parse(),
+            Ok(NetworkTarget::Tag("my-turbid-tag".parse().unwrap()))
+        );
+        assert_eq!(
+            "ip:127.0.0.1".parse(),
+            Ok(NetworkTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))))
+        );
+        assert_eq!(
+            "inetgw:my-gregarious-internet-gateway".parse(),
+            Ok(NetworkTarget::InternetGateway(
+                "my-gregarious-internet-gateway".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "fip:my-fickle-floating-ip".parse(),
+            Ok(NetworkTarget::FloatingIp(
+                "my-fickle-floating-ip".parse().unwrap()
+            ))
+        );
+        assert_eq!(
+            "ip_pool:my-placid-ip-pool".parse(),
+            Ok(NetworkTarget::IpPool("my-placid-ip-pool".parse().unwrap()))
+        );
+        assert_eq!(
+            "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
+            parse_display::ParseError::new()
+        );
     }
 }
