@@ -1630,11 +1630,11 @@ impl DataStore {
         .insert_and_get_result_async(self.pool())
         .await
         .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::VpcRouter,
                 lookup_type: LookupType::ById(*router_id),
             },
-            InsertError::DatabaseError(e) => {
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::RouterRoute,
