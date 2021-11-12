@@ -1393,7 +1393,7 @@ impl TryFrom<NetworkTarget> for RouteTarget {
                 Ok(RouteTarget::InternetGateway(name))
             }
             _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
+                "Invalid RouteTarget {}, only ip, vpc, and subnet, instance, and inetgw are allowed",
                 value
             )),
         }
