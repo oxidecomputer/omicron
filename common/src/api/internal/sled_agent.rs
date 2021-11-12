@@ -4,30 +4,6 @@ use crate::api::{external, internal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use uuid::Uuid;
-
-///Used to request a Disk state change
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase", tag = "state", content = "instance")]
-pub enum DiskStateRequested {
-    Detached,
-    Attached(Uuid),
-    Destroyed,
-    Faulted,
-}
-
-impl DiskStateRequested {
-    /// Returns whether the requested state is attached to an Instance or not.
-    pub fn is_attached(&self) -> bool {
-        match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
-
-            DiskStateRequested::Attached(_) => true,
-        }
-    }
-}
 
 /// Describes the instance hardware.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
