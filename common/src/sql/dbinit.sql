@@ -401,6 +401,12 @@ CREATE TABLE omicron.public.router_route (
     destination STRING(128) NOT NULL
 );
 
+CREATE UNIQUE INDEX ON omicron.public.router_route (
+    router_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 /*
