@@ -216,6 +216,8 @@ impl From<Error> for HttpError {
                 )
             }
 
+            // TODO: RFC-7231 requires that 405s generate an Accept header to describe
+            // what methods are available in the response
             Error::MethodNotAllowed { internal_message } => {
                 HttpError::for_client_error(
                     Some(String::from("MethodNotAllowed")),

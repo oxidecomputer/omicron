@@ -1578,6 +1578,7 @@ impl Nexus {
             .into())
     }
 
+    // TODO: When a subnet is created it should add a route entry into the VPC's system router
     pub async fn vpc_create_subnet(
         &self,
         organization_name: &Name,
@@ -1595,6 +1596,7 @@ impl Nexus {
         Ok(subnet.into())
     }
 
+    // TODO: When a subnet is deleted it should remove its entry from the VPC's system router.
     pub async fn vpc_delete_subnet(
         &self,
         organization_name: &Name,
@@ -1694,6 +1696,9 @@ impl Nexus {
         Ok(router.into())
     }
 
+    // TODO: When a router is deleted all its routes should be deleted
+    // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
+    //       or trigger an error
     pub async fn vpc_delete_router(
         &self,
         organization_name: &Name,
