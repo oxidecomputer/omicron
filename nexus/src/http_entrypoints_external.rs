@@ -1343,16 +1343,19 @@ async fn vpc_routers_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let routers = nexus
-        .vpc_list_routers(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &data_page_params_for(&rqctx, &query)?
-                .map_name(|n| Name::ref_cast(n)),
-        )
-        .await?;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+    let handler = async {
+        let routers = nexus
+            .vpc_list_routers(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?;
+        Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1380,15 +1383,18 @@ async fn vpc_routers_get_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let vpc_router = nexus
-        .vpc_lookup_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-        )
-        .await?;
-    Ok(HttpResponseOk(vpc_router))
+    let handler = async {
+        let vpc_router = nexus
+            .vpc_lookup_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(vpc_router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1406,16 +1412,19 @@ async fn vpc_routers_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let router = nexus
-        .vpc_create_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &VpcRouterKind::Custom,
-            &create_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseCreated(router))
+    let handler = async {
+        let router = nexus
+            .vpc_create_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &VpcRouterKind::Custom,
+                &create_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1432,15 +1441,18 @@ async fn vpc_routers_delete_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .vpc_delete_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-        )
-        .await?;
-    Ok(HttpResponseDeleted())
+    let handler = async {
+        nexus
+            .vpc_delete_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1458,16 +1470,19 @@ async fn vpc_routers_put_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .vpc_update_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &router_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseOk(()))
+    let handler = async {
+        nexus
+            .vpc_update_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /*
@@ -1490,17 +1505,20 @@ async fn routers_routes_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let routes = nexus
-        .router_list_routes(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &data_page_params_for(&rqctx, &query)?
-                .map_name(|n| Name::ref_cast(n)),
-        )
-        .await?;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+    let handler = async {
+        let routes = nexus
+            .router_list_routes(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?;
+        Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1529,16 +1547,19 @@ async fn routers_routes_get_route(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let route = nexus
-        .router_lookup_route(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &path.route_name,
-        )
-        .await?;
-    Ok(HttpResponseOk(route))
+    let handler = async {
+        let route = nexus
+            .router_lookup_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(route))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1556,17 +1577,20 @@ async fn routers_routes_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let router = nexus
-        .router_create_route(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &RouterRouteKind::Custom,
-            &create_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseCreated(router))
+    let handler = async {
+        let router = nexus
+            .router_create_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &RouterRouteKind::Custom,
+                &create_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1583,16 +1607,19 @@ async fn routers_routes_delete_route(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .router_delete_route(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &path.route_name,
-        )
-        .await?;
-    Ok(HttpResponseDeleted())
+    let handler = async {
+        nexus
+            .router_delete_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1610,17 +1637,20 @@ async fn routers_routes_put_route(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .router_update_route(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &path.route_name,
-            &router_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseOk(()))
+    let handler = async {
+        nexus
+            .router_update_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /*
