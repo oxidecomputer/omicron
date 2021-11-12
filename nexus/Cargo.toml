@@ -36,6 +36,9 @@ structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
 
+[dependencies.api_identity]
+path = "../api_identity"
+
 [dependencies.chrono]
 version = "0.4"
 features = [ "serde" ]

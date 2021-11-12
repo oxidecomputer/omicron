@@ -17,8 +17,8 @@ mod authz;
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
-mod external_api;
-mod internal_api;
+pub mod external_api; // public for testing
+pub mod internal_api; // public for testing
 mod nexus;
 mod saga_interface;
 mod sagas;

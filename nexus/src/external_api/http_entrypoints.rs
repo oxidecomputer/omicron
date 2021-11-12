@@ -2,11 +2,13 @@
  * Handler functions (entrypoints) for external HTTP APIs
  */
 
-use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
 use crate::ServerContext;
 
+use super::params;
+use super::views::{Organization, Project};
+use crate::context::OpContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -38,13 +40,7 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::api::external::Organization;
-use omicron_common::api::external::OrganizationCreateParams;
-use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Rack;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
@@ -224,7 +220,7 @@ async fn organizations_get(
 }]
 async fn organizations_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_organization: TypedBody<OrganizationCreateParams>,
+    new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -307,7 +303,7 @@ async fn organizations_delete_organization(
 async fn organizations_put_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    updated_organization: TypedBody<OrganizationUpdateParams>,
+    updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -381,7 +377,7 @@ async fn organization_projects_get(
 async fn organization_projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_project: TypedBody<ProjectCreateParams>,
+    new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -470,7 +466,7 @@ async fn organization_projects_delete_project(
 async fn organization_projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    updated_project: TypedBody<ProjectUpdateParams>,
+    updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

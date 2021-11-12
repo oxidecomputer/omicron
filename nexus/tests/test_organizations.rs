@@ -1,4 +1,4 @@
-use omicron_common::api::external::Organization;
+use omicron_nexus::external_api::views::Organization;
 
 use dropshot::test_util::{object_delete, object_get, objects_list_page};
 

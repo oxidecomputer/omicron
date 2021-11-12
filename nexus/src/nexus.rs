@@ -8,6 +8,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
+use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -29,11 +30,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::OrganizationCreateParams;
-use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vpc;
@@ -421,7 +418,7 @@ impl Nexus {
     pub async fn organization_create(
         &self,
         opctx: &OpContext,
-        new_organization: &OrganizationCreateParams,
+        new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
         self.db_datastore.organization_create(opctx, db_org).await
@@ -455,7 +452,7 @@ impl Nexus {
     pub async fn organization_update(
         &self,
         name: &Name,
-        new_params: &OrganizationUpdateParams,
+        new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         self.db_datastore
             .organization_update(name, new_params.clone().into())
@@ -469,7 +466,7 @@ impl Nexus {
     pub async fn project_create(
         &self,
         organization_name: &Name,
-        new_project: &ProjectCreateParams,
+        new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
@@ -560,7 +557,7 @@ impl Nexus {
         &self,
         organization_name: &Name,
         project_name: &Name,
-        new_params: &ProjectUpdateParams,
+        new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
