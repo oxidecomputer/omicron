@@ -2,11 +2,11 @@
  * Handler functions (entrypoints) for external HTTP APIs
  */
 
-use super::ServerContext;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
+use crate::ServerContext;
 
-use crate::context::OpContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -70,7 +70,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /**
  * Returns a description of the external nexus API
  */
-pub fn external_api() -> NexusApiDescription {
+pub fn api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(organizations_get)?;
         api.register(organizations_post)?;
