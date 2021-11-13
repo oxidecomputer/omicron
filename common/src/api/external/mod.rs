@@ -1422,7 +1422,8 @@ impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
 }
 
 /// Filter for a firewall rule. A given packet must match every field that is
-/// present for the rule to apply to it.
+/// present for the rule to apply to it. A packet matches a field if any entry
+/// in that field matches the packet.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
     /// If present, the sources (if incoming) or destinations (if outgoing)
