@@ -18,7 +18,8 @@ pub use dropshot::PaginationOrder;
 use futures::future::ready;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
-use parse_display::{Display, FromStr};
+use parse_display::Display;
+use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -131,12 +132,12 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
     Clone,
     Debug,
     Deserialize,
+    Display,
     Eq,
     Ord,
     PartialEq,
     PartialOrd,
     Serialize,
-    Display,
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
@@ -1363,8 +1364,6 @@ pub enum NetworkTarget {
     InternetGateway(Name),
     #[display("fip:{0}")]
     FloatingIp(Name),
-    #[display("ip_pool:{0}")]
-    IpPool(Name),
 }
 
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
@@ -1393,7 +1392,7 @@ impl TryFrom<NetworkTarget> for RouteTarget {
                 Ok(RouteTarget::InternetGateway(name))
             }
             _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, and subnet, instance, and inetgw are allowed",
+                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
                 value
             )),
         }
@@ -1818,10 +1817,6 @@ mod test {
             Ok(NetworkTarget::FloatingIp(
                 "my-fickle-floating-ip".parse().unwrap()
             ))
-        );
-        assert_eq!(
-            "ip_pool:my-placid-ip-pool".parse(),
-            Ok(NetworkTarget::IpPool("my-placid-ip-pool".parse().unwrap()))
         );
         assert_eq!(
             "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
