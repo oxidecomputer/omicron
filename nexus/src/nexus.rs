@@ -1466,8 +1466,8 @@ impl Nexus {
             "allow-internal-inbound": {
                 "status": "enabled",
                 "direction": "inbound",
-                "targets": [ "vpc:default" ],
-                "filters": { "hosts": [ "vpc:default" ] },
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
                 "action": "allow",
                 "priority": 65534,
                 "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
@@ -1475,7 +1475,7 @@ impl Nexus {
             "allow-ssh": {
                 "status": "enabled",
                 "direction": "inbound",
-                "targets": [ "vpc:default" ],
+                "targets": [ { "type": "vpc", "value": "default" } ],
                 "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
                 "action": "allow",
                 "priority": 65534,
@@ -1484,7 +1484,7 @@ impl Nexus {
             "allow-icmp": {
                 "status": "enabled",
                 "direction": "inbound",
-                "targets": [ "vpc:default" ],
+                "targets": [ { "type": "vpc", "value": "default" } ],
                 "filters": { "protocols": [ "ICMP" ] },
                 "action": "allow",
                 "priority": 65534,
@@ -1493,7 +1493,7 @@ impl Nexus {
             "allow-rdp": {
                 "status": "enabled",
                 "direction": "inbound",
-                "targets": [ "vpc:default" ],
+                "targets": [ { "type": "vpc", "value": "default" } ],
                 "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
                 "action": "allow",
                 "priority": 65534,

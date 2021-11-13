@@ -1222,16 +1222,16 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 
-/// Newtype wrapper around [`external::NetworkTarget`] so we can derive
+/// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 #[repr(transparent)]
-pub struct NetworkTarget(pub external::NetworkTarget);
-NewtypeFrom! { () pub struct NetworkTarget(external::NetworkTarget); }
-NewtypeDeref! { () pub struct NetworkTarget(external::NetworkTarget); }
+pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
+NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
+NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 
-impl<DB> ToSql<sql_types::Text, DB> for NetworkTarget
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleTarget
 where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
@@ -1240,21 +1240,57 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        let as_string: String = self.0.clone().into();
-        as_string.to_sql(out)
+        self.0.to_string().to_sql(out)
     }
 }
 
-// Deserialize the "NetworkTarget" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for NetworkTarget
+// Deserialize the "VpcFirewallRuleTarget" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleTarget
 where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::NetworkTarget::try_from(String::from_sql(bytes)?)
-            .map(NetworkTarget)
-            .map_err(|e| e.into())
+        Ok(VpcFirewallRuleTarget(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleTarget>()?,
+        ))
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
+NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRuleHostFilter" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleHostFilter(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleHostFilter>()?,
+        ))
     }
 }
 
@@ -1303,8 +1339,8 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
     pub status: VpcFirewallRuleStatus,
     pub direction: VpcFirewallRuleDirection,
-    pub targets: Vec<NetworkTarget>,
-    pub filter_hosts: Option<Vec<NetworkTarget>>,
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    pub filter_hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
     pub filter_ports: Option<Vec<L4PortRange>>,
     pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: VpcFirewallRuleAction,
@@ -1338,7 +1374,7 @@ impl VpcFirewallRule {
             filter_hosts: rule.filters.hosts.as_ref().map(|hosts| {
                 hosts
                     .iter()
-                    .map(|target| NetworkTarget(target.clone()))
+                    .map(|target| VpcFirewallRuleHostFilter(target.clone()))
                     .collect()
             }),
             filter_ports: rule.filters.ports.as_ref().map(|ports| {
