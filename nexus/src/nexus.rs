@@ -1716,7 +1716,7 @@ impl Nexus {
             .await?;
         if router.kind == VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
-                internal_message: "Cannot delete system routes".to_string(),
+                internal_message: "Cannot delete system router".to_string(),
             });
         }
         self.db_datastore.vpc_delete_router(&router.identity.id).await
