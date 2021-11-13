@@ -1625,15 +1625,14 @@ impl DataStore {
     pub async fn router_update_route(
         &self,
         route_id: &Uuid,
-        params: &api::external::RouterRouteUpdateParams,
+        route_update: RouterRouteUpdate,
     ) -> Result<(), Error> {
         use db::schema::router_route::dsl;
-        let updates: RouterRouteUpdate = params.clone().into();
 
         diesel::update(dsl::router_route)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*route_id))
-            .set(updates)
+            .set(route_update)
             .execute_async(self.pool())
             .await
             .map_err(|e| {

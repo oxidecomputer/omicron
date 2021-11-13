@@ -16,6 +16,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -29,6 +30,7 @@ use uuid::Uuid;
 #[derive(
     Clone,
     Debug,
+    Display,
     AsExpression,
     FromSqlRow,
     Eq,
@@ -42,6 +44,7 @@ use uuid::Uuid;
 #[sql_type = "sql_types::Text"]
 #[serde(transparent)]
 #[repr(transparent)]
+#[display("{0}")]
 pub struct Name(pub external::Name);
 
 NewtypeFrom! { () pub struct Name(external::Name); }

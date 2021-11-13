@@ -1876,15 +1876,16 @@ impl Nexus {
             _ => {
                 return Err(Error::MethodNotAllowed {
                     internal_message: format!(
-                        "routes of type {} from the system table of VPC {0} are not modifiable",
-                        route.kind
+                        "routes of type {} from the system table of VPC {} are not modifiable",
+                        route.kind,
+                        vpc_name
                     ),
                 })
             }
         }
         Ok(self
             .db_datastore
-            .router_update_route(&route.identity.id, params)
+            .router_update_route(&route.identity.id, params.clone().into())
             .await?)
     }
 
