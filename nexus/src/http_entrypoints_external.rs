@@ -1335,6 +1335,7 @@ async fn vpc_firewall_rules_get(
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcFirewallRule>>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -1366,6 +1367,7 @@ async fn vpc_firewall_rules_put(
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
 ) -> Result<HttpResponseOk<VpcFirewallRuleUpdateResult>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

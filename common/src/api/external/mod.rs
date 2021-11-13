@@ -1476,7 +1476,8 @@ pub enum VpcFirewallRuleTarget {
     Vpc(Name),
     Subnet(Name),
     Instance(Name),
-    Tag(Name),
+    // Tags not yet implemented
+    //Tag(Name),
 }
 
 impl TryFrom<String> for VpcFirewallRuleTarget {
@@ -1503,7 +1504,6 @@ impl From<VpcFirewallRuleTarget> for NetworkTarget {
             VpcFirewallRuleTarget::Instance(name) => {
                 NetworkTarget::Instance(name)
             }
-            VpcFirewallRuleTarget::Tag(name) => NetworkTarget::Tag(name),
         }
     }
 }
@@ -1520,10 +1520,9 @@ impl TryFrom<NetworkTarget> for VpcFirewallRuleTarget {
             NetworkTarget::Instance(name) => {
                 Ok(VpcFirewallRuleTarget::Instance(name))
             }
-            NetworkTarget::Tag(name) => Ok(VpcFirewallRuleTarget::Tag(name)),
             _ => Err(format!(
-                "Invalid VpcFirewallRuleTarget {}, only vpc, subnet, instance, \
-                and tag are allowed",
+                "Invalid VpcFirewallRuleTarget {}, only vpc, subnet, and instance, \
+                are allowed",
                 value
             )),
         }
@@ -1546,7 +1545,8 @@ pub enum VpcFirewallRuleHostFilter {
     Vpc(Name),
     Subnet(Name),
     Instance(Name),
-    Tag(Name),
+    // Tags not yet implemented
+    // Tag(Name),
     Ip(IpAddr),
     InternetGateway(Name),
 }
@@ -1579,7 +1579,6 @@ impl From<VpcFirewallRuleHostFilter> for NetworkTarget {
             VpcFirewallRuleHostFilter::Instance(name) => {
                 NetworkTarget::Instance(name)
             }
-            VpcFirewallRuleHostFilter::Tag(name) => NetworkTarget::Tag(name),
             VpcFirewallRuleHostFilter::Ip(ip) => NetworkTarget::Ip(ip),
             VpcFirewallRuleHostFilter::InternetGateway(name) => {
                 NetworkTarget::InternetGateway(name)
@@ -1602,16 +1601,13 @@ impl TryFrom<NetworkTarget> for VpcFirewallRuleHostFilter {
             NetworkTarget::Instance(name) => {
                 Ok(VpcFirewallRuleHostFilter::Instance(name))
             }
-            NetworkTarget::Tag(name) => {
-                Ok(VpcFirewallRuleHostFilter::Tag(name))
-            }
             NetworkTarget::Ip(ip) => Ok(VpcFirewallRuleHostFilter::Ip(ip)),
             NetworkTarget::InternetGateway(name) => {
                 Ok(VpcFirewallRuleHostFilter::InternetGateway(name))
             }
             _ => Err(format!(
                 "Invalid VpcFirewallRuleHostFilter {}, only vpc, subnet, \
-                instance, tag, ip, and inetgw are allowed",
+                instance, ip, and inetgw are allowed",
                 value
             )),
         }
