@@ -2,8 +2,8 @@
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
+use super::views::ShareResponse;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;
