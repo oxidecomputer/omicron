@@ -1438,7 +1438,7 @@ impl Nexus {
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
-        let _ = db::model::VpcRouter::new(
+        let router = db::model::VpcRouter::new(
             system_router_id,
             vpc_id,
             VpcRouterKind::System,
@@ -1449,6 +1449,7 @@ impl Nexus {
                 }
             }
             );
+        let _ = self.db_datastore.vpc_create_router(router).await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
             system_router_id,

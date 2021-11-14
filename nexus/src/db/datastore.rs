@@ -1577,11 +1577,11 @@ impl DataStore {
         route: RouterRoute,
     ) -> CreateResult<RouterRoute> {
         use db::schema::router_route::dsl;
-        let router_id = &route.identity().id;
+        let router_id = route.router_id;
         let name = route.name().clone();
 
         VpcRouter::insert_resource(
-            *router_id,
+            router_id,
             diesel::insert_into(dsl::router_route).values(route),
         )
         .insert_and_get_result_async(self.pool())
@@ -1589,7 +1589,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::VpcRouter,
-                lookup_type: LookupType::ById(*router_id),
+                lookup_type: LookupType::ById(router_id),
             },
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
