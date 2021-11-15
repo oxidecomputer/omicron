@@ -64,16 +64,40 @@ impl Zones {
         Ok(())
     }
 
-    pub fn seed_smf(mountpoint: &std::path::Path) -> Result<(), Error> {
+    /// Seed the SMF files within a zone.
+    ///
+    /// This is a performance optimization, which manages to shave
+    /// several seconds off of zone boot time.
+    ///
+    /// Background:
+    /// - https://illumos.org/man/5/smf_bootstrap
+    ///
+    /// When a zone starts, a service called `manifest-import` uses
+    /// `svccfg` to import XML-based config files into a SQLite DB.
+    /// This database - stored at `/etc/svc/repository.db` - is used
+    /// by SMF as a representation of known services.
+    ///
+    /// This process is, unfortunately, SLOW. It involves serially
+    /// parsing a many XML files from storage, and loading them into
+    /// this database file. The invocation below is effectively
+    /// what would happen when the zone is first booted.
+    ///
+    /// By doing this operation for "base zones", first-time setup takes
+    /// slightly longer, but all subsequent zones boot much faster.
+    ///
+    /// NOTE: This process could be optimized further by creating
+    /// this file as part of the image building process - see
+    /// `seed_smf` within https://github.com/illumos/image-builder.
+    pub fn seed_smf(
+        log: &Logger,
+        mountpoint: &std::path::Path,
+    ) -> Result<(), Error> {
         let tmpdir = tempfile::tempdir().map_err(|e| {
             Error::internal_error(&format!("Tempdir err: {}", e))
         })?;
         let mountpoint = mountpoint.to_str().unwrap();
 
-        let dtd = format!(
-            "{}/usr/share/lib/xml/dtd/service_bundle.dtd.1",
-            mountpoint
-        );
+        let dtd = format!("/usr/share/lib/xml/dtd/service_bundle.dtd.1",);
         let repo = format!("{}/repo.db", tmpdir.as_ref().to_string_lossy());
         let seed = format!("{}/lib/svc/seed/{}.db", mountpoint, "nonglobal");
         let manifests = format!("{}/lib/svc/manifest", mountpoint);
@@ -92,9 +116,11 @@ impl Zones {
         env.insert("SVCCFG_CHECKHASH".to_string(), "1".to_string());
         env.insert("PKG_INSTALL_ROOT".to_string(), mountpoint.to_string());
 
+        info!(log, "Seeding SMF repository at {}", mountpoint);
         let mut cmd = std::process::Command::new(PFEXEC);
         let command = cmd.envs(env).args(&[SVCCFG, "import", &manifests]);
         execute(command)?;
+        info!(log, "Seeding SMF repository at {} - Complete", mountpoint);
 
         std::fs::copy(&repo, &installto).map_err(|e| {
             Error::internal_error(&format!("Cannot copy SMF DB: {}", e))
@@ -161,7 +187,7 @@ impl Zones {
 
         info!(log, "Seeding base zone: {}", name);
         let root = format!("{}/{}", path, "root");
-        Self::seed_smf(std::path::Path::new(&root))?;
+        Self::seed_smf(&log, std::path::Path::new(&root))?;
 
         Ok(())
     }
