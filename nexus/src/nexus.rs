@@ -56,7 +56,7 @@ use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
-use omicron_common::api::internal::nexus::ZpoolPostRequest;
+use omicron_common::api::internal::nexus::ZpoolPutRequest;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
@@ -219,7 +219,7 @@ impl Nexus {
         &self,
         id: Uuid,
         sled_id: Uuid,
-        info: ZpoolPostRequest,
+        info: ZpoolPutRequest,
     ) -> Result<(), Error> {
         info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
         let zpool = db::model::Zpool::new(id, sled_id, &info);

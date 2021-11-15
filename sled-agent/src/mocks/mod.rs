@@ -3,8 +3,8 @@
 use anyhow::Error;
 use mockall::mock;
 use omicron_common::nexus_client::types::{
-    DatasetPostRequest, DatasetPostResponse, InstanceRuntimeState,
-    SledAgentStartupInfo, ZpoolPostRequest, ZpoolPostResponse,
+    DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
+    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -22,17 +22,17 @@ mock! {
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
         ) -> Result<(), Error>;
-        pub async fn zpool_post(
+        pub async fn zpool_put(
             &self,
             zpool_id: &Uuid,
             sled_id: &Uuid,
-            info: &ZpoolPostRequest,
-        ) -> Result<ZpoolPostResponse, Error>;
-        pub async fn dataset_post(
+            info: &ZpoolPutRequest,
+        ) -> Result<ZpoolPutResponse, Error>;
+        pub async fn dataset_put(
             &self,
             dataset_id: &Uuid,
             zpool_id: &Uuid,
-            info: &DatasetPostRequest,
-        ) -> Result<DatasetPostResponse, Error>;
+            info: &DatasetPutRequest,
+        ) -> Result<DatasetPutResponse, Error>;
     }
 }

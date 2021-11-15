@@ -55,8 +55,8 @@ pub struct SledAgentStartupInfo {
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPostRequest {
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ZpoolPutRequest {
     /// Total size of the pool.
     pub size: ByteCount,
     // TODO: We could include any other data from `ZpoolInfo` we want,
@@ -64,7 +64,7 @@ pub struct ZpoolPostRequest {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPostResponse {}
+pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
@@ -104,7 +104,7 @@ impl FromStr for DatasetFlavor {
 
 /// Describes a dataset within a pool.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DatasetPostRequest {
+pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
     pub address: SocketAddr,
@@ -123,7 +123,7 @@ pub struct DatasetPostRequest {
 // more details. Nexus, in response, merely advises minimums/maximums
 // for dataset sizes.
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DatasetPostResponse {
+pub struct DatasetPutResponse {
     /// A minimum reservation size for a filesystem.
     /// Refer to ZFS native properties for more detail.
     pub reservation: Option<ByteCount>,

@@ -3,9 +3,9 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, dataset, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, region, router_route, sled, vpc,
-    vpc_router, vpc_subnet, zpool
+    console_session, dataset, disk, instance, metric_producer,
+    network_interface, organization, oximeter, project, rack, region,
+    router_route, sled, vpc, vpc_router, vpc_subnet, zpool,
 };
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -366,7 +366,7 @@ impl Zpool {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        info: &internal::nexus::ZpoolPostRequest,
+        info: &internal::nexus::ZpoolPutRequest,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),

@@ -14,7 +14,7 @@ use futures::StreamExt;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use omicron_common::nexus_client::types::{
-    DatasetFlavor, DatasetPostRequest, ZpoolPostRequest,
+    DatasetFlavor, DatasetPutRequest, ZpoolPutRequest,
 };
 use slog::Logger;
 use std::collections::HashMap;
@@ -318,22 +318,22 @@ impl StorageWorker {
                     let sled_id = self.sled_id;
                     let nexus = self.nexus_client.clone();
                     let notify_nexus = move || {
-                        let zpool_request = ZpoolPostRequest { size: size.into() };
+                        let zpool_request = ZpoolPutRequest { size: size.into() };
                         let nexus = nexus.clone();
                         let partitions = partitions.clone();
                         async move {
                             nexus
-                                .zpool_post(&pool_id, &sled_id, &zpool_request)
+                                .zpool_put(&pool_id, &sled_id, &zpool_request)
                                 .await
                                 .map_err(backoff::BackoffError::Transient)?;
 
                             for (id, address, flavor) in partitions {
-                                let request = DatasetPostRequest {
+                                let request = DatasetPutRequest {
                                     address: address.to_string(),
                                     flavor,
                                 };
                                 nexus
-                                    .dataset_post(&id, &pool_id, &request)
+                                    .dataset_put(&id, &pool_id, &request)
                                     .await
                                     .map_err(backoff::BackoffError::Transient)?;
                             }
