@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
+use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -1462,50 +1463,10 @@ impl Nexus {
         &self,
         vpc_id: &Uuid,
     ) -> CreateResult<()> {
-        const DEFAULT_FIREWALL_RULES: &'static str = r#"{
-            "allow-internal-inbound": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-            },
-            "allow-ssh": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 22 from anywhere"
-            },
-            "allow-icmp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "protocols": [ "ICMP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound ICMP traffic from anywhere"
-            },
-            "allow-rdp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 3389 from anywhere"
-            }
-        }"#;
-        let params = serde_json::from_str::<
-            external::VpcFirewallRuleUpdateParams,
-        >(DEFAULT_FIREWALL_RULES)
-        .unwrap();
-        let rules =
-            db::model::VpcFirewallRule::vec_from_params(*vpc_id, params);
+        let rules = db::model::VpcFirewallRule::vec_from_params(
+            *vpc_id,
+            DEFAULT_FIREWALL_RULES.clone(),
+        );
         self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
         Ok(())
     }
@@ -2134,4 +2095,46 @@ impl TestInterfaces for Nexus {
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
     }
+}
+
+lazy_static! {
+    static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
+        serde_json::from_str(r#"{
+            "allow-internal-inbound": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
+            },
+            "allow-ssh": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 22 from anywhere"
+            },
+            "allow-icmp": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "protocols": [ "ICMP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound ICMP traffic from anywhere"
+            },
+            "allow-rdp": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 3389 from anywhere"
+            }
+        }"#).unwrap();
 }
