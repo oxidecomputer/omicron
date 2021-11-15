@@ -1982,11 +1982,11 @@ pub struct NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::{
-        ByteCount, L4PortRange, Name, NetworkTarget, VpcFirewallRuleAction,
-        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
-        VpcFirewallRuleHostFilter, VpcFirewallRuleProtocol,
-        VpcFirewallRuleStatus, VpcFirewallRuleTarget, VpcFirewallRuleUpdate,
-        VpcFirewallRuleUpdateParams,
+        ByteCount, L4Port, L4PortRange, Name, NetworkTarget,
+        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
+        VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
     use std::convert::TryFrom;
@@ -2123,11 +2123,11 @@ mod test {
     fn test_ip_port_range_from_str() {
         assert_eq!(
             L4PortRange::try_from("65532".to_string()),
-            Ok(L4PortRange { first: 65532, last: 65532 })
+            Ok(L4PortRange { first: L4Port(65532), last: L4Port(65532) })
         );
         assert_eq!(
             L4PortRange::try_from("22-53".to_string()),
-            Ok(L4PortRange { first: 22, last: 53 })
+            Ok(L4PortRange { first: L4Port(22), last: L4Port(53) })
         );
 
         assert_eq!(
@@ -2150,10 +2150,12 @@ mod test {
 
     #[test]
     fn test_ip_port_range_into_str() {
-        let range: String = L4PortRange { first: 12345, last: 12345 }.into();
+        let range: String =
+            L4PortRange { first: L4Port(12345), last: L4Port(12345) }.into();
         assert_eq!(range, "12345");
 
-        let range: String = L4PortRange { first: 1, last: 1024 }.into();
+        let range: String =
+            L4PortRange { first: L4Port(1), last: L4Port(1024) }.into();
         assert_eq!(range, "1-1024");
     }
 
@@ -2201,7 +2203,7 @@ mod test {
                     protocols: None,
                 },
                 action: VpcFirewallRuleAction::Allow,
-                priority: 65534,
+                priority: VpcFirewallRulePriority(65534),
                 description: "allow inbound traffic between instances"
                     .to_string(),
             }
@@ -2217,13 +2219,13 @@ mod test {
                 filters: VpcFirewallRuleFilter {
                     hosts: None,
                     ports: Some(vec![
-                        L4PortRange { first: 22, last: 25 },
-                        L4PortRange { first: 27, last: 27 }
+                        L4PortRange { first: L4Port(22), last: L4Port(25) },
+                        L4PortRange { first: L4Port(27), last: L4Port(27) }
                     ]),
                     protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
                 },
                 action: VpcFirewallRuleAction::Deny,
-                priority: 65533,
+                priority: VpcFirewallRulePriority(65533),
                 description: "second rule".to_string(),
             }
         );
