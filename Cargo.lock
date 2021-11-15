@@ -1052,6 +1052,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "indoc"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a75aeaaef0ce18b58056d306c27b07436fbb34b8816c53094b76dd81803136"
+dependencies = [
+ "unindent",
+]
+
+[[package]]
 name = "input_buffer"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1125,7 +1134,6 @@ dependencies = [
  "itertools",
  "lalrpop-util",
  "petgraph 0.5.1",
- "pico-args",
  "regex",
  "regex-syntax",
  "string_cache",
@@ -1139,9 +1147,6 @@ name = "lalrpop-util"
 version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e58cce361efcc90ba8a0a5f982c741ff86b603495bb15a998412e957dcd278"
-dependencies = [
- "regex",
-]
 
 [[package]]
 name = "lazy_static"
@@ -1647,9 +1652,9 @@ dependencies = [
 
 [[package]]
 name = "oso"
-version = "0.22.1"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8d3eccbf381198a6d75e1117fb3839a6631f8090dcc6bfc08644bf9849c87c"
+checksum = "4b4a9939d99f534e1fb3da82bafd75700c0448d96c67bbbb2e2f71b98bf6db6b"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -1663,9 +1668,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.22.1"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b1258b50a1bec082e92838d1f630f10f501ae80d309b006e79233e6331ff96d"
+checksum = "2f0b65c690950395b643741e081d83b24d6f35954be9483f27619470c1c39d80"
 dependencies = [
  "quote",
  "syn",
@@ -1930,12 +1935,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico-args"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db8bcd96cb740d03149cbad5518db9fd87126a10ab519c011893b1754134c468"
-
-[[package]]
 name = "pin-project"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1975,17 +1974,16 @@ checksum = "7c9b1041b4387893b91ee6746cddfc28516aff326a3519fb2adf820932c5e6cb"
 
 [[package]]
 name = "polar-core"
-version = "0.22.1"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f3be8d89fcc2c3bcebc0b5d45eabe5ad9cb8c8ffd77169ded7eb5237eef6191"
+checksum = "f761b5f02567ab5b0f239740d35421cbf7b82b34aa533284f8c3333b42239c8e"
 dependencies = [
+ "indoc",
  "js-sys",
  "lalrpop",
  "lalrpop-util",
- "regex",
  "serde",
  "serde_derive",
- "serde_json",
  "wasm-bindgen",
 ]
 
@@ -3585,6 +3583,12 @@ name = "unicode-xid"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
+
+[[package]]
+name = "unindent"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f14ee04d9415b52b3aeab06258a3f07093182b88ba0f9b8d203f211a7a7d41c7"
 
 [[package]]
 name = "untrusted"
