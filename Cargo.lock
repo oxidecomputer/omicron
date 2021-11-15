@@ -1414,6 +1414,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "macaddr",
+ "parse-display",
  "percent-encoding",
  "progenitor",
  "propolis-server",
@@ -1475,6 +1476,7 @@ dependencies = [
  "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer",
+ "parse-display",
  "pq-sys",
  "rand",
  "ref-cast",
@@ -1798,6 +1800,32 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi",
+]
+
+[[package]]
+name = "parse-display"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "898bf4c2a569dedbfd4e6c3f0bbd0ae825e5b6b0b69bae3e3c1000158689334a"
+dependencies = [
+ "once_cell",
+ "parse-display-derive",
+ "regex",
+]
+
+[[package]]
+name = "parse-display-derive"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1779d1e28ab04568223744c2af4aa4e642e67b92c76bdce0929a6d2c36267199"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-syntax",
+ "structmeta",
+ "syn",
 ]
 
 [[package]]
@@ -2626,9 +2654,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.69"
+version = "1.0.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e466864e431129c7e0d3476b92f20458e5879919a0596c6472738d9fa2d342f8"
+checksum = "e277c495ac6cd1a01a58d0a0c574568b4d1ddf14f59965c6a58b8d96400b54f3"
 dependencies = [
  "itoa",
  "ryu",
@@ -3009,6 +3037,29 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "structmeta"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59915b528a896f2e3bfa1a6ace65f7bb0ff9f9863de6213b0c01cb6fd3c3ac71"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta-derive",
+ "syn",
+]
+
+[[package]]
+name = "structmeta-derive"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b73800bcca56045d5ab138a48cd28a96093335335deaa916f22b5749c4150c79"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "structopt"
