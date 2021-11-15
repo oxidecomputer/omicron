@@ -412,16 +412,16 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     time_deleted TIMESTAMPTZ,
 
     vpc_id UUID NOT NULL,
-    status vpc_firewall_rule_status NOT NULL,
-    direction vpc_firewall_rule_direction NOT NULL,
+    status omicron.public.vpc_firewall_rule_status NOT NULL,
+    direction omicron.public.vpc_firewall_rule_direction NOT NULL,
     /* Array of targets. 128 was picked to include plenty of space for
        a tag, colon, and resource identifier. */
     targets STRING(128)[] NOT NULL,
     /* Also an array of targets */
     filter_hosts STRING(128)[],
     filter_ports STRING(11)[],
-    filter_protocols vpc_firewall_rule_protocol[],
-    action vpc_firewall_rule_action NOT NULL,
+    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
+    action omicron.public.vpc_firewall_rule_action NOT NULL,
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 
