@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 const ZPOOL: &str = "/usr/sbin/zpool";
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum ParseError {
     #[error("Failed to parse output as UTF-8: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
@@ -27,7 +27,7 @@ pub enum Error {
     Command(ExternalError),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZpoolHealth {
     /// The device is online and functioning.
     Online,
@@ -117,7 +117,7 @@ impl FromStr for ZpoolInfo {
             ))
         };
 
-        let mut values = s.trim().split('\t');
+        let mut values = s.trim().split_whitespace();
         let name =
             values.next().ok_or_else(|| expected_field("name"))?.to_string();
         let size = values
@@ -167,6 +167,46 @@ impl Zpool {
     }
 }
 
-// TODO: Test parsing (ez with just tab-separated output)
-//
-// e.g. "rpool   996432412672    24349094912     972083317760    ONLINE"
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_zpool() {
+        let name = "rpool";
+        let size = 10000;
+        let allocated = 6000;
+        let free = 4000;
+        let health = "ONLINE";
+
+        // We should be able to tolerate any whitespace between columns.
+        let input = format!(
+            "{} {}    {} \t\t\t {} {}",
+            name, size, allocated, free, health
+        );
+        let output: ZpoolInfo = input.parse().unwrap();
+        assert_eq!(output.name(), name);
+        assert_eq!(output.size(), size);
+        assert_eq!(output.allocated(), allocated);
+        assert_eq!(output.free(), free);
+        assert_eq!(output.health(), ZpoolHealth::Online);
+    }
+
+    #[test]
+    fn test_parse_zpool_missing_column() {
+        let name = "rpool";
+        let size = 10000;
+        let allocated = 6000;
+        let free = 4000;
+        let _health = "ONLINE";
+
+        // Similar to the prior test case, just omit "health".
+        let input = format!("{} {} {} {}", name, size, allocated, free);
+        let result: Result<ZpoolInfo, ParseError> = input.parse();
+
+        let expected_err = ParseError::Parse(
+            "Missing 'health' value in zpool list output".to_owned(),
+        );
+        assert_eq!(result.unwrap_err(), expected_err,);
+    }
+}
