@@ -25,6 +25,7 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.2"
 thiserror = "1.0"
 tokio = { version = "1.13", features = [ "full" ] }
 toml = "0.5.6"

@@ -24,10 +24,8 @@ pub enum ExecutionError {
 fn execute(
     command: &mut std::process::Command,
 ) -> Result<std::process::Output, ExecutionError> {
-    let output = command
-        .env_clear()
-        .output()
-        .map_err(|e| ExecutionError::ExecutionStart(e))?;
+    let output =
+        command.output().map_err(|e| ExecutionError::ExecutionStart(e))?;
 
     if !output.status.success() {
         return Err(ExecutionError::CommandFailure {

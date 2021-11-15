@@ -60,6 +60,9 @@ pub enum Error {
     #[error("Failed to parse output: {0}")]
     Parse(#[from] std::string::FromUtf8Error),
 
+    #[error("Error accessing filesystem: {0}")]
+    Filesystem(std::io::Error),
+
     #[error("Value not found")]
     NotFound,
 }
@@ -74,16 +77,72 @@ impl Zones {
         if let Some(zone) = Self::find(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
             if zone.state() == zone::State::Running {
-                zone::Adm::new(name).halt().map_err(|e| Error::Halt(e))?;
+                zone::Adm::new(name).halt().map_err(Error::Halt)?;
             }
             zone::Adm::new(name)
                 .uninstall(/* force= */ true)
-                .map_err(|e| Error::Uninstall(e))?;
+                .map_err(Error::Uninstall)?;
             zone::Config::new(name)
                 .delete(/* force= */ true)
                 .run()
-                .map_err(|e| Error::Delete(e))?;
+                .map_err(Error::Delete)?;
         }
+        Ok(())
+    }
+
+    /// Seed the SMF files within a zone.
+    ///
+    /// This is a performance optimization, which manages to shave
+    /// several seconds off of zone boot time.
+    ///
+    /// Background:
+    /// - https://illumos.org/man/5/smf_bootstrap
+    ///
+    /// When a zone starts, a service called `manifest-import` uses
+    /// `svccfg` to import XML-based config files into a SQLite DB.
+    /// This database - stored at `/etc/svc/repository.db` - is used
+    /// by SMF as a representation of known services.
+    ///
+    /// This process is, unfortunately, SLOW. It involves serially
+    /// parsing a many XML files from storage, and loading them into
+    /// this database file. The invocation below is effectively
+    /// what would happen when the zone is first booted.
+    ///
+    /// By doing this operation for "base zones", first-time setup takes
+    /// slightly longer, but all subsequent zones boot much faster.
+    ///
+    /// NOTE: This process could be optimized further by creating
+    /// this file as part of the image building process - see
+    /// `seed_smf` within https://github.com/illumos/image-builder.
+    pub fn seed_smf(
+        log: &Logger,
+        mountpoint: &std::path::Path,
+    ) -> Result<(), Error> {
+        let tmpdir = tempfile::tempdir().map_err(Error::Filesystem)?;
+        let mountpoint = mountpoint.to_str().unwrap();
+
+        let repo = format!("{}/repo.db", tmpdir.as_ref().to_string_lossy());
+        let seed = format!("{}/lib/svc/seed/{}.db", mountpoint, "nonglobal");
+        let manifests = format!("{}/lib/svc/manifest", mountpoint);
+        let installto = format!("{}/etc/svc/repository.db", mountpoint);
+
+        std::fs::copy(&seed, &repo).map_err(Error::Filesystem)?;
+
+        let mut env = std::collections::HashMap::new();
+        let dtd = "/usr/share/lib/xml/dtd/service_bundle.dtd.1".to_string();
+        env.insert("SVCCFG_DTD".to_string(), dtd);
+        env.insert("SVCCFG_REPOSITORY".to_string(), repo.to_string());
+        env.insert("SVCCFG_CHECKHASH".to_string(), "1".to_string());
+        env.insert("PKG_INSTALL_ROOT".to_string(), mountpoint.to_string());
+
+        info!(log, "Seeding SMF repository at {}", mountpoint);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let command = cmd.envs(env).args(&[SVCCFG, "import", &manifests]);
+        execute(command)?;
+        info!(log, "Seeding SMF repository at {} - Complete", mountpoint);
+
+        std::fs::copy(&repo, &installto).map_err(Error::Filesystem)?;
+
         Ok(())
     }
 
@@ -120,9 +179,10 @@ impl Zones {
             /* overwrite= */ true,
             zone::CreationOptions::Blank,
         );
+        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
         cfg.get_global()
             .set_brand("sparse")
-            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
+            .set_path(&path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         for fs in filesystems {
@@ -131,11 +191,15 @@ impl Zones {
         for device in devices {
             cfg.add_device(device);
         }
-        cfg.run().map_err(|e| Error::Configure(e))?;
+        cfg.run().map_err(Error::Configure)?;
 
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
-        zone::Adm::new(name).install(&[]).map_err(|e| Error::Install(e))?;
+        zone::Adm::new(name).install(&[]).map_err(Error::Install)?;
+
+        info!(log, "Seeding base zone: {}", name);
+        let root = format!("{}/{}", path, "root");
+        Self::seed_smf(&log, std::path::Path::new(&root))?;
 
         Ok(())
     }
@@ -198,7 +262,7 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().map_err(|e| Error::Configure(e))?;
+        cfg.run().map_err(Error::Configure)?;
         Ok(())
     }
 
@@ -231,7 +295,7 @@ impl Zones {
 
     /// Clones a zone (named `name`) from the base Propolis zone.
     fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
-        zone::Adm::new(name).clone(base).map_err(|e| Error::Clone(e))?;
+        zone::Adm::new(name).clone(base).map_err(Error::Clone)?;
         Ok(())
     }
 
@@ -247,7 +311,7 @@ impl Zones {
 
     /// Boots a zone (named `name`).
     pub fn boot(name: &str) -> Result<(), Error> {
-        zone::Adm::new(name).boot().map_err(|e| Error::Boot(e))?;
+        zone::Adm::new(name).boot().map_err(Error::Boot)?;
         Ok(())
     }
 
@@ -256,7 +320,7 @@ impl Zones {
     /// These zones must have names starting with [`ZONE_PREFIX`].
     pub fn get() -> Result<Vec<zone::Zone>, Error> {
         Ok(zone::Adm::list()
-            .map_err(|e| Error::List(e))?
+            .map_err(Error::List)?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
@@ -284,7 +348,7 @@ impl Zones {
         ]);
         let output = execute(cmd)?;
         String::from_utf8(output.stdout)
-            .map_err(|e| Error::Parse(e))?
+            .map_err(Error::Parse)?
             .lines()
             .find_map(|name| {
                 if name.starts_with(VNIC_PREFIX_CONTROL) {
