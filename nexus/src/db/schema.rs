@@ -240,6 +240,22 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         kind -> crate::db::model::VpcRouterKindEnum,
         vpc_id -> Uuid,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    router_route (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::db::model::RouterRouteKindEnum,
+        router_id -> Uuid,
+        target -> Text,
+        destination -> Text,
     }
 }
 
@@ -255,6 +271,7 @@ allow_tables_to_appear_in_same_query!(
     saga_node_event,
     console_session,
     sled,
+    router_route,
     vpc,
     vpc_subnet,
     vpc_router
