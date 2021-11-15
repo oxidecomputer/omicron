@@ -1372,10 +1372,10 @@ impl DataStore {
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
-        // Ideally this would be a CTE so we don't need to hold a transaction
-        // open across multiple roundtrips from the database, but for now we're
-        // using a transaction due to the severely decreased legibility of
-        // CTEs via diesel right now.
+        // TODO-scalability: Ideally this would be a CTE so we don't need to
+        // hold a transaction open across multiple roundtrips from the database,
+        // but for now we're using a transaction due to the severely decreased
+        // legibility of CTEs via diesel right now.
         self.pool()
             .transaction(move |conn| {
                 delete_old_query.execute(conn)?;

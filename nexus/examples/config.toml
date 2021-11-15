@@ -23,8 +23,9 @@ url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
-# Allow larger request bodies to accomodate firewall endpoints (one rule is ~500 bytes)
-request_body_max_bytes = 10240
+# Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
+# rule is ~500 bytes)
+request_body_max_bytes = 1048576
 
 [dropshot_internal]
 # IP address and TCP port on which to listen for the internal API

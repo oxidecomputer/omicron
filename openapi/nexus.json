@@ -3471,7 +3471,7 @@
         ]
       },
       "VpcFirewallRuleFilter": {
-        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it.",
+        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
         "type": "object",
         "properties": {
           "hosts": {
@@ -3546,24 +3546,6 @@
                 "type": "string",
                 "enum": [
                   "instance"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/Name"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tag"
                 ]
               },
               "value": {
@@ -3697,24 +3679,6 @@
                 "type": "string",
                 "enum": [
                   "instance"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/Name"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tag"
                 ]
               },
               "value": {

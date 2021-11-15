@@ -1330,6 +1330,41 @@ where
     }
 }
 
+/// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[repr(transparent)]
+#[sql_type = "sql_types::Int4"]
+pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
+NewtypeFrom! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+NewtypeDeref! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+
+impl<DB> ToSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        SqlU16(self.0 .0).to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRulePriority" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRulePriority(external::VpcFirewallRulePriority(
+            *SqlU16::from_sql(bytes)?,
+        )))
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpc_firewall_rule"]
 pub struct VpcFirewallRule {
@@ -1344,7 +1379,7 @@ pub struct VpcFirewallRule {
     pub filter_ports: Option<Vec<L4PortRange>>,
     pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: VpcFirewallRuleAction,
-    pub priority: SqlU16,
+    pub priority: VpcFirewallRulePriority,
 }
 
 impl VpcFirewallRule {

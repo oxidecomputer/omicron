@@ -1361,7 +1361,7 @@ pub struct VpcFirewallRule {
     /// whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
-    pub priority: u16,
+    pub priority: VpcFirewallRulePriority,
 }
 
 /// A single rule in a VPC firewall
@@ -1382,7 +1382,7 @@ pub struct VpcFirewallRuleUpdate {
     /// whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
-    pub priority: u16,
+    pub priority: VpcFirewallRulePriority,
 }
 
 /**
@@ -1420,6 +1420,22 @@ impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
         }
     }
 }
+
+/// Firewall rule priority. This is a value from 0 to 65535, with rules with
+/// lower values taking priority over higher values.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct VpcFirewallRulePriority(pub u16);
 
 /// Filter for a firewall rule. A given packet must match every field that is
 /// present for the rule to apply to it. A packet matches a field if any entry
@@ -1484,7 +1500,9 @@ impl TryFrom<String> for VpcFirewallRuleTarget {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        VpcFirewallRuleTarget::try_from(value.parse::<NetworkTarget>().unwrap())
+        VpcFirewallRuleTarget::try_from(
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string()).unwrap(),
+        )
     }
 }
 
@@ -1556,7 +1574,7 @@ impl TryFrom<String> for VpcFirewallRuleHostFilter {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         VpcFirewallRuleHostFilter::try_from(
-            value.parse::<NetworkTarget>().unwrap(),
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string()).unwrap(),
         )
     }
 }
@@ -1621,15 +1639,37 @@ impl Display for VpcFirewallRuleHostFilter {
     }
 }
 
+/// Port number used in a transport-layer protocol like TCP or UDP
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Display,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct L4Port(pub u16);
+
+impl From<u16> for L4Port {
+    fn from(port: u16) -> L4Port {
+        L4Port(port)
+    }
+}
+
 /// A range of transport layer ports
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct L4PortRange {
     /// The first port in the range
-    pub first: u16,
+    pub first: L4Port,
     /// The last port in the range
-    pub last: u16,
+    pub last: L4Port,
 }
 
 impl TryFrom<String> for L4PortRange {
@@ -1642,16 +1682,19 @@ impl TryFrom<String> for L4PortRange {
             None => {
                 let port = range
                     .parse::<u16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
                 Ok(L4PortRange { first: port, last: port })
             }
             Some((left, right)) => {
                 let first = left
                     .parse::<u16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
                 let last = right
                     .parse::<u16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?;
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
                 Ok(L4PortRange { first, last })
             }
         }
