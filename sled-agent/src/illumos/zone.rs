@@ -97,7 +97,6 @@ impl Zones {
         })?;
         let mountpoint = mountpoint.to_str().unwrap();
 
-        let dtd = format!("/usr/share/lib/xml/dtd/service_bundle.dtd.1",);
         let repo = format!("{}/repo.db", tmpdir.as_ref().to_string_lossy());
         let seed = format!("{}/lib/svc/seed/{}.db", mountpoint, "nonglobal");
         let manifests = format!("{}/lib/svc/manifest", mountpoint);
@@ -111,6 +110,7 @@ impl Zones {
         })?;
 
         let mut env = std::collections::HashMap::new();
+        let dtd = "/usr/share/lib/xml/dtd/service_bundle.dtd.1".to_string();
         env.insert("SVCCFG_DTD".to_string(), dtd);
         env.insert("SVCCFG_REPOSITORY".to_string(), repo.to_string());
         env.insert("SVCCFG_CHECKHASH".to_string(), "1".to_string());
