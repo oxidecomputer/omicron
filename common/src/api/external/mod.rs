@@ -471,6 +471,7 @@ pub enum ResourceType {
     Vpc,
     VpcSubnet,
     VpcRouter,
+    RouterRoute,
     Oximeter,
     MetricProducer,
 }
@@ -492,6 +493,7 @@ impl Display for ResourceType {
                 ResourceType::Vpc => "vpc",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::VpcRouter => "vpc router",
+                ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
             }
@@ -1493,6 +1495,75 @@ impl Display for RouteDestination {
         let target = NetworkTarget::from(self.clone());
         write!(f, "{}", target)
     }
+}
+
+/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind determines certain attributes such as if the route is modifiable
+/// and describes how or where the route was created.
+///
+/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
+)]
+#[display("{}")]
+pub enum RouterRouteKind {
+    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    ///
+    /// `Destination: An Internet Gateway`
+    /// `Modifiable: true`
+    Default,
+    /// Automatically added for each VPC Subnet in the VPC
+    ///
+    /// `Destination: A VPC Subnet`
+    /// `Modifiable: false`
+    VpcSubnet,
+    /// Automatically added when VPC peering is established
+    ///
+    /// `Destination: A different VPC`
+    /// `Modifiable: false`
+    VpcPeering,
+    /// Created by a user
+    /// See [`RouteTarget`]
+    ///
+    /// `Destination: User defined`
+    /// `Modifiable: true`
+    Custom,
+}
+
+///  A route defines a rule that governs where traffic should be sent based on its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRoute {
+    /// common identifying metadata
+    pub identity: IdentityMetadata,
+
+    /// The VPC Router to which the route belongs.
+    pub router_id: Uuid,
+
+    /// Describes the kind of router. Set at creation. `read-only`
+    pub kind: RouterRouteKind,
+
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Create-time parameters for a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
