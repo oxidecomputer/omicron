@@ -1,11 +1,15 @@
 //! Management of sled-local storage.
 
 use crate::illumos::{
+    dladm::Dladm,
     zfs::Mountpoint,
+    zfs::Zfs,
+    zone::Zones,
     zone::{
         COCKROACH_SVC_DIRECTORY, COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY,
         CRUCIBLE_ZONE_PREFIX,
     },
+    zpool::Zpool,
     zpool::ZpoolInfo,
 };
 use crate::running_zone::RunningZone;
@@ -13,10 +17,10 @@ use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
-use omicron_common::backoff;
 use omicron_common::nexus_client::types::{
     DatasetKind, DatasetPutRequest, ZpoolPutRequest,
 };
+use omicron_common::{backoff, NexusClient};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -24,19 +28,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones, zpool::Zpool};
-#[cfg(test)]
-use crate::illumos::{
-    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
-    zpool::MockZpool as Zpool,
-};
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use omicron_common::NexusClient;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
