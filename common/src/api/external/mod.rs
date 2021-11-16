@@ -1706,7 +1706,7 @@ impl Into<String> for L4PortRange {
         if self.first == self.last {
             self.first.to_string()
         } else {
-            format!("{}-{}", self.first, self.last).to_string()
+            format!("{}-{}", self.first, self.last)
         }
     }
 }
