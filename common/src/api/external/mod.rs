@@ -474,6 +474,7 @@ pub enum ResourceType {
     VpcFirewallRule,
     VpcSubnet,
     VpcRouter,
+    RouterRoute,
     Oximeter,
     MetricProducer,
 }
@@ -496,6 +497,7 @@ impl Display for ResourceType {
                 ResourceType::VpcFirewallRule => "vpc firewall rule",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::VpcRouter => "vpc router",
+                ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
             }
@@ -1345,6 +1347,229 @@ pub struct VpcRouterUpdateParams {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+/// Represents all possible network target strings as defined in RFD-21
+/// This enum itself isn't intended to be used directly but rather as a
+/// delegate for subset enums to not have to re-implement all the base type conversions.
+///
+/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
+#[derive(Debug, PartialEq, Display, FromStr)]
+pub enum NetworkTarget {
+    #[display("vpc:{0}")]
+    Vpc(Name),
+    #[display("subnet:{0}")]
+    Subnet(Name),
+    #[display("instance:{0}")]
+    Instance(Name),
+    #[display("tag:{0}")]
+    Tag(Name),
+    #[display("ip:{0}")]
+    Ip(IpAddr),
+    #[display("inetgw:{0}")]
+    InternetGateway(Name),
+    #[display("fip:{0}")]
+    FloatingIp(Name),
+}
+
+/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
+/// possible targets that a route can forward to.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum RouteTarget {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    InternetGateway(Name),
+}
+
+impl TryFrom<String> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        RouteTarget::try_from(value.parse::<NetworkTarget>().unwrap())
+    }
+}
+
+impl FromStr for RouteTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        RouteTarget::try_from(String::from(value))
+    }
+}
+
+impl From<RouteTarget> for NetworkTarget {
+    fn from(target: RouteTarget) -> Self {
+        match target {
+            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
+            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
+            RouteTarget::InternetGateway(name) => {
+                NetworkTarget::InternetGateway(name)
+            }
+        }
+    }
+}
+
+impl TryFrom<NetworkTarget> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
+            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(RouteTarget::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl Display for RouteTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
+/// A subset of [`NetworkTarget`], `RouteDestination` specifies
+/// the kind of network traffic that will be matched to be forwarded
+/// to the [`RouteTarget`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum RouteDestination {
+    Ip(IpAddr),
+    Vpc(Name),
+    Subnet(Name),
+}
+
+impl TryFrom<NetworkTarget> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for RouteDestination {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        RouteDestination::try_from(value.parse::<NetworkTarget>().unwrap())
+    }
+}
+
+impl FromStr for RouteDestination {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        RouteDestination::try_from(String::from(value))
+    }
+}
+
+impl From<RouteDestination> for NetworkTarget {
+    fn from(target: RouteDestination) -> Self {
+        match target {
+            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
+            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
+            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
+        }
+    }
+}
+
+impl Display for RouteDestination {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
+/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind determines certain attributes such as if the route is modifiable
+/// and describes how or where the route was created.
+///
+/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
+)]
+#[display("{}")]
+pub enum RouterRouteKind {
+    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    ///
+    /// `Destination: An Internet Gateway`
+    /// `Modifiable: true`
+    Default,
+    /// Automatically added for each VPC Subnet in the VPC
+    ///
+    /// `Destination: A VPC Subnet`
+    /// `Modifiable: false`
+    VpcSubnet,
+    /// Automatically added when VPC peering is established
+    ///
+    /// `Destination: A different VPC`
+    /// `Modifiable: false`
+    VpcPeering,
+    /// Created by a user
+    /// See [`RouteTarget`]
+    ///
+    /// `Destination: User defined`
+    /// `Modifiable: true`
+    Custom,
+}
+
+///  A route defines a rule that governs where traffic should be sent based on its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRoute {
+    /// common identifying metadata
+    pub identity: IdentityMetadata,
+
+    /// The VPC Router to which the route belongs.
+    pub router_id: Uuid,
+
+    /// Describes the kind of router. Set at creation. `read-only`
+    pub kind: RouterRouteKind,
+
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Create-time parameters for a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteCreateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterRouteUpdateParams {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
@@ -1742,160 +1967,6 @@ impl JsonSchema for L4PortRange {
             })),
             ..Default::default()
         })
-    }
-}
-
-/// Represents all possible network target strings as defined in RFD-21
-/// This enum itself isn't intended to be used directly but rather as a
-/// delegate for subset enums to not have to re-implement all the base type conversions.
-///
-/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
-#[derive(Debug, PartialEq, Display, FromStr)]
-pub enum NetworkTarget {
-    #[display("vpc:{0}")]
-    Vpc(Name),
-    #[display("subnet:{0}")]
-    Subnet(Name),
-    #[display("instance:{0}")]
-    Instance(Name),
-    #[display("tag:{0}")]
-    Tag(Name),
-    #[display("ip:{0}")]
-    Ip(IpAddr),
-    #[display("inetgw:{0}")]
-    InternetGateway(Name),
-    #[display("fip:{0}")]
-    FloatingIp(Name),
-}
-
-/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
-/// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
-pub enum RouteTarget {
-    Ip(IpAddr),
-    Vpc(Name),
-    Subnet(Name),
-    Instance(Name),
-    InternetGateway(Name),
-}
-
-impl TryFrom<String> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteTarget::try_from(value.parse::<NetworkTarget>().unwrap())
-    }
-}
-
-impl FromStr for RouteTarget {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteTarget::try_from(String::from(value))
-    }
-}
-
-impl From<RouteTarget> for NetworkTarget {
-    fn from(target: RouteTarget) -> Self {
-        match target {
-            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
-            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
-            RouteTarget::InternetGateway(name) => {
-                NetworkTarget::InternetGateway(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
-            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(RouteTarget::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for RouteTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
-}
-
-/// A subset of [`NetworkTarget`], `RouteDestination` specifies
-/// the kind of network traffic that will be matched to be forwarded
-/// to the [`RouteTarget`].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
-pub enum RouteDestination {
-    Ip(IpAddr),
-    Vpc(Name),
-    Subnet(Name),
-}
-
-impl TryFrom<NetworkTarget> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl TryFrom<String> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteDestination::try_from(value.parse::<NetworkTarget>().unwrap())
-    }
-}
-
-impl FromStr for RouteDestination {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteDestination::try_from(String::from(value))
-    }
-}
-
-impl From<RouteDestination> for NetworkTarget {
-    fn from(target: RouteDestination) -> Self {
-        match target {
-            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
-        }
-    }
-}
-
-impl Display for RouteDestination {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
     }
 }
 

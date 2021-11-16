@@ -46,6 +46,10 @@ use omicron_common::api::external::Project;
 use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::Rack;
+use omicron_common::api::external::RouterRoute;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
@@ -125,6 +129,12 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(vpc_firewall_rules_get)?;
         api.register(vpc_firewall_rules_put)?;
+
+        api.register(routers_routes_get)?;
+        api.register(routers_routes_get_route)?;
+        api.register(routers_routes_post)?;
+        api.register(routers_routes_delete_route)?;
+        api.register(routers_routes_put_route)?;
 
         api.register(hardware_racks_get)?;
         api.register(hardware_racks_get_rack)?;
@@ -1405,16 +1415,19 @@ async fn vpc_routers_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let routers = nexus
-        .vpc_list_routers(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &data_page_params_for(&rqctx, &query)?
-                .map_name(|n| Name::ref_cast(n)),
-        )
-        .await?;
-    Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+    let handler = async {
+        let routers = nexus
+            .vpc_list_routers(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?;
+        Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1442,15 +1455,18 @@ async fn vpc_routers_get_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let vpc_router = nexus
-        .vpc_lookup_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-        )
-        .await?;
-    Ok(HttpResponseOk(vpc_router))
+    let handler = async {
+        let vpc_router = nexus
+            .vpc_lookup_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(vpc_router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1468,16 +1484,19 @@ async fn vpc_routers_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let router = nexus
-        .vpc_create_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &VpcRouterKind::Custom,
-            &create_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseCreated(router))
+    let handler = async {
+        let router = nexus
+            .vpc_create_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &VpcRouterKind::Custom,
+                &create_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1494,15 +1513,18 @@ async fn vpc_routers_delete_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .vpc_delete_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-        )
-        .await?;
-    Ok(HttpResponseDeleted())
+    let handler = async {
+        nexus
+            .vpc_delete_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /**
@@ -1520,16 +1542,187 @@ async fn vpc_routers_put_router(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    nexus
-        .vpc_update_router(
-            &path.organization_name,
-            &path.project_name,
-            &path.vpc_name,
-            &path.router_name,
-            &router_params.into_inner(),
-        )
-        .await?;
-    Ok(HttpResponseOk(()))
+    let handler = async {
+        nexus
+            .vpc_update_router(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Vpc Router Routes
+ */
+
+/**
+ * List a Router's routes
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+ }]
+async fn routers_routes_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcRouterPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let routes = nexus
+            .router_list_routes(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?;
+        Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Path parameters for Router Route requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct RouterRoutePathParam {
+    organization_name: Name,
+    project_name: Name,
+    vpc_name: Name,
+    router_name: Name,
+    route_name: Name,
+}
+
+/**
+ * Get a VPC Router route
+ */
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}"
+}]
+async fn routers_routes_get_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RouterRoutePathParam>,
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let route = nexus
+            .router_lookup_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(route))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Create a VPC Router
+ */
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+}]
+async fn routers_routes_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcRouterPathParam>,
+    create_params: TypedBody<RouterRouteCreateParams>,
+) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let router = nexus
+            .router_create_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &RouterRouteKind::Custom,
+                &create_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(router))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Delete a route from its router
+ */
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+}]
+async fn routers_routes_delete_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RouterRoutePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        nexus
+            .router_delete_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Update a Router route
+ */
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+}]
+async fn routers_routes_put_route(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RouterRoutePathParam>,
+    router_params: TypedBody<RouterRouteUpdateParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        nexus
+            .router_update_route(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.router_name,
+                &path.route_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /*

@@ -24,7 +24,8 @@ lazy_static = "1.4.0"
 libc = "0.2.107"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
-oso = "0.22"
+oso = "0.23"
+parse-display = "0.5.3"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand = "0.8.4"

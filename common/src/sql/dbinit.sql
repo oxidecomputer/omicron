@@ -371,7 +371,8 @@ CREATE TABLE omicron.public.vpc_router (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     kind vpc_router_kind NOT NULL,
-    vpc_id UUID NOT NULL
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc_router (
@@ -427,6 +428,35 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
 
 CREATE UNIQUE INDEX ON omicron.public.vpc_router (
     vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TYPE omicron.public.router_route_kind AS ENUM (
+    'default',
+    'vpc_subnet',
+    'vpc_peering',
+    'custom'
+);
+
+CREATE TABLE omicron.public.router_route (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    router_id UUID NOT NULL,
+    kind router_route_kind NOT NULL,
+    target STRING(128) NOT NULL,
+    destination STRING(128) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.router_route (
+    router_id,
     name
 ) WHERE
     time_deleted IS NULL;

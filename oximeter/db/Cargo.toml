@@ -11,9 +11,9 @@ bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 oximeter = { path = "../oximeter" }
 reqwest = { version = "0.11.6", features = [ "json" ] }
-schemars = { version = "0.8.6", features = [ "uuid", "bytes", "chrono" ] }
+schemars = { version = "0.8.7", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
-serde_json = "1.0.69"
+serde_json = "1.0.70"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.6"
 slog-term = "2.8"

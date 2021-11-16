@@ -64,6 +64,71 @@ impl Zones {
         Ok(())
     }
 
+    /// Seed the SMF files within a zone.
+    ///
+    /// This is a performance optimization, which manages to shave
+    /// several seconds off of zone boot time.
+    ///
+    /// Background:
+    /// - https://illumos.org/man/5/smf_bootstrap
+    ///
+    /// When a zone starts, a service called `manifest-import` uses
+    /// `svccfg` to import XML-based config files into a SQLite DB.
+    /// This database - stored at `/etc/svc/repository.db` - is used
+    /// by SMF as a representation of known services.
+    ///
+    /// This process is, unfortunately, SLOW. It involves serially
+    /// parsing a many XML files from storage, and loading them into
+    /// this database file. The invocation below is effectively
+    /// what would happen when the zone is first booted.
+    ///
+    /// By doing this operation for "base zones", first-time setup takes
+    /// slightly longer, but all subsequent zones boot much faster.
+    ///
+    /// NOTE: This process could be optimized further by creating
+    /// this file as part of the image building process - see
+    /// `seed_smf` within https://github.com/illumos/image-builder.
+    pub fn seed_smf(
+        log: &Logger,
+        mountpoint: &std::path::Path,
+    ) -> Result<(), Error> {
+        let tmpdir = tempfile::tempdir().map_err(|e| {
+            Error::internal_error(&format!("Tempdir err: {}", e))
+        })?;
+        let mountpoint = mountpoint.to_str().unwrap();
+
+        let repo = format!("{}/repo.db", tmpdir.as_ref().to_string_lossy());
+        let seed = format!("{}/lib/svc/seed/{}.db", mountpoint, "nonglobal");
+        let manifests = format!("{}/lib/svc/manifest", mountpoint);
+        let installto = format!("{}/etc/svc/repository.db", mountpoint);
+
+        std::fs::copy(&seed, &repo).map_err(|e| {
+            Error::internal_error(&format!(
+                "Cannot copy seed DB to tempdir: {}",
+                e
+            ))
+        })?;
+
+        let mut env = std::collections::HashMap::new();
+        let dtd = "/usr/share/lib/xml/dtd/service_bundle.dtd.1".to_string();
+        env.insert("SVCCFG_DTD".to_string(), dtd);
+        env.insert("SVCCFG_REPOSITORY".to_string(), repo.to_string());
+        env.insert("SVCCFG_CHECKHASH".to_string(), "1".to_string());
+        env.insert("PKG_INSTALL_ROOT".to_string(), mountpoint.to_string());
+
+        info!(log, "Seeding SMF repository at {}", mountpoint);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let command = cmd.envs(env).args(&[SVCCFG, "import", &manifests]);
+        execute(command)?;
+        info!(log, "Seeding SMF repository at {} - Complete", mountpoint);
+
+        std::fs::copy(&repo, &installto).map_err(|e| {
+            Error::internal_error(&format!("Cannot copy SMF DB: {}", e))
+        })?;
+
+        Ok(())
+    }
+
     /// Creates a "base" zone for Propolis, from which other Propolis
     /// zones may quickly be cloned.
     pub fn create_base(log: &Logger) -> Result<(), Error> {
@@ -96,9 +161,10 @@ impl Zones {
             /* overwrite= */ true,
             zone::CreationOptions::Blank,
         );
+        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
         cfg.get_global()
             .set_brand("sparse")
-            .set_path(format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name))
+            .set_path(&path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         cfg.add_fs(&zone::Fs {
@@ -111,7 +177,6 @@ impl Zones {
         cfg.run().map_err(|e| Error::InternalError {
             internal_message: format!("Failed to create base zone: {}", e),
         })?;
-
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing base zone: {}", name);
         zone::Adm::new(name).install(&[]).map_err(|e| {
@@ -119,6 +184,10 @@ impl Zones {
                 internal_message: format!("Failed to install base zone: {}", e),
             }
         })?;
+
+        info!(log, "Seeding base zone: {}", name);
+        let root = format!("{}/{}", path, "root");
+        Self::seed_smf(&log, std::path::Path::new(&root))?;
 
         Ok(())
     }

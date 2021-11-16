@@ -58,6 +58,9 @@ pub enum Error {
     /** The system (or part of it) is unavailable. */
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
+    /** Method Not Allowed */
+    #[error("Method Not Allowed: {internal_message}")]
+    MethodNotAllowed { internal_message: String },
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
@@ -86,6 +89,7 @@ impl Error {
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
             | Error::Forbidden
+            | Error::MethodNotAllowed { .. }
             | Error::InternalError { .. } => false,
         }
     }
@@ -209,6 +213,16 @@ impl From<Error> for HttpError {
                 HttpError::for_bad_request(
                     Some(String::from("InvalidValue")),
                     message,
+                )
+            }
+
+            // TODO: RFC-7231 requires that 405s generate an Accept header to describe
+            // what methods are available in the response
+            Error::MethodNotAllowed { internal_message } => {
+                HttpError::for_client_error(
+                    Some(String::from("MethodNotAllowed")),
+                    http::StatusCode::METHOD_NOT_ALLOWED,
+                    internal_message,
                 )
             }
 
