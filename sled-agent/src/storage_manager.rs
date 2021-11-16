@@ -3,7 +3,8 @@
 use crate::illumos::{
     zfs::Mountpoint,
     zone::{
-        COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY, CRUCIBLE_ZONE_PREFIX,
+        COCKROACH_SVC_DIRECTORY, COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY,
+        CRUCIBLE_ZONE_PREFIX,
     },
     zpool::ZpoolInfo,
 };
@@ -198,7 +199,8 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         zone_prefix: CRUCIBLE_ZONE_PREFIX,
         data_directory: "/data",
         svc_directory: CRUCIBLE_SVC_DIRECTORY,
-        // TODO: Ensure crucible agent uses this port
+        // TODO: Ensure crucible agent uses this port.
+        // Currently, nothing is running in the zone, so it's made up.
         port: 8080,
         kind: DatasetKind::Crucible,
     },
@@ -206,8 +208,9 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         name: "cockroach",
         zone_prefix: COCKROACH_ZONE_PREFIX,
         data_directory: "/data",
-        svc_directory: CRUCIBLE_SVC_DIRECTORY, // XXX Replace me
-        // TODO: Ensure cockroach uses this port
+        svc_directory: COCKROACH_SVC_DIRECTORY,
+        // TODO: Ensure cockroach uses this port.
+        // Currently, nothing is running in the zone, so it's made up.
         port: 8080,
         kind: DatasetKind::Cockroach,
     },
@@ -303,7 +306,6 @@ impl StorageWorker {
                 _ = nexus_notifications.next(), if !nexus_notifications.is_empty() => {},
                 Some(pool_name) = self.new_pools_rx.recv() => {
                     let mut pools = self.pools.lock().await;
-                    // TODO: when would this not exist? It really should...
                     let pool = pools.get_mut(&pool_name).unwrap();
 
                     info!(
@@ -374,8 +376,6 @@ impl StorageWorker {
 /// A sled-local view of all attached storage.
 pub struct StorageManager {
     // A map of "zpool name" to "pool".
-    // TODO: Does this need to be arc / mutexed? who needs access other than the
-    // worker?
     pools: Arc<Mutex<HashMap<String, Pool>>>,
     new_pools_tx: mpsc::Sender<String>,
 

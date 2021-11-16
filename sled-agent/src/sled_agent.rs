@@ -30,9 +30,6 @@ use {
     crate::mocks::MockNexusClient as NexusClient,
 };
 
-// TODO: I wanna make a task that continually reports the storage status
-// upward to nexus.
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -63,8 +60,7 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    #[allow(dead_code)]
-    storage: StorageManager,
+    _storage: StorageManager,
     instances: InstanceManager,
 }
 
@@ -120,12 +116,9 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        // TODO-nit: Could remove nexus_client from IM?
-        // basically just one less place to store it, could be passed in
-        // 'ensure'. idk.
         let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { storage, instances })
+        Ok(SledAgent { _storage: storage, instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.

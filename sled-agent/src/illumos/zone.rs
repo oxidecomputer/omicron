@@ -13,6 +13,7 @@ const PROPOLIS_BASE_ZONE: &str = "oxz_propolis_base";
 const STORAGE_BASE_ZONE: &str = "oxz_storage_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 pub const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
+pub const COCKROACH_SVC_DIRECTORY: &str = "/opt/oxide/cockroachdb";
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
