@@ -1476,7 +1476,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        let as_string: String = self.0.clone().into();
+        let as_string: String = self.0.into();
         as_string.to_sql(out)
     }
 }
