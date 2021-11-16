@@ -510,6 +510,7 @@ impl Dataset {
     }
 }
 
+// Datasets contain regions
 impl DatastoreCollection<Region> for Dataset {
     type CollectionId = Uuid;
     type GenerationNumberColumn = dataset::dsl::rcgen;
@@ -517,12 +518,13 @@ impl DatastoreCollection<Region> for Dataset {
     type CollectionIdColumn = region::dsl::dataset_id;
 }
 
-// impl DatastoreCollection<Region> for Disk {
-//     type CollectionId = Uuid;
-//     type GenerationNumberColumn = disk::dsl::rcgen;
-//     type CollectionTimeDeletedColumn = disk::dsl::time_deleted;
-//     type CollectionIdColumn = region::dsl::disk_id;
-// }
+// Virtual disks contain regions
+impl DatastoreCollection<Region> for Disk {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = disk::dsl::rcgen;
+    type CollectionTimeDeletedColumn = disk::dsl::time_deleted;
+    type CollectionIdColumn = region::dsl::disk_id;
+}
 
 /// Database representation of a Region.
 ///
@@ -534,7 +536,6 @@ pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
 
-    // TODO: How do we insert into two collections simultaneously?
     dataset_id: Uuid,
     disk_id: Uuid,
 
@@ -812,6 +813,9 @@ pub struct Disk {
     #[diesel(embed)]
     identity: DiskIdentity,
 
+    /// child resource generation number, per RFD 192
+    rcgen: Generation,
+
     /// id for the project containing this Disk
     pub project_id: Uuid,
 
@@ -838,6 +842,7 @@ impl Disk {
         let identity = DiskIdentity::new(disk_id, params.identity);
         Self {
             identity,
+            rcgen: external::Generation::new().into(),
             project_id,
             runtime_state: runtime_initial,
             size: params.size.into(),

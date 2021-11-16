@@ -277,6 +277,7 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,

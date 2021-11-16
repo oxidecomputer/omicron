@@ -60,14 +60,11 @@ struct SledAgentPathParam {
     sled_id: Uuid,
 }
 
-/**
- * Report that the sled agent for the specified sled has come online.
- *
- * TODO: Should probably be "PUT", since:
- * 1. We're upserting the value
- * 2. The client supplies the UUID
- * 3. This call is idempotent (mod "time_modified").
- */
+/// Report that the sled agent for the specified sled has come online.
+// TODO: Should probably be "PUT", since:
+// 1. We're upserting the value
+// 2. The client supplies the UUID
+// 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
      path = "/sled_agents/{sled_id}",

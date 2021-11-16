@@ -154,7 +154,7 @@
     },
     "/sled_agents/{sled_id}": {
       "post": {
-        "description": "Report that the sled agent for the specified sled has come online.\n * TODO: Should probably be \"PUT\", since: 1. We're upserting the value 2. The client supplies the UUID 3. This call is idempotent (mod \"time_modified\").",
+        "description": "Report that the sled agent for the specified sled has come online.",
         "operationId": "cpapi_sled_agents_post",
         "parameters": [
           {

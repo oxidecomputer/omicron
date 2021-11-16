@@ -10,6 +10,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         project_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,

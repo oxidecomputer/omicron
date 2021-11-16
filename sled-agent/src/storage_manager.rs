@@ -88,14 +88,21 @@ impl Pool {
         Ok(Pool { id, info, zones: HashMap::new() })
     }
 
+    /// Associate an already running zone with this pool object.
+    ///
+    /// Typically this is used when a dataset within the zone (identified
+    /// by ID) has a running zone (e.g. Crucible, Cockroach) operating on
+    /// behalf of that data.
     fn add_zone(&mut self, id: Uuid, zone: RunningZone) {
         self.zones.insert(id, zone);
     }
 
+    /// Access a zone managing data within this pool.
     fn get_zone(&self, id: Uuid) -> Option<&RunningZone> {
         self.zones.get(&id)
     }
 
+    /// Returns the ID of the pool itself.
     fn id(&self) -> Uuid {
         self.id
     }
@@ -116,22 +123,22 @@ async fn ensure_running_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
     partition_info: &PartitionInfo<'_>,
-    filesystem_name: &str,
+    dataset_name: &str,
 ) -> Result<RunningZone, Error> {
     match RunningZone::get(log, partition_info.zone_prefix, partition_info.port)
         .await
     {
         Ok(zone) => {
-            info!(log, "Zone for {} is already running", filesystem_name);
+            info!(log, "Zone for {} is already running", dataset_name);
             Ok(zone)
         }
         Err(_) => {
-            info!(log, "Zone for {} is not running: Booting", filesystem_name);
+            info!(log, "Zone for {} is not running: Booting", dataset_name);
             let (nic, zname) = configure_zone(
                 log,
                 vnic_id_allocator,
                 partition_info,
-                filesystem_name,
+                dataset_name,
             )?;
             RunningZone::boot(log, zname, nic, partition_info.port)
                 .await
@@ -145,7 +152,7 @@ fn configure_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
     partition_info: &PartitionInfo<'_>,
-    filesystem_name: &str,
+    dataset_name: &str,
 ) -> Result<(Vnic, String), Error> {
     let physical_dl = Dladm::find_physical()?;
     let nic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
@@ -168,7 +175,7 @@ fn configure_zone(
             zone::Fs {
                 ty: "zfs".to_string(),
                 dir: partition_info.data_directory.to_string(),
-                special: filesystem_name.to_string(),
+                special: dataset_name.to_string(),
                 options: vec!["rw".to_string()],
                 ..Default::default()
             },
@@ -217,12 +224,12 @@ struct StorageWorker {
 }
 
 impl StorageWorker {
-    // Idempotently ensure the named filesystem exists with a UUID.
+    // Idempotently ensure the named dataset exists as a filesystem with a UUID.
     //
-    // Returns the UUID attached to the ZFS filesystem
-    fn ensure_filesystem_with_id(fs_name: &str) -> Result<Uuid, Error> {
+    // Returns the UUID attached to the ZFS filesystem.
+    fn ensure_dataset_with_id(fs_name: &str) -> Result<Uuid, Error> {
         Zfs::ensure_filesystem(&fs_name, Mountpoint::Legacy)?;
-        // Ensure the filesystem has a usable UUID.
+        // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 return Ok(id);
@@ -236,9 +243,9 @@ impl StorageWorker {
     // Formats a partition within a zpool, starting a zone for it.
     // Returns the UUID attached to the underlying ZFS partition.
     //
-    // For now, we place all "expected" filesystems on each new zpool
+    // For now, we place all "expected" datasets on each new zpool
     // we see. The decision of "whether or not to actually use the
-    // filesystem" is a decision left to both the bootstrapping protocol
+    // dataset" is a decision left to both the bootstrapping protocol
     // and Nexus.
     //
     // If we had a better signal - from the bootstrapping system - about
@@ -251,8 +258,8 @@ impl StorageWorker {
     ) -> Result<Uuid, Error> {
         let name = format!("{}/{}", pool.info.name(), partition.name);
 
-        info!(&self.log, "Ensuring filesystem {} exists", name);
-        let id = StorageWorker::ensure_filesystem_with_id(&name)?;
+        info!(&self.log, "Ensuring dataset {} exists", name);
+        let id = StorageWorker::ensure_dataset_with_id(&name)?;
 
         info!(&self.log, "Creating zone for {}", name);
         let zone = ensure_running_zone(

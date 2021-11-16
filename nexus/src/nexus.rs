@@ -657,6 +657,13 @@ impl Nexus {
         );
         let disk_created = self.db_datastore.project_create_disk(disk).await?;
 
+        // TODO: Here, we should ensure the disk is backed by appropriate
+        // regions. This is blocked behind actually having Crucible agents
+        // running in zones for dedicated zpools.
+        //
+        // TODO: Performing this operation, alongside "create" and "update
+        // state from create to detach", should be executed in a Saga.
+
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
          * transition from "Creating" to "Detached".  For instances, the
