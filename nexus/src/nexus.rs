@@ -7,6 +7,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
@@ -55,6 +56,7 @@ use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::OximeterInfo;
+use omicron_common::api::internal::nexus::ZpoolPutRequest;
 use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
@@ -207,11 +209,35 @@ impl Nexus {
         address: SocketAddr,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
-
-        // Insert the sled into the database.
         let sled = db::model::Sled::new(id, address);
         self.db_datastore.sled_upsert(sled).await?;
+        Ok(())
+    }
 
+    /// Upserts a Zpool into the database, updating it if it already exists.
+    pub async fn upsert_zpool(
+        &self,
+        id: Uuid,
+        sled_id: Uuid,
+        info: ZpoolPutRequest,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
+        let zpool = db::model::Zpool::new(id, sled_id, &info);
+        self.db_datastore.zpool_upsert(zpool).await?;
+        Ok(())
+    }
+
+    /// Upserts a dataset into the database, updating it if it already exists.
+    pub async fn upsert_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddr,
+        kind: DatasetKind,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string());
+        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }
 
@@ -630,6 +656,13 @@ impl Nexus {
             db::model::DiskRuntimeState::new(),
         );
         let disk_created = self.db_datastore.project_create_disk(disk).await?;
+
+        // TODO: Here, we should ensure the disk is backed by appropriate
+        // regions. This is blocked behind actually having Crucible agents
+        // running in zones for dedicated zpools.
+        //
+        // TODO: Performing this operation, alongside "create" and "update
+        // state from create to detach", should be executed in a Saga.
 
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
