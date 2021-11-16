@@ -85,6 +85,12 @@ CREATE TABLE omicron.public.Zpool (
     total_size INT NOT NULL
 );
 
+CREATE TYPE omicron.public.dataset_kind AS ENUM (
+  'crucible',
+  'cockroach',
+  'clickhouse'
+);
+
 /*
  * A dataset of allocated space within a zpool.
  */
@@ -103,9 +109,7 @@ CREATE TABLE omicron.public.Dataset (
     ip INET NOT NULL,
     port INT4 NOT NULL,
 
-    /* Indicates which type of dataset is being used */
-    flavor TEXT NOT NULL
-    /* We are eyeing "Crucible datasets" to start, but these could be used for e.g. clickhouse */
+    kind omicron.public.dataset_kind NOT NULL
 );
 
 /*

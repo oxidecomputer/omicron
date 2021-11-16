@@ -183,7 +183,7 @@ table! {
         ip -> Inet,
         port -> Int4,
 
-        flavor -> Text,
+        kind -> crate::db::model::DatasetKindEnum,
     }
 }
 

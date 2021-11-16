@@ -24,14 +24,14 @@ mock! {
         ) -> Result<(), Error>;
         pub async fn zpool_put(
             &self,
-            zpool_id: &Uuid,
             sled_id: &Uuid,
+            zpool_id: &Uuid,
             info: &ZpoolPutRequest,
         ) -> Result<ZpoolPutResponse, Error>;
         pub async fn dataset_put(
             &self,
-            dataset_id: &Uuid,
             zpool_id: &Uuid,
+            dataset_id: &Uuid,
             info: &DatasetPutRequest,
         ) -> Result<DatasetPutResponse, Error>;
     }

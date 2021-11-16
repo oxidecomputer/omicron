@@ -145,7 +145,7 @@ async fn dataset_put(
             path.dataset_id,
             path.zpool_id,
             info.address,
-            info.flavor.into(),
+            info.kind.into(),
         )
         .await?;
     Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))

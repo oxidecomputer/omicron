@@ -63,7 +63,10 @@ impl Server {
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
-            debug!(log, "contacting server nexus");
+            info!(
+                log,
+                "contacting server nexus, registering sled: {}", config.id
+            );
             nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,

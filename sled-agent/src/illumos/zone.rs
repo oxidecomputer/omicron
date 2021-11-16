@@ -9,8 +9,8 @@ use crate::illumos::dladm::VNIC_PREFIX_CONTROL;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
-const PROPOLIS_BASE_ZONE: &str = "propolis_base";
-const STORAGE_BASE_ZONE: &str = "storage_base";
+const PROPOLIS_BASE_ZONE: &str = "oxz_propolis_base";
+const STORAGE_BASE_ZONE: &str = "oxz_storage_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
 pub const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
 

@@ -68,15 +68,15 @@ pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
-pub enum DatasetFlavor {
+pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
 }
 
-impl fmt::Display for DatasetFlavor {
+impl fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use DatasetFlavor::*;
+        use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
             Cockroach => "cockroach",
@@ -86,31 +86,31 @@ impl fmt::Display for DatasetFlavor {
     }
 }
 
-impl FromStr for DatasetFlavor {
+impl FromStr for DatasetKind {
     type Err = crate::api::external::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetFlavor::*;
+        use DatasetKind::*;
         match s {
             "crucible" => Ok(Crucible),
             "cockroach" => Ok(Cockroach),
             "clickhouse" => Ok(Clickhouse),
             _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset flavor: {}", s),
+                internal_message: format!("Unknown dataset kind: {}", s),
             }),
         }
     }
 }
 
 /// Describes a dataset within a pool.
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
     pub address: SocketAddr,
 
     /// Type of dataset being inserted.
-    pub flavor: DatasetFlavor,
+    pub kind: DatasetKind,
 }
 
 /// Describes which ZFS properties should be set for a particular allocated

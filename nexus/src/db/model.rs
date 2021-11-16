@@ -22,10 +22,70 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
+
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Newtype wrapper around [external::Name].
 #[derive(
@@ -385,38 +445,24 @@ impl DatastoreCollection<Dataset> for Zpool {
     type CollectionIdColumn = dataset::dsl::pool_id;
 }
 
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Deserialize)]
-#[sql_type = "sql_types::Text"]
-#[serde(transparent)]
-#[repr(transparent)]
-pub struct DatasetFlavor(internal::nexus::DatasetFlavor);
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "dataset_kind", type_schema = "public")]
+    pub struct DatasetKindEnum;
 
-NewtypeFrom! { () pub struct DatasetFlavor(internal::nexus::DatasetFlavor); }
-NewtypeDeref! { () pub struct DatasetFlavor(internal::nexus::DatasetFlavor); }
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "DatasetKindEnum"]
+    pub struct DatasetKind(pub internal::nexus::DatasetKind);
 
-impl<DB> ToSql<sql_types::Text, DB> for DatasetFlavor
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
-    }
-}
+    // Enum values
+    Crucible => b"crucible"
+    Cockroach => b"cockroach"
+    Clickhouse => b"clickhouse"
+);
 
-impl<DB> FromSql<sql_types::Text, DB> for DatasetFlavor
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let flavor =
-            DatasetFlavor(internal::nexus::DatasetFlavor::from_str(&s)?);
-        Ok(flavor)
+impl From<internal::nexus::DatasetKind> for DatasetKind {
+    fn from(k: internal::nexus::DatasetKind) -> Self {
+        Self(k)
     }
 }
 
@@ -437,7 +483,7 @@ pub struct Dataset {
     ip: ipnetwork::IpNetwork,
     port: i32,
 
-    flavor: DatasetFlavor,
+    kind: DatasetKind,
 }
 
 impl Dataset {
@@ -445,7 +491,7 @@ impl Dataset {
         id: Uuid,
         pool_id: Uuid,
         addr: SocketAddr,
-        flavor: DatasetFlavor,
+        kind: DatasetKind,
     ) -> Self {
         Self {
             identity: DatasetIdentity::new(id),
@@ -454,7 +500,7 @@ impl Dataset {
             pool_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
-            flavor,
+            kind,
         }
     }
 
@@ -1146,67 +1192,6 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
             time_modified: Utc::now(),
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
-        }
-    }
-}
-
-/// This macro implements serialization and deserialization of an enum type
-/// from our database into our model types.
-/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
-/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
-macro_rules! impl_enum_type {
-    (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
-
-        $(#[$model_meta:meta])*
-        pub struct $model_type:ident(pub $ext_type:ty);
-        $($enum_item:ident => $sql_value:literal)+
-    ) => {
-
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
-        $(#[$model_meta])*
-        pub struct $model_type(pub $ext_type);
-
-        impl<DB> ToSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend,
-        {
-            fn to_sql<W: std::io::Write>(
-                &self,
-                out: &mut serialize::Output<W, DB>,
-            ) -> serialize::Result {
-                match self.0 {
-                    $(
-                    <$ext_type>::$enum_item => {
-                        out.write_all($sql_value)?
-                    }
-                    )*
-                }
-                Ok(IsNull::No)
-            }
-        }
-
-        impl<DB> FromSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend + for<'a> BinaryRawValue<'a>,
-        {
-            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-                match DB::as_bytes(bytes) {
-                    $(
-                    $sql_value => {
-                        Ok($model_type(<$ext_type>::$enum_item))
-                    }
-                    )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
-                    }
-                }
-            }
         }
     }
 }

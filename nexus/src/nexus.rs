@@ -7,7 +7,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
-use crate::db::model::DatasetFlavor;
+use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
@@ -233,10 +233,10 @@ impl Nexus {
         id: Uuid,
         zpool_id: Uuid,
         address: SocketAddr,
-        flavor: DatasetFlavor,
+        kind: DatasetKind,
     ) -> Result<(), Error> {
         info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string());
-        let dataset = db::model::Dataset::new(id, zpool_id, address, flavor);
+        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

@@ -11,11 +11,10 @@ extern crate slog;
 
 // Tests the "normal" case of zpool_put: inserting a known Zpool.
 //
-// This will typically be invoked by the Sled Agent, after
-// performing inventory.
+// This will typically be invoked by the Sled Agent, after performing inventory.
 #[tokio::test]
 async fn test_zpool_put_success() {
-    let cptestctx = test_setup("test_zpools").await;
+    let cptestctx = test_setup("test_zpool_put_success").await;
     let client = &cptestctx.internal_client;
 
     let zpool_id = Uuid::new_v4();
@@ -36,11 +35,12 @@ async fn test_zpool_put_success() {
     cptestctx.teardown().await;
 }
 
-// Tests a failure case of zpool_put: Inserting a zpool into a
-// sled agent that does not exist.
+// Tests a failure case of zpool_put: Inserting a zpool into a sled agent that
+// does not exist.
 #[tokio::test]
 async fn test_zpool_put_bad_sled_returns_not_found() {
-    let cptestctx = test_setup("test_zpools").await;
+    let cptestctx =
+        test_setup("test_zpool_put_bad_sled_returns_not_found").await;
     let client = &cptestctx.internal_client;
 
     // A sled with the "nil" UUID should not exist.

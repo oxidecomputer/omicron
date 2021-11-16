@@ -498,7 +498,7 @@
           "value"
         ]
       },
-      "DatasetFlavor": {
+      "DatasetKind": {
         "description": "Describes the purpose of the dataset.",
         "type": "string",
         "enum": [
@@ -515,18 +515,18 @@
             "description": "Address on which a service is responding to requests for the dataset.",
             "type": "string"
           },
-          "flavor": {
+          "kind": {
             "description": "Type of dataset being inserted.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/DatasetFlavor"
+                "$ref": "#/components/schemas/DatasetKind"
               }
             ]
           }
         },
         "required": [
           "address",
-          "flavor"
+          "kind"
         ]
       },
       "DatasetPutResponse": {

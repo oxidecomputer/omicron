@@ -197,7 +197,7 @@ impl DataStore {
                     dsl::pool_id.eq(excluded(dsl::id)),
                     dsl::ip.eq(excluded(dsl::ip)),
                     dsl::port.eq(excluded(dsl::port)),
-                    dsl::flavor.eq(excluded(dsl::flavor)),
+                    dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
         .insert_and_get_result_async(self.pool())

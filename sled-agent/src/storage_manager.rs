@@ -14,12 +14,11 @@ use futures::StreamExt;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use omicron_common::nexus_client::types::{
-    DatasetFlavor, DatasetPutRequest, ZpoolPutRequest,
+    DatasetKind, DatasetPutRequest, ZpoolPutRequest,
 };
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -68,18 +67,12 @@ pub enum Error {
     Timeout(String),
 }
 
-/// A ZFS filesystem dataset within a zpool.
-#[allow(dead_code)]
-struct Filesystem {
-    name: String,
-    address: SocketAddr,
-}
-
 /// A ZFS storage pool.
 struct Pool {
     id: Uuid,
     info: ZpoolInfo,
-    filesystems: HashMap<Uuid, Filesystem>,
+    // ZFS filesytem UUID -> Zone.
+    zones: HashMap<Uuid, RunningZone>,
 }
 
 impl Pool {
@@ -92,11 +85,15 @@ impl Pool {
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
         let id: Uuid = info.name().parse().map_err(|e| Error::Parse(e))?;
-        Ok(Pool { id, info, filesystems: HashMap::new() })
+        Ok(Pool { id, info, zones: HashMap::new() })
     }
 
-    fn add_filesystem(&mut self, id: Uuid, fs: Filesystem) {
-        self.filesystems.insert(id, fs);
+    fn add_zone(&mut self, id: Uuid, zone: RunningZone) {
+        self.zones.insert(id, zone);
+    }
+
+    fn get_zone(&self, id: Uuid) -> Option<&RunningZone> {
+        self.zones.get(&id)
     }
 
     fn id(&self) -> Uuid {
@@ -112,7 +109,7 @@ struct PartitionInfo<'a> {
     data_directory: &'a str,
     svc_directory: &'a str,
     port: u16,
-    flavor: DatasetFlavor,
+    kind: DatasetKind,
 }
 
 async fn ensure_running_zone(
@@ -196,7 +193,7 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         svc_directory: CRUCIBLE_SVC_DIRECTORY,
         // TODO: Ensure crucible agent uses this port
         port: 8080,
-        flavor: DatasetFlavor::Crucible,
+        kind: DatasetKind::Crucible,
     },
     PartitionInfo {
         name: "cockroach",
@@ -205,7 +202,7 @@ const PARTITIONS: &[PartitionInfo<'static>] = &[
         svc_directory: CRUCIBLE_SVC_DIRECTORY, // XXX Replace me
         // TODO: Ensure cockroach uses this port
         port: 8080,
-        flavor: DatasetFlavor::Cockroach,
+        kind: DatasetKind::Cockroach,
     },
 ];
 
@@ -221,6 +218,8 @@ struct StorageWorker {
 
 impl StorageWorker {
     // Idempotently ensure the named filesystem exists with a UUID.
+    //
+    // Returns the UUID attached to the ZFS filesystem
     fn ensure_filesystem_with_id(fs_name: &str) -> Result<Uuid, Error> {
         Zfs::ensure_filesystem(&fs_name, Mountpoint::Legacy)?;
         // Ensure the filesystem has a usable UUID.
@@ -235,6 +234,7 @@ impl StorageWorker {
     }
 
     // Formats a partition within a zpool, starting a zone for it.
+    // Returns the UUID attached to the underlying ZFS partition.
     //
     // For now, we place all "expected" filesystems on each new zpool
     // we see. The decision of "whether or not to actually use the
@@ -248,7 +248,7 @@ impl StorageWorker {
         &self,
         pool: &mut Pool,
         partition: &PartitionInfo<'static>,
-    ) -> Result<(Uuid, RunningZone), Error> {
+    ) -> Result<Uuid, Error> {
         let name = format!("{}/{}", pool.info.name(), partition.name);
 
         info!(&self.log, "Ensuring filesystem {} exists", name);
@@ -264,8 +264,8 @@ impl StorageWorker {
         .await?;
 
         info!(&self.log, "Created zone with address {}", zone.address());
-        pool.add_filesystem(id, Filesystem { name, address: zone.address() });
-        Ok((id, zone))
+        pool.add_zone(id, zone);
+        Ok(id)
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
@@ -309,8 +309,10 @@ impl StorageWorker {
                     // Initialize all sled-local state.
                     let mut partitions = vec![];
                     for partition in PARTITIONS {
-                        let (id, zone) = self.initialize_partition(pool, partition).await?;
-                        partitions.push((id, zone.address(), partition.flavor.clone()));
+                        let id = self.initialize_partition(pool, partition).await?;
+                        // Unwrap safety: We just put this zone in the pool.
+                        let zone = pool.get_zone(id).unwrap();
+                        partitions.push((id, zone.address(), partition.kind.clone()));
                     }
 
                     // Notify Nexus of the zpool and all datasets within.
@@ -323,17 +325,17 @@ impl StorageWorker {
                         let partitions = partitions.clone();
                         async move {
                             nexus
-                                .zpool_put(&pool_id, &sled_id, &zpool_request)
+                                .zpool_put(&sled_id, &pool_id, &zpool_request)
                                 .await
                                 .map_err(backoff::BackoffError::Transient)?;
 
-                            for (id, address, flavor) in partitions {
+                            for (id, address, kind) in partitions {
                                 let request = DatasetPutRequest {
                                     address: address.to_string(),
-                                    flavor,
+                                    kind,
                                 };
                                 nexus
-                                    .dataset_put(&id, &pool_id, &request)
+                                    .dataset_put(&pool_id, &id, &request)
                                     .await
                                     .map_err(backoff::BackoffError::Transient)?;
                             }
@@ -382,7 +384,6 @@ impl StorageManager {
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
-        info!(log, "SLED AGENT: Creating storage manager");
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
         let mut worker = StorageWorker {
