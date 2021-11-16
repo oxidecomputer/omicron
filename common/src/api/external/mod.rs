@@ -1701,12 +1701,12 @@ impl TryFrom<String> for L4PortRange {
     }
 }
 
-impl Into<String> for L4PortRange {
-    fn into(self) -> String {
-        if self.first == self.last {
-            self.first.to_string()
+impl From<L4PortRange> for String {
+    fn from(ports: L4PortRange) -> String {
+        if ports.first == ports.last {
+            ports.first.to_string()
         } else {
-            format!("{}-{}", self.first, self.last)
+            format!("{}-{}", ports.first, ports.last)
         }
     }
 }
