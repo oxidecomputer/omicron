@@ -1387,7 +1387,9 @@ impl TryFrom<String> for RouteTarget {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteTarget::try_from(value.parse::<NetworkTarget>().unwrap())
+        RouteTarget::try_from(
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
+        )
     }
 }
 
@@ -1472,7 +1474,9 @@ impl TryFrom<String> for RouteDestination {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteDestination::try_from(value.parse::<NetworkTarget>().unwrap())
+        RouteDestination::try_from(
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
+        )
     }
 }
 

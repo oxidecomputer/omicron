@@ -370,7 +370,7 @@ CREATE TABLE omicron.public.vpc_router (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    kind vpc_router_kind NOT NULL,
+    kind omicron.public.vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL,
     rcgen INT NOT NULL
 );
@@ -450,7 +450,7 @@ CREATE TABLE omicron.public.router_route (
     time_deleted TIMESTAMPTZ,
 
     router_id UUID NOT NULL,
-    kind router_route_kind NOT NULL,
+    kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
     destination STRING(128) NOT NULL
 );
