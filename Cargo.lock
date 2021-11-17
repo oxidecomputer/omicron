@@ -2127,7 +2127,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
+source = "git+https://github.com/oxidecomputer/progenitor#f53d122406fa27f48728330b20c96147881bb296"
 dependencies = [
  "anyhow",
  "getopts",
@@ -2141,7 +2141,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
+source = "git+https://github.com/oxidecomputer/progenitor#f53d122406fa27f48728330b20c96147881bb296"
 dependencies = [
  "anyhow",
  "convert_case",
@@ -2162,7 +2162,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
+source = "git+https://github.com/oxidecomputer/progenitor#f53d122406fa27f48728330b20c96147881bb296"
 dependencies = [
  "openapiv3 1.0.0-beta.5",
  "proc-macro2",
