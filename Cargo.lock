@@ -1534,6 +1534,7 @@ dependencies = [
  "serial_test",
  "slog",
  "smf",
+ "socket2",
  "structopt",
  "subprocess",
  "tar",

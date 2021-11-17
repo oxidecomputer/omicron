@@ -2,7 +2,7 @@
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::Error as ExternalError;
 use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::packaging::sha256_digest;
 
@@ -37,6 +37,12 @@ pub enum BootstrapError {
     Api(#[from] anyhow::Error),
 }
 
+impl From<BootstrapError> for ExternalError {
+    fn from(err: BootstrapError) -> Self {
+        Self::internal_error(&err.to_string())
+    }
+}
+
 /// The entity responsible for bootstrapping an Oxide rack.
 pub struct Agent {
     /// Debug log
@@ -52,7 +58,7 @@ impl Agent {
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
-    ) -> Result<ShareResponse, Error> {
+    ) -> Result<ShareResponse, BootstrapError> {
         // TODO-correctness: Validate identity, return whatever
         // information is necessary to establish trust quorum.
         //

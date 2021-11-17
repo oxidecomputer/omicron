@@ -4,4 +4,5 @@ pub mod agent;
 mod client;
 pub mod config;
 mod http_entrypoints;
+mod multicast;
 pub mod server;
