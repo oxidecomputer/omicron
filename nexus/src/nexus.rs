@@ -426,16 +426,18 @@ impl Nexus {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(pagparams).await
+        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
     }
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(pagparams).await
+        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {

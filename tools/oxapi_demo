@@ -160,7 +160,7 @@ function mkjson
 function cmd_organizations_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /organizations
+	do_curl_authn /organizations
 }
 
 function cmd_organization_create_demo

@@ -183,7 +183,7 @@ impl AuthenticatedActor {
      * checks need to do an extra database query to load the fleet_id from the
      * Organization.
      */
-    fn has_role_fleet(&self, _fleet: &Fleet, role: &str) -> bool {
+    fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
         self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
     }
 }
