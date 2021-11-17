@@ -58,6 +58,9 @@ fn session_cookie_value(token: &str, max_age: Duration) -> String {
     )
 }
 
+// for now this is just for testing purposes, and the username and password are
+// ignored. we will probably end up with a real username/password login
+// endpoint, but I think it will only be for use while setting up the rack
 #[endpoint {
      method = POST,
      path = "/login",
