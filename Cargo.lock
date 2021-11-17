@@ -1608,14 +1608,13 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "791f5f66415ca5d11fb29e8dcf0b923adff5b2c9bd1cf54621777494c8f8f688"
+checksum = "d45518fa48878a21efa793483d3c5a3dd5f8f98026fc3dade65104d8b78bb535"
 dependencies = [
  "indexmap",
  "serde",
  "serde_json",
- "serde_yaml",
 ]
 
 [[package]]
@@ -2128,11 +2127,11 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
 dependencies = [
  "anyhow",
  "getopts",
- "openapiv3 1.0.0-beta.2",
+ "openapiv3 1.0.0-beta.5",
  "progenitor-impl",
  "progenitor-macro",
  "serde",
@@ -2142,13 +2141,13 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
 dependencies = [
  "anyhow",
  "convert_case",
  "getopts",
  "indexmap",
- "openapiv3 1.0.0-beta.2",
+ "openapiv3 1.0.0-beta.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -2163,9 +2162,9 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#a3fbbc06bad0ee19de8256e4bad853da9688e198"
+source = "git+https://github.com/oxidecomputer/progenitor#dd9d1e8846a0cd3eb651ad9bfc7545d364049485"
 dependencies = [
- "openapiv3 1.0.0-beta.2",
+ "openapiv3 1.0.0-beta.5",
  "proc-macro2",
  "progenitor-impl",
  "quote",
@@ -3512,8 +3511,8 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 
 [[package]]
 name = "typify"
-version = "0.0.2"
-source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+version = "0.0.6-dev"
+source = "git+https://github.com/oxidecomputer/typify#58bfcd02a2cd74bff047e9e8ad6e4f2b4f84f3af"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -3521,12 +3520,13 @@ dependencies = [
 
 [[package]]
 name = "typify-impl"
-version = "0.0.2"
-source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+version = "0.0.6-dev"
+source = "git+https://github.com/oxidecomputer/typify#58bfcd02a2cd74bff047e9e8ad6e4f2b4f84f3af"
 dependencies = [
  "convert_case",
  "proc-macro2",
  "quote",
+ "rustfmt-wrapper",
  "schemars",
  "serde_json",
  "syn",
@@ -3535,8 +3535,8 @@ dependencies = [
 
 [[package]]
 name = "typify-macro"
-version = "0.0.2"
-source = "git+https://github.com/oxidecomputer/typify#69bc7f3e42fdeee40229fb8305773377b1d5e4d7"
+version = "0.0.6-dev"
+source = "git+https://github.com/oxidecomputer/typify#58bfcd02a2cd74bff047e9e8ad6e4f2b4f84f3af"
 dependencies = [
  "proc-macro2",
  "quote",
