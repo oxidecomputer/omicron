@@ -155,12 +155,42 @@ pub struct AuthenticatedActor {
     actor_id: Uuid,
 }
 
+impl AuthenticatedActor {
+    /**
+     * Returns whether this actor has the given role for the given resource
+     */
+    fn has_role_resource(
+        &self,
+        _resource_type: ResourceType,
+        _resource_id: Uuid,
+        _role: &str,
+    ) -> bool {
+        /*
+         * TODO We will probably want to either pre-load the list of roles that
+         * the actor has for this resource or else at this point we will go
+         * fetch them from the database.
+         */
+        self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
+    }
+
+    /**
+     * Returns whether this actor has the given role for a fleet
+     */
+    /*
+     * XXX This is special-cased only because Fleets don't exist in the database
+     * and do not have an id.  It might be a good idea to put them in the
+     * database with their own id, though it might mean that lots of authz
+     * checks need to do an extra database query to load the fleet_id from the
+     * Organization.
+     */
+    fn has_role_fleet(&self, _fleet: &Fleet, role: &str) -> bool {
+        self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
+    }
+}
+
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .add_attribute_getter("is_test_user", |a: &AuthenticatedActor| {
-                a.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
-            })
             .set_equality_check(
                 |a1: &AuthenticatedActor, a2: &AuthenticatedActor| a1 == a2,
             )
@@ -184,9 +214,20 @@ impl From<&authn::Actor> for AuthenticatedActor {
 //
 /// Represents the whole Oxide fleet to Polar (used essentially to mean
 /// "global").  See RFD 24.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, oso::PolarClass)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Fleet;
 pub const FLEET: Fleet = Fleet;
+
+impl oso::PolarClass for Fleet {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+            "has_role",
+            |fleet: &Fleet, actor: AuthenticatedActor, role: String| {
+                actor.has_role_fleet(fleet, &role)
+            },
+        )
+    }
+}
 
 /// Wraps [`db::model::Organization`] for Polar
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -198,6 +239,16 @@ impl oso::PolarClass for Organization {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .set_equality_check(|a1, a2| a1 == a2)
+            .add_method(
+                "has_role",
+                |o: &Organization, actor: AuthenticatedActor, role: String| {
+                    actor.has_role_resource(
+                        ResourceType::Organization,
+                        o.organization_id,
+                        &role,
+                    )
+                },
+            )
             .add_attribute_getter("fleet", |_: &Organization| Fleet {})
     }
 }
@@ -219,6 +270,16 @@ impl oso::PolarClass for Project {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .set_equality_check(|a1, a2| a1 == a2)
+            .add_method(
+                "has_role",
+                |p: &Project, actor: AuthenticatedActor, role: String| {
+                    actor.has_role_resource(
+                        ResourceType::Project,
+                        p.project_id,
+                        &role,
+                    )
+                },
+            )
             .add_attribute_getter("organization", |p: &Project| Organization {
                 organization_id: p.organization_id,
             })
@@ -264,6 +325,18 @@ impl oso::PolarClass for ProjectResource {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .set_equality_check(|a1, a2| a1 == a2)
+            .add_method(
+                "has_role",
+                |pr: &ProjectResource,
+                 actor: AuthenticatedActor,
+                 role: String| {
+                    actor.has_role_resource(
+                        pr.resource_type,
+                        pr.resource_id,
+                        &role,
+                    )
+                },
+            )
             .add_attribute_getter("project", |pr: &ProjectResource| Project {
                 organization_id: pr.organization_id,
                 project_id: pr.project_id,
@@ -273,6 +346,18 @@ impl oso::PolarClass for ProjectResource {
 
 /// Represents the database itself to Polar (so that we can have roles with no
 /// access to the database at all)
-#[derive(Clone, Copy, Debug, Eq, PartialEq, oso::PolarClass)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Database;
 pub const DATABASE: Database = Database;
+
+impl oso::PolarClass for Database {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().add_method(
+            "has_role",
+            |_d: &Database, _actor: AuthenticatedActor, role: String| {
+                assert_eq!(role, "user");
+                true
+            },
+        )
+    }
+}

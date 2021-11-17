@@ -135,11 +135,11 @@ mod test {
     fn test_organization() {
         let authz_privileged =
             authz_context_for_actor(TEST_USER_UUID_PRIVILEGED);
-        authz_privileged.authorize(Action::CreateOrganization, FLEET).expect(
+        authz_privileged.authorize(Action::CreateChild, FLEET).expect(
             "expected privileged user to be able to create organization",
         );
         let authz_nobody = authz_context_for_actor(TEST_USER_UUID_UNPRIVILEGED);
-        authz_nobody.authorize(Action::CreateOrganization, FLEET).expect_err(
+        authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
             "expected unprivileged user not to be able to create organization",
         );
         let authz_noauth = authz_context_noauth();

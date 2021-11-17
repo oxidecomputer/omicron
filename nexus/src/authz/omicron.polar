@@ -21,15 +21,6 @@ allow(actor: AnyActor, action: Action, resource) if
     actor.authenticated and
     has_permission(actor.authn_actor.unwrap(), action.to_perm(), resource);
 
-# For now, we hardcode some fixed actor ids and what roles they have.
-# This will eventually need to be replaced with data that comes from the
-# database.
-# NOTE: this user uuid is duplicated in authn/mod.rs.
-has_role(actor: AuthenticatedActor, _role: String, _resource: Resource) if
-    actor.is_test_user;
-
-
-
 #
 # Resources
 #
@@ -44,6 +35,7 @@ resource Database {
 }
 
 # All authenticated users have the "user" role on the database.
+# XXX This rule doesn't seem to get used for some reason.
 has_role(_actor: AuthenticatedActor, "user", _resource: Database);
 
 #
@@ -195,5 +187,5 @@ has_relation(project: Project, "parent_project", project_resource: ProjectResour
 	if project_resource.project = project;
 
 # Define role relationships
-has_role(actor: Actor, role: String, resource: Resource)
+has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 	if resource.has_role(actor, role);
