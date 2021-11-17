@@ -231,35 +231,57 @@ Here's a small demo that creates a project, creates an instance, and attaches a 
 ----
 $ ./tools/oxapi_demo
 oxapi_demo: command not specified
+usage: oxapi_demo [-A] [cmd] [args]
+
+GENERAL OPTIONS
+
+    -A        do not attempt to authenticate
+              (default behavior: use "spoof" authentication for endpoints
+              that require it)
+
+ORGANIZATIONS
+
+    organizations_list
+    organization_create_demo ORGANIZATION_NAME
+    organization_delete      ORGANIZATION_NAME
+    organization_get         ORGANIZATION_NAME
 
 PROJECTS
 
-    projects_list
-    project_create_demo    PROJECT_NAME
-    project_delete         PROJECT_NAME
-    project_get            PROJECT_NAME
-    project_list_instances PROJECT_NAME
-    project_list_disks     PROJECT_NAME
+    projects_list          ORGANIZATION_NAME
+    project_create_demo    ORGANIZATION_NAME PROJECT_NAME
+    project_delete         ORGANIZATION_NAME PROJECT_NAME
+    project_get            ORGANIZATION_NAME PROJECT_NAME
+    project_list_instances ORGANIZATION_NAME PROJECT_NAME
+    project_list_disks     ORGANIZATION_NAME PROJECT_NAME
+    project_list_vpcs      ORGANIZATION_NAME PROJECT_NAME
 
 INSTANCES
 
-    instance_create_demo PROJECT_NAME INSTANCE_NAME
-    instance_get         PROJECT_NAME INSTANCE_NAME
-    instance_delete      PROJECT_NAME INSTANCE_NAME
+    instance_create_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_get         ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_delete      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
-    instance_stop        PROJECT_NAME INSTANCE_NAME
-    instance_start       PROJECT_NAME INSTANCE_NAME
-    instance_reboot      PROJECT_NAME INSTANCE_NAME
+    instance_stop        ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_start       ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_reboot      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
-    instance_attach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_detach_disk PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_list_disks  PROJECT_NAME INSTANCE_NAME
-    instance_get_disk    PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_attach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
+    instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_get_disk    ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
 
 DISKS
 
-    disk_create_demo PROJECT_NAME DISK_NAME
-    disk_get PROJECT_NAME DISK_NAME
+    disk_create_demo ORGANIZATION_NAME PROJECT_NAME DISK_NAME
+    disk_get         ORGANIZATION_NAME PROJECT_NAME DISK_NAME
+    disk_delete      ORGANIZATION_NAME PROJECT_NAME DISK_NAME
+
+VPCS
+
+    vpc_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME
+    vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+    vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
 
 HARDWARE
 
@@ -267,165 +289,173 @@ HARDWARE
     rack_get     RACK_ID
 
     sleds_list
-    sled_get     SERVER_ID
-
-
-$ ./tools/oxapi_demo project_create_demo myproject
-++ curl -sSi http://127.0.0.1:12220/projects -X POST -T -
+    sled_get     SLED_ID
+$ ./tools/oxapi_demo organization_create_demo myorg
+++ curl -sSi http://127.0.0.1:12220/organizations -X POST -T - -H 'oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007'
 ++ json -ga
 HTTP/1.1 100 Continue
 
 HTTP/1.1 201 Created
 content-type: application/json
-x-request-id: 6e357d79-dc11-4418-8f9d-3c50fce13027
-content-length: 196
-date: Wed, 27 May 2020 00:45:03 GMT
+x-request-id: 60ffbc0b-212a-4ffd-84f0-39aeb4b3b772
+content-length: 194
+date: Wed, 17 Nov 2021 01:43:52 GMT
 
 {
-  "id": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "id": "dbaf046f-1c05-4b6a-a749-5111a8cd9aa1",
+  "name": "myorg",
+  "description": "an organization called myorg",
+  "timeCreated": "2021-11-17T01:43:52.322629Z",
+  "timeModified": "2021-11-17T01:43:52.322629Z"
+}
+$ ./tools/oxapi_demo project_create_demo myorg myproject
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects -X POST -T -
+++ json -ga
+HTTP/1.1 100 Continue
+
+HTTP/1.1 201 Created
+content-type: application/json
+x-request-id: bea0ba10-2916-473c-b3e4-461984b85c6b
+content-length: 252
+date: Wed, 17 Nov 2021 01:44:01 GMT
+
+{
+  "id": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "name": "myproject",
   "description": "a project called myproject",
-  "timeCreated": "2020-05-27T00:45:03.563996Z",
-  "timeModified": "2020-05-27T00:45:03.563996Z"
+  "timeCreated": "2021-11-17T01:44:01.933615Z",
+  "timeModified": "2021-11-17T01:44:01.933615Z",
+  "organizationId": "dbaf046f-1c05-4b6a-a749-5111a8cd9aa1"
 }
-
-
-$ ./tools/oxapi_demo instance_create_demo myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances -X POST -T -
+$ ./tools/oxapi_demo instance_create_demo myorg myproject myinstance
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances -X POST -T -
 ++ json -ga
 HTTP/1.1 100 Continue
 
 HTTP/1.1 201 Created
 content-type: application/json
-x-request-id: ec65473d-7c0f-462d-a0cb-2e35fabb6533
-content-length: 388
-date: Wed, 27 May 2020 00:45:24 GMT
+x-request-id: 3d07dfa2-efda-4085-ac9f-9e6bd3040997
+content-length: 377
+date: Wed, 17 Nov 2021 01:45:07 GMT
 
 {
-  "id": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98",
   "name": "myinstance",
   "description": "an instance called myinstance",
-  "timeCreated": "2020-05-27T00:45:24.784729Z",
-  "timeModified": "2020-05-27T00:45:24.784729Z",
-  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "timeCreated": "2021-11-17T01:45:07.606749Z",
+  "timeModified": "2021-11-17T01:45:07.606749Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "ncpus": 1,
-  "memory": 256,
-  "bootDiskSize": 1,
+  "memory": 268435456,
   "hostname": "myproject",
   "runState": "starting",
-  "timeRunStateUpdated": "2020-05-27T00:45:24.785445Z"
+  "timeRunStateUpdated": "2021-11-17T01:45:07.618960Z"
 }
-
-
-$ ./tools/oxapi_demo instance_get myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance
+$ ./tools/oxapi_demo instance_get myorg myproject myinstance
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance
 ++ json -ga
 HTTP/1.1 200 OK
 content-type: application/json
-x-request-id: c228154b-ddd1-4758-b51c-e5c0547727ba
-content-length: 387
-date: Wed, 27 May 2020 00:45:42 GMT
+x-request-id: 5870f965-06a8-41fc-967f-9021ec640ad4
+content-length: 376
+date: Wed, 17 Nov 2021 01:46:41 GMT
 
 {
-  "id": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98",
   "name": "myinstance",
   "description": "an instance called myinstance",
-  "timeCreated": "2020-05-27T00:45:24.784729Z",
-  "timeModified": "2020-05-27T00:45:24.784729Z",
-  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "timeCreated": "2021-11-17T01:45:07.606749Z",
+  "timeModified": "2021-11-17T01:45:07.606749Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "ncpus": 1,
-  "memory": 256,
-  "bootDiskSize": 1,
+  "memory": 268435456,
   "hostname": "myproject",
   "runState": "running",
-  "timeRunStateUpdated": "2020-05-27T00:45:26.291810Z"
+  "timeRunStateUpdated": "2021-11-17T01:45:09.120652Z"
 }
-
-
-$ ./tools/oxapi_demo disk_create_demo myproject mydisk
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/disks -X POST -T -
+$ ./tools/oxapi_demo disk_create_demo myorg myproject mydisk
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/disks -X POST -T -
 ++ json -ga
 HTTP/1.1 100 Continue
 
 HTTP/1.1 201 Created
 content-type: application/json
-x-request-id: e004d88f-d8cc-4721-8000-583b504a5372
-content-length: 314
-date: Wed, 27 May 2020 00:45:34 GMT
+x-request-id: f6073b9d-4b07-4eba-b8cf-55d8158785eb
+content-length: 324
+date: Wed, 17 Nov 2021 01:47:36 GMT
 
 {
-  "id": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "id": "551bbe67-3640-41c9-b968-249a136e5e31",
   "name": "mydisk",
   "description": "a disk called mydisk",
-  "timeCreated": "2020-05-27T00:45:34.119234Z",
-  "timeModified": "2020-05-27T00:45:34.119234Z",
-  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "timeCreated": "2021-11-17T01:47:36.524136Z",
+  "timeModified": "2021-11-17T01:47:36.524136Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "snapshotId": null,
   "size": 1024,
-  "state": "creating",
+  "state": {
+    "state": "creating"
+  },
   "devicePath": "/mnt/mydisk"
 }
-
-
-$ ./tools/oxapi_demo disk_get myproject mydisk
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/disks/mydisk
+$ ./tools/oxapi_demo disk_get myorg myproject mydisk
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/disks/mydisk
 ++ json -ga
 HTTP/1.1 200 OK
 content-type: application/json
-x-request-id: 09608040-f645-4f1e-941f-2f4629cdedd0
-content-length: 314
-date: Wed, 27 May 2020 00:45:50 GMT
+x-request-id: bd1083a8-67f2-407a-8d33-068906e9f2f1
+content-length: 324
+date: Wed, 17 Nov 2021 01:48:17 GMT
 
 {
-  "id": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
+  "id": "551bbe67-3640-41c9-b968-249a136e5e31",
   "name": "mydisk",
   "description": "a disk called mydisk",
-  "timeCreated": "2020-05-27T00:45:34.119234Z",
-  "timeModified": "2020-05-27T00:45:34.119234Z",
-  "projectId": "9c159daa-fdd1-402b-bc98-e1bebaeb578c",
+  "timeCreated": "2021-11-17T01:47:36.524136Z",
+  "timeModified": "2021-11-17T01:47:36.524136Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "snapshotId": null,
   "size": 1024,
-  "state": "detached",
+  "state": {
+    "state": "detached"
+  },
   "devicePath": "/mnt/mydisk"
 }
-
-
-$ ./tools/oxapi_demo instance_attach_disk myproject myinstance mydisk
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks/mydisk -X PUT -T /dev/null
+$ ./tools/oxapi_demo instance_attach_disk myorg myproject myinstance mydisk
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance/disks
+/mydisk -X PUT -T /dev/null
 ++ json -ga
 HTTP/1.1 201 Created
 content-type: application/json
-x-request-id: 933cecce-d356-4cd4-b1b2-728cecf29a45
-content-length: 214
-date: Wed, 27 May 2020 00:46:04 GMT
+x-request-id: da298038-28fc-4eb2-a283-4182859d6f33
+content-length: 205
+date: Wed, 17 Nov 2021 01:48:41 GMT
 
 {
-  "instanceName": "myinstance",
-  "instanceId": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "instanceId": "99ad2514-050c-4493-9cb9-d9ceba980a98",
+  "diskId": "551bbe67-3640-41c9-b968-249a136e5e31",
   "diskName": "mydisk",
-  "diskId": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
   "diskState": {
-    "attaching": "d58039dc-4ed3-44de-a5d4-cd4696246799"
+    "state": "attaching",
+    "instance": "99ad2514-050c-4493-9cb9-d9ceba980a98"
   }
 }
-
-
-$ ./tools/oxapi_demo instance_list_disks myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/projects/myproject/instances/myinstance/disks
+$ ./tools/oxapi_demo instance_list_disks myorg myproject myinstance
+++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance/disks
 ++ json -ga
 HTTP/1.1 200 OK
-content-type: application/x-ndjson
-x-request-id: fb3f4d2a-4992-4816-94df-1aa2c461777c
-content-length: 214
-date: Wed, 27 May 2020 00:46:11 GMT
+content-type: application/json
+x-request-id: 9f0490d5-e09e-4831-900c-d39f5f07d2c8
+content-length: 206
+date: Wed, 17 Nov 2021 01:49:10 GMT
 
 {
-  "instanceName": "myinstance",
-  "instanceId": "d58039dc-4ed3-44de-a5d4-cd4696246799",
+  "instanceId": "99ad2514-050c-4493-9cb9-d9ceba980a98",
+  "diskId": "551bbe67-3640-41c9-b968-249a136e5e31",
   "diskName": "mydisk",
-  "diskId": "bb225f2a-bba3-4d5c-9161-117b8a5b678d",
   "diskState": {
-    "attached": "d58039dc-4ed3-44de-a5d4-cd4696246799"
+    "state": "attached",
+    "instance": "99ad2514-050c-4493-9cb9-d9ceba980a98"
   }
 }
 ----
