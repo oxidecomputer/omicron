@@ -260,8 +260,8 @@ impl Nexus {
                 "n_producers" => producers.len(),
                 "collector_id" => ?oximeter_info.collector_id,
             );
-            let (client, _) = self.build_oximeter_client(
-                oximeter_info.collector_id,
+            let client = self.build_oximeter_client(
+                &oximeter_info.collector_id,
                 oximeter_info.address,
             );
             for producer in producers.into_iter() {
@@ -320,26 +320,13 @@ impl Nexus {
         .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
-    /// Return a client to the Oximeter instance with the given ID.
-    pub async fn oximeter_client(
-        &self,
-        id: Uuid,
-    ) -> Result<(OximeterClient, Uuid), Error> {
-        let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
-        let address = SocketAddr::new(
-            oximeter_info.ip.ip(),
-            oximeter_info.port.try_into().unwrap(),
-        );
-        Ok(self.build_oximeter_client(oximeter_info.id, address))
-    }
-
     // Internal helper to build an Oximeter client from its ID and address (common data between
     // model type and the API type).
     fn build_oximeter_client(
         &self,
-        id: Uuid,
+        id: &Uuid,
         address: SocketAddr,
-    ) -> (OximeterClient, Uuid) {
+    ) -> OximeterClient {
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
         let client =
@@ -349,7 +336,7 @@ impl Nexus {
             "registered oximeter collector client";
             "id" => id.to_string(),
         );
-        (client, id)
+        client
     }
 
     /**
@@ -2207,7 +2194,8 @@ impl Nexus {
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
-        Ok(self.build_oximeter_client(info.id, address))
+        let id = info.id;
+        Ok((self.build_oximeter_client(&id, address), id))
     }
 
     pub async fn session_fetch(
