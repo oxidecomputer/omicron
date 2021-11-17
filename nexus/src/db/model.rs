@@ -1616,6 +1616,7 @@ pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
 
+    pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,

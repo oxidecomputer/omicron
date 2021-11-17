@@ -245,6 +245,7 @@ impl From<&omicron_common::api::external::NetworkInterface>
         Self {
             identity: (&s.identity).into(),
             ip: s.ip.to_string(),
+            instance_id: s.instance_id,
             mac: s.mac.into(),
             subnet_id: s.subnet_id,
             vpc_id: s.vpc_id,

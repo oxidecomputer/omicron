@@ -1984,6 +1984,9 @@ pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
 
+    /** The Instance to which the interface belongs. */
+    pub instance_id: Uuid,
+
     /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,
 
