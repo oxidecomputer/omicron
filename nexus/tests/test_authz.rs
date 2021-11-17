@@ -1,5 +1,7 @@
 //! Basic end-to-end tests for authorization
+use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
+use futures::Future;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, OrganizationCreateParams,
 };
@@ -25,17 +27,20 @@ extern crate slog;
 #[tokio::test]
 async fn test_authz_basic() {
     let cptestctx = test_setup("test_authz_basic").await;
+    let log = &cptestctx.logctx.log;
     let client = &cptestctx.external_client;
 
     // With no credentials, we should get back a 401 "Unauthorized" response.
     let error =
-        try_create_organization(&client, None, StatusCode::UNAUTHORIZED).await;
+        try_create_organization(log, &client, None, StatusCode::UNAUTHORIZED)
+            .await;
     assert_eq!(error.error_code, Some(String::from("Unauthorized")));
     assert_eq!(error.message.as_str(), "credentials missing or invalid");
 
     // If we provide the valid credentials of an unprivileged user, we should
     // get back a 403 "Forbidden" response.
     let error = try_create_organization(
+        log,
         &client,
         Some(omicron_nexus::authn::TEST_USER_UUID_UNPRIVILEGED),
         StatusCode::FORBIDDEN,
@@ -49,6 +54,7 @@ async fn test_authz_basic() {
     // the authentication system in general, outside the context of Nexus).
     // This one verifies that we've correctly integrated authn with Nexus.
     let error = try_create_organization(
+        &log,
         &client,
         Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR),
         StatusCode::UNAUTHORIZED,
@@ -58,6 +64,7 @@ async fn test_authz_basic() {
     assert_eq!(error.message.as_str(), "credentials missing or invalid");
 
     let error = try_create_organization(
+        &log,
         &client,
         Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS),
         StatusCode::UNAUTHORIZED,
@@ -69,29 +76,35 @@ async fn test_authz_basic() {
     cptestctx.teardown().await;
 }
 
-async fn try_create_organization(
+fn try_create_organization(
+    log: &slog::Logger,
     client: &dropshot::test_util::ClientTestContext,
     maybe_user_id: Option<&'static str>,
     expected_status: http::StatusCode,
-) -> HttpErrorResponseBody {
-    let organization_name = "a-crime-family";
+) -> impl Future<Output=HttpErrorResponseBody> {
+    let log = log.new(slog::o!());
     let input = OrganizationCreateParams {
         identity: IdentityMetadataCreateParams {
-            name: organization_name.parse().unwrap(),
+            name: "a-crime-family".parse().unwrap(),
             description: "an org".to_string(),
         },
     };
-    let uri = client.url("/organizations");
-    let mut request = hyper::Request::builder().method(Method::POST).uri(uri);
+
+    let mut builder =
+        RequestBuilder::new(client, Method::POST, "/organizations")
+            .body(Some(input))
+            .expect_status(Some(expected_status));
     if let Some(user_id) = maybe_user_id {
         let authn_header = http::HeaderValue::from_static(user_id);
-        request = request.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
+        builder = builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
     }
-    let request = request
-        .body(serde_json::to_string(&input).unwrap().into())
-        .expect("attempted to construct invalid test request");
-    client
-        .make_request_with_request(request, expected_status)
-        .await
-        .expect_err("did not expect request to succeed")
+
+    async move {
+        builder
+            .execute(&log, &hyper::Client::new())
+            .await
+            .expect("failed to make request")
+            .expect_response_body()
+            .unwrap()
+    }
 }

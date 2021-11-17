@@ -20,6 +20,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub mod resource_helpers;
+pub mod http_testing;
 
 const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
