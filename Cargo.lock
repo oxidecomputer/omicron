@@ -3,6 +3,18 @@
 version = 3
 
 [[package]]
+name = "aes"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e8b47f52ea9bae42228d07ec09eb676433d7c4ed1ebdf0f1d1c29ed446f1ab8"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures",
+ "opaque-debug 0.3.0",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -34,6 +46,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "array-init"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6945cc5422176fc5e602e590c2878d2c2acd9a4fe20a4baa7c28022521698ec6"
 
 [[package]]
 name = "ascii-canvas"
@@ -74,7 +92,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"
 dependencies = [
  "hermit-abi",
- "libc 0.2.107",
+ "libc",
  "winapi",
 ]
 
@@ -126,10 +144,20 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 dependencies = [
- "libc 0.2.107",
+ "bitflags",
+ "libc",
  "num_enum",
+]
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -152,6 +180,26 @@ name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
+
+[[package]]
+name = "bitstruct"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1b10c3912af09af44ea1dafe307edb5ed374b2a32658eb610e372270c9017b4"
+dependencies = [
+ "bitstruct_derive",
+]
+
+[[package]]
+name = "bitstruct_derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35fd19022c2b750d14eb9724c204d08ab7544570105b3b466d8a9f2f3feded27"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "block-buffer"
@@ -228,12 +276,21 @@ version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670ad68c9088c2a963aaa298cb369688cf3f9465ce5e2d4ca10e6e0098a1ce73"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "num-integer",
  "num-traits",
  "serde",
  "time 0.1.44",
  "winapi",
+]
+
+[[package]]
+name = "cipher"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
+dependencies = [
+ "generic-array 0.14.4",
 ]
 
 [[package]]
@@ -280,7 +337,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6888e10551bb93e424d8df1d07f1a8b4fceb0001a3a4b048bfc47554946f47b3"
 dependencies = [
  "core-foundation-sys",
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -295,7 +352,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95059428f66df56b63431fdb4e1947ed2190586af5c5a8a8b71122bdf5a7f469"
 dependencies = [
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -340,6 +397,77 @@ checksum = "d82cfc11ce7f2c3faef78d8a684447b40d503d9681acebed6cb728d45940c4db"
 dependencies = [
  "cfg-if",
  "lazy_static",
+]
+
+[[package]]
+name = "crucible"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+dependencies = [
+ "aes",
+ "anyhow",
+ "base64",
+ "bytes",
+ "crucible-common",
+ "crucible-protocol",
+ "crucible-scope",
+ "futures",
+ "futures-core",
+ "rand",
+ "ringbuffer",
+ "serde",
+ "serde_json",
+ "structopt",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "usdt",
+ "uuid",
+ "xts-mode",
+]
+
+[[package]]
+name = "crucible-common"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-protocol"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bytes",
+ "crucible-common",
+ "serde",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-scope"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "toml",
 ]
 
 [[package]]
@@ -424,7 +552,7 @@ dependencies = [
  "diesel_derives",
  "ipnetwork",
  "itoa",
- "libc 0.2.107",
+ "libc",
  "pq-sys",
  "r2d2",
  "serde_json",
@@ -487,7 +615,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "redox_users",
  "winapi",
 ]
@@ -501,9 +629,9 @@ checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "num_enum",
 ]
 
@@ -526,7 +654,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c193292b40e271a31b302c4b38bfddd40ba255a4"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#30662b4ac9ea71493084631f9d05e007ddf7aba9"
 dependencies = [
  "async-trait",
  "base64",
@@ -538,7 +666,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3 0.5.0",
+ "openapiv3 1.0.0-beta.5",
  "paste",
  "percent-encoding",
  "proc-macro2",
@@ -554,13 +682,14 @@ dependencies = [
  "syn",
  "tokio",
  "toml",
+ "usdt",
  "uuid",
 ]
 
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c193292b40e271a31b302c4b38bfddd40ba255a4"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#30662b4ac9ea71493084631f9d05e007ddf7aba9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -577,9 +706,9 @@ checksum = "56899898ce76aaf4a0f24d914c97ea6ed976d42fec6ad33fcbb0a1103e07b2b0"
 
 [[package]]
 name = "dtrace-parser"
-version = "0.1.10"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56feede1391d58ff85422cf52602d89b2187d4fffb18dbeac82e35a4b842cd04"
+checksum = "5bbb93fb1a0c517bf20f37caaf5d1f7d20f144c6c35a7d751ecad077b6c042e8"
 dependencies = [
  "pest",
  "pest_derive",
@@ -617,6 +746,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "erased-serde"
+version = "0.3.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3de9ad4541d99dc22b59134e7ff8dc3d6c988c89ecd7324bf10a8362b07a2afa"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "expectorate"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -645,7 +783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "975ccf83d8d9d0d84682850a38c8169027be83368805971cc4f238c2b245bc98"
 dependencies = [
  "cfg-if",
- "libc 0.2.107",
+ "libc",
  "redox_syscall",
  "winapi",
 ]
@@ -837,7 +975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fcd999463524c52659517fe2cea98493cfe485d10565e7b0fb07dbba7ad2753"
 dependencies = [
  "cfg-if",
- "libc 0.2.107",
+ "libc",
  "wasi",
 ]
 
@@ -887,7 +1025,7 @@ version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -921,7 +1059,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c731c3e10504cc8ed35cfe2f1db4c9274c3d35fa486e3b31df46f068ef3e867"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "match_cfg",
  "winapi",
 ]
@@ -1156,11 +1294,6 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.101"
-source = "git+https://github.com/rust-lang/libc.git?rev=796459785#796459785e5190a02fdf7c223fc8aa91d04306f7"
-
-[[package]]
-name = "libc"
 version = "0.2.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbe5e23404da5b4f555ef85ebed98fb4083e55a00c317800bc2a50ede9f3d219"
@@ -1254,7 +1387,7 @@ version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8067b404fe97c70829f082dec8bcf4f71225d7eaea1d8645349cb76fa06205cc"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "log",
  "miow",
  "ntapi",
@@ -1304,7 +1437,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48ba9f7719b5a0f42f338907614285fb5fd70e53858141f69898a1fb7203b24d"
 dependencies = [
  "lazy_static",
- "libc 0.2.107",
+ "libc",
  "log",
  "openssl",
  "openssl-probe",
@@ -1377,7 +1510,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05499f3756671c15885fee9034446956fff3f243d6077b91e5767df161f766b3"
 dependencies = [
  "hermit-abi",
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -1466,7 +1599,7 @@ dependencies = [
  "hyper",
  "ipnetwork",
  "lazy_static",
- "libc 0.2.107",
+ "libc",
  "macaddr",
  "newtype_derive",
  "omicron-common",
@@ -1553,7 +1686,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "libc 0.2.107",
+ "libc",
  "omicron-common",
  "postgres-protocol",
  "signal-hook",
@@ -1626,7 +1759,7 @@ dependencies = [
  "bitflags",
  "cfg-if",
  "foreign-types",
- "libc 0.2.107",
+ "libc",
  "once_cell",
  "openssl-sys",
 ]
@@ -1645,7 +1778,7 @@ checksum = "69df2d8dfc6ce3aaf44b40dec6f487d5a886516cf6879c49e98e0710f310a058"
 dependencies = [
  "autocfg",
  "cc",
- "libc 0.2.107",
+ "libc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1800,7 +1933,7 @@ checksum = "d76e8e1493bcac0d2766c42737f34458f1c8c50c0d23bcb24ea953affb273216"
 dependencies = [
  "cfg-if",
  "instant",
- "libc 0.2.107",
+ "libc",
  "redox_syscall",
  "smallvec",
  "winapi",
@@ -1834,9 +1967,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
+checksum = "0744126afe1a6dd7f394cb50a716dbe086cb06e255e53d8d0185d82828358fb5"
 
 [[package]]
 name = "percent-encoding"
@@ -2175,16 +2308,24 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 dependencies = [
+ "anyhow",
  "bhyve_api",
  "bitflags",
+ "bitstruct",
  "byteorder",
+ "crucible",
  "dladm",
+ "erased-serde",
+ "futures",
  "lazy_static",
- "libc 0.2.101",
+ "libc",
  "num_enum",
+ "serde",
+ "slog",
  "thiserror",
+ "tokio",
  "usdt",
  "viona_api",
 ]
@@ -2192,7 +2333,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 dependencies = [
  "reqwest",
  "ring",
@@ -2208,7 +2349,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 dependencies = [
  "anyhow",
  "dropshot",
@@ -2253,7 +2394,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e7573632e6454cf6b99d7aac4ccca54be06da05aca2ef7423d22d27d4d4bcd8"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "rand_chacha",
  "rand_core",
  "rand_hc",
@@ -2423,12 +2564,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3053cf52e236a3ed746dfc745aa9cacf1b791d846bdaf412f60a8d7d6e17c8fc"
 dependencies = [
  "cc",
- "libc 0.2.107",
+ "libc",
  "once_cell",
  "spin",
  "untrusted",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "ringbuffer"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72dfeba9c94fdc308dcfe165efa6855c698f317484b736605ff859c5fa81d992"
+dependencies = [
+ "array-init",
 ]
 
 [[package]]
@@ -2565,7 +2715,7 @@ dependencies = [
  "bitflags",
  "core-foundation",
  "core-foundation-sys",
- "libc 0.2.107",
+ "libc",
  "security-framework-sys",
 ]
 
@@ -2576,7 +2726,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9dd14d83160b528b7bfd66439110573efcfbe281b17fc2ca9f39f550d619c7e"
 dependencies = [
  "core-foundation-sys",
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -2799,7 +2949,7 @@ version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c98891d737e271a2954825ef19e46bd16bdb98e2746f2eec4f7a4ef7946efd1"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "signal-hook-registry",
 ]
 
@@ -2809,7 +2959,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
 dependencies = [
- "libc 0.2.107",
+ "libc",
 ]
 
 [[package]]
@@ -2819,7 +2969,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6c5d32165ff8b94e68e7b3bdecb1b082e958c22434b363482cfb89dcd6f3ff8"
 dependencies = [
  "futures-core",
- "libc 0.2.107",
+ "libc",
  "signal-hook",
  "tokio",
 ]
@@ -2912,7 +3062,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dc90fe6c7be1a323296982db1836d1ea9e47b6839496dde9a541bc496df3516"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "winapi",
 ]
 
@@ -3088,7 +3238,7 @@ version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "055cf3ebc2981ad8f0a5a17ef6652f652d87831f79fddcba2ac57bcb9a0aa407"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "winapi",
 ]
 
@@ -3134,7 +3284,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f5515d3add52e0bbdcad7b83c388bb36ba7b754dda3b5f5bc2d38640cdba5c"
 dependencies = [
  "filetime",
- "libc 0.2.107",
+ "libc",
  "xattr",
 ]
 
@@ -3145,7 +3295,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dac1c663cfc93810f88aed9b8941d48cabf856a1b111c29a40439018d870eb22"
 dependencies = [
  "cfg-if",
- "libc 0.2.107",
+ "libc",
  "rand",
  "redox_syscall",
  "remove_dir_all",
@@ -3208,6 +3358,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread-id"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fdfe0627923f7411a43ec9ec9c39c3a9b4151be313e0922042581fb6c9b717f"
+dependencies = [
+ "libc",
+ "redox_syscall",
+ "winapi",
+]
+
+[[package]]
 name = "thread_local"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3222,7 +3383,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db9e6914ab8b1ae1c260a4ae7a49b6c5611b40328a735b21862567685e73255"
 dependencies = [
- "libc 0.2.107",
+ "libc",
  "wasi",
  "winapi",
 ]
@@ -3234,7 +3395,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4752a97f8eebd6854ff91f1c1824cd6160626ac4bd44287f7f4ea2035a02a242"
 dependencies = [
  "const_fn",
- "libc 0.2.107",
+ "libc",
  "standback",
  "stdweb",
  "time-macros",
@@ -3297,7 +3458,7 @@ checksum = "588b2d10a336da58d877567cd8fb8a14b463e2104910f8132cd054b4b96e29ee"
 dependencies = [
  "autocfg",
  "bytes",
- "libc 0.2.107",
+ "libc",
  "memchr",
  "mio",
  "num_cpus",
@@ -3611,12 +3772,13 @@ dependencies = [
 
 [[package]]
 name = "usdt"
-version = "0.1.15"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dc803baf485d9d1209cfe7b851ad9ad823a8454d4610e91999930e24dc4bc7d"
+checksum = "600146386c6ecaac1e363ac8d291b218f9f538d2e9edecfdc458a5cf554c89b9"
 dependencies = [
  "dof",
  "dtrace-parser",
+ "serde",
  "usdt-attr-macro",
  "usdt-impl",
  "usdt-macro",
@@ -3624,10 +3786,11 @@ dependencies = [
 
 [[package]]
 name = "usdt-attr-macro"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7a78e124958ac049759f3ff6a86b2225c1705aa7854c83d4d9a80607dada8dd"
+checksum = "f309eda502a38b964d3bec0daef868ddbcc9c706bd22f0afd08e1db5d65e58d3"
 dependencies = [
+ "dtrace-parser",
  "proc-macro2",
  "quote",
  "serde_tokenstream",
@@ -3637,26 +3800,28 @@ dependencies = [
 
 [[package]]
 name = "usdt-impl"
-version = "0.1.10"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b995a42830dae8b4ca1233378e1eae3ccfa1ea3e9cf75f023d8d7c73b804f7e8"
+checksum = "70f91c7d6acdbb2977ad7ab465afcf2d46badd463374f121d66701cfb8987508"
 dependencies = [
  "byteorder",
  "dof",
  "dtrace-parser",
- "libc 0.2.107",
+ "libc",
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn",
  "thiserror",
+ "thread-id",
 ]
 
 [[package]]
 name = "usdt-macro"
-version = "0.1.11"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c110e4720b7173ca208da426e679a0f1f399565201f1849255e53bdf07e1ae0"
+checksum = "d1236c4f2870f6d6ce9a3b3aaf2e93eca760d5bf00f223135470a7a782369581"
 dependencies = [
  "dtrace-parser",
  "proc-macro2",
@@ -3703,7 +3868,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc0661e#bc0661eb0d0c9365bbb69450f3033baabc5b3945"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
 
 [[package]]
 name = "walkdir"
@@ -3873,7 +4038,17 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "244c3741f4240ef46274860397c7c74e50eb23624996930e484c16679633a54c"
 dependencies = [
- "libc 0.2.107",
+ "libc",
+]
+
+[[package]]
+name = "xts-mode"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75a099a2f21d48275314733f85bc43b6c6213b66394233aaea573fc7a520dcd9"
+dependencies = [
+ "byteorder",
+ "cipher",
 ]
 
 [[package]]
