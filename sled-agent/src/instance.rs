@@ -291,6 +291,8 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
+            // TODO: Actual disks need to be wired up here.
+            disks: vec![],
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
