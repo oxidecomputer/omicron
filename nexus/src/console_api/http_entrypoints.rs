@@ -183,13 +183,9 @@ async fn asset(
     assets_dir.push("tests");
     assets_dir.push("fixtures");
 
-    fn not_found() -> HttpError {
-        HttpError::for_not_found(None, "File not found".to_string())
-    }
-
-    let file = find_file(path, assets_dir).ok_or_else(not_found)?;
+    let file = find_file(path, assets_dir)?;
     let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found())?;
+        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
 
     // Derive the MIME type from the file name
     let content_type = mime_guess::from_path(&file)
@@ -202,38 +198,39 @@ async fn asset(
         .body(file_contents.into())?)
 }
 
+fn not_found(internal_msg: &str) -> HttpError {
+    HttpError::for_not_found(None, internal_msg.to_string())
+}
+
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
-fn find_file(path: Vec<String>, root_dir: PathBuf) -> Option<PathBuf> {
+fn find_file(
+    path: Vec<String>,
+    root_dir: PathBuf,
+) -> Result<PathBuf, HttpError> {
     let mut current = root_dir; // start from `root_dir`
     for segment in &path {
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
-            return None;
+            return Err(not_found("ENOTDIR"));
         }
 
         current.push(segment);
 
-        // don't follow symlinks
-        if is_symlink_or_metadata_error(&current) {
-            return None;
+        // Don't follow symlinks.
+        // Error means either the user doesn't have permission to pull
+        // metadata or the path doesn't exist.
+        let m = current.symlink_metadata().map_err(|_| not_found("ENOENT"))?;
+        if m.file_type().is_symlink() {
+            return Err(not_found("EMLINK"));
         }
     }
 
     // can't serve a directory
     if current.is_dir() {
-        return None;
+        return Err(not_found("EISDIR"));
     }
 
-    Some(current)
-}
-
-fn is_symlink_or_metadata_error(path: &PathBuf) -> bool {
-    match path.symlink_metadata() {
-        Ok(m) => m.file_type().is_symlink(),
-        // Error means either the user doesn't have permission to pull metadata
-        // or the path doesn't exist.
-        Err(_) => true,
-    }
+    Ok(current)
 }
