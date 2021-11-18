@@ -25,8 +25,8 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
-use external_api::http_entrypoints::api as external_api;
-use internal_api::http_entrypoints::api as internal_api;
+use external_api::http_entrypoints::external_api;
+use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 use slog::Logger;

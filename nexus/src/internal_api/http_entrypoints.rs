@@ -27,7 +27,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /**
  * Returns a description of the internal nexus API
  */
-pub fn api() -> NexusApiDescription {
+pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
         api.register(cpapi_instances_put)?;
