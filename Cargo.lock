@@ -144,7 +144,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 dependencies = [
  "bitflags",
  "libc",
@@ -629,7 +629,7 @@ checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 dependencies = [
  "libc",
  "num_enum",
@@ -654,7 +654,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#30662b4ac9ea71493084631f9d05e007ddf7aba9"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c7fe5d2ae94150c1b2c3d0c2844474fa2fb4c8bc"
 dependencies = [
  "async-trait",
  "base64",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.5.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#30662b4ac9ea71493084631f9d05e007ddf7aba9"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c7fe5d2ae94150c1b2c3d0c2844474fa2fb4c8bc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2308,7 +2308,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -2333,7 +2333,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 dependencies = [
  "reqwest",
  "ring",
@@ -2349,7 +2349,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 dependencies = [
  "anyhow",
  "dropshot",
@@ -3772,9 +3772,9 @@ dependencies = [
 
 [[package]]
 name = "usdt"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "600146386c6ecaac1e363ac8d291b218f9f538d2e9edecfdc458a5cf554c89b9"
+checksum = "0ede7ff58821fee096f60fd731d56f61b56883a4808a290cac15df29baf1bc50"
 dependencies = [
  "dof",
  "dtrace-parser",
@@ -3786,9 +3786,9 @@ dependencies = [
 
 [[package]]
 name = "usdt-attr-macro"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f309eda502a38b964d3bec0daef868ddbcc9c706bd22f0afd08e1db5d65e58d3"
+checksum = "8233e148b2767bf47aa1620bfe72c982da8abe2da05090c3b716f2fd1865e94d"
 dependencies = [
  "dtrace-parser",
  "proc-macro2",
@@ -3800,9 +3800,9 @@ dependencies = [
 
 [[package]]
 name = "usdt-impl"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70f91c7d6acdbb2977ad7ab465afcf2d46badd463374f121d66701cfb8987508"
+checksum = "d6e158f113f80db319e54f62c59ea4329a31190a43ed7db07578982021209014"
 dependencies = [
  "byteorder",
  "dof",
@@ -3819,9 +3819,9 @@ dependencies = [
 
 [[package]]
 name = "usdt-macro"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1236c4f2870f6d6ce9a3b3aaf2e93eca760d5bf00f223135470a7a782369581"
+checksum = "af8dae3bb94dfc25189d8566b8da97ad05003fe24346b118c697c6671b4b7d10"
 dependencies = [
  "dtrace-parser",
  "proc-macro2",
@@ -3868,7 +3868,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ae24caf#ae24caf77f4595a70233a2a98f8112aaf6b0e91f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
 
 [[package]]
 name = "walkdir"
