@@ -2,9 +2,6 @@ use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use tokio::net::UdpSocket;
 
-// TODO: 0x
-//     pub static ref IPV6: IpAddr = Ipv6Addr::new(0xFF04, 0, 0, 0, 0, 0, 0, 0x0123).into();
-
 /// Scope of an IPv6 Multicast address.
 ///
 /// Attempts to align with the unstable [`std::net::Ipv6MulticastScope`] enum.
@@ -71,11 +68,19 @@ pub fn new_ipv6_multicast_udp_listener(addr: &SocketAddrV6) -> io::Result<UdpSoc
     // sockets bound to the port."
     eprintln!("Creating listener - setting re-use");
     socket.set_reuse_address(true)?;
+
     // TODO: We can specify a more specific interface here. Should we?
     eprintln!("Creating listener - joining multi-cast");
-    socket.join_multicast_v6(addr.ip(), 0)?;
+    socket.join_multicast_v6(addr.ip(), 2)?;
     eprintln!("Creating listener - binding");
-    socket.bind(&(*addr).into())?;
+
+    // TODO: I tried binding on the input value of "addr.ip()", but doing so
+    // returns errno 22 ("Invalid Input").
+    //
+    // This may be binding to a larger address range than we want.
+    let bind_address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, addr.port(), 0, 0);
+//    let bind_address = SocketAddrV6::new(*addr.ip(), addr.port(), 0, 0);
+    socket.bind(&(bind_address).into())?;
     eprintln!("Creating listener - OK");
 
     // Convert from: socket2 -> std -> tokio
@@ -87,12 +92,13 @@ pub fn new_ipv6_multicast_udp_sender(addr: &SocketAddrV6) -> io::Result<UdpSocke
     eprintln!("Creating sender");
     let socket = new_ipv6_udp_socket(&addr)?;
     // Avoid seeing our own transmissions.
-    eprintln!("Creating sender - setting multicast loop to false");
-    socket.set_multicast_loop_v6(false)?;
+    eprintln!("Creating sender - setting multicast loop");
+    // XXX set to 'true' for testing
+    socket.set_multicast_loop_v6(true)?;
 
     // TODO: Should we pick a specific interface?
-    // socket.set_multicast_if_v6(...)?;
-    let any_interface_address = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0, 0, 0);
+    socket.set_multicast_if_v6(2)?;
+    let any_interface_address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
     eprintln!("Creating sender - binding");
     socket.bind(&any_interface_address.into())?;
     eprintln!("Creating sender - OK");
@@ -108,15 +114,47 @@ mod test {
     #[tokio::test]
     async fn test_multicast_v6() {
         let message = b"Hello World!";
-        let scope = Ipv6MulticastScope::LinkLocal.first_hextet();
+        let scope = Ipv6MulticastScope::InterfaceLocal.first_hextet();
         let address = SocketAddrV6::new(
-            Ipv6Addr::new(scope, 0, 0, 0, 0, 0, 0, 0x0123),
+            Ipv6Addr::new(scope, 0, 0, 0, 0, 0, 0, 0x1),
             7645, 0, 0
         );
 
         eprintln!("Address: {}", address);
-        let listener = new_ipv6_multicast_udp_listener(&address).unwrap();
         let sender = new_ipv6_multicast_udp_sender(&address).unwrap();
+        let listener = new_ipv6_multicast_udp_listener(&address).unwrap();
+
+
+//        let (len, sender_addr) = listener.recv_from(&mut buf).await.unwrap();
+//        assert_eq!(message.len(), sender.send_to(message, address).await.unwrap());
+
+        let echo_server_handle = tokio::task::spawn(async move {
+            let mut buf = vec![0u8; 32];
+            let (len, addr) = listener.recv_from(&mut buf).await?;
+            assert_eq!(message.len(), len);
+            Ok::<_, io::Error>(buf)
+        });
+
+        tokio::pin!(echo_server_handle);
+
+        let mut send_count = 0;
+        loop {
+            tokio::select! {
+                result = sender.send_to(message, address) => {
+                    assert_eq!(message.len(), result.unwrap());
+                    send_count += 1;
+                    if send_count > 50 {
+                        panic!("we sent 50 messages with no response");
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+                _ = &mut echo_server_handle => {
+                    eprintln!("Receiver received message");
+                    break;
+                }
+            }
+        }
+
 
 
     }
