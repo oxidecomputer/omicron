@@ -1,8 +1,5 @@
 /*!
- * Views are public lenses onto the DB models.
- *
- * Views let us define what fields from the models will be serialized out in
- * API responses.
+ * Views are response bodies, most of which are public lenses onto DB models.
  */
 
 use crate::db::identity::Resource;
