@@ -19,6 +19,7 @@ mod http_entrypoints;
 mod illumos;
 mod instance;
 mod instance_manager;
+mod params;
 pub mod server;
 mod sled_agent;
 

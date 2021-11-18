@@ -2,10 +2,10 @@
  * Simulated sled agent implementation
  */
 
+use crate::params::DiskStateRequested;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::NexusClient;

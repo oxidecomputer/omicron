@@ -52,11 +52,11 @@ use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
+use omicron_common::sled_agent_client;
 use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
@@ -1060,16 +1060,17 @@ impl Nexus {
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
-        let instance_hardware =
-            omicron_common::sled_agent_client::types::InstanceHardware {
-                runtime: omicron_common::sled_agent_client::types::InstanceRuntimeState::from(runtime),
-                nics: vec![],
-            };
+        let instance_hardware = sled_agent_client::types::InstanceHardware {
+            runtime: sled_agent_client::types::InstanceRuntimeState::from(
+                runtime,
+            ),
+            nics: vec![],
+        };
 
         let new_runtime = sa
             .instance_put(
                 &instance.id(),
-                &omicron_common::sled_agent_client::types::InstanceEnsureBody {
+                &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
                     target: requested.into(),
                 },
@@ -1266,7 +1267,9 @@ impl Nexus {
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            DiskStateRequested::Attached(*instance_id),
+            sled_agent_client::types::DiskStateRequested::Attached(
+                *instance_id,
+            ),
         )
         .await?;
         let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
@@ -1336,7 +1339,7 @@ impl Nexus {
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            DiskStateRequested::Detached,
+            sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
         Ok(())
@@ -1350,7 +1353,7 @@ impl Nexus {
         &self,
         disk: &db::model::Disk,
         sa: Arc<SledAgentClient>,
-        requested: DiskStateRequested,
+        requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
         let runtime: DiskRuntimeState = disk.runtime().into();
 
@@ -1361,9 +1364,12 @@ impl Nexus {
         let new_runtime = sa
             .disk_put(
                 &disk.id(),
-                &omicron_common::sled_agent_client::types::DiskEnsureBody {
-                    initial_runtime: omicron_common::sled_agent_client::types::DiskRuntimeState::from(runtime),
-                    target: omicron_common::sled_agent_client::types::DiskStateRequested::from(requested),
+                &sled_agent_client::types::DiskEnsureBody {
+                    initial_runtime:
+                        sled_agent_client::types::DiskRuntimeState::from(
+                            runtime,
+                        ),
+                    target: requested,
                 },
             )
             .await
