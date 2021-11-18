@@ -1450,6 +1450,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_identity",
  "async-bb8-diesel",
  "async-trait",
  "bb8",
