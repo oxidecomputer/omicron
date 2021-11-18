@@ -9,9 +9,6 @@ use omicron_common::api::external::OrganizationCreateParams;
 
 extern crate slog;
 
-// TODO: test authed/not-authed with requests to console pages instead of
-// /organizations
-
 #[tokio::test]
 async fn test_sessions() {
     let cptestctx = test_setup("test_sessions").await;
@@ -63,8 +60,7 @@ async fn test_sessions() {
         },
     };
 
-    // hitting auth-gated endpoint without session cookie 401s
-
+    // hitting auth-gated API endpoint without session cookie 401s
     let _ = external_client
         .make_request_with_body(
             Method::POST,
@@ -74,16 +70,36 @@ async fn test_sessions() {
         )
         .await;
 
-    // now make same request with cookie
+    // console pages don't 401, they 302
+    let _ = console_client
+        .make_request_with_body(
+            Method::GET,
+            "/c/whatever",
+            "".into(),
+            StatusCode::FOUND,
+        )
+        .await;
 
-    let get_orgs = hyper::Request::builder()
+    // now make same requests with cookie
+    let create_org = hyper::Request::builder()
         .header(header::COOKIE, session_token)
         .method(Method::POST)
         .uri(external_client.url("/organizations"))
         .body(serde_json::to_string(&org_params).unwrap().into())
         .expect("attempted to construct invalid test request");
     external_client
-        .make_request_with_request(get_orgs, StatusCode::CREATED)
+        .make_request_with_request(create_org, StatusCode::CREATED)
+        .await
+        .expect("failed to make request");
+
+    let get_console_page = hyper::Request::builder()
+        .header(header::COOKIE, session_token)
+        .method(Method::GET)
+        .uri(console_client.url("/c/whatever"))
+        .body("".into())
+        .expect("attempted to construct invalid test request");
+    console_client
+        .make_request_with_request(get_console_page, StatusCode::OK)
         .await
         .expect("failed to make request");
 
@@ -107,7 +123,7 @@ async fn test_sessions() {
         "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
     );
 
-    // now the same request with the same session cookie should 401 because
+    // now the same requests with the same session cookie should 401 because
     // logout also deletes the session server-side
     let request = hyper::Request::builder()
         .header(header::COOKIE, session_token)
@@ -118,6 +134,17 @@ async fn test_sessions() {
     let _ = external_client
         .make_request_with_request(request, StatusCode::UNAUTHORIZED)
         .await;
+
+    let get_console_page = hyper::Request::builder()
+        .header(header::COOKIE, session_token)
+        .method(Method::GET)
+        .uri(console_client.url("/c/whatever"))
+        .body("".into())
+        .expect("attempted to construct invalid test request");
+    console_client
+        .make_request_with_request(get_console_page, StatusCode::FOUND)
+        .await
+        .expect("failed to make request");
 
     cptestctx.teardown().await;
 }

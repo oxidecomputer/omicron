@@ -155,6 +155,8 @@ async fn console_page(
         .body("".into())?)
 }
 
+/// Return a static asset from the configured assets directory. 404 on virtually
+/// any error for now.
 #[endpoint {
      method = GET,
      path = "/assets/{path:.*}",
@@ -168,7 +170,9 @@ async fn asset(
     // we *could* auth gate the static assets but it would be kind of weird.
     // prob not necessary. one way would be to have two directories, one that
     // requires auth and one that doesn't. I'd rather not
+
     let path = path_params.into_inner().path;
+
     // TODO: make path configurable, confirm existence at startup (though it can
     // always be deleted later, so maybe confirming existence isn't that
     // important)
@@ -179,64 +183,58 @@ async fn asset(
     })?;
     assets_dir.push("tests");
     assets_dir.push("fixtures");
-    let file = find_file(path, assets_dir);
 
-    if file.is_none() {
-        return Err(HttpError::for_not_found(
-            None,
-            "file not found".to_string(),
-        ));
+    fn not_found() -> HttpError {
+        HttpError::for_not_found(None, "File not found".to_string())
     }
 
-    let file = file.unwrap();
-
-    let body = tokio::fs::read(&file)
-        .await
-        .map_err(|_| HttpError::for_bad_request(None, "EBADF".to_string()))?;
+    let file = find_file(path, assets_dir).ok_or_else(not_found)?;
+    let file_contents =
+        tokio::fs::read(&file).await.map_err(|_| not_found())?;
 
     // Derive the MIME type from the file name
-    let content_type = mime_guess::from_path(&file) // should be the actual file
+    let content_type = mime_guess::from_path(&file)
         .first()
         .map_or("text/plain".to_string(), |m| m.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, &content_type)
-        .body(body.into())?)
+        .body(file_contents.into())?)
 }
 
-// This is a bit stripped down from the dropshot example. For example, we don't
-// want to tell the user why the request failed, we just 404 on everything.
-
-// TODO: return a Result so we can at least log the problems internally. it
-// would also clean up the control flow
+/// Starting from `root_dir`, follow the segments of `path` down the file tree
+/// until we find a file (or not). Do not follow symlinks.
 fn find_file(path: Vec<String>, root_dir: PathBuf) -> Option<PathBuf> {
-    // start from `root_dir`
-    let mut current = root_dir;
-    for component in &path {
-        // The previous iteration needs to have resulted in a directory.
+    let mut current = root_dir; // start from `root_dir`
+    for segment in &path {
+        // If we hit a non-directory thing already and we still have segments
+        // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
             return None;
         }
-        // Dropshot won't ever give us dot-components.
-        assert_ne!(component, ".");
-        assert_ne!(component, "..");
-        current.push(component);
 
-        // block symlinks
-        match current.symlink_metadata() {
-            Ok(m) => {
-                if m.file_type().is_symlink() {
-                    return None;
-                }
-            }
-            Err(_) => return None,
+        current.push(segment);
+
+        // don't follow symlinks
+        if is_symlink_or_metadata_error(&current) {
+            return None;
         }
     }
-    // if we've landed on a directory, we can't serve that so it's a 404 again
+
+    // can't serve a directory
     if current.is_dir() {
         return None;
     }
 
     Some(current)
+}
+
+fn is_symlink_or_metadata_error(path: &PathBuf) -> bool {
+    match path.symlink_metadata() {
+        Ok(m) => m.file_type().is_symlink(),
+        // Error means either the user doesn't have permission to pull metadata
+        // or the path doesn't exist.
+        Err(_) => true,
+    }
 }
