@@ -70,7 +70,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /**
  * Returns a description of the external nexus API
  */
-pub fn api() -> NexusApiDescription {
+pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(organizations_get)?;
         api.register(organizations_post)?;
