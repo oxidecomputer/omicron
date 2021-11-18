@@ -97,29 +97,26 @@ impl Server {
         let pool = db::Pool::new(&config.database);
         let apictx = ServerContext::new(rack_id, ctxlog, pool, &config);
 
-        let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.dropshot_external,
             external_api(),
-            c1,
+            Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_external")),
         )
         .map_err(|error| format!("initializing external server: {}", error))?;
 
-        let c2 = Arc::clone(&apictx);
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.dropshot_internal,
             internal_api(),
-            c2,
+            Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
 
-        let c2 = Arc::clone(&apictx);
         let http_server_starter_console = dropshot::HttpServerStarter::new(
             &config.dropshot_console,
             console_api(),
-            c2,
+            Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_console")),
         )
         .map_err(|error| format!("initializing console server: {}", error))?;
