@@ -19,7 +19,9 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::env::current_dir;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -43,8 +45,10 @@ pub struct ServerContext {
     pub external_latencies: LatencyTracker,
     /** registry of metric producers */
     pub producer_registry: ProducerRegistry,
-    /** the whole config */
+    /** tunable settings needed at runtime */
     pub tunables: Tunables,
+    /** directory containing static assets for the console */
+    pub assets_directory: PathBuf,
 }
 
 pub struct Tunables {
@@ -101,6 +105,16 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
+        // TODO: currently relative to the execution dir, should this be absolute?
+        let assets_directory = current_dir()
+            .expect("could not access current directory")
+            .join(config.assets_directory.to_owned());
+        // TODO: do we want to assert this? there are no other asserts in here
+        assert!(
+            assets_directory.exists(),
+            "assets directory must exist at start time"
+        );
+
         Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
@@ -123,6 +137,7 @@ impl ServerContext {
                     config.authn.session_absolute_timeout_minutes.into(),
                 ),
             },
+            assets_directory,
         })
     }
 }

@@ -42,6 +42,8 @@ pub struct Config {
     pub dropshot_console: ConfigDropshot,
     /** Identifier for this instance of Nexus */
     pub id: uuid::Uuid,
+    /** */
+    pub assets_directory: PathBuf,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
     /** Database parameters */
@@ -259,6 +261,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            assets_directory = "tests/fixtures"
             [authn]
             schemes_external = []
             session_idle_timeout_minutes = 60
@@ -287,6 +290,7 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                assets_directory: "tests/fixtures".parse().unwrap(),
                 authn: AuthnConfig {
                     schemes_external: Vec::new(),
                     session_idle_timeout_minutes: 60,
@@ -327,6 +331,7 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            assets_directory = "tests/fixtures"
             [authn]
             schemes_external = [ "spoof", "session_cookie" ]
             session_idle_timeout_minutes = 60
@@ -365,6 +370,7 @@ mod test {
             "bad authn.schemes_external",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            assets_directory = "tests/fixtures"
             [authn]
             schemes_external = ["trust-me"]
             session_idle_timeout_minutes = 60

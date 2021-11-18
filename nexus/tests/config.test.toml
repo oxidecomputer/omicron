@@ -6,6 +6,10 @@
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
+# Directory of static assets for the console
+# NOTE: relative to <root>/nexus 
+assets_directory = "tests/fixtures"
+
 # List of authentication schemes to support.
 [authn]
 schemes_external = [ "spoof", "session_cookie" ]

@@ -5,6 +5,10 @@
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
+# Directory of static assets for the console
+# NOTE: relative to <root>/nexus 
+assets_directory = "tests/fixtures" # TODO: figure out value
+
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
 schemes_external = ["spoof"]

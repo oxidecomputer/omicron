@@ -19,7 +19,7 @@ use hyper::Body;
 use mime_guess;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::{env::current_dir, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -143,7 +143,7 @@ async fn console_page(
             return Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-                .body("".into())?);
+                .body("".into())?); // TODO: actual HTML
         }
     }
 
@@ -163,27 +163,17 @@ async fn console_page(
      unpublished = true,
  }]
 async fn asset(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     // we *could* auth gate the static assets but it would be kind of weird.
     // prob not necessary. one way would be to have two directories, one that
     // requires auth and one that doesn't. I'd rather not
 
+    let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    // TODO: make path configurable, confirm existence at startup (though it can
-    // always be deleted later, so maybe confirming existence isn't that
-    // important)
-    let mut assets_dir = current_dir().map_err(|_| {
-        HttpError::for_internal_error(
-            "couldn't pull current execution directory".to_string(),
-        )
-    })?;
-    assets_dir.push("tests");
-    assets_dir.push("fixtures");
-
-    let file = find_file(path, assets_dir)?;
+    let file = find_file(path, &apictx.assets_directory)?;
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
 
@@ -206,9 +196,9 @@ fn not_found(internal_msg: &str) -> HttpError {
 /// until we find a file (or not). Do not follow symlinks.
 fn find_file(
     path: Vec<String>,
-    root_dir: PathBuf,
+    root_dir: &PathBuf,
 ) -> Result<PathBuf, HttpError> {
-    let mut current = root_dir; // start from `root_dir`
+    let mut current = root_dir.to_owned(); // start from `root_dir`
     for segment in &path {
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
