@@ -7,6 +7,8 @@ use crate::db::schema::{
     organization, oximeter, project, rack, router_route, sled, vpc,
     vpc_firewall_rule, vpc_router, vpc_subnet,
 };
+use crate::external_api::params;
+use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, BinaryRawValue, RawValue};
@@ -386,7 +388,7 @@ pub struct Organization {
 
 impl Organization {
     /// Creates a new database Organization object.
-    pub fn new(params: external::OrganizationCreateParams) -> Self {
+    pub fn new(params: params::OrganizationCreate) -> Self {
         let id = Uuid::new_v4();
         Self {
             identity: OrganizationIdentity::new(id, params.identity),
@@ -402,12 +404,6 @@ impl DatastoreCollection<Project> for Organization {
     type CollectionIdColumn = project::dsl::organization_id;
 }
 
-impl Into<external::Organization> for Organization {
-    fn into(self) -> external::Organization {
-        external::Organization { identity: self.identity() }
-    }
-}
-
 /// Describes a set of updates for the [`Organization`] model.
 #[derive(AsChangeset)]
 #[table_name = "organization"]
@@ -417,8 +413,8 @@ pub struct OrganizationUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
-    fn from(params: external::OrganizationUpdateParams) -> Self {
+impl From<params::OrganizationUpdate> for OrganizationUpdate {
+    fn from(params: params::OrganizationUpdate) -> Self {
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
@@ -439,22 +435,10 @@ pub struct Project {
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(
-        organization_id: Uuid,
-        params: external::ProjectCreateParams,
-    ) -> Self {
+    pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
             organization_id: organization_id,
-        }
-    }
-}
-
-impl Into<external::Project> for Project {
-    fn into(self) -> external::Project {
-        external::Project {
-            identity: self.identity(),
-            organization_id: self.organization_id,
         }
     }
 }
@@ -468,8 +452,8 @@ pub struct ProjectUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::ProjectUpdateParams> for ProjectUpdate {
-    fn from(params: external::ProjectUpdateParams) -> Self {
+impl From<params::ProjectUpdate> for ProjectUpdate {
+    fn from(params: params::ProjectUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -897,7 +881,7 @@ pub struct OximeterInfo {
 }
 
 impl OximeterInfo {
-    pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
+    pub fn new(info: &internal_api::params::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
             id: info.collector_id,

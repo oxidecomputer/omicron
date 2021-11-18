@@ -17,16 +17,16 @@ mod authz;
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
-mod http_entrypoints_external;
-mod http_entrypoints_internal;
+pub mod external_api; // public for testing
+pub mod internal_api; // public for testing
 mod nexus;
 mod saga_interface;
 mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
-use http_entrypoints_external::external_api;
-use http_entrypoints_internal::internal_api;
+use external_api::http_entrypoints::external_api;
+use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
 use slog::Logger;
