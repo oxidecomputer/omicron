@@ -1,12 +1,16 @@
+use dropshot::test_util::read_string;
+use http::{header, method::Method, StatusCode};
+use hyper;
+
 pub mod common;
 use common::test_setup;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::OrganizationCreateParams;
 
-use http::{header, method::Method, StatusCode};
-use hyper;
-
 extern crate slog;
+
+// TODO: test authed/not-authed with requests to console pages instead of
+// /organizations
 
 #[tokio::test]
 async fn test_sessions() {
@@ -114,6 +118,66 @@ async fn test_sessions() {
     let _ = external_client
         .make_request_with_request(request, StatusCode::UNAUTHORIZED)
         .await;
+
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_console_pages() {
+    let cptestctx = test_setup("test_console_pages").await;
+    let client = &cptestctx.console_client;
+
+    // request to console page route without auth should redirect to IdP
+    let unauthed_response = client
+        .make_request_with_body(
+            Method::GET,
+            // 404s will be handled client-side unless we want to pull in the
+            // entire route tree from the client (which we may well want to do)
+            "/c/irrelevant-path",
+            "".into(),
+            StatusCode::FOUND,
+        )
+        .await
+        .unwrap();
+
+    let location_header =
+        unauthed_response.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(location_header, "idp.com/login");
+
+    // get session
+
+    // hit console page with session, should get back HTML response
+
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_assets() {
+    let cptestctx = test_setup("test_assets").await;
+    let client = &cptestctx.console_client;
+
+    // nonexistent file 404s
+    let _ = client
+        .make_request_with_body(
+            Method::GET,
+            "/assets/nonexistent.svg",
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+
+    // existing file is returned
+    let mut response = client
+        .make_request_with_body(
+            Method::GET,
+            "/assets/hello.txt",
+            "".into(),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    let file_contents = read_string(&mut response).await;
+    assert_eq!(file_contents, "hello there".to_string());
 
     cptestctx.teardown().await;
 }

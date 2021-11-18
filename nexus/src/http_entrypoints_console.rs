@@ -18,7 +18,7 @@ use hyper::Body;
 use mime_guess;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::{path::PathBuf, sync::Arc};
+use std::{env::current_dir, path::PathBuf, sync::Arc};
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -133,10 +133,9 @@ async fn console_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    let _opctx = OpContext::for_external_api(&rqctx).await;
-    // redirect to IdP if not logged in
+    let opctx = OpContext::for_external_api(&rqctx).await;
 
-    // otherwise serve HTML page with bundle in script tag
+    // if authed, serve HTML page with bundle in script tag
 
     // HTML doesn't need to be static -- we'll probably find a reason to do some minimal
     // templating, e.g., putting a CSRF token in the page
@@ -145,9 +144,19 @@ async fn console_page(
     // because the real routing is all client-side. we serve the same HTML
     // regardless, the app starts on the client and renders the right page and
     // makes the right API requests.
+    if let Ok(opctx) = opctx {
+        if opctx.authn.actor().is_some() {
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+                .body("".into())?);
+        }
+    }
+
+    // otherwise redirect to idp
     Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+        .status(StatusCode::FOUND)
+        .header(http::header::LOCATION, "idp.com/login")
         .body("".into())?)
 }
 
@@ -161,15 +170,34 @@ async fn asset(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    // we *could* auth gate the static assets but it would be kind of weird. prob not necessary
+    // we *could* auth gate the static assets but it would be kind of weird.
+    // prob not necessary. one way would be to have two directories, one that
+    // requires auth and one that doesn't. I'd rather not
     let path = path_params.into_inner().path;
-    let file = find_file(path, PathBuf::new());
+    // TODO: make path configurable, confirm existence at startup (though it can
+    // always be deleted later, so maybe confirming existence isn't that
+    // important)
+    let mut assets_dir = current_dir().map_err(|_| {
+        HttpError::for_internal_error(
+            "couldn't pull current execution directory".to_string(),
+        )
+    })?;
+    assets_dir.push("tests");
+    assets_dir.push("fixtures");
+    let file = find_file(path, assets_dir);
 
     if file.is_none() {
-        // 404
+        return Err(HttpError::for_not_found(
+            None,
+            "file not found".to_string(),
+        ));
     }
 
     let file = file.unwrap();
+
+    let body = tokio::fs::read(&file)
+        .await
+        .map_err(|_| HttpError::for_bad_request(None, "EBADF".to_string()))?;
 
     // Derive the MIME type from the file name
     let content_type = mime_guess::from_path(&file) // should be the actual file
@@ -179,14 +207,14 @@ async fn asset(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, &content_type)
-        .body("".into())?)
+        .body(body.into())?)
 }
 
 // This is a bit stripped down from the dropshot example. For example, we don't
 // want to tell the user why the request failed, we just 404 on everything.
 
-// TODO: we should probably return a Result so we can at least log the problems
-// internally. it would also clean up the control flow
+// TODO: return a Result so we can at least log the problems internally. it
+// would also clean up the control flow
 fn find_file(path: Vec<String>, root_dir: PathBuf) -> Option<PathBuf> {
     // start from `root_dir`
     let mut current = root_dir;
