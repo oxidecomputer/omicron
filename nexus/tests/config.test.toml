@@ -27,9 +27,11 @@ url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
 [dropshot_external]
 bind_address = "127.0.0.1:0"
 
+# port must be 0. see above
 [dropshot_internal]
 bind_address = "127.0.0.1:0"
 
+# port must be 0. see above
 [dropshot_console]
 bind_address = "127.0.0.1:0"
 
