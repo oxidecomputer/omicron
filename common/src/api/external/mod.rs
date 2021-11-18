@@ -23,6 +23,7 @@ use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -31,7 +32,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::iter::FromIterator;
 use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -1657,7 +1658,7 @@ impl TryFrom<String> for VpcFirewallRuleTarget {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         VpcFirewallRuleTarget::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string()).unwrap(),
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
         )
     }
 }
@@ -1730,7 +1731,7 @@ impl TryFrom<String> for VpcFirewallRuleHostFilter {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         VpcFirewallRuleHostFilter::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string()).unwrap(),
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
         )
     }
 }
@@ -1796,6 +1797,7 @@ impl Display for VpcFirewallRuleHostFilter {
 }
 
 /// Port number used in a transport-layer protocol like TCP or UDP
+/// Note that 0 is an invalid port number.
 #[derive(
     Clone,
     Copy,
@@ -1809,18 +1811,25 @@ impl Display for VpcFirewallRuleHostFilter {
 )]
 #[serde(transparent)]
 #[repr(transparent)]
-pub struct L4Port(pub u16);
+pub struct L4Port(pub NonZeroU16);
 
-impl From<u16> for L4Port {
-    fn from(port: u16) -> L4Port {
+impl From<NonZeroU16> for L4Port {
+    fn from(port: NonZeroU16) -> L4Port {
         L4Port(port)
     }
 }
 
-/// A range of transport layer ports
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(try_from = "String")]
-#[serde(into = "String")]
+impl TryFrom<u16> for L4Port {
+    type Error = <NonZeroU16 as TryFrom<u16>>::Error;
+    fn try_from(port: u16) -> Result<L4Port, Self::Error> {
+        NonZeroU16::try_from(port).map(L4Port)
+    }
+}
+
+/// A range of transport layer ports. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
 pub struct L4PortRange {
     /// The first port in the range
     pub first: L4Port,
@@ -1828,27 +1837,26 @@ pub struct L4PortRange {
     pub last: L4Port,
 }
 
-impl TryFrom<String> for L4PortRange {
-    type Error = String;
-
-    fn try_from(range: String) -> Result<Self, Self::Error> {
+impl FromStr for L4PortRange {
+    type Err = String;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
         const INVALID_PORT_NUMBER_MSG: &'static str = "invalid port number";
 
         match range.split_once('-') {
             None => {
                 let port = range
-                    .parse::<u16>()
+                    .parse::<NonZeroU16>()
                     .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
                     .into();
                 Ok(L4PortRange { first: port, last: port })
             }
             Some((left, right)) => {
                 let first = left
-                    .parse::<u16>()
+                    .parse::<NonZeroU16>()
                     .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
                     .into();
                 let last = right
-                    .parse::<u16>()
+                    .parse::<NonZeroU16>()
                     .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
                     .into();
                 Ok(L4PortRange { first, last })
@@ -1857,12 +1865,20 @@ impl TryFrom<String> for L4PortRange {
     }
 }
 
-impl From<L4PortRange> for String {
-    fn from(ports: L4PortRange) -> String {
-        if ports.first == ports.last {
-            ports.first.to_string()
+impl TryFrom<String> for L4PortRange {
+    type Error = <L4PortRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for L4PortRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
         } else {
-            format!("{}-{}", ports.first, ports.last)
+            write!(f, "{}-{}", self.first, self.last)
         }
     }
 }
@@ -2125,11 +2141,17 @@ mod test {
     fn test_ip_port_range_from_str() {
         assert_eq!(
             L4PortRange::try_from("65532".to_string()),
-            Ok(L4PortRange { first: L4Port(65532), last: L4Port(65532) })
+            Ok(L4PortRange {
+                first: L4Port::try_from(65532).unwrap(),
+                last: L4Port::try_from(65532).unwrap()
+            })
         );
         assert_eq!(
             L4PortRange::try_from("22-53".to_string()),
-            Ok(L4PortRange { first: L4Port(22), last: L4Port(53) })
+            Ok(L4PortRange {
+                first: L4Port::try_from(22).unwrap(),
+                last: L4Port::try_from(53).unwrap()
+            })
         );
 
         assert_eq!(
@@ -2148,16 +2170,34 @@ mod test {
             L4PortRange::try_from("0x23".to_string()),
             Err("invalid port number".to_string())
         );
+        assert_eq!(
+            L4PortRange::try_from("0".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("0-20".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("-20".to_string()),
+            Err("invalid port number".to_string())
+        );
     }
 
     #[test]
     fn test_ip_port_range_into_str() {
-        let range: String =
-            L4PortRange { first: L4Port(12345), last: L4Port(12345) }.into();
+        let range = L4PortRange {
+            first: L4Port::try_from(12345).unwrap(),
+            last: L4Port::try_from(12345).unwrap(),
+        }
+        .to_string();
         assert_eq!(range, "12345");
 
-        let range: String =
-            L4PortRange { first: L4Port(1), last: L4Port(1024) }.into();
+        let range: String = L4PortRange {
+            first: L4Port::try_from(1).unwrap(),
+            last: L4Port::try_from(1024).unwrap(),
+        }
+        .to_string();
         assert_eq!(range, "1-1024");
     }
 
@@ -2221,8 +2261,14 @@ mod test {
                 filters: VpcFirewallRuleFilter {
                     hosts: None,
                     ports: Some(vec![
-                        L4PortRange { first: L4Port(22), last: L4Port(25) },
-                        L4PortRange { first: L4Port(27), last: L4Port(27) }
+                        L4PortRange {
+                            first: L4Port::try_from(22).unwrap(),
+                            last: L4Port::try_from(25).unwrap()
+                        },
+                        L4PortRange {
+                            first: L4Port::try_from(27).unwrap(),
+                            last: L4Port::try_from(27).unwrap()
+                        }
                     ]),
                     protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
                 },

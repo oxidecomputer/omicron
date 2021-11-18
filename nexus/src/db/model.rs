@@ -149,7 +149,7 @@ where
     }
 }
 
-/// Representation of a [u16] in the database.
+/// Representation of a [`u16`] in the database.
 /// We need this because the database does not support unsigned types.
 /// This handles converting from the database's INT4 to the actual u16.
 #[derive(
@@ -1460,8 +1460,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        let as_string: String = self.0.into();
-        as_string.to_sql(out)
+        self.0.to_string().to_sql(out)
     }
 }
 
@@ -1472,9 +1471,7 @@ where
     String: FromSql<sql_types::Text, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::L4PortRange::try_from(String::from_sql(bytes)?)
-            .map(L4PortRange)
-            .map_err(|e| e.into())
+        String::from_sql(bytes)?.parse().map(L4PortRange).map_err(|e| e.into())
     }
 }
 

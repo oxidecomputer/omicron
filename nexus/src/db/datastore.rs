@@ -1288,7 +1288,10 @@ impl DataStore {
         use db::schema::vpc::dsl;
 
         // Note that we don't ensure the firewall rules are empty here, because
-        // we allow deleting VPCs with firewall rules present
+        // we allow deleting VPCs with firewall rules present. Inserting new
+        // rules is serialized with respect to the deletion by the row lock
+        // associated with the VPC row, since we use the collection insert CTE
+        // pattern to add firewall rules.
 
         let now = Utc::now();
         diesel::update(dsl::vpc)
@@ -1337,6 +1340,7 @@ impl DataStore {
         use db::schema::vpc_firewall_rule::dsl;
 
         let now = Utc::now();
+        // TODO-performance: Paginate this update to avoid long queries
         diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))

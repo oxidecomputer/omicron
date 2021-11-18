@@ -1542,8 +1542,8 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        // TODO: This should eventually call the networking subsystem to have it clean up
-        // and use a saga for atomicity
+        // TODO: This should eventually use a saga to call the
+        // networking subsystem to have it clean up the networking resources
         self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
         self.db_datastore.project_delete_vpc(&vpc.identity.id).await?;
 

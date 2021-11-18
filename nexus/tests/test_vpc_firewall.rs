@@ -8,6 +8,7 @@ use omicron_common::api::external::{
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
 };
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use dropshot::test_util::{object_delete, objects_list_page};
 
@@ -207,8 +208,8 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
                 hosts: None,
                 protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
                 ports: Some(vec![L4PortRange {
-                    first: L4Port(3389),
-                    last: L4Port(3389),
+                    first: L4Port::try_from(3389).unwrap(),
+                    last: L4Port::try_from(3389).unwrap(),
                 }]),
             },
             action: VpcFirewallRuleAction::Allow,
@@ -233,8 +234,8 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
                 hosts: None,
                 protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
                 ports: Some(vec![L4PortRange {
-                    first: L4Port(22),
-                    last: L4Port(22),
+                    first: L4Port::try_from(22).unwrap(),
+                    last: L4Port::try_from(22).unwrap(),
                 }]),
             },
             action: VpcFirewallRuleAction::Allow,
