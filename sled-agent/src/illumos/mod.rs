@@ -14,10 +14,9 @@ const PFEXEC: &str = "/usr/bin/pfexec";
 fn execute(
     command: &mut std::process::Command,
 ) -> Result<std::process::Output, Error> {
-    let output =
-        command.env_clear().output().map_err(|e| Error::InternalError {
-            internal_message: format!("Failed to execute {:?}: {}", command, e),
-        })?;
+    let output = command.output().map_err(|e| Error::InternalError {
+        internal_message: format!("Failed to execute {:?}: {}", command, e),
+    })?;
 
     if !output.status.success() {
         return Err(Error::InternalError {
