@@ -5,11 +5,13 @@ use super::ServerContext;
 
 use crate::authn::external::{
     cookies::Cookies,
-    session_cookie::{SessionStore, SESSION_COOKIE_COOKIE_NAME},
+    session_cookie::{
+        clear_session_cookie_header_value, session_cookie_header_value,
+        SessionStore, SESSION_COOKIE_COOKIE_NAME,
+    },
 };
 use crate::authn::TEST_USER_UUID_PRIVILEGED;
 use crate::context::OpContext;
-use chrono::Duration;
 use dropshot::{
     endpoint, ApiDescription, HttpError, Path, RequestContext, TypedBody,
 };
@@ -48,16 +50,6 @@ pub struct LoginParams {
     password: String,
 }
 
-// TODO: this should live alongside the session cookie stuff
-fn session_cookie_value(token: &str, max_age: Duration) -> String {
-    format!(
-        "{}=\"{}\"; Secure; HttpOnly; SameSite=Lax; Max-Age={}",
-        SESSION_COOKIE_COOKIE_NAME,
-        token,
-        max_age.num_seconds()
-    )
-}
-
 // for now this is just for testing purposes, and the username and password are
 // ignored. we will probably end up with a real username/password login
 // endpoint, but I think it will only be for use while setting up the rack
@@ -79,7 +71,10 @@ async fn login(
         .status(200)
         .header(
             header::SET_COOKIE,
-            session_cookie_value(&session.token, apictx.session_idle_timeout()),
+            session_cookie_header_value(
+                &session.token,
+                apictx.session_idle_timeout(),
+            ),
         )
         .body("ok".into())
         .unwrap())
@@ -115,7 +110,7 @@ async fn logout(
 
     Ok(Response::builder()
         .status(200)
-        .header(header::SET_COOKIE, session_cookie_value("", Duration::zero()))
+        .header(header::SET_COOKIE, clear_session_cookie_header_value())
         .body("".into())?)
 }
 
