@@ -16,7 +16,7 @@ ipnetwork = "0.18"
 omicron-common = { path = "../common" }
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
 reqwest = "0.11.5"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -25,6 +25,7 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.2"
 thiserror = "1.0"
 tokio = { version = "1.13", features = [ "full" ] }
 toml = "0.5.6"

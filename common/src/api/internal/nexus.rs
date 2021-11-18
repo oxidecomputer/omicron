@@ -45,13 +45,6 @@ pub struct InstanceRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-/// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentStartupInfo {
-    /// the address of the sled agent's API endpoint
-    pub sa_address: SocketAddr,
-}
-
 // Oximeter producer/collector objects.
 
 /// Information announced by a metric server, used so that clients can contact it and collect
@@ -71,14 +64,4 @@ impl ProducerEndpoint {
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
     }
-}
-
-/// Message used to notify Nexus that this oximeter instance is up and running.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
-pub struct OximeterInfo {
-    /// The ID for this oximeter instance.
-    pub collector_id: Uuid,
-
-    /// The address on which this oximeter instance listens for requests
-    pub address: SocketAddr,
 }
