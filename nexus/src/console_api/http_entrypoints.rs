@@ -1,8 +1,6 @@
 /*!
  * Handler functions (entrypoints) for console-related routes.
  */
-use super::ServerContext;
-
 use crate::authn::external::{
     cookies::Cookies,
     session_cookie::{
@@ -12,6 +10,7 @@ use crate::authn::external::{
 };
 use crate::authn::TEST_USER_UUID_PRIVILEGED;
 use crate::context::OpContext;
+use crate::ServerContext;
 use dropshot::{
     endpoint, ApiDescription, HttpError, Path, RequestContext, TypedBody,
 };
@@ -27,7 +26,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /**
  * Returns a description of the part of the nexus API dedicated to the web console
  */
-pub fn api() -> NexusApiDescription {
+pub fn console_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(login)?;
         api.register(logout)?;

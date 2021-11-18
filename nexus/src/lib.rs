@@ -15,19 +15,19 @@
 pub mod authn; // Public only for testing
 mod authz;
 mod config;
+mod console_api;
 mod context;
 pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
-mod http_entrypoints_console;
 pub mod internal_api; // public for testing
 mod nexus;
 mod saga_interface;
 mod sagas;
 
 pub use config::Config;
+use console_api::http_entrypoints::console_api;
 pub use context::ServerContext;
 use external_api::http_entrypoints::external_api;
-use http_entrypoints_console::api as console_api;
 use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;

@@ -5,7 +5,7 @@ use hyper;
 pub mod common;
 use common::test_setup;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::OrganizationCreateParams;
+use omicron_nexus::external_api::params::OrganizationCreate;
 
 extern crate slog;
 
@@ -15,8 +15,9 @@ async fn test_sessions() {
     let console_client = &cptestctx.console_client;
     let external_client = &cptestctx.external_client;
 
-    // Set-Cookie responses only work if you make dropshot's test utils not
-    // panic! when it sees the Set-Cookie header
+    // TODO: responses with set-cookie in them won't work until this uses the
+    // new test helpers that don't lock you into a particular set of allowed
+    // headers. See https://github.com/oxidecomputer/omicron/pull/403
 
     let resp = console_client
         .make_request_with_body(
@@ -53,7 +54,7 @@ async fn test_sessions() {
     assert!(session_token.starts_with("session="));
     assert_eq!(rest, "Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
 
-    let org_params = OrganizationCreateParams {
+    let org_params = OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: "my-org".parse().unwrap(),
             description: "an org".to_string(),
