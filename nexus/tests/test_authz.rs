@@ -1,14 +1,13 @@
 //! Basic end-to-end tests for authorization
 use dropshot::HttpErrorResponseBody;
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, OrganizationCreateParams,
-};
 
 pub mod common;
 use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+use omicron_nexus::external_api::params;
 
 extern crate slog;
 
@@ -75,7 +74,7 @@ async fn try_create_organization(
     expected_status: http::StatusCode,
 ) -> HttpErrorResponseBody {
     let organization_name = "a-crime-family";
-    let input = OrganizationCreateParams {
+    let input = params::OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: organization_name.parse().unwrap(),
             description: "an org".to_string(),
