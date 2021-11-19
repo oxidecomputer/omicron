@@ -2,18 +2,23 @@
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
+use super::discovery;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::api::internal::bootstrap_agent::ShareResponse;
+use omicron_common::backoff::{
+    internal_service_policy, retry_notify, BackoffError,
+};
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
+
+const UNLOCK_THRESHOLD: usize = 1;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -35,6 +40,9 @@ pub enum BootstrapError {
 
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
+
+    #[error("Not enough peers to unlock storage")]
+    NotEnoughPeers,
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -47,11 +55,13 @@ impl From<BootstrapError> for ExternalError {
 pub struct Agent {
     /// Debug log
     log: Logger,
+    peer_monitor: discovery::PeerMonitor,
 }
 
 impl Agent {
-    pub fn new(log: Logger) -> Self {
-        Agent { log }
+    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
+        let peer_monitor = discovery::PeerMonitor::new(&log)?;
+        Ok(Agent { log, peer_monitor })
     }
 
     /// Implements the "request share" API.
@@ -68,42 +78,69 @@ impl Agent {
         Ok(ShareResponse { shared_secret: vec![] })
     }
 
-    /// Performs device initialization:
+    /// Communicates with peers, sharing secrets, until the rack has been
+    /// sufficiently unlocked.
     ///
-    /// - TODO: Communicates with other sled agents to establish a trust quorum.
-    /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(
-        &self,
-        other_agents: Vec<SocketAddr>,
-    ) -> Result<(), BootstrapError> {
-        info!(&self.log, "bootstrap service initializing");
-        // TODO-correctness:
-        // - Establish trust quorum.
-        // - Once this is done, "unlock" local storage
-        //
-        // The current implementation sends a stub request to all known
-        // sled agents, but does not actually create a quorum / unlock
-        // anything.
-        let other_agents: Vec<BootstrapClient> = other_agents
-            .into_iter()
-            .map(|addr| {
-                let addr_str = addr.to_string();
-                BootstrapClient::new(
-                    &format!("http://{}", addr_str,),
-                    self.log.new(o!(
-                        "Address" => addr_str,
-                    )),
-                )
-            })
-            .collect();
-        for agent in &other_agents {
-            agent
-                .api_request_share(&bootstrap_types::ShareRequest {
-                    identity: vec![],
-                })
-                .await?;
-        }
+    /// - This method retries until [`UNLOCK_THRESHOLD`] other agents are
+    /// online, and have successfully responded to "share requests".
+    async fn establish_sled_quorum(&self) -> Result<(), BootstrapError> {
+        retry_notify(
+            internal_service_policy(),
+            || async {
+                let other_agents = self.peer_monitor.addrs().await;
 
+                // "-1" to account for ourselves.
+                if other_agents.len() < UNLOCK_THRESHOLD - 1 {
+                    return Err(BackoffError::Transient(
+                        BootstrapError::NotEnoughPeers,
+                    ));
+                }
+
+                // TODO-correctness:
+                // - Establish trust quorum.
+                // - Once this is done, "unlock" local storage
+                //
+                // The current implementation sends a stub request to all known sled
+                // agents, but does not actually create a quorum / unlock anything.
+                let other_agents: Vec<BootstrapClient> = other_agents
+                    .into_iter()
+                    .map(|addr| {
+                        let addr_str = addr.to_string();
+                        BootstrapClient::new(
+                            &format!("http://{}", addr_str,),
+                            self.log.new(o!(
+                                "Address" => addr_str,
+                            )),
+                        )
+                    })
+                    .collect();
+                for agent in &other_agents {
+                    agent
+                        .api_request_share(&bootstrap_types::ShareRequest {
+                            identity: vec![],
+                        })
+                        .await
+                        .map_err(|e| {
+                            BackoffError::Transient(BootstrapError::Api(e))
+                        })?;
+                }
+                Ok(())
+            },
+            |error, duration| {
+                warn!(
+                    self.log,
+                    "Failed to unlock sleds (will retry after {:?}: {:#}",
+                    duration,
+                    error,
+                )
+            },
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn launch_local_services(&self) -> Result<(), BootstrapError> {
         let tar_source = Path::new("/opt/oxide");
         let destination = Path::new("/opt/oxide");
         // TODO-correctness: Validation should come from ROT, not local file.
@@ -127,6 +164,19 @@ impl Agent {
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
         self.extract(&digests, &tar_source, &destination, "propolis-server")?;
+
+        Ok(())
+    }
+
+    /// Performs device initialization:
+    ///
+    /// - TODO: Communicates with other sled agents to establish a trust quorum.
+    /// - Verifies, unpacks, and launches other services.
+    pub async fn initialize(&self) -> Result<(), BootstrapError> {
+        info!(&self.log, "bootstrap service initializing");
+
+        self.establish_sled_quorum().await?;
+        self.launch_local_services().await?;
 
         Ok(())
     }

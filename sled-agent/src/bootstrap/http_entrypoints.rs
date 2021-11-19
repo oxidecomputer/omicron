@@ -41,11 +41,10 @@ async fn api_request_share(
     let bootstrap_agent = rqctx.context();
 
     let request = request.into_inner();
-    Ok(
-        HttpResponseOk(
-            bootstrap_agent.request_share(request.identity)
-                .await
-                .map_err(|e| ExternalError::from(e))?
-        )
-    )
+    Ok(HttpResponseOk(
+        bootstrap_agent
+            .request_share(request.identity)
+            .await
+            .map_err(|e| ExternalError::from(e))?,
+    ))
 }
