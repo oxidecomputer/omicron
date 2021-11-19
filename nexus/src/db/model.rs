@@ -9,7 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    router_route, sled, vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
+    router_route, sled, update_available_artifact, vpc, vpc_firewall_rule,
+    vpc_router, vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -396,6 +397,9 @@ where
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
+
+    pub tuf_metadata_base_url: String,
+    pub tuf_targets_base_url: String,
 }
 
 /// Database representation of a Sled.
@@ -1768,4 +1772,39 @@ impl ConsoleSession {
         let now = Utc::now();
         Self { token, user_id, time_last_used: now, time_created: now }
     }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
+    pub struct UpdateArtifactKindEnum;
+
+    #[derive(Clone, Debug, Display, AsExpression, FromSqlRow)]
+    #[display("{0}")]
+    #[sql_type = "UpdateArtifactKindEnum"]
+    pub struct UpdateArtifactKind(pub crate::updates::UpdateArtifactKind);
+
+    // Enum values
+    Zone => b"zone"
+);
+
+#[derive(
+    Queryable, Insertable, Clone, Debug, Display, Selectable, AsChangeset,
+)]
+#[table_name = "update_available_artifact"]
+#[display("{kind} \"{name}\" v{version}")]
+pub struct UpdateAvailableArtifact {
+    pub name: String,
+    /// Version of the artifact itself
+    pub version: i64,
+    pub kind: UpdateArtifactKind,
+    /// `version` field of targets.json from the repository
+    // FIXME this *should* be a NonZeroU64
+    pub targets_version: i64,
+    pub metadata_expiration: DateTime<Utc>,
+    pub target_name: String,
+    // FIXME should this be [u8; 32]?
+    pub target_sha256: String,
+    // FIXME this *should* be a u64
+    pub target_length: i64,
 }

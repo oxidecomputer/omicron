@@ -131,6 +131,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(hardware_sleds_get)?;
         api.register(hardware_sleds_get_sled)?;
 
+        api.register(updates_refresh)?;
+
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
 
@@ -1865,6 +1867,28 @@ async fn hardware_sleds_get_sled(
         let sled_info = nexus.sled_lookup(&path.sled_id).await?;
         Ok(HttpResponseOk(sled_info.into()))
     };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Updates
+ */
+
+/**
+ * Refresh update metadata
+ */
+#[endpoint {
+     method = POST,
+     path = "/updates/refresh",
+}]
+async fn updates_refresh(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    // _query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler =
+        async { Ok(HttpResponseOk(nexus.updates_refresh_metadata().await?)) };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 

@@ -69,8 +69,8 @@ impl ServerContext {
      * Create a new context with the given rack id and log.  This creates the
      * underlying nexus as well.
      */
-    pub fn new(
-        rack_id: &Uuid,
+    pub async fn new(
+        rack_id: Uuid,
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
@@ -140,7 +140,8 @@ impl ServerContext {
                 pool,
                 config,
                 Arc::clone(&authz),
-            ),
+            )
+            .await,
             log,
             external_authn,
             authz,

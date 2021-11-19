@@ -17,6 +17,7 @@ use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use crate::updates::ArtifactsDocument;
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
@@ -127,6 +128,8 @@ pub struct Nexus {
 
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+
+    tuf_trusted_root: Vec<u8>,
 }
 
 /*
@@ -142,8 +145,8 @@ impl Nexus {
      * Create a new Nexus instance for the given rack id `rack_id`
      */
     /* TODO-polish revisit rack metadata */
-    pub fn new_with_id(
-        rack_id: &Uuid,
+    pub async fn new_with_id(
+        rack_id: Uuid,
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
@@ -166,12 +169,15 @@ impl Nexus {
         ));
         let nexus = Nexus {
             id: config.id,
-            rack_id: *rack_id,
+            rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(*rack_id),
+            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
+            tuf_trusted_root: tokio::fs::read(&config.tuf_trusted_root)
+                .await
+                .unwrap(),
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -1973,7 +1979,13 @@ impl Nexus {
      */
 
     fn as_rack(&self) -> db::model::Rack {
-        db::model::Rack { identity: self.api_rack_identity.clone() }
+        db::model::Rack {
+            identity: self.api_rack_identity.clone(),
+            // FIXME your username is embedded in a path ya dingus
+            tuf_metadata_base_url: "file:///home/iliana/tuf/metadata"
+                .to_string(),
+            tuf_targets_base_url: "file:///home/iliana/tuf/targets".to_string(),
+        }
     }
 
     pub async fn racks_list(
@@ -2248,6 +2260,76 @@ impl Nexus {
 
     pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
         self.db_datastore.session_hard_delete(token).await
+    }
+
+    fn updates_load_artifacts(
+        &self,
+    ) -> Result<
+        Vec<db::model::UpdateAvailableArtifact>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        // TODO(iliana): make async/.await. awslabs/tough#213
+        use std::io::Read;
+
+        let rack = self.as_rack();
+        let repository = tough::RepositoryLoader::new(
+            self.tuf_trusted_root.as_slice(),
+            rack.tuf_metadata_base_url.parse()?,
+            rack.tuf_targets_base_url.parse()?,
+        )
+        .load()?;
+
+        let mut artifact_document = Vec::new();
+        match repository.read_target(&"artifacts.json".parse()?)? {
+            Some(mut target) => target.read_to_end(&mut artifact_document)?,
+            None => return Err("artifacts.json missing".into()),
+        };
+        let artifacts: ArtifactsDocument =
+            serde_json::from_slice(&artifact_document)?;
+
+        let earliest_expiration = unimplemented!();
+
+        let mut v = Vec::new();
+        for artifact in artifacts.artifacts {
+            if let Some(target) = repository
+                .targets()
+                .signed
+                .targets
+                .get(&artifact.target.parse()?)
+            {
+                v.push(db::model::UpdateAvailableArtifact {
+                    name: artifact.name,
+                    version: artifact.version,
+                    kind: db::model::UpdateArtifactKind(artifact.kind),
+                    targets_version: repository
+                        .targets()
+                        .signed
+                        .version
+                        .get()
+                        .try_into()?,
+                    metadata_expiration: earliest_expiration,
+                    target_name: artifact.target,
+                    target_sha256: hex::encode(&target.hashes.sha256),
+                    target_length: target.length.try_into()?,
+                });
+            }
+        }
+        Ok(v)
+    }
+
+    pub async fn updates_refresh_metadata(&self) -> Result<(), Error> {
+        for artifact in self.updates_load_artifacts().map_err(|e| {
+            Error::InternalError { internal_message: e.to_string() }
+        })? {
+            self.db_datastore
+                .update_available_artifact_upsert(artifact)
+                .await?;
+        }
+
+        // delete all rows remaining with a targets_version < repository.targets().version()
+        unimplemented!();
+
+        Ok(())
     }
 }
 

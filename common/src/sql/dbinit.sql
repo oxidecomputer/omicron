@@ -46,7 +46,11 @@ CREATE TABLE omicron.public.rack (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* Used to configure the updates service URLs */
+    tuf_metadata_base_url STRING(512) NOT NULL,
+    tuf_targets_base_url STRING(512) NOT NULL
 );
 
 /*
@@ -640,6 +644,31 @@ CREATE TABLE omicron.public.console_session (
 -- to be used for cleaning up old tokens
 CREATE INDEX ON omicron.public.console_session (
     time_created
+);
+
+/*******************************************************************/
+
+CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
+    'zone'
+);
+
+CREATE TABLE omicron.public.update_available_artifact (
+    name STRING(40) NOT NULL,
+    version INT NOT NULL,
+    kind omicron.public.update_artifact_kind NOT NULL,
+
+    /* the version of the targets.json role this came from */
+    targets_version INT NOT NULL,
+
+    /* when the metadata this artifact was cached from expires */
+    metadata_expiration TIMESTAMPTZ NOT NULL,
+
+    /* data about the target from the targets.json role */
+    target_name STRING(512) NOT NULL,
+    target_sha256 STRING(64) NOT NULL,
+    target_length INT NOT NULL,
+
+    PRIMARY KEY (name, version, kind)
 );
 
 /*******************************************************************/

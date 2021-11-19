@@ -59,6 +59,8 @@ pub struct Config {
     pub database: db::Config,
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
+
+    pub tuf_trusted_root: PathBuf,
 }
 
 #[derive(Debug)]

@@ -40,6 +40,7 @@ sled-agent-client = { path = "../sled-agent-client" }
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
+tough = { version = "0.12", features = [ "http" ] }
 
 [dependencies.api_identity]
 path = "../api_identity"
