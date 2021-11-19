@@ -194,6 +194,16 @@ async fn test_assets() {
         )
         .await;
 
+    // symlink 404s
+    let _ = client
+        .make_request_with_body(
+            Method::GET,
+            "/assets/a_symlink",
+            "".into(),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+
     // existing file is returned
     let mut response = client
         .make_request_with_body(

@@ -203,7 +203,7 @@ fn find_file(
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
-            return Err(not_found("ENOTDIR"));
+            return Err(not_found("ENOENT"));
         }
 
         current.push(segment);
@@ -223,4 +223,84 @@ fn find_file(
     }
 
     Ok(current)
+}
+
+#[cfg(test)]
+mod test {
+    use super::find_file;
+    use http::StatusCode;
+    use std::{env::current_dir, path::PathBuf};
+
+    fn get_path(path_str: &str) -> Vec<String> {
+        path_str.split("/").map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_find_file_finds_file() {
+        let root = current_dir().unwrap();
+        let file = find_file(get_path("tests/fixtures/hello.txt"), &root);
+        assert!(file.is_ok());
+    }
+
+    #[test]
+    fn test_find_file_404_on_nonexistent() {
+        let root = current_dir().unwrap();
+        let error =
+            find_file(get_path("tests/fixtures/nonexistent.svg"), &root)
+                .unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "ENOENT".to_string());
+    }
+
+    #[test]
+    fn test_find_file_404_on_nonexistent_nested() {
+        let root = current_dir().unwrap();
+        let error =
+            find_file(get_path("tests/fixtures/a/b/c/nonexistent.svg"), &root)
+                .unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "ENOENT".to_string());
+    }
+
+    #[test]
+    fn test_find_file_404_on_directory() {
+        let root = current_dir().unwrap();
+        let error = find_file(get_path("tests/fixtures/a_directory"), &root)
+            .unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "EISDIR".to_string());
+    }
+
+    #[test]
+    fn test_find_file_404_on_symlink() {
+        let root = current_dir().unwrap();
+        let path_str = "tests/fixtures/a_symlink";
+
+        // the file in question does exist and is a symlink
+        assert!(root
+            .join(PathBuf::from(path_str))
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        // so we 404
+        let error = find_file(get_path(path_str), &root).unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "EMLINK".to_string());
+    }
+
+    #[test]
+    fn test_find_file_wont_follow_symlink() {
+        let root = current_dir().unwrap();
+        let path_str = "tests/fixtures/a_symlink/another_file.txt";
+
+        // the file in question does exist
+        assert!(root.join(PathBuf::from(path_str)).exists());
+
+        // but it 404s because the path goes through a symlink
+        let error = find_file(get_path(path_str), &root).unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "EMLINK".to_string());
+    }
 }
