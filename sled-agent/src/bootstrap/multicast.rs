@@ -4,15 +4,6 @@ use std::io;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use tokio::net::UdpSocket;
 
-// NOTE: Use zones? Exclusive netstacks?
-//  ipdadm can drop packets?
-//  pstop can stop packets
-// NOTE: start w/link local, get address (TCP!) from 'hello' message.
-// NOTE: Want to to set up pairs for each link. We'll have
-// one for each switch.
-// NOTE: "LIF" ioctls to identify devices?
-// NOTE: Maghemite uses link-level multicast to discovery neighbors.
-
 /// Scope of an IPv6 Multicast address.
 ///
 /// Attempts to align with the unstable [`std::net::Ipv6MulticastScope`] enum.
