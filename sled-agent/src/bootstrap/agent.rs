@@ -2,6 +2,7 @@
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
+use super::spdm::SpdmError;
 use super::views::ShareResponse;
 use omicron_common::api::external::Error;
 use omicron_common::packaging::sha256_digest;
@@ -35,6 +36,9 @@ pub enum BootstrapError {
 
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
+
+    #[error("Error running SPDM protocol")]
+    Spdm(#[from] SpdmError)
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.

@@ -7,3 +7,4 @@ mod http_entrypoints;
 mod params;
 pub mod server;
 mod views;
+mod spdm;

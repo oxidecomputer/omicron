@@ -996,7 +996,7 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -1512,6 +1512,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "cfg-if",
  "chrono",
  "dropshot",
@@ -1534,13 +1535,17 @@ dependencies = [
  "serde_json",
  "serial_test",
  "slog",
+ "slog-async",
+ "slog-term",
  "smf",
+ "spdm",
  "structopt",
  "subprocess",
  "tar",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
  "uuid",
  "zone",
@@ -2471,7 +2476,7 @@ dependencies = [
  "log",
  "ring",
  "sct",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -2915,6 +2920,16 @@ checksum = "5dc90fe6c7be1a323296982db1836d1ea9e47b6839496dde9a541bc496df3516"
 dependencies = [
  "libc 0.2.107",
  "winapi",
+]
+
+[[package]]
+name = "spdm"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "rand",
+ "ring",
+ "webpki 0.22.0",
 ]
 
 [[package]]
@@ -3362,7 +3377,7 @@ checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls",
  "tokio",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -3820,12 +3835,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "webpki"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
+dependencies = [
+ "ring",
+ "untrusted",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aabe153544e473b775453675851ecc86863d2a81d786d741f6b76778f2a48940"
 dependencies = [
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
