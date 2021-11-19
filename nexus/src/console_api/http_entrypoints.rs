@@ -154,8 +154,8 @@ async fn console_page(
         .body("".into())?)
 }
 
-/// Return a static asset from the configured assets directory. 404 on virtually
-/// any error for now.
+/// Fetch a static asset from the configured assets directory. 404 on virtually
+/// all errors. No auth. NO SENSITIVE FILES.
 #[endpoint {
      method = GET,
      path = "/assets/{path:.*}",
@@ -166,10 +166,6 @@ async fn asset(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    // we *could* auth gate the static assets but it would be kind of weird.
-    // prob not necessary. one way would be to have two directories, one that
-    // requires auth and one that doesn't. I'd rather not
-
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
