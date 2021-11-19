@@ -1,7 +1,6 @@
 //! Basic end-to-end tests for authorization
 use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
-use futures::Future;
 
 pub mod common;
 use common::test_setup;
@@ -70,11 +69,11 @@ async fn test_authz_basic() {
     cptestctx.teardown().await;
 }
 
-fn try_create_organization<'a>(
-    client: &'a dropshot::test_util::ClientTestContext,
+async fn try_create_organization(
+    client: &dropshot::test_util::ClientTestContext,
     maybe_user_id: Option<&'static str>,
     expected_status: http::StatusCode,
-) -> impl Future<Output = HttpErrorResponseBody> + 'a {
+) -> HttpErrorResponseBody {
     let input = params::OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: "a-crime-family".parse().unwrap(),
@@ -91,12 +90,10 @@ fn try_create_organization<'a>(
         builder = builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
     }
 
-    async move {
-        builder
-            .execute()
-            .await
-            .expect("failed to make request")
-            .response_body()
-            .unwrap()
-    }
+    builder
+        .execute()
+        .await
+        .expect("failed to make request")
+        .response_body()
+        .unwrap()
 }
