@@ -137,6 +137,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        tuf_metadata_base_url -> Text,
+        tuf_targets_base_url -> Text,
     }
 }
 
@@ -286,6 +288,19 @@ table! {
         filter_protocols -> Nullable<Array<model::VpcFirewallRuleProtocolEnum>>,
         action -> model::VpcFirewallRuleActionEnum,
         priority -> Int4,
+    }
+}
+
+table! {
+    update_available_artifact (name, version, kind) {
+        name -> Text,
+        version -> Int8,
+        kind -> crate::db::model::UpdateArtifactKindEnum,
+        targets_version -> Int8,
+        metadata_expiration -> Timestamptz,
+        target_name -> Text,
+        target_sha256 -> Text,
+        target_length -> Int8,
     }
 }
 

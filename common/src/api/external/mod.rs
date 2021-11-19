@@ -484,6 +484,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     Zpool,
+    UpdateAvailableArtifact,
 }
 
 impl Display for ResourceType {
@@ -509,6 +510,8 @@ impl Display for ResourceType {
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
                 ResourceType::Zpool => "zpool",
+                ResourceType::UpdateAvailableArtifact =>
+                    "available update artifact",
             }
         )
     }
