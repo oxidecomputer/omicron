@@ -61,6 +61,7 @@ use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1682,14 +1683,180 @@ impl Nexus {
             vpc.id(),
             params.clone(),
         );
-        let result = self
+        let rules = self
             .db_datastore
             .vpc_update_firewall_rules(&vpc.id(), rules)
+            .await?;
+
+        let rules_for_sled =
+            self.resolve_firewall_rules_for_sled_agent(&vpc, &rules).await?;
+
+        let sleds = self
+            .db_datastore
+            .vpc_resolve_to_sleds(&vpc.id())
             .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect();
+            .iter()
+            .map(|sled| async move { self.sled_client(&sled.id()).await });
+
+        let result = rules.into_iter().map(|rule| rule.into()).collect();
         Ok(result)
+    }
+
+    // TODO: move this somewhere else
+    async fn resolve_firewall_rules_for_sled_agent(
+        &self,
+        vpc: &db::model::Vpc,
+        rules: &Vec<crate::db::model::VpcFirewallRule>,
+    ) -> Result<Vec<OpteFirewallRule>, Error> {
+        // Gather list of Instances and Subnets to resolve
+        let mut instances = HashSet::new();
+        let mut subnets = HashSet::new();
+        for rule in rules {
+            for target in &rule.targets {
+                match &target.0 {
+                    external::VpcFirewallRuleTarget::Instance(name) => {
+                        instances.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleTarget::Subnet(name) => {
+                        subnets.insert(name.clone().into());
+                    }
+                    // TODO: How do we resolve VPC targets?
+                    external::VpcFirewallRuleTarget::Vpc(name) => (),
+                }
+            }
+
+            for host in rule.filter_hosts.iter().flatten() {
+                match &host.0 {
+                    external::VpcFirewallRuleHostFilter::Instance(name) => {
+                        instances.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleHostFilter::Subnet(name) => {
+                        subnets.insert(name.clone().into());
+                    }
+                    // We don't need to resolve anything for Ip
+                    external::VpcFirewallRuleHostFilter::Ip(addr) => (),
+                    // TODO: How do we resolve VPC targets?
+                    external::VpcFirewallRuleHostFilter::Vpc(name) => (),
+                    // TODO: How do we resolve InternetGateway targets?
+                    external::VpcFirewallRuleHostFilter::InternetGateway(
+                        name,
+                    ) => (),
+                }
+            }
+        }
+        let instance_ips: HashMap<external::Name, Vec<ipnetwork::IpNetwork>> =
+            self.db_datastore
+                .resolve_instances_to_ips(vpc, instances)
+                .await?
+                .drain()
+                .map(|(name, v)| (name.0, v))
+                .collect();
+        let subnet_networks: HashMap<
+            external::Name,
+            Vec<ipnetwork::IpNetwork>,
+        > = self
+            .db_datastore
+            .resolve_subnets_to_ips(vpc, subnets)
+            .await?
+            .drain()
+            .map(|(name, v)| (name.0, v))
+            .collect();
+
+        let mut opte_rules = Vec::with_capacity(rules.len());
+        for rule in rules {
+            let mut targets = Vec::with_capacity(rule.targets.len());
+            for target in &rule.targets {
+                match &target.0 {
+                    // TODO: what is the correct behavior when a name is not
+                    // found? Options:
+                    // 1) Fail update request (though note this can still
+                    //    arise from things like instance deletion)
+                    // 2) Allow update request, ignore this rule (but store it
+                    //    in case it becomes valid later). This is consistent
+                    //    with the semantics of the rules. Rules with bad
+                    //    references should likely at least be flagged to users
+                    external::VpcFirewallRuleTarget::Instance(name) => {
+                        targets.extend_from_slice(
+                            instance_ips
+                                .get(&name)
+                                .ok_or_else(|| {
+                                    Error::not_found_by_name(
+                                        ResourceType::Instance,
+                                        &name,
+                                    )
+                                })?
+                                .as_slice(),
+                        );
+                    }
+                    external::VpcFirewallRuleTarget::Subnet(name) => {
+                        targets.extend_from_slice(
+                            subnet_networks
+                                .get(&name)
+                                .ok_or_else(|| {
+                                    Error::not_found_by_name(
+                                        ResourceType::VpcSubnet,
+                                        &name,
+                                    )
+                                })?
+                                .as_slice(),
+                        );
+                    }
+                    // TODO: How do we resolve VPC targets?
+                    external::VpcFirewallRuleTarget::Vpc(_name) => (),
+                };
+            }
+
+            let filter_hosts = match &rule.filter_hosts {
+                None => None,
+                Some(hosts) => {
+                    let mut host_addrs = Vec::with_capacity(hosts.len());
+                    for host in hosts {
+                        match &host.0 {
+                            // TODO: See above about handling missing names
+                            external::VpcFirewallRuleHostFilter::Instance(name) => {
+                                host_addrs.extend_from_slice(instance_ips.get(&name).ok_or_else(|| {
+                                    Error::not_found_by_name(
+                                        ResourceType::Instance,
+                                        &name,
+                                    )
+                                })?.as_slice());
+                            }
+                            external::VpcFirewallRuleHostFilter::Subnet(name) => {
+                                host_addrs.extend_from_slice(subnet_networks.get(&name).ok_or_else(|| {
+                                    Error::not_found_by_name(
+                                        ResourceType::VpcSubnet,
+                                        &name,
+                                    )
+                                })?.as_slice());
+                            }
+                            external::VpcFirewallRuleHostFilter::Ip(addr) => {
+                                host_addrs.push(ipnetwork::IpNetwork::from(*addr));
+                            }
+                            // TODO: How do we resolve VPC targets?
+                            external::VpcFirewallRuleHostFilter::Vpc(_name) => {
+                            }
+                            // TODO: How do we resolve InternetGateway targets?
+                            external::VpcFirewallRuleHostFilter::InternetGateway(
+                                _name,
+                            ) => (),
+                        }
+                    }
+                    Some(host_addrs)
+                }
+            };
+
+            opte_rules.push(OpteFirewallRule {
+                status: rule.status,
+                direction: rule.direction,
+                targets: targets,
+                filter_hosts: filter_hosts,
+                filter_ports: rule.filter_ports.clone(),
+                filter_protocols: rule.filter_protocols.clone(),
+                action: rule.action,
+                priority: rule.priority,
+            });
+        }
+        Ok(opte_rules)
     }
 
     pub async fn vpc_list_subnets(
@@ -2380,4 +2547,17 @@ lazy_static! {
                 "description": "allow inbound TCP connections on port 3389 from anywhere"
             }
         }"#).unwrap();
+}
+
+// TODO: move this somewhere else
+pub struct OpteFirewallRule {
+    pub status: crate::db::model::VpcFirewallRuleStatus,
+    pub direction: crate::db::model::VpcFirewallRuleDirection,
+    pub targets: Vec<ipnetwork::IpNetwork>,
+    pub filter_hosts: Option<Vec<ipnetwork::IpNetwork>>,
+    pub filter_ports: Option<Vec<crate::db::model::L4PortRange>>,
+    pub filter_protocols:
+        Option<Vec<crate::db::model::VpcFirewallRuleProtocol>>,
+    pub action: crate::db::model::VpcFirewallRuleAction,
+    pub priority: crate::db::model::VpcFirewallRulePriority,
 }
