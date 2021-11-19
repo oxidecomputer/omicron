@@ -26,6 +26,9 @@ use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
 pub mod common;
+use common::http_testing::AuthnMode;
+use common::http_testing::NexusRequest;
+use common::http_testing::RequestBuilder;
 use common::identity_eq;
 use common::resource_helpers::create_organization;
 use common::resource_helpers::create_project;
@@ -62,9 +65,16 @@ async fn test_disks() {
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* We should also get a 404 if we delete one. */
-    let error = client
-        .make_request_error(Method::DELETE, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .response_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* Create a disk. */
@@ -492,10 +502,11 @@ async fn test_disks() {
     );
 
     /* It's not allowed to delete a disk that's detaching, either. */
-    client
-        .make_request_no_body(Method::DELETE, &disk_url, StatusCode::NO_CONTENT)
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .unwrap();
+        .expect("failed to delete disk");
 
     /* It should no longer be present in our list of disks. */
     assert_eq!(disks_list(&client, &url_disks).await.len(), 0);

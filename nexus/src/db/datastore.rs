@@ -903,9 +903,17 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+    pub async fn project_delete_disk(
+        &self,
+        opctx: &OpContext,
+        disk_authz: authz::ProjectResource,
+    ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
+
+        let disk_id = disk_authz.id();
+        // XXX TODO-coverage add tests for this
+        opctx.authorize(authz::Action::Delete, disk_authz)?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
@@ -917,7 +925,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

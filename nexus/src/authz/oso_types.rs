@@ -218,6 +218,12 @@ impl From<&authn::Actor> for AuthenticatedActor {
 pub struct Fleet;
 pub const FLEET: Fleet = Fleet;
 
+impl Fleet {
+    pub fn organization(&self, organization_id: Uuid) -> Organization {
+        Organization { organization_id }
+    }
+}
+
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
@@ -233,6 +239,15 @@ impl oso::PolarClass for Fleet {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Organization {
     organization_id: Uuid,
+}
+
+impl Organization {
+    pub fn project(&self, project_id: Uuid) -> Project {
+        Project {
+            organization_id: self.organization_id,
+            project_id,
+        }
+    }
 }
 
 impl oso::PolarClass for Organization {
@@ -260,10 +275,25 @@ impl From<&db::model::Organization> for Organization {
 }
 
 /// Wraps [`db::model::Project`] for Polar
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Project {
     organization_id: Uuid,
     project_id: Uuid,
+}
+
+impl Project {
+    pub fn resource(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+    ) -> ProjectResource {
+        ProjectResource {
+            organization_id: self.organization_id,
+            project_id: self.project_id,
+            resource_type,
+            resource_id,
+        }
+    }
 }
 
 impl oso::PolarClass for Project {
@@ -295,21 +325,6 @@ impl From<&db::model::Project> for Project {
     }
 }
 
-impl Project {
-    fn resource(
-        &self,
-        resource_type: ResourceType,
-        resource_id: Uuid,
-    ) -> ProjectResource {
-        ProjectResource {
-            organization_id: self.organization_id,
-            project_id: self.project_id,
-            resource_type,
-            resource_id,
-        }
-    }
-}
-
 /// Wraps any resource that lives inside a Project for Polar
 ///
 /// This would include [`db::model::Instance`], [`db::model::Disk`], etc.
@@ -319,6 +334,12 @@ pub struct ProjectResource {
     project_id: Uuid,
     resource_type: ResourceType,
     resource_id: Uuid,
+}
+
+impl ProjectResource {
+    pub fn id(&self) -> &Uuid {
+        &self.resource_id
+    }
 }
 
 impl oso::PolarClass for ProjectResource {

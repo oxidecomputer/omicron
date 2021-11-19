@@ -597,7 +597,7 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let disk = nexus
+        let (disk, _) = nexus
             .project_lookup_disk(&organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
@@ -623,8 +623,14 @@ async fn project_disks_delete_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .project_delete_disk(&organization_name, &project_name, &disk_name)
+            .project_delete_disk(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };
