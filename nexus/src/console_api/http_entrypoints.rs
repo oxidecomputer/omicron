@@ -18,7 +18,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use mime_guess;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
@@ -42,11 +42,11 @@ pub fn console_api() -> NexusApiDescription {
     api
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginParams {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 // for now this is just for testing purposes, and the username and password are
@@ -67,7 +67,7 @@ async fn login(
         .session_create(TEST_USER_UUID_PRIVILEGED.parse().unwrap())
         .await?;
     Ok(Response::builder()
-        .status(200)
+        .status(StatusCode::OK)
         .header(
             header::SET_COOKIE,
             session_cookie_header_value(
@@ -75,7 +75,7 @@ async fn login(
                 apictx.session_idle_timeout(),
             ),
         )
-        .body("ok".into())
+        .body("ok".into()) // TODO: what do we return from login?
         .unwrap())
 }
 
@@ -108,7 +108,7 @@ async fn logout(
     // intended, and we should send the standard success response.
 
     Ok(Response::builder()
-        .status(200)
+        .status(StatusCode::NO_CONTENT)
         .header(header::SET_COOKIE, clear_session_cookie_header_value())
         .body("".into())?)
 }

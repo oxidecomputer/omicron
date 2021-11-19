@@ -77,6 +77,7 @@ impl<'a> RequestBuilder<'a> {
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
                 http::header::SET_COOKIE,
+                http::header::LOCATION,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
             error: None,
@@ -298,7 +299,7 @@ impl<'a> RequestBuilder<'a> {
         };
         if status.is_client_error() || status.is_server_error() {
             let error_body = test_response
-                .response_body::<dropshot::HttpErrorResponseBody>()
+                .parsed_body::<dropshot::HttpErrorResponseBody>()
                 .context("parsing error body")?;
             ensure!(
                 error_body.request_id == request_id_header,
@@ -317,14 +318,14 @@ impl<'a> RequestBuilder<'a> {
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,
-    body: bytes::Bytes,
+    pub body: bytes::Bytes,
 }
 
 impl TestResponse {
     /// Parse the response body as an instance of `R` and returns it
     ///
     /// Fails if the body could not be parsed as an `R`.
-    pub fn response_body<R: serde::de::DeserializeOwned>(
+    pub fn parsed_body<R: serde::de::DeserializeOwned>(
         &self,
     ) -> Result<R, anyhow::Error> {
         serde_json::from_slice(self.body.as_ref())
@@ -434,7 +435,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<T>()
+            .parsed_body::<T>()
             .unwrap()
     }
 
@@ -450,7 +451,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<ResultsPage<T>>()
+            .parsed_body::<ResultsPage<T>>()
             .unwrap()
     }
 
@@ -468,7 +469,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<T>()
+            .parsed_body::<T>()
             .unwrap()
     }
 }

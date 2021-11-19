@@ -28,7 +28,7 @@ pub async fn create_organization(
         .execute()
         .await
         .expect("failed to make request")
-        .response_body()
+        .parsed_body()
         .unwrap()
 }
 

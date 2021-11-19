@@ -1,10 +1,11 @@
-use dropshot::test_util::read_string;
+use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
-use hyper;
 
 pub mod common;
+use common::http_testing::{RequestBuilder, TestResponse};
 use common::test_setup;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_nexus::console_api::http_entrypoints::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 
 extern crate slog;
@@ -12,43 +13,32 @@ extern crate slog;
 #[tokio::test]
 async fn test_sessions() {
     let cptestctx = test_setup("test_sessions").await;
-    let console_client = &cptestctx.console_client;
-    let external_client = &cptestctx.external_client;
+    let console_testctx = &cptestctx.console_client;
+    let external_testctx = &cptestctx.external_client;
 
-    // TODO: responses with set-cookie in them won't work until this uses the
-    // new test helpers that don't lock you into a particular set of allowed
-    // headers. See https://github.com/oxidecomputer/omicron/pull/403
-
-    let resp = console_client
-        .make_request_with_body(
-            Method::POST,
-            "/logout",
-            "".into(),
-            StatusCode::OK,
-        )
+    let logout = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
         .await
         .unwrap();
 
     // logout always gives the same response whether you have a session or not
-    let set_cookie_header =
-        resp.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert_eq!(
-        set_cookie_header,
+        get_header_value(logout, header::SET_COOKIE),
         "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
     );
 
-    let resp = console_client
-        .make_request_with_body(
-            Method::POST,
-            "/login",
-            "{ \"username\": \"\", \"password\": \"\"}".into(),
-            StatusCode::OK,
-        )
+    let login = RequestBuilder::new(&console_testctx, Method::POST, "/login")
+        .body(Some(LoginParams {
+            username: "".parse().unwrap(),
+            password: "".parse().unwrap(),
+        }))
+        .expect_status(Some(StatusCode::OK))
+        .execute()
         .await
         .unwrap();
 
-    let session_cookie =
-        resp.headers().get("set-cookie").unwrap().to_str().unwrap();
+    let session_cookie = get_header_value(login, header::SET_COOKIE);
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
 
     assert!(session_token.starts_with("session="));
@@ -62,90 +52,64 @@ async fn test_sessions() {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    let _ = external_client
-        .make_request_with_body(
-            Method::POST,
-            "/organizations",
-            serde_json::to_string(&org_params).unwrap().into(),
-            StatusCode::UNAUTHORIZED,
-        )
-        .await;
+    let _ =
+        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
+            .body(Some(org_params.clone()))
+            .expect_status(Some(StatusCode::UNAUTHORIZED))
+            .execute()
+            .await;
 
     // console pages don't 401, they 302
-    let _ = console_client
-        .make_request_with_body(
-            Method::GET,
-            "/c/whatever",
-            "".into(),
-            StatusCode::FOUND,
-        )
+    let _ = RequestBuilder::new(&external_testctx, Method::POST, "/c/whatever")
+        .expect_status(Some(StatusCode::FOUND))
+        .execute()
         .await;
 
     // now make same requests with cookie
-    let create_org = hyper::Request::builder()
-        .header(header::COOKIE, session_token)
-        .method(Method::POST)
-        .uri(external_client.url("/organizations"))
-        .body(serde_json::to_string(&org_params).unwrap().into())
-        .expect("attempted to construct invalid test request");
-    external_client
-        .make_request_with_request(create_org, StatusCode::CREATED)
-        .await
-        .expect("failed to make request");
+    let _ =
+        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
+            .header(header::COOKIE, session_token)
+            .body(Some(org_params.clone()))
+            // TODO: explicit expect_status not needed. decide whether to keep it anyway
+            .expect_status(Some(StatusCode::CREATED))
+            .execute()
+            .await;
 
-    let get_console_page = hyper::Request::builder()
+    let _ = RequestBuilder::new(&console_testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
-        .method(Method::GET)
-        .uri(console_client.url("/c/whatever"))
-        .body("".into())
-        .expect("attempted to construct invalid test request");
-    console_client
-        .make_request_with_request(get_console_page, StatusCode::OK)
-        .await
-        .expect("failed to make request");
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await;
 
     // logout with an actual session should delete the session in the db
-    let logout_request = hyper::Request::builder()
+    let logout = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
         .header(header::COOKIE, session_token)
-        .method(Method::POST)
-        .uri(console_client.url("/logout"))
-        .body("".into())
-        .expect("attempted to construct invalid test request");
-    let logout_resp = console_client
-        .make_request_with_request(logout_request, StatusCode::OK)
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
         .await
         .unwrap();
 
     // logout clears the cookie client-side
-    let set_cookie_header =
-        logout_resp.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert_eq!(
-        set_cookie_header,
+        get_header_value(logout, header::SET_COOKIE),
         "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
     );
 
-    // now the same requests with the same session cookie should 401 because
+    // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    let request = hyper::Request::builder()
-        .header(header::COOKIE, session_token)
-        .method(Method::POST)
-        .uri(external_client.url("/organizations"))
-        .body(serde_json::to_string(&org_params).unwrap().into())
-        .expect("attempted to construct invalid test request");
-    let _ = external_client
-        .make_request_with_request(request, StatusCode::UNAUTHORIZED)
-        .await;
+    let _ =
+        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
+            .header(header::COOKIE, session_token)
+            .body(Some(org_params))
+            .expect_status(Some(StatusCode::UNAUTHORIZED))
+            .execute()
+            .await;
 
-    let get_console_page = hyper::Request::builder()
+    let _ = RequestBuilder::new(&console_testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
-        .method(Method::GET)
-        .uri(console_client.url("/c/whatever"))
-        .body("".into())
-        .expect("attempted to construct invalid test request");
-    console_client
-        .make_request_with_request(get_console_page, StatusCode::FOUND)
-        .await
-        .expect("failed to make request");
+        .expect_status(Some(StatusCode::FOUND))
+        .execute()
+        .await;
 
     cptestctx.teardown().await;
 }
@@ -153,23 +117,17 @@ async fn test_sessions() {
 #[tokio::test]
 async fn test_console_pages() {
     let cptestctx = test_setup("test_console_pages").await;
-    let client = &cptestctx.console_client;
+    let testctx = &cptestctx.console_client;
 
     // request to console page route without auth should redirect to IdP
-    let unauthed_response = client
-        .make_request_with_body(
-            Method::GET,
-            // 404s will be handled client-side unless we want to pull in the
-            // entire route tree from the client (which we may well want to do)
-            "/c/irrelevant-path",
-            "".into(),
-            StatusCode::FOUND,
-        )
-        .await
-        .unwrap();
+    let unauthed_response =
+        RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
+            .expect_status(Some(StatusCode::FOUND))
+            .execute()
+            .await
+            .unwrap();
 
-    let location_header =
-        unauthed_response.headers().get("location").unwrap().to_str().unwrap();
+    let location_header = get_header_value(unauthed_response, header::LOCATION);
     assert_eq!(location_header, "idp.com/login");
 
     // get session
@@ -182,40 +140,32 @@ async fn test_console_pages() {
 #[tokio::test]
 async fn test_assets() {
     let cptestctx = test_setup("test_assets").await;
-    let client = &cptestctx.console_client;
+    let testctx = &cptestctx.console_client;
 
     // nonexistent file 404s
-    let _ = client
-        .make_request_with_body(
-            Method::GET,
-            "/assets/nonexistent.svg",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    let _ =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/nonexistent.svg")
+            .expect_status(Some(StatusCode::NOT_FOUND))
+            .execute()
+            .await;
 
     // symlink 404s
-    let _ = client
-        .make_request_with_body(
-            Method::GET,
-            "/assets/a_symlink",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/a_symlink")
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
         .await;
 
     // existing file is returned
-    let mut response = client
-        .make_request_with_body(
-            Method::GET,
-            "/assets/hello.txt",
-            "".into(),
-            StatusCode::OK,
-        )
+    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .execute()
         .await
         .unwrap();
-    let file_contents = read_string(&mut response).await;
-    assert_eq!(file_contents, "hello there".to_string());
+
+    assert_eq!(resp.body, "hello there".as_bytes());
 
     cptestctx.teardown().await;
+}
+
+fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
+    resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
 }

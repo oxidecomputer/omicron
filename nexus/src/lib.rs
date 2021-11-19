@@ -15,7 +15,7 @@
 pub mod authn; // Public only for testing
 mod authz;
 mod config;
-mod console_api;
+pub mod console_api; // public for testing
 mod context;
 pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
