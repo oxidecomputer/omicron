@@ -16,18 +16,18 @@ async fn test_sessions() {
     let console_testctx = &cptestctx.console_client;
     let external_testctx = &cptestctx.external_client;
 
-    let logout = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
+    // logout always gives the same response whether you have a session or not
+    let _ = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
         .expect_status(Some(StatusCode::NO_CONTENT))
+        .expect_response_header(
+            header::SET_COOKIE,
+            "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+        )
         .execute()
         .await
         .unwrap();
 
-    // logout always gives the same response whether you have a session or not
-    assert_eq!(
-        get_header_value(logout, header::SET_COOKIE),
-        "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
-    );
-
+    // log in and pull the token out of the header so we can use it for authed requests
     let login = RequestBuilder::new(&console_testctx, Method::POST, "/login")
         .body(Some(LoginParams {
             username: "".parse().unwrap(),
@@ -82,18 +82,17 @@ async fn test_sessions() {
         .await;
 
     // logout with an actual session should delete the session in the db
-    let logout = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
+    let _ = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
+        // logout also clears the cookie client-side
+        .expect_response_header(
+            header::SET_COOKIE,
+            "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+        )
         .execute()
         .await
         .unwrap();
-
-    // logout clears the cookie client-side
-    assert_eq!(
-        get_header_value(logout, header::SET_COOKIE),
-        "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
-    );
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
@@ -120,15 +119,12 @@ async fn test_console_pages() {
     let testctx = &cptestctx.console_client;
 
     // request to console page route without auth should redirect to IdP
-    let unauthed_response =
-        RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
-            .expect_status(Some(StatusCode::FOUND))
-            .execute()
-            .await
-            .unwrap();
-
-    let location_header = get_header_value(unauthed_response, header::LOCATION);
-    assert_eq!(location_header, "idp.com/login");
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
+        .expect_status(Some(StatusCode::FOUND))
+        .expect_response_header(header::LOCATION, "idp.com/login")
+        .execute()
+        .await
+        .unwrap();
 
     // get session
 

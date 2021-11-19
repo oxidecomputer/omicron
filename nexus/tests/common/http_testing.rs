@@ -55,6 +55,8 @@ pub struct RequestBuilder<'a> {
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
+    // doesn't need Option<> because if it's empty, we don't check anything
+    expected_response_headers: http::HeaderMap<http::header::HeaderValue>,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -80,6 +82,7 @@ impl<'a> RequestBuilder<'a> {
                 http::header::LOCATION,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
+            expected_response_headers: http::HeaderMap::new(),
             error: None,
         }
     }
@@ -166,6 +169,48 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Add header and value to check for at execution time
+    ///
+    /// Behaves like header() rather than expect_allowed_headers() in that it
+    /// takes one header at a time rather than a whole set.
+    pub fn expect_response_header<K, V, KE, VE>(
+        mut self,
+        name: K,
+        value: V,
+    ) -> Self
+    where
+        K: TryInto<http::header::HeaderName, Error = KE> + Debug,
+        V: TryInto<http::header::HeaderValue, Error = VE> + Debug,
+        KE: std::error::Error + Send + Sync + 'static,
+        VE: std::error::Error + Send + Sync + 'static,
+    {
+        let header_name_dbg = format!("{:?}", name);
+        let header_value_dbg = format!("{:?}", value);
+        let header_name: Result<http::header::HeaderName, _> =
+            name.try_into().with_context(|| {
+                format!("converting header name {}", header_name_dbg)
+            });
+        let header_value: Result<http::header::HeaderValue, _> =
+            value.try_into().with_context(|| {
+                format!(
+                    "converting value for header {}: {}",
+                    header_name_dbg, header_value_dbg
+                )
+            });
+        match (header_name, header_value) {
+            (Ok(name), Ok(value)) => {
+                self.expected_response_headers.append(name, value);
+            }
+            (Err(error), _) => {
+                self.error = Some(error);
+            }
+            (_, Err(error)) => {
+                self.error = Some(error);
+            }
+        };
+        self
+    }
+
     /// Make the HTTP request using the given `client`, verify the returned
     /// response, and make the response available to the caller
     ///
@@ -226,6 +271,25 @@ impl<'a> RequestBuilder<'a> {
                     header_name
                 );
             }
+        }
+
+        // Check that we do have all expected headers
+        for (header_name, expected_value) in
+            self.expected_response_headers.iter()
+        {
+            ensure!(
+                headers.contains_key(header_name),
+                "response did not contain expected header {:?}",
+                header_name
+            );
+            let actual_value = headers.get(header_name).unwrap();
+            ensure!(
+                actual_value == expected_value,
+                "response contained expected header {:?}, but with value {:?} instead of expected {:?}",
+                header_name,
+                actual_value,
+                expected_value,
+            );
         }
 
         // Sanity check the Date header in the response.  This check assumes
