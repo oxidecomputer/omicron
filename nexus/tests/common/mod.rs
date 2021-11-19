@@ -19,6 +19,7 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod http_testing;
 pub mod resource_helpers;
 
 const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
