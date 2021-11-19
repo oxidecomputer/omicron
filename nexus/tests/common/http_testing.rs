@@ -76,6 +76,7 @@ impl RequestBuilder {
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
+                http::header::SET_COOKIE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
             error: None,
