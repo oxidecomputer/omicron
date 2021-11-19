@@ -73,9 +73,9 @@ impl RequestBuilder {
             body: hyper::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
-                http::header::HeaderName::from_static("content-length"),
-                http::header::HeaderName::from_static("content-type"),
-                http::header::HeaderName::from_static("date"),
+                http::header::CONTENT_LENGTH,
+                http::header::CONTENT_TYPE,
+                http::header::DATE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
             error: None,
@@ -288,7 +288,11 @@ impl RequestBuilder {
 
         // For errors of any kind, attempt to parse the body and make sure the
         // request id matches what we found in the header.
-        let test_response = TestResponse { status, response_body };
+        let test_response = TestResponse {
+            status,
+            headers: response.headers().clone(),
+            body: response_body,
+        };
         if status.is_client_error() || status.is_server_error() {
             let error_body = test_response
                 .expect_response_body::<dropshot::HttpErrorResponseBody>()
@@ -309,7 +313,8 @@ impl RequestBuilder {
 /// Represents a response from an HTTP server
 pub struct TestResponse {
     pub status: http::StatusCode,
-    pub response_body: bytes::Bytes,
+    pub headers: http::HeaderMap,
+    body: bytes::Bytes,
 }
 
 impl TestResponse {
@@ -319,7 +324,7 @@ impl TestResponse {
     pub fn expect_response_body<R: serde::de::DeserializeOwned>(
         &self,
     ) -> Result<R, anyhow::Error> {
-        serde_json::from_slice(self.response_body.as_ref())
+        serde_json::from_slice(self.body.as_ref())
             .context("parsing response body")
     }
 }
