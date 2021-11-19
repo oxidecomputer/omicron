@@ -59,9 +59,6 @@ pub struct RequestBuilder<'a> {
 
 impl<'a> RequestBuilder<'a> {
     /// Start building a request with the given `method` and `uri`
-    ///
-    /// `testctx` is only used to construct the full URL (including HTTP scheme,
-    /// server name, and port).
     pub fn new(
         client: &'a dropshot::test_util::ClientTestContext,
         method: http::Method,
