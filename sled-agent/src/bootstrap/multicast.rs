@@ -47,16 +47,17 @@ impl Ipv6MulticastScope {
 fn new_ipv6_udp_socket() -> io::Result<socket2::Socket> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV6,
-        // From
-        // https://docs.rs/tokio/1.14.0/tokio/net/struct.UdpSocket.html#method.from_std
-        //
-        // "It is left up to the user to set it in non-blocking mode".
-        //
-        // We (the user) do that here.
-        socket2::Type::DGRAM.nonblocking(),
+        socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
     )?;
     socket.set_only_v6(true)?;
+    // From
+    // https://docs.rs/tokio/1.14.0/tokio/net/struct.UdpSocket.html#method.from_std
+    //
+    // "It is left up to the user to set it in non-blocking mode".
+    //
+    // We (the user) do that here.
+    socket.set_nonblocking(true)?;
     Ok(socket)
 }
 
