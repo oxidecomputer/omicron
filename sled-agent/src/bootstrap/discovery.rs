@@ -84,6 +84,6 @@ impl PeerMonitor {
     ///
     /// Note: These sleds have not yet been verified.
     pub async fn addrs(&self) -> Vec<SocketAddr> {
-        self.sleds.lock().await.iter().map(|addr| addr.clone()).collect()
+        self.sleds.lock().await.iter().map(|addr| *addr).collect()
     }
 }

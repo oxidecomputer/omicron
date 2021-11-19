@@ -90,6 +90,11 @@ impl Agent {
                 let other_agents = self.peer_monitor.addrs().await;
 
                 // "-1" to account for ourselves.
+                //
+                // NOTE: Clippy error exists while the compile-time unlock
+                // threshold is "1", because we basically don't require any
+                // peers to unlock.
+                #[allow(clippy::absurd_extreme_comparisons)]
                 if other_agents.len() < UNLOCK_THRESHOLD - 1 {
                     return Err(BackoffError::Transient(
                         BootstrapError::NotEnoughPeers,
