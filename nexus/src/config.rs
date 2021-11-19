@@ -9,9 +9,12 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
+use serde_with::DisplayFromStr;
 use serde_with::SerializeDisplay;
 use std::fmt;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /*
@@ -29,6 +32,13 @@ pub struct AuthnConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TimeseriesDbConfig {
+    #[serde_as(as = "DisplayFromStr")]
+    pub address: SocketAddr,
+}
+
 /**
  * Configuration for a nexus server
  */
@@ -44,6 +54,8 @@ pub struct Config {
     pub log: ConfigLogging,
     /** Database parameters */
     pub database: db::Config,
+    /** Timeseries database parameters */
+    pub timeseries_db: TimeseriesDbConfig,
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
 }
@@ -149,7 +161,10 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use super::{AuthnConfig, Config, LoadError, LoadErrorKind, SchemeName};
+    use super::{
+        AuthnConfig, Config, LoadError, LoadErrorKind, SchemeName,
+        TimeseriesDbConfig,
+    };
     use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -269,6 +284,8 @@ mod test {
             request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"
+            [timeseries_db]
+            address = "127.0.0.1:8123"
             [log]
             mode = "file"
             level = "debug"
@@ -309,6 +326,9 @@ mod test {
                         .parse()
                         .unwrap()
                 },
+                timeseries_db: TimeseriesDbConfig {
+                    address: "127.0.0.1:8123".parse().unwrap(),
+                },
             }
         );
 
@@ -328,6 +348,8 @@ mod test {
             request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"
+            [timeseries_db]
+            address = "127.0.0.1:8123"
             [log]
             mode = "file"
             level = "debug"
@@ -363,6 +385,8 @@ mod test {
             request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"
+            [timeseries_db]
+            address = "127.0.0.1:8123"
             [log]
             mode = "file"
             level = "debug"

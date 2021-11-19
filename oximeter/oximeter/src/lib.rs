@@ -111,3 +111,29 @@ pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
 };
+
+/// Format the name of a timeseries, from the names of its target and metric
+pub fn timeseries_name<S>(target_name: S, metric_name: S) -> String
+where
+    S: AsRef<str> + std::fmt::Display,
+{
+    format!("{}:{}", target_name, metric_name)
+}
+
+/// Format the name of a timeseries, from its target and metric objects.
+pub fn timeseries_name_for<T, M>(target: &T, metric: &M) -> String
+where
+    T: Target,
+    M: Metric,
+{
+    timeseries_name(target.name(), metric.name())
+}
+
+/// Format the full timeseries key for a target and metric.
+pub fn timeseries_key<T, M>(target: &T, metric: &M) -> String
+where
+    T: Target,
+    M: Metric,
+{
+    format!("{}:{}", target.key(), metric.key())
+}

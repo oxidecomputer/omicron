@@ -21,26 +21,10 @@ pub struct Client {
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
-    pub async fn new(address: SocketAddr, log: Logger) -> Result<Self, Error> {
+    pub fn new(address: SocketAddr, log: Logger) -> Self {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
-        let out =
-            Self { log, url, client, schema: Mutex::new(BTreeMap::new()) };
-        // TODO-robustness: We may want to remove this init_db call.
-        //
-        // The call will always succeed (assuming the DB can be reached), since the statements for
-        // creating the database and tables have `IF NOT EXISTS` everywhere. It may be preferable
-        // to remove this call and change the statements to _fail_ if the DB is already
-        // initialized. This removes some of the "magic", and allows clients to know if the DB is
-        // already populated or not. It also means we can connect and do stuff (such as wipe)
-        // without first creating a bunch of data.
-        //
-        // For example, we really want to know if the DB is populated when we cold-start the rack,
-        // as that would indicate a serious problem. This should probably trigger an obvious error,
-        // rather than silently succeeding.
-        out.init_db().await?;
-        out.get_schema().await?;
-        Ok(out)
+        Self { log, url, client, schema: Mutex::new(BTreeMap::new()) }
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
@@ -170,6 +154,14 @@ impl Client {
         Ok(self.schema.lock().unwrap().get(name.as_ref()).map(Clone::clone))
     }
 
+    /// Return all timeseries schema.
+    pub async fn all_schema(
+        &self,
+    ) -> Result<Vec<model::TimeseriesSchema>, Error> {
+        self.get_schema().await?;
+        Ok(self.schema.lock().unwrap().values().cloned().collect())
+    }
+
     // Verifies that the schema for a sample matches the schema in the database.
     //
     // If the schema does not match, an Err is returned (the caller skips the sample in this case).
@@ -207,25 +199,6 @@ impl Client {
             serde_json::to_string(&model::DbTimeseriesSchema::from(schema))
                 .unwrap()
         }))
-    }
-
-    // Initialize ClickHouse with the database and metric table schema.
-    pub(crate) async fn init_db(&self) -> Result<(), Error> {
-        // The HTTP client doesn't support multiple statements per query, so we break them out here
-        // manually.
-        debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-init.sql");
-        for query in sql.split("\n--\n") {
-            self.execute(query.to_string()).await?;
-        }
-        Ok(())
-    }
-
-    // Wipe the ClickHouse database entirely.
-    pub async fn wipe_db(&self) -> Result<(), Error> {
-        debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe.sql").to_string();
-        self.execute(sql).await
     }
 
     // Execute a generic SQL statement.
@@ -291,6 +264,12 @@ impl Client {
 pub trait DbWrite {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
+
+    /// Initialize ClickHouse with the database and metric table schema.
+    async fn init_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely.
+    async fn wipe_db(&self) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -386,6 +365,25 @@ impl DbWrite for Client {
         // many as one per sample. It's not clear how to structure this in a way that's useful.
         Ok(())
     }
+
+    /// Initialize ClickHouse with the database and metric table schema.
+    async fn init_db(&self) -> Result<(), Error> {
+        // The HTTP client doesn't support multiple statements per query, so we break them out here
+        // manually.
+        debug!(self.log, "initializing ClickHouse database");
+        let sql = include_str!("./db-init.sql");
+        for query in sql.split("\n--\n") {
+            self.execute(query.to_string()).await?;
+        }
+        Ok(())
+    }
+
+    /// Wipe the ClickHouse database entirely.
+    async fn wipe_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
+        let sql = include_str!("./db-wipe.sql").to_string();
+        self.execute(sql).await
+    }
 }
 
 // Return Ok if the response indicates success, otherwise return either the reqwest::Error, if this
@@ -437,6 +435,7 @@ fn reconstitute_from_schema(
     let (target_fields, metric_fields): (Vec<_>, Vec<_>) = schema
         .fields
         .iter()
+        // TODO-correctness: We need to handle keys with a literal ":" in the name.
         .zip(timeseries_key.split(':'))
         .map(|(field, value_str)| {
             FieldValue::parse_as_type(value_str, field.ty)
@@ -493,7 +492,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, log).await.unwrap().wipe_db().await.unwrap();
+        Client::new(address, log).wipe_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
@@ -507,7 +506,11 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log).await.unwrap();
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
         let samples = {
             let mut s = Vec::with_capacity(8);
             for _ in 0..s.capacity() {
@@ -549,7 +552,11 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log).await.unwrap();
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
         client.insert_samples(&vec![sample]).await.unwrap();
 
@@ -579,7 +586,11 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log).await.unwrap();
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
@@ -732,7 +743,11 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log).await.unwrap();
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
 
         // Create sample data
         let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);

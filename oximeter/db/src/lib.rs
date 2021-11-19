@@ -10,6 +10,8 @@ mod client;
 pub mod model;
 pub mod query;
 pub use client::{Client, DbWrite};
+pub use model::{Metric, Target, Timeseries, TimeseriesSchema};
+pub use query::{FieldFilter, Filter, TimeFilter};
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {

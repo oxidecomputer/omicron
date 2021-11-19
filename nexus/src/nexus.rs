@@ -14,6 +14,7 @@ use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
@@ -123,6 +124,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
+    /** client for the timeseries database */
+    timeseries_db: Arc<oximeter_db::Client>,
+
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -171,6 +175,10 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore: Arc::clone(&db_datastore),
+            timeseries_db: Arc::new(oximeter_db::Client::new(
+                config.timeseries_db.address,
+                log.new(o!()),
+            )),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
         };
@@ -2134,6 +2142,72 @@ impl Nexus {
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         let id = info.id;
         Ok((self.build_oximeter_client(&id, address), id))
+    }
+
+    /**
+     * Query the timeseries database for a given timeseries.
+     */
+    // TODO(ben): Paginate
+    pub async fn get_timeseries(
+        &self,
+        target: &str,
+        metric: &str,
+        after: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+        filters: &Vec<oximeter_db::Filter>,
+    ) -> Result<Vec<oximeter_db::Timeseries>, Error> {
+        let timeseries_name = oximeter::timeseries_name(target, metric);
+        self.timeseries_db
+            .filter_timeseries_with(&timeseries_name, filters, after, before)
+            .await
+            .map_err(|e| match e {
+                oximeter_db::Error::QueryError(_)
+                | oximeter_db::Error::SchemaMismatch { .. } => {
+                    Error::InvalidRequest { message: e.to_string() }
+                }
+                _ => Error::internal_error(&e.to_string()),
+            })
+    }
+
+    /**
+     * Query the timeseries database for the schema associated with the given timeseries.
+     */
+    pub async fn get_timeseries_schema(
+        &self,
+        target: &str,
+        metric: &str,
+    ) -> Result<oximeter_db::TimeseriesSchema, Error> {
+        let timeseries_name = oximeter::timeseries_name(target, metric);
+        let result =
+            self.timeseries_db.schema_for_timeseries(&timeseries_name).await;
+        match result {
+            Ok(schema) => schema.ok_or_else(|| {
+                Error::not_found_other(
+                    ResourceType::Timeseries,
+                    timeseries_name,
+                )
+            }),
+            Err(e) => match e {
+                oximeter_db::Error::QueryError(_)
+                | oximeter_db::Error::SchemaMismatch { .. } => {
+                    Err(Error::InvalidRequest { message: e.to_string() })
+                }
+                _ => Err(Error::internal_error(&e.to_string())),
+            },
+        }
+    }
+
+    /**
+     * Get all timeseries schema.
+     */
+    // TODO(ben): Paginate
+    pub async fn get_all_timeseries_schema(
+        &self,
+    ) -> Result<Vec<oximeter_db::TimeseriesSchema>, Error> {
+        self.timeseries_db
+            .all_schema()
+            .await
+            .map_err(|e| Error::internal_error(&e.to_string()))
     }
 
     pub async fn session_fetch(

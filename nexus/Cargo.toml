@@ -58,6 +58,10 @@ path = "../sled-agent"
 version = "0.1.0"
 path = "../oximeter/oximeter"
 
+[dependencies.oximeter-db]
+version = "0.1.0"
+path = "../oximeter/db"
+
 [dependencies.oximeter-instruments]
 version = "0.1.0"
 path = "../oximeter/instruments"

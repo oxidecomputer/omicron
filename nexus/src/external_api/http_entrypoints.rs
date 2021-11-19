@@ -9,6 +9,7 @@ use crate::ServerContext;
 use super::params;
 use super::views::{Organization, Project};
 use crate::context::OpContext;
+use chrono::{DateTime, Utc};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -58,6 +59,7 @@ use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
+use oximeter_db::{Filter, Timeseries, TimeseriesSchema};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -133,6 +135,10 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
+
+        api.register(metrics_get_schema)?;
+        api.register(metrics_get_schemas)?;
+        api.register(metrics_get_timeseries)?;
 
         Ok(())
     }
@@ -1818,6 +1824,91 @@ async fn sagas_get_saga(
     let handler = async {
         let saga = nexus.saga_get(path.saga_id).await?;
         Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TimeseriesName {
+    target: String,
+    metric: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TimeseriesFilters {
+    after: Option<DateTime<Utc>>,
+    before: Option<DateTime<Utc>>,
+    field_filters: Vec<Filter>,
+}
+
+/**
+ * Fetch a specific metric timeseries by name.
+ */
+#[endpoint {
+    method = GET,
+    path = "/metrics/timeseries/{target}/{metric}",
+}]
+async fn metrics_get_timeseries(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<TimeseriesName>,
+    body: TypedBody<TimeseriesFilters>,
+) -> Result<HttpResponseOk<Vec<Timeseries>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let body = body.into_inner();
+    let handler = async {
+        let data = nexus
+            .get_timeseries(
+                &path.target,
+                &path.metric,
+                body.after,
+                body.before,
+                &body.field_filters,
+            )
+            .await?;
+        Ok(HttpResponseOk(data))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Fetch the schema for a metric timeseries by name.
+ */
+#[endpoint {
+    method = GET,
+    path = "/metrics/schema/{target}/{metric}",
+}]
+async fn metrics_get_schema(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<TimeseriesName>,
+) -> Result<HttpResponseOk<TimeseriesSchema>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let schema =
+            nexus.get_timeseries_schema(&path.target, &path.metric).await?;
+        Ok(HttpResponseOk(schema))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Fetch all timeseries schema.
+ */
+#[endpoint {
+    method = GET,
+    path = "/metrics/schema",
+}]
+async fn metrics_get_schemas(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<Vec<TimeseriesSchema>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let schema = nexus.get_all_timeseries_schema().await?;
+        Ok(HttpResponseOk(schema))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

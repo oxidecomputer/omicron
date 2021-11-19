@@ -263,7 +263,8 @@ impl OximeterAgent {
         let client_log = log.new(o!("component" => "clickhouse-client"));
 
         // Construct the ClickHouse client first, to propagate an error if needed.
-        let client = Client::new(db_config.address, client_log).await?;
+        let client = Client::new(db_config.address, client_log);
+        client.init_db().await?;
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {

@@ -97,6 +97,7 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     config.database.url = database.pg_config().clone();
+    config.timeseries_db.address.set_port(clickhouse.port());
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();

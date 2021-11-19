@@ -474,6 +474,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Timeseries,
 }
 
 impl Display for ResourceType {
@@ -496,6 +497,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Timeseries => "timeseries",
             }
         )
     }

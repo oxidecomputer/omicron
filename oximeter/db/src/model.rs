@@ -9,6 +9,7 @@ use oximeter::types::{
     self, Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
     Sample,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -55,14 +56,14 @@ impl From<DbBool> for Datum {
 }
 
 /// The source, target or metric, from which a field is derived.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub enum FieldSource {
     Target,
     Metric,
 }
 
 /// Information about a target or metric field as contained in a schema.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Field {
     pub name: String,
     pub ty: FieldType,
@@ -115,7 +116,7 @@ impl From<Vec<Field>> for DbFieldList {
 }
 
 /// The `TimeseriesSchema` struct represents the schema of a timeseries.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TimeseriesSchema {
     pub timeseries_name: String,
     pub fields: Vec<Field>,
@@ -685,14 +686,14 @@ pub(crate) fn parse_measurement_from_row(
 }
 
 /// Information about a target, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<types::Field>,
 }
 
 /// Information about a metric, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct Metric {
     pub name: String,
     pub fields: Vec<types::Field>,
@@ -700,7 +701,7 @@ pub struct Metric {
 }
 
 /// A list of timestamped measurements from a timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct Timeseries {
     pub timeseries_name: String,
     pub timeseries_key: String,

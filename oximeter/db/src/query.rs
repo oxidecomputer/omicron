@@ -5,6 +5,7 @@ use crate::model::DATABASE_NAME;
 use crate::Error;
 use chrono::{DateTime, Utc};
 use oximeter::types::{DatumType, FieldValue};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
@@ -12,7 +13,7 @@ use std::net::IpAddr;
 ///
 /// Note that the endpoints are interpreted as inclusive, so a timestamp matching the endpoints is
 /// also returned.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub enum TimeFilter {
     /// Passes timestamps before the contained value
     Before(DateTime<Utc>),
@@ -77,7 +78,7 @@ impl TimeFilter {
 }
 
 /// A string-typed filter, used to build filters on timeseries fields from external input.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Filter {
     /// The name of the field.
     pub name: String,
