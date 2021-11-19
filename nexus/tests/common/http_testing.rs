@@ -45,7 +45,7 @@ use std::fmt::Debug;
 // expectations.
 //
 pub struct RequestBuilder<'a> {
-    client: &'a dropshot::test_util::ClientTestContext,
+    testctx: &'a dropshot::test_util::ClientTestContext,
 
     method: http::Method,
     uri: http::Uri,
@@ -60,13 +60,13 @@ pub struct RequestBuilder<'a> {
 impl<'a> RequestBuilder<'a> {
     /// Start building a request with the given `method` and `uri`
     pub fn new(
-        client: &'a dropshot::test_util::ClientTestContext,
+        testctx: &'a dropshot::test_util::ClientTestContext,
         method: http::Method,
         uri: &str,
     ) -> Self {
-        let uri = client.url(uri);
+        let uri = testctx.url(uri);
         RequestBuilder {
-            client,
+            testctx,
             method,
             uri,
             headers: http::HeaderMap::new(),
@@ -185,7 +185,7 @@ impl<'a> RequestBuilder<'a> {
             builder.body(self.body).context("failed to construct request")?;
 
         let time_before = chrono::offset::Utc::now().timestamp();
-        slog::info!(self.client.client_log,
+        slog::info!(self.testctx.client_log,
             "client request";
             "method" => %request.method(),
             "uri" => %request.uri(),
@@ -193,7 +193,7 @@ impl<'a> RequestBuilder<'a> {
         );
 
         let mut response = self
-            .client
+            .testctx
             .client
             .request(request)
             .await
@@ -201,7 +201,7 @@ impl<'a> RequestBuilder<'a> {
 
         // Check that we got the expected response code.
         let status = response.status();
-        slog::info!(self.client.client_log,
+        slog::info!(self.testctx.client_log,
             "client received response";
             "status" => ?status
         );
