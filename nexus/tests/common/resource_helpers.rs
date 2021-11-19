@@ -9,10 +9,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
-use omicron_common::api::external::VpcRouterCreateParams;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Project};
 

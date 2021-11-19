@@ -2,9 +2,6 @@
 use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
 use futures::Future;
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, OrganizationCreateParams,
-};
 
 pub mod common;
 use common::test_setup;
@@ -78,14 +75,14 @@ async fn test_authz_basic() {
     cptestctx.teardown().await;
 }
 
-async fn try_create_organization(
+fn try_create_organization(
     log: &slog::Logger,
     client: &dropshot::test_util::ClientTestContext,
     maybe_user_id: Option<&'static str>,
     expected_status: http::StatusCode,
-) -> HttpErrorResponseBody {
+) -> impl Future<Output = HttpErrorResponseBody> {
     let log = log.new(slog::o!());
-    let input = params::OrganizationCreateParams {
+    let input = params::OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: "a-crime-family".parse().unwrap(),
             description: "an org".to_string(),
@@ -101,10 +98,12 @@ async fn try_create_organization(
         builder = builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
     }
 
-    builder
-        .execute(&log, &hyper::Client::new())
-        .await
-        .expect("failed to make request")
-        .expect_response_body()
-        .unwrap()
+    async move {
+        builder
+            .execute(&log, &hyper::Client::new())
+            .await
+            .expect("failed to make request")
+            .expect_response_body()
+            .unwrap()
+    }
 }
