@@ -1737,11 +1737,9 @@ mod test {
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::db::DataStore;
+    use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, OrganizationCreateParams,
-        ProjectCreateParams,
-    };
+    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -1755,7 +1753,7 @@ mod test {
         let pool = db::Pool::new(&cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
-        let organization = Organization::new(OrganizationCreateParams {
+        let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "org".parse().unwrap(),
                 description: "desc".to_string(),
@@ -1766,7 +1764,7 @@ mod test {
 
         let project = Project::new(
             organization.id(),
-            ProjectCreateParams {
+            params::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),

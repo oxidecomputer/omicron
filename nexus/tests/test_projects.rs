@@ -1,4 +1,4 @@
-use omicron_common::api::external::Project;
+use omicron_nexus::external_api::views::Project;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;

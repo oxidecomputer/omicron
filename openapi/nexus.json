@@ -231,7 +231,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationCreateParams"
+                "$ref": "#/components/schemas/OrganizationCreate"
               }
             }
           },
@@ -297,7 +297,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationUpdateParams"
+                "$ref": "#/components/schemas/OrganizationUpdate"
               }
             }
           },
@@ -414,7 +414,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectCreateParams"
+                "$ref": "#/components/schemas/ProjectCreate"
               }
             }
           },
@@ -498,7 +498,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectUpdateParams"
+                "$ref": "#/components/schemas/ProjectUpdate"
               }
             }
           },
@@ -3072,7 +3072,7 @@
           "timeModified"
         ]
       },
-      "OrganizationCreateParams": {
+      "OrganizationCreate": {
         "description": "Create-time parameters for an [`Organization`]",
         "type": "object",
         "properties": {
@@ -3109,7 +3109,7 @@
           "items"
         ]
       },
-      "OrganizationUpdateParams": {
+      "OrganizationUpdate": {
         "description": "Updateable properties of an [`Organization`]",
         "type": "object",
         "properties": {
@@ -3172,7 +3172,7 @@
           "timeModified"
         ]
       },
-      "ProjectCreateParams": {
+      "ProjectCreate": {
         "description": "Create-time parameters for an [`Project`]",
         "type": "object",
         "properties": {
@@ -3209,7 +3209,7 @@
           "items"
         ]
       },
-      "ProjectUpdateParams": {
+      "ProjectUpdate": {
         "description": "Updateable properties of an [`Project`]",
         "type": "object",
         "properties": {

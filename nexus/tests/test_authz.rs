@@ -10,7 +10,9 @@ pub mod common;
 use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+use omicron_nexus::external_api::params;
 
 extern crate slog;
 
@@ -76,14 +78,14 @@ async fn test_authz_basic() {
     cptestctx.teardown().await;
 }
 
-fn try_create_organization(
+async fn try_create_organization(
     log: &slog::Logger,
     client: &dropshot::test_util::ClientTestContext,
     maybe_user_id: Option<&'static str>,
     expected_status: http::StatusCode,
-) -> impl Future<Output=HttpErrorResponseBody> {
+) -> HttpErrorResponseBody {
     let log = log.new(slog::o!());
-    let input = OrganizationCreateParams {
+    let input = params::OrganizationCreateParams {
         identity: IdentityMetadataCreateParams {
             name: "a-crime-family".parse().unwrap(),
             description: "an org".to_string(),
@@ -99,12 +101,10 @@ fn try_create_organization(
         builder = builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
     }
 
-    async move {
-        builder
-            .execute(&log, &hyper::Client::new())
-            .await
-            .expect("failed to make request")
-            .expect_response_body()
-            .unwrap()
-    }
+    builder
+        .execute(&log, &hyper::Client::new())
+        .await
+        .expect("failed to make request")
+        .expect_response_body()
+        .unwrap()
 }
