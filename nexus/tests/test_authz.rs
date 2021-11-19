@@ -26,21 +26,18 @@ extern crate slog;
 #[tokio::test]
 async fn test_authz_basic() {
     let cptestctx = test_setup("test_authz_basic").await;
-    let log = &cptestctx.logctx.log;
     let client = &cptestctx.external_client;
 
     // With no credentials, we should get back a 401 "Unauthorized" response.
     let error =
-        try_create_organization(log, &client, None, StatusCode::UNAUTHORIZED)
-            .await;
+        try_create_organization(client, None, StatusCode::UNAUTHORIZED).await;
     assert_eq!(error.error_code, Some(String::from("Unauthorized")));
     assert_eq!(error.message.as_str(), "credentials missing or invalid");
 
     // If we provide the valid credentials of an unprivileged user, we should
     // get back a 403 "Forbidden" response.
     let error = try_create_organization(
-        log,
-        &client,
+        client,
         Some(omicron_nexus::authn::TEST_USER_UUID_UNPRIVILEGED),
         StatusCode::FORBIDDEN,
     )
@@ -53,8 +50,7 @@ async fn test_authz_basic() {
     // the authentication system in general, outside the context of Nexus).
     // This one verifies that we've correctly integrated authn with Nexus.
     let error = try_create_organization(
-        &log,
-        &client,
+        client,
         Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR),
         StatusCode::UNAUTHORIZED,
     )
@@ -63,8 +59,7 @@ async fn test_authz_basic() {
     assert_eq!(error.message.as_str(), "credentials missing or invalid");
 
     let error = try_create_organization(
-        &log,
-        &client,
+        client,
         Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS),
         StatusCode::UNAUTHORIZED,
     )
@@ -75,13 +70,11 @@ async fn test_authz_basic() {
     cptestctx.teardown().await;
 }
 
-fn try_create_organization(
-    log: &slog::Logger,
-    client: &dropshot::test_util::ClientTestContext,
+fn try_create_organization<'a>(
+    client: &'a dropshot::test_util::ClientTestContext,
     maybe_user_id: Option<&'static str>,
     expected_status: http::StatusCode,
-) -> impl Future<Output = HttpErrorResponseBody> {
-    let log = log.new(slog::o!());
+) -> impl Future<Output = HttpErrorResponseBody> + 'a {
     let input = params::OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: "a-crime-family".parse().unwrap(),
@@ -100,10 +93,10 @@ fn try_create_organization(
 
     async move {
         builder
-            .execute(&log, &hyper::Client::new())
+            .execute()
             .await
             .expect("failed to make request")
-            .expect_response_body()
+            .response_body()
             .unwrap()
     }
 }

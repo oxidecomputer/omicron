@@ -44,7 +44,9 @@ use std::fmt::Debug;
 // request and response information as we have, including the caller's
 // expectations.
 //
-pub struct RequestBuilder {
+pub struct RequestBuilder<'a> {
+    client: &'a dropshot::test_util::ClientTestContext,
+
     method: http::Method,
     uri: http::Uri,
     headers: http::HeaderMap<http::header::HeaderValue>,
@@ -55,18 +57,19 @@ pub struct RequestBuilder {
     allowed_headers: Option<Vec<http::header::HeaderName>>,
 }
 
-impl RequestBuilder {
+impl<'a> RequestBuilder<'a> {
     /// Start building a request with the given `method` and `uri`
     ///
     /// `testctx` is only used to construct the full URL (including HTTP scheme,
     /// server name, and port).
     pub fn new(
-        testctx: &dropshot::test_util::ClientTestContext,
+        client: &'a dropshot::test_util::ClientTestContext,
         method: http::Method,
         uri: &str,
     ) -> Self {
-        let uri = testctx.url(uri);
+        let uri = client.url(uri);
         RequestBuilder {
+            client,
             method,
             uri,
             headers: http::HeaderMap::new(),
@@ -171,11 +174,7 @@ impl RequestBuilder {
     /// This function checks the returned status code (if [`expect_status()`]
     /// was used), allowed headers (if [`allowed_headers()`] was used), and
     /// various other properties of the response.
-    pub async fn execute(
-        self,
-        log: &slog::Logger,
-        client: &hyper::Client<hyper::client::HttpConnector>,
-    ) -> Result<TestResponse, anyhow::Error> {
+    pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -189,20 +188,26 @@ impl RequestBuilder {
             builder.body(self.body).context("failed to construct request")?;
 
         let time_before = chrono::offset::Utc::now().timestamp();
-        slog::info!(log, "client request";
+        slog::info!(self.client.client_log,
+            "client request";
             "method" => %request.method(),
             "uri" => %request.uri(),
             "body" => ?&request.body(),
         );
 
-        let mut response = client
+        let mut response = self
+            .client
+            .client
             .request(request)
             .await
             .context("making request to server")?;
 
         // Check that we got the expected response code.
         let status = response.status();
-        slog::info!(log, "client received response"; "status" => ?status);
+        slog::info!(self.client.client_log,
+            "client received response";
+            "status" => ?status
+        );
 
         if let Some(expected_status) = self.expected_status {
             ensure!(
@@ -296,7 +301,7 @@ impl RequestBuilder {
         };
         if status.is_client_error() || status.is_server_error() {
             let error_body = test_response
-                .expect_response_body::<dropshot::HttpErrorResponseBody>()
+                .response_body::<dropshot::HttpErrorResponseBody>()
                 .context("parsing error body")?;
             ensure!(
                 error_body.request_id == request_id_header,
@@ -322,7 +327,7 @@ impl TestResponse {
     /// Parse the response body as an instance of `R` and returns it
     ///
     /// Fails if the body could not be parsed as an `R`.
-    pub fn expect_response_body<R: serde::de::DeserializeOwned>(
+    pub fn response_body<R: serde::de::DeserializeOwned>(
         &self,
     ) -> Result<R, anyhow::Error> {
         serde_json::from_slice(self.body.as_ref())
@@ -342,11 +347,11 @@ pub enum AuthnMode {
 /// This is a thin wrapper around [`RequestBuilder`] that exists to allow
 /// callers to specify authentication details (and, in the future, any other
 /// application-level considerations).
-pub struct NexusRequest {
-    request_builder: RequestBuilder,
+pub struct NexusRequest<'a> {
+    request_builder: RequestBuilder<'a>,
 }
 
-impl NexusRequest {
+impl<'a> NexusRequest<'a> {
     /// Create a `NexusRequest` around `request_builder`
     ///
     /// Most callers should use [`objects_post`], [`object_get`],
@@ -355,7 +360,7 @@ impl NexusRequest {
     /// whatever HTTP-level stuff you want (including any non-authentication
     /// headers), then call this function to get a `NexusRequest`, then use
     /// [`authn_as()`] to configure authentication.
-    pub fn new(request_builder: RequestBuilder) -> Self {
+    pub fn new(request_builder: RequestBuilder<'a>) -> Self {
         NexusRequest { request_builder }
     }
 
@@ -378,18 +383,14 @@ impl NexusRequest {
     }
 
     /// See [`RequestBuilder::execute()`].
-    pub async fn execute(
-        self,
-        log: &slog::Logger,
-    ) -> Result<TestResponse, anyhow::Error> {
-        let client = hyper::Client::new();
-        self.request_builder.execute(log, &client).await
+    pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
+        self.request_builder.execute().await
     }
 
     /// Returns a new `NexusRequest` suitable for `POST $uri` with the given
     /// `body`
     pub fn objects_post<BodyType: serde::Serialize>(
-        testctx: &ClientTestContext,
+        testctx: &'a ClientTestContext,
         uri: &str,
         body: BodyType,
     ) -> Self {
@@ -401,7 +402,7 @@ impl NexusRequest {
     }
 
     /// Returns a new `NexusRequest` suitable for `GET $uri`
-    pub fn object_get(testctx: &ClientTestContext, uri: &str) -> Self {
+    pub fn object_get(testctx: &'a ClientTestContext, uri: &str) -> Self {
         NexusRequest::new(
             RequestBuilder::new(testctx, http::Method::GET, uri)
                 .expect_status(Some(http::StatusCode::OK)),
@@ -409,7 +410,7 @@ impl NexusRequest {
     }
 
     /// Returns a new `NexusRequest` suitable for `DELETE $uri`
-    pub fn object_delete(testctx: &ClientTestContext, uri: &str) -> Self {
+    pub fn object_delete(testctx: &'a ClientTestContext, uri: &str) -> Self {
         NexusRequest::new(
             RequestBuilder::new(testctx, http::Method::GET, uri)
                 .expect_status(Some(http::StatusCode::NO_CONTENT)),
@@ -433,10 +434,10 @@ pub mod dropshot_compat {
         T: DeserializeOwned,
     {
         NexusRequest::object_get(testctx, object_url)
-            .execute(&testctx.client_log)
+            .execute()
             .await
             .unwrap()
-            .expect_response_body::<T>()
+            .response_body::<T>()
             .unwrap()
     }
 
@@ -449,10 +450,10 @@ pub mod dropshot_compat {
         T: DeserializeOwned,
     {
         NexusRequest::object_get(testctx, list_url)
-            .execute(&testctx.client_log)
+            .execute()
             .await
             .unwrap()
-            .expect_response_body::<ResultsPage<T>>()
+            .response_body::<ResultsPage<T>>()
             .unwrap()
     }
 
@@ -467,10 +468,10 @@ pub mod dropshot_compat {
         T: DeserializeOwned,
     {
         NexusRequest::objects_post(testctx, collection_url, input)
-            .execute(&testctx.client_log)
+            .execute()
             .await
             .unwrap()
-            .expect_response_body::<T>()
+            .response_body::<T>()
             .unwrap()
     }
 }

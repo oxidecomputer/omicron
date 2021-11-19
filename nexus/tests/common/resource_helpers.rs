@@ -25,10 +25,10 @@ pub async fn create_organization(
     };
     NexusRequest::objects_post(client, "/organizations", input)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute(&client.client_log)
+        .execute()
         .await
         .expect("failed to make request")
-        .expect_response_body()
+        .response_body()
         .unwrap()
 }
 
