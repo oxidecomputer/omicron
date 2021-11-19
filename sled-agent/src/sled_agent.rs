@@ -1,9 +1,9 @@
 //! Sled agent implementation
 
+use crate::params::DiskStateRequested;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };

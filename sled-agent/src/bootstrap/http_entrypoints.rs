@@ -7,12 +7,10 @@ use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::api::internal::bootstrap_agent::{
-    ShareRequest, ShareResponse,
-};
 use std::sync::Arc;
 
 use super::agent::Agent;
+use super::{params::ShareRequest, views::ShareResponse};
 
 /// Returns a description of the bootstrap agent API
 pub fn ba_api() -> ApiDescription<Arc<Agent>> {

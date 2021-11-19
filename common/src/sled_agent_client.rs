@@ -201,27 +201,6 @@ impl From<types::DiskState> for crate::api::external::DiskState {
     }
 }
 
-impl From<crate::api::internal::sled_agent::DiskStateRequested>
-    for types::DiskStateRequested
-{
-    fn from(s: crate::api::internal::sled_agent::DiskStateRequested) -> Self {
-        match s {
-            crate::api::internal::sled_agent::DiskStateRequested::Detached => {
-                Self::Detached
-            }
-            crate::api::internal::sled_agent::DiskStateRequested::Attached(
-                u,
-            ) => Self::Attached(u),
-            crate::api::internal::sled_agent::DiskStateRequested::Destroyed => {
-                Self::Destroyed
-            }
-            crate::api::internal::sled_agent::DiskStateRequested::Faulted => {
-                Self::Faulted
-            }
-        }
-    }
-}
-
 impl From<crate::api::internal::sled_agent::InstanceHardware>
     for types::InstanceHardware
 {

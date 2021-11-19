@@ -3,8 +3,8 @@
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
 use super::discovery;
+use super::views::ShareResponse;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
