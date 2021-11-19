@@ -283,7 +283,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
-        // XXX working here
         use db::schema::organization::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::id, pagparams)

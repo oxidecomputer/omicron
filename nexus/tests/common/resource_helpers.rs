@@ -13,8 +13,6 @@ use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Project};
 
-// XXX This needs to be better abstracted.
-// and/or we should do the dropshot RFE for a builder that makes requests.
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
     path: &str,
@@ -22,21 +20,13 @@ pub async fn objects_list_page_authz<ItemType>(
 where
     ItemType: serde::de::DeserializeOwned,
 {
-    let authn_header = http::HeaderValue::from_static(
-        omicron_nexus::authn::TEST_USER_UUID_PRIVILEGED,
-    );
-    let uri = client.url(path);
-    let request = hyper::Request::builder()
-        .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header)
-        .method(Method::GET)
-        .uri(uri)
-        .body("".into())
-        .expect("attempted to construct invalid test request");
-    let mut response = client
-        .make_request_with_request(request, StatusCode::OK)
+    NexusRequest::object_get(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .expect("failed to make request");
-    read_json::<dropshot::ResultsPage<ItemType>>(&mut response).await
+        .expect("failed to make request")
+        .response_body()
+        .unwrap()
 }
 
 pub async fn create_organization(
