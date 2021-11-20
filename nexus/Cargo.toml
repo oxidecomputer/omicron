@@ -25,6 +25,7 @@ libc = "0.2.107"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 oso = "0.23"
+oximeter-client = { path = "../oximeter-client" }
 parse-display = "0.5.3"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -33,6 +34,7 @@ ref-cast = "1.0"
 reqwest = { version = "0.11.6", features = [ "json" ] }
 serde_json = "1.0"
 serde_with = "1.11.0"
+sled-agent-client = { path = "../sled-agent-client" }
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"

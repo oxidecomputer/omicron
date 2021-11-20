@@ -6,6 +6,7 @@ description = "The oximeter metric collection server"
 
 [dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
 oximeter-db = { path = "../db" }

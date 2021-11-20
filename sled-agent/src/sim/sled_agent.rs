@@ -3,12 +3,12 @@
  */
 
 use crate::params::DiskStateRequested;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;

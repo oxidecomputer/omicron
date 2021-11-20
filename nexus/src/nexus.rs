@@ -56,11 +56,10 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
-use omicron_common::sled_agent_client;
-use omicron_common::OximeterClient;
-use omicron_common::SledAgentClient;
+use oximeter_client::Client as OximeterClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -258,20 +257,18 @@ impl Nexus {
                 oximeter_info.address,
             );
             for producer in producers.into_iter() {
-                let producer_info =
-                    omicron_common::oximeter_client::types::ProducerEndpoint {
-                        id: producer.id(),
-                        address: SocketAddr::new(
-                            producer.ip.ip(),
-                            producer.port.try_into().unwrap(),
-                        )
-                        .to_string(),
-                        base_route: producer.base_route,
-                        interval:
-                            omicron_common::oximeter_client::types::Duration::from(
-                                Duration::from_secs_f64(producer.interval),
-                            ),
-                    };
+                let producer_info = oximeter_client::types::ProducerEndpoint {
+                    id: producer.id(),
+                    address: SocketAddr::new(
+                        producer.ip.ip(),
+                        producer.port.try_into().unwrap(),
+                    )
+                    .to_string(),
+                    base_route: producer.base_route,
+                    interval: oximeter_client::types::Duration::from(
+                        Duration::from_secs_f64(producer.interval),
+                    ),
+                };
                 client
                     .producers_post(&producer_info)
                     .await
@@ -283,15 +280,12 @@ impl Nexus {
 
     /// Register as a metric producer with the oximeter metric collection server.
     pub async fn register_as_producer(&self, address: SocketAddr) {
-        let producer_endpoint =
-            omicron_common::nexus_client::types::ProducerEndpoint {
-                id: self.id,
-                address: address.to_string(),
-                base_route: String::from("/metrics/collect"),
-                interval: omicron_common::nexus_client::types::Duration::from(
-                    Duration::from_secs(10),
-                ),
-            };
+        let producer_endpoint = nexus::ProducerEndpoint {
+            id: self.id,
+            address,
+            base_route: String::from("/metrics/collect"),
+            interval: Duration::from_secs(10),
+        };
         let register = || async {
             debug!(self.log, "registering nexus as metric producer");
             register(address, &self.log, &producer_endpoint)
@@ -2100,11 +2094,9 @@ impl Nexus {
         let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
         collector
-            .producers_post(
-                &omicron_common::oximeter_client::types::ProducerEndpoint::from(
-                    &producer_info,
-                ),
-            )
+            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
+                &producer_info,
+            ))
             .await
             .map_err(Error::from)?;
         info!(

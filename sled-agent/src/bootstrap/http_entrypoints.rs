@@ -12,7 +12,7 @@ use super::agent::Agent;
 use super::{params::ShareRequest, views::ShareResponse};
 
 /// Returns a description of the bootstrap agent API
-pub fn ba_api() -> ApiDescription<Arc<Agent>> {
+pub(crate) fn ba_api() -> ApiDescription<Arc<Agent>> {
     fn register_endpoints(
         api: &mut ApiDescription<Arc<Agent>>,
     ) -> Result<(), String> {

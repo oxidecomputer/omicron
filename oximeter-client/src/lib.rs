@@ -2,7 +2,7 @@
 
 //! Interface for API requests to an Oximeter metric collection server
 
-generate_logging_api!("../openapi/oximeter.json");
+omicron_common::generate_logging_api!("../openapi/oximeter.json");
 
 impl From<std::time::Duration> for types::Duration {
     fn from(s: std::time::Duration) -> Self {
@@ -10,10 +10,12 @@ impl From<std::time::Duration> for types::Duration {
     }
 }
 
-impl From<&crate::api::internal::nexus::ProducerEndpoint>
+impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     for types::ProducerEndpoint
 {
-    fn from(s: &crate::api::internal::nexus::ProducerEndpoint) -> Self {
+    fn from(
+        s: &omicron_common::api::internal::nexus::ProducerEndpoint,
+    ) -> Self {
         Self {
             address: s.address.to_string(),
             base_route: s.base_route.clone(),

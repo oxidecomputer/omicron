@@ -33,7 +33,7 @@ use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -243,7 +243,7 @@ impl InstanceInner {
         self.nexus_client
             .cpapi_instances_put(
                 self.id(),
-                &omicron_common::nexus_client::types::InstanceRuntimeState::from(
+                &nexus_client::types::InstanceRuntimeState::from(
                     self.state.current(),
                 ),
             )

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
-use omicron_common::NexusClient;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
