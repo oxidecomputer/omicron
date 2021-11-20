@@ -501,7 +501,25 @@ async fn test_disks() {
         "disk \"just-rainsticks\" is not attached to instance \"instance2\""
     );
 
-    /* It's not allowed to delete a disk that's detaching, either. */
+    /*
+     * If we're not authenticated, or authenticated as an unprivileged user, we
+     * shouldn't be able to delete this disk.
+     */
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::UNAUTHORIZED)),
+    )
+    .execute()
+    .await
+    .expect("expected request to fail");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail");
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

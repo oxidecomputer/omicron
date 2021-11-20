@@ -912,7 +912,6 @@ impl DataStore {
         let now = Utc::now();
 
         let disk_id = disk_authz.id();
-        // XXX TODO-coverage add tests for this
         opctx.authorize(authz::Action::Delete, disk_authz)?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
