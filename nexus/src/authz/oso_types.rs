@@ -177,11 +177,11 @@ impl AuthenticatedActor {
      * Returns whether this actor has the given role for a fleet
      */
     /*
-     * XXX This is special-cased only because Fleets don't exist in the database
-     * and do not have an id.  It might be a good idea to put them in the
-     * database with their own id, though it might mean that lots of authz
-     * checks need to do an extra database query to load the fleet_id from the
-     * Organization.
+     * This is special-cased because Fleets don't exist in the database and do
+     * not have an id.  It might be a good idea to put them in the database with
+     * their own id.  But it's not needed for anything right now.  (It might
+     * also mean that many authz checks would need to do an extra database query
+     * to load the fleet_id from the Organization.)
      */
     fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
         self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
