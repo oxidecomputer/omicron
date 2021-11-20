@@ -87,8 +87,8 @@ impl Context {
 mod test {
     /*
      * These are essentially unit tests for the policy itself.
-     * TODO-coverage This is just a start.
-     * XXX Flesh these out now that we have a more realistic policy and types
+     * TODO-coverage This is just a start.  But we need roles to do a more
+     * comprehensive test.
      * TODO If this gets any more complicated, we could consider automatically
      * generating the test cases.  We could precreate a bunch of resources and
      * some users with different roles.  Then we could run through a table that
