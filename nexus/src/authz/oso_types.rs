@@ -345,9 +345,7 @@ impl oso::PolarClass for ProjectChild {
             .set_equality_check(|a1, a2| a1 == a2)
             .add_method(
                 "has_role",
-                |pr: &ProjectChild,
-                 actor: AuthenticatedActor,
-                 role: String| {
+                |pr: &ProjectChild, actor: AuthenticatedActor, role: String| {
                     actor.has_role_resource(
                         pr.resource_type,
                         pr.resource_id,
