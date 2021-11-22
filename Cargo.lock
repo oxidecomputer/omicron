@@ -1564,6 +1564,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "serde_with",
  "slog",
  "smf",
  "steno",
