@@ -36,7 +36,6 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
@@ -1778,7 +1777,7 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<RouterRoute> {
+    ) -> ListResultVec<db::model::RouterRoute> {
         let router = self
             .vpc_lookup_router(
                 organization_name,
@@ -1790,10 +1789,7 @@ impl Nexus {
         let routes = self
             .db_datastore
             .router_list_routes(&router.id(), pagparams)
-            .await?
-            .into_iter()
-            .map(|router| router.into())
-            .collect::<Vec<RouterRoute>>();
+            .await?;
         Ok(routes)
     }
 
@@ -1804,7 +1800,7 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
-    ) -> LookupResult<RouterRoute> {
+    ) -> LookupResult<db::model::RouterRoute> {
         let router = self
             .vpc_lookup_router(
                 organization_name,
@@ -1816,8 +1812,7 @@ impl Nexus {
         Ok(self
             .db_datastore
             .router_route_fetch_by_name(&router.id(), route_name)
-            .await?
-            .into())
+            .await?)
     }
 
     pub async fn router_create_route(
@@ -1828,7 +1823,7 @@ impl Nexus {
         router_name: &Name,
         kind: &RouterRouteKind,
         params: &RouterRouteCreateParams,
-    ) -> CreateResult<RouterRoute> {
+    ) -> CreateResult<db::model::RouterRoute> {
         let router = self
             .vpc_lookup_router(
                 organization_name,
@@ -1841,7 +1836,7 @@ impl Nexus {
         let route =
             db::model::RouterRoute::new(id, router.id(), *kind, params.clone());
         let route = self.db_datastore.router_create_route(route).await?;
-        Ok(route.into())
+        Ok(route)
     }
 
     pub async fn router_delete_route(
@@ -1862,13 +1857,13 @@ impl Nexus {
             )
             .await?;
         // Only custom routes can be deleted
-        if route.kind != RouterRouteKind::Custom {
+        if route.kind.0 != RouterRouteKind::Custom {
             return Err(Error::MethodNotAllowed {
                 internal_message: "DELETE not allowed on system routes"
                     .to_string(),
             });
         }
-        self.db_datastore.router_delete_route(&route.identity.id).await
+        self.db_datastore.router_delete_route(&route.id()).await
     }
 
     pub async fn router_update_route(
@@ -1890,13 +1885,13 @@ impl Nexus {
             )
             .await?;
         // TODO: Write a test for this once there's a way to test it (i.e. subnets automatically register to the system router table)
-        match route.kind {
+        match route.kind.0 {
             RouterRouteKind::Custom | RouterRouteKind::Default => (),
             _ => {
                 return Err(Error::MethodNotAllowed {
                     internal_message: format!(
                         "routes of type {} from the system table of VPC {} are not modifiable",
-                        route.kind,
+                        route.kind.0,
                         vpc_name
                     ),
                 })
@@ -1904,7 +1899,7 @@ impl Nexus {
         }
         Ok(self
             .db_datastore
-            .router_update_route(&route.identity.id, params.clone().into())
+            .router_update_route(&route.id(), params.clone().into())
             .await?)
     }
 
