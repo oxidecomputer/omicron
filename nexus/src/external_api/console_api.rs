@@ -170,7 +170,7 @@ pub async fn asset(
     // Derive the MIME type from the file name
     let content_type = mime_guess::from_path(&file)
         .first()
-        .map_or("text/plain".to_string(), |m| m.to_string());
+        .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::OK)
