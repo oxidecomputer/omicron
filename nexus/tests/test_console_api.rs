@@ -121,7 +121,7 @@ async fn test_console_pages() {
     // request to console page route without auth should redirect to IdP
     let _ = RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
         .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(header::LOCATION, "idp.com/login")
+        .expect_response_header(header::LOCATION, "https://idp.com/login")
         .execute()
         .await
         .unwrap();

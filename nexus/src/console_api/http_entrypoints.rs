@@ -140,17 +140,22 @@ async fn console_page(
     // makes the right API requests.
     if let Ok(opctx) = opctx {
         if opctx.authn.actor().is_some() {
+            let apictx = rqctx.context();
+            let file =
+                &apictx.assets_directory.join(PathBuf::from("index.html"));
+            let file_contents =
+                tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
             return Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-                .body("".into())?); // TODO: actual HTML
+                .body(file_contents.into())?);
         }
     }
 
     // otherwise redirect to idp
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, "idp.com/login")
+        .header(http::header::LOCATION, "https://idp.com/login")
         .body("".into())?)
 }
 
