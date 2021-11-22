@@ -7,7 +7,6 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
-use dropshot::HttpErrorResponseBody;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -59,6 +58,9 @@ pub enum Error {
     /** The system (or part of it) is unavailable. */
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
+    /** Method Not Allowed */
+    #[error("Method Not Allowed: {internal_message}")]
+    MethodNotAllowed { internal_message: String },
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
@@ -87,6 +89,7 @@ impl Error {
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
             | Error::Forbidden
+            | Error::MethodNotAllowed { .. }
             | Error::InternalError { .. } => false,
         }
     }
@@ -143,36 +146,6 @@ impl Error {
      */
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
-    }
-
-    /**
-     * Given an error returned in an HTTP response, reconstitute an `Error`
-     * that describes that error.  This is intended for use when returning an
-     * error from one control plane service to another while preserving
-     * information about the error.  If the error is of an unknown kind or
-     * doesn't match the expected form, an internal error will be returned.
-     */
-    pub fn from_response(
-        error_message_base: String,
-        error_response: HttpErrorResponseBody,
-    ) -> Error {
-        /*
-         * We currently only handle the simple case of an InvalidRequest because
-         * that's the only case that we currently use.  If we want to preserve
-         * others of these (e.g., ObjectNotFound), we will probably need to
-         * include more information in the HttpErrorResponseBody.
-         */
-        match error_response.error_code.as_deref() {
-            Some("InvalidRequest") => {
-                Error::InvalidRequest { message: error_response.message }
-            }
-            _ => Error::InternalError {
-                internal_message: format!(
-                    "{}: unknown error from dependency: {:?}",
-                    error_message_base, error_response
-                ),
-            },
-        }
     }
 }
 
@@ -243,6 +216,16 @@ impl From<Error> for HttpError {
                 )
             }
 
+            // TODO: RFC-7231 requires that 405s generate an Accept header to describe
+            // what methods are available in the response
+            Error::MethodNotAllowed { internal_message } => {
+                HttpError::for_client_error(
+                    Some(String::from("MethodNotAllowed")),
+                    http::StatusCode::METHOD_NOT_ALLOWED,
+                    internal_message,
+                )
+            }
+
             Error::Forbidden => HttpError::for_client_error(
                 Some(String::from("Forbidden")),
                 http::StatusCode::FORBIDDEN,
@@ -287,6 +270,7 @@ mod test {
 
     #[test]
     fn test_bail_unless() {
+        #![allow(clippy::eq_op)]
         /* Success cases */
         let no_bail = || {
             bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);

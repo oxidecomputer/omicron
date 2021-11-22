@@ -18,7 +18,7 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{DatastoreCollection, InsertError};
+use super::collection_insert::{AsyncInsertError, DatastoreCollection};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
@@ -42,7 +42,6 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db::model::VpcRouterUpdate;
 use crate::db::{
     self,
     error::{
@@ -51,8 +50,9 @@ use crate::db::{
     model::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, Vpc, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -320,10 +320,9 @@ impl DataStore {
     pub async fn organization_update(
         &self,
         name: &Name,
-        update_params: &api::external::OrganizationUpdateParams,
+        updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
-        let updates: OrganizationUpdate = update_params.clone().into();
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
@@ -357,11 +356,11 @@ impl DataStore {
         .insert_and_get_result_async(self.pool())
         .await
         .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Organization,
                 lookup_type: LookupType::ById(organization_id),
             },
-            InsertError::DatabaseError(e) => {
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
@@ -496,10 +495,9 @@ impl DataStore {
         &self,
         organization_id: &Uuid,
         name: &Name,
-        update_params: &api::external::ProjectUpdateParams,
+        updates: ProjectUpdate,
     ) -> UpdateResult<Project> {
         use db::schema::project::dsl;
-        let updates: ProjectUpdate = update_params.clone().into();
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
@@ -547,19 +545,11 @@ impl DataStore {
      */
     pub async fn project_create_instance(
         &self,
-        instance_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::InstanceCreateParams,
-        runtime_initial: &InstanceRuntimeState,
+        instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
 
-        let instance = Instance::new(
-            *instance_id,
-            *project_id,
-            params,
-            runtime_initial.clone(),
-        );
+        let gen = instance.runtime().gen;
         let name = instance.name().clone();
         let instance: Instance = diesel::insert_into(dsl::instance)
             .values(instance)
@@ -583,7 +573,7 @@ impl DataStore {
             instance.runtime().state
         );
         bail_unless!(
-            instance.runtime().gen == runtime_initial.gen,
+            instance.runtime().gen == gen,
             "newly-created Instance has unexpected generation: {:?}",
             instance.runtime().gen
         );
@@ -782,21 +772,10 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_disk(
-        &self,
-        disk_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::DiskCreateParams,
-        runtime_initial: &DiskRuntimeState,
-    ) -> CreateResult<Disk> {
+    pub async fn project_create_disk(&self, disk: Disk) -> CreateResult<Disk> {
         use db::schema::disk::dsl;
 
-        let disk = Disk::new(
-            *disk_id,
-            *project_id,
-            params.clone(),
-            runtime_initial.clone(),
-        );
+        let gen = disk.runtime().gen;
         let name = disk.name().clone();
         let disk: Disk = diesel::insert_into(dsl::disk)
             .values(disk)
@@ -820,7 +799,7 @@ impl DataStore {
             runtime.disk_state
         );
         bail_unless!(
-            runtime.gen == runtime_initial.gen,
+            runtime.gen == gen,
             "newly-created Disk has unexpected generation: {:?}",
             runtime.gen
         );
@@ -1235,17 +1214,9 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_vpc(
-        &self,
-        vpc_id: &Uuid,
-        project_id: &Uuid,
-        system_router_id: &Uuid,
-        params: &api::external::VpcCreateParams,
-    ) -> Result<Vpc, Error> {
+    pub async fn project_create_vpc(&self, vpc: Vpc) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
-        let vpc =
-            Vpc::new(*vpc_id, *project_id, *system_router_id, params.clone());
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
@@ -1267,10 +1238,9 @@ impl DataStore {
     pub async fn project_update_vpc(
         &self,
         vpc_id: &Uuid,
-        params: &api::external::VpcUpdateParams,
+        updates: VpcUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc::dsl;
-        let updates: VpcUpdate = params.clone().into();
 
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1378,13 +1348,10 @@ impl DataStore {
 
     pub async fn vpc_create_subnet(
         &self,
-        subnet_id: &Uuid,
-        vpc_id: &Uuid,
-        params: &api::external::VpcSubnetCreateParams,
+        subnet: VpcSubnet,
     ) -> CreateResult<VpcSubnet> {
         use db::schema::vpc_subnet::dsl;
 
-        let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
         let name = subnet.name().clone();
         let subnet = diesel::insert_into(dsl::vpc_subnet)
             .values(subnet)
@@ -1427,10 +1394,9 @@ impl DataStore {
     pub async fn vpc_update_subnet(
         &self,
         subnet_id: &Uuid,
-        params: &api::external::VpcSubnetUpdateParams,
+        updates: VpcSubnetUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc_subnet::dsl;
-        let updates: VpcSubnetUpdate = params.clone().into();
 
         diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
@@ -1495,14 +1461,10 @@ impl DataStore {
 
     pub async fn vpc_create_router(
         &self,
-        router_id: &Uuid,
-        vpc_id: &Uuid,
-        kind: &api::external::VpcRouterKind,
-        params: &api::external::VpcRouterCreateParams,
+        router: VpcRouter,
     ) -> CreateResult<VpcRouter> {
         use db::schema::vpc_router::dsl;
 
-        let router = VpcRouter::new(*router_id, *vpc_id, *kind, params.clone());
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
@@ -1545,10 +1507,9 @@ impl DataStore {
     pub async fn vpc_update_router(
         &self,
         router_id: &Uuid,
-        params: &api::external::VpcRouterUpdateParams,
+        updates: VpcRouterUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc_router::dsl;
-        let updates: VpcRouterUpdate = params.clone().into();
 
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
@@ -1561,6 +1522,124 @@ impl DataStore {
                     e,
                     ResourceType::VpcRouter,
                     LookupType::ById(*router_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn router_list_routes(
+        &self,
+        router_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<RouterRoute> {
+        use db::schema::router_route::dsl;
+
+        paginated(dsl::router_route, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .select(RouterRoute::as_select())
+            .load_async::<db::model::RouterRoute>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn router_route_fetch_by_name(
+        &self,
+        router_id: &Uuid,
+        route_name: &Name,
+    ) -> LookupResult<RouterRoute> {
+        use db::schema::router_route::dsl;
+
+        dsl::router_route
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .filter(dsl::name.eq(route_name.clone()))
+            .select(RouterRoute::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ByName(route_name.as_str().to_owned()),
+                )
+            })
+    }
+
+    pub async fn router_create_route(
+        &self,
+        route: RouterRoute,
+    ) -> CreateResult<RouterRoute> {
+        use db::schema::router_route::dsl;
+        let router_id = route.router_id;
+        let name = route.name().clone();
+
+        VpcRouter::insert_resource(
+            router_id,
+            diesel::insert_into(dsl::router_route).values(route),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::VpcRouter,
+                lookup_type: LookupType::ById(router_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::RouterRoute,
+                    name.as_str(),
+                )
+            }
+        })
+    }
+
+    pub async fn router_delete_route(&self, route_id: &Uuid) -> DeleteResult {
+        use db::schema::router_route::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::router_route)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*route_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(RouterRoute::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn router_update_route(
+        &self,
+        route_id: &Uuid,
+        route_update: RouterRouteUpdate,
+    ) -> Result<(), Error> {
+        use db::schema::router_route::dsl;
+
+        diesel::update(dsl::router_route)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*route_id))
+            .set(route_update)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
                 )
             })?;
         Ok(())
@@ -1658,11 +1737,9 @@ mod test {
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::db::DataStore;
+    use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, OrganizationCreateParams,
-        ProjectCreateParams,
-    };
+    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -1676,7 +1753,7 @@ mod test {
         let pool = db::Pool::new(&cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
-        let organization = Organization::new(OrganizationCreateParams {
+        let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "org".parse().unwrap(),
                 description: "desc".to_string(),
@@ -1687,7 +1764,7 @@ mod test {
 
         let project = Project::new(
             organization.id(),
-            ProjectCreateParams {
+            params::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),

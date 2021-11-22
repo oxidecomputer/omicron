@@ -4,8 +4,11 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, sled, vpc, vpc_router, vpc_subnet,
+    organization, oximeter, project, rack, router_route, sled, vpc, vpc_router,
+    vpc_subnet,
 };
+use crate::external_api::params;
+use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, BinaryRawValue, RawValue};
@@ -15,6 +18,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -28,6 +32,7 @@ use uuid::Uuid;
 #[derive(
     Clone,
     Debug,
+    Display,
     AsExpression,
     FromSqlRow,
     Eq,
@@ -41,6 +46,7 @@ use uuid::Uuid;
 #[sql_type = "sql_types::Text"]
 #[serde(transparent)]
 #[repr(transparent)]
+#[display("{0}")]
 pub struct Name(pub external::Name);
 
 NewtypeFrom! { () pub struct Name(external::Name); }
@@ -339,7 +345,7 @@ pub struct Organization {
 
 impl Organization {
     /// Creates a new database Organization object.
-    pub fn new(params: external::OrganizationCreateParams) -> Self {
+    pub fn new(params: params::OrganizationCreate) -> Self {
         let id = Uuid::new_v4();
         Self {
             identity: OrganizationIdentity::new(id, params.identity),
@@ -355,12 +361,6 @@ impl DatastoreCollection<Project> for Organization {
     type CollectionIdColumn = project::dsl::organization_id;
 }
 
-impl Into<external::Organization> for Organization {
-    fn into(self) -> external::Organization {
-        external::Organization { identity: self.identity() }
-    }
-}
-
 /// Describes a set of updates for the [`Organization`] model.
 #[derive(AsChangeset)]
 #[table_name = "organization"]
@@ -370,8 +370,8 @@ pub struct OrganizationUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
-    fn from(params: external::OrganizationUpdateParams) -> Self {
+impl From<params::OrganizationUpdate> for OrganizationUpdate {
+    fn from(params: params::OrganizationUpdate) -> Self {
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
@@ -392,22 +392,10 @@ pub struct Project {
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(
-        organization_id: Uuid,
-        params: external::ProjectCreateParams,
-    ) -> Self {
+    pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
             organization_id: organization_id,
-        }
-    }
-}
-
-impl Into<external::Project> for Project {
-    fn into(self) -> external::Project {
-        external::Project {
-            identity: self.identity(),
-            organization_id: self.organization_id,
         }
     }
 }
@@ -421,8 +409,8 @@ pub struct ProjectUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::ProjectUpdateParams> for ProjectUpdate {
-    fn from(params: external::ProjectUpdateParams) -> Self {
+impl From<params::ProjectUpdate> for ProjectUpdate {
+    fn from(params: params::ProjectUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -848,7 +836,7 @@ pub struct OximeterInfo {
 }
 
 impl OximeterInfo {
-    pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
+    pub fn new(info: &internal_api::params::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
             id: info.collector_id,
@@ -979,58 +967,80 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
-/// Custom Enum type for Diesel. Note that the type_name _must_ be all lowercase
-/// or it'll fail.
-#[derive(SqlType, Debug)]
-#[postgres(type_name = "vpc_router_kind", type_schema = "public")]
-pub struct VpcRouterKindEnum;
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
 
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "VpcRouterKindEnum"]
-pub struct VpcRouterKind(pub external::VpcRouterKind);
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
 
-impl VpcRouterKind {
-    pub fn new(state: external::VpcRouterKind) -> Self {
-        Self(state)
-    }
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
 
-    pub fn state(&self) -> &external::VpcRouterKind {
-        &self.0
-    }
-}
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
 
-impl<DB> ToSql<VpcRouterKindEnum, DB> for VpcRouterKind
-where
-    DB: Backend,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        match *self.state() {
-            external::VpcRouterKind::System => out.write_all(b"system")?,
-            external::VpcRouterKind::Custom => out.write_all(b"custom")?,
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl<DB> FromSql<VpcRouterKindEnum, DB> for VpcRouterKind
-where
-    DB: Backend + for<'a> BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        match DB::as_bytes(bytes) {
-            b"system" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::System))
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
             }
-            b"custom" => {
-                Ok(VpcRouterKind::new(external::VpcRouterKind::Custom))
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
             }
-            _ => Err("Unrecognized enum variant for VpcRouterKind".into()),
         }
     }
 }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
+    pub struct VpcRouterKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcRouterKindEnum"]
+    pub struct VpcRouterKind(pub external::VpcRouterKind);
+
+    // Enum values
+    System => b"system"
+    Custom => b"custom"
+);
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "vpc_router"]
@@ -1040,6 +1050,7 @@ pub struct VpcRouter {
 
     pub vpc_id: Uuid,
     pub kind: VpcRouterKind,
+    pub rcgen: Generation,
 }
 
 impl VpcRouter {
@@ -1050,8 +1061,20 @@ impl VpcRouter {
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind: VpcRouterKind::new(kind) }
+        Self {
+            identity,
+            vpc_id,
+            kind: VpcRouterKind(kind),
+            rcgen: Generation::new(),
+        }
     }
+}
+
+impl DatastoreCollection<RouterRoute> for VpcRouter {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc_router::dsl::rcgen;
+    type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
+    type CollectionIdColumn = router_route::dsl::router_id;
 }
 
 impl Into<external::VpcRouter> for VpcRouter {
@@ -1059,7 +1082,7 @@ impl Into<external::VpcRouter> for VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: *self.kind.state(),
+            kind: self.kind.0,
         }
     }
 }
@@ -1078,6 +1101,153 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "router_route_kind", type_schema = "public")]
+    pub struct RouterRouteKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "RouterRouteKindEnum"]
+    pub struct RouterRouteKind(pub external::RouterRouteKind);
+
+    // Enum values
+    Default => b"default"
+    VpcSubnet => b"vpc_subnet"
+    VpcPeering => b"vpc_peering"
+    Custom => b"custom"
+);
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteTarget(pub external::RouteTarget);
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(RouteTarget(
+            String::from_sql(bytes)?.parse::<external::RouteTarget>()?,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteDestination(pub external::RouteDestination);
+
+impl RouteDestination {
+    pub fn new(state: external::RouteDestination) -> Self {
+        Self(state)
+    }
+
+    pub fn state(&self) -> &external::RouteDestination {
+        &self.0
+    }
+}
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(RouteDestination::new(
+            String::from_sql(bytes)?.parse::<external::RouteDestination>()?,
+        ))
+    }
+}
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "router_route"]
+pub struct RouterRoute {
+    #[diesel(embed)]
+    identity: RouterRouteIdentity,
+
+    pub kind: RouterRouteKind,
+    pub router_id: Uuid,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+impl RouterRoute {
+    pub fn new(
+        route_id: Uuid,
+        router_id: Uuid,
+        kind: external::RouterRouteKind,
+        params: external::RouterRouteCreateParams,
+    ) -> Self {
+        let identity = RouterRouteIdentity::new(route_id, params.identity);
+        Self {
+            identity,
+            router_id,
+            kind: RouterRouteKind(kind),
+            target: RouteTarget(params.target),
+            destination: RouteDestination::new(params.destination),
+        }
+    }
+}
+
+impl Into<external::RouterRoute> for RouterRoute {
+    fn into(self) -> external::RouterRoute {
+        external::RouterRoute {
+            identity: self.identity(),
+            router_id: self.router_id,
+            kind: self.kind.0,
+            target: self.target.0.clone(),
+            destination: self.destination.state().clone(),
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "router_route"]
+pub struct RouterRouteUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
+    fn from(params: external::RouterRouteUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            target: RouteTarget(params.target),
+            destination: RouteDestination::new(params.destination),
         }
     }
 }

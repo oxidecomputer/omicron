@@ -10,7 +10,7 @@ futures = "0.3.15"
 http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
 rayon = "1.5"
 regex = "1.5.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
@@ -25,9 +25,11 @@ thiserror = "1.0"
 toml = "0.5.6"
 walkdir = "2.3"
 parse-display = "0.5.3"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+percent-encoding = "2.1.0"
 
 [dependencies.api_identity]
-path = "src/api/external/api_identity"
+path = "../api_identity"
 
 [dependencies.backoff]
 version = "0.3.0"

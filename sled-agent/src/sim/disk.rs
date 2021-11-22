@@ -2,13 +2,13 @@
  * Simulated sled agent implementation
  */
 
+use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::sled_agent::DiskStateRequested;
 use omicron_common::NexusClient;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;
@@ -85,6 +85,14 @@ impl Simulatable for SimDisk {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        nexus_client.notify_disk_updated(id, &current).await
+        nexus_client
+            .cpapi_disks_put(
+                id,
+                &omicron_common::nexus_client::types::DiskRuntimeState::from(
+                    current,
+                ),
+            )
+            .await
+            .map_err(Error::from)
     }
 }

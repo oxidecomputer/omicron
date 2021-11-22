@@ -1,44 +1,35 @@
-use dropshot::test_util::objects_post;
-use dropshot::test_util::read_json;
+use super::http_testing::dropshot_compat::objects_post;
+use super::http_testing::AuthnMode;
+use super::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Organization;
-use omicron_common::api::external::OrganizationCreateParams;
-use omicron_common::api::external::Project;
-use omicron_common::api::external::ProjectCreateParams;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcRouter;
+use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::views::{Organization, Project};
 
 pub async fn create_organization(
     client: &ClientTestContext,
     organization_name: &str,
 ) -> Organization {
-    let input = OrganizationCreateParams {
+    let input = params::OrganizationCreate {
         identity: IdentityMetadataCreateParams {
             name: organization_name.parse().unwrap(),
             description: "an org".to_string(),
         },
     };
-    let authn_header = http::HeaderValue::from_static(
-        omicron_nexus::authn::TEST_USER_UUID_PRIVILEGED,
-    );
-    let uri = client.url("/organizations");
-    let request = hyper::Request::builder()
-        .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header)
-        .method(Method::POST)
-        .uri(uri)
-        .body(serde_json::to_string(&input).unwrap().into())
-        .expect("attempted to construct invalid test request");
-    let mut response = client
-        .make_request_with_request(request, StatusCode::CREATED)
+    NexusRequest::objects_post(client, "/organizations", input)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .expect("failed to make request");
-    read_json::<Organization>(&mut response).await
+        .expect("failed to make request")
+        .response_body()
+        .unwrap()
 }
 
 pub async fn create_project(
@@ -49,7 +40,7 @@ pub async fn create_project(
     objects_post(
         &client,
         format!("/organizations/{}/projects", &organization_name).as_str(),
-        ProjectCreateParams {
+        params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
@@ -110,4 +101,28 @@ pub async fn create_vpc_with_error(
             status,
         )
         .await
+}
+
+pub async fn create_router(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+) -> VpcRouter {
+    objects_post(
+        &client,
+        format!(
+            "/organizations/{}/projects/{}/vpcs/{}/routers",
+            &organization_name, &project_name, &vpc_name
+        )
+        .as_str(),
+        VpcRouterCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: router_name.parse().unwrap(),
+                description: String::from("router description"),
+            },
+        },
+    )
+    .await
 }

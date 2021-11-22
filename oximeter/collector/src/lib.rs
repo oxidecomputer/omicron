@@ -7,8 +7,9 @@ use dropshot::{
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use omicron_common::api::internal::nexus::{OximeterInfo, ProducerEndpoint};
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
+use omicron_common::nexus_client;
 use oximeter::types::ProducerResults;
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
@@ -396,8 +397,8 @@ impl Oximeter {
                     "http://{}/metrics/collectors",
                     config.nexus_address
                 ))
-                .json(&OximeterInfo {
-                    address: server.local_addr(),
+                .json(&nexus_client::types::OximeterInfo {
+                    address: server.local_addr().to_string(),
                     collector_id: agent.id,
                 })
                 .send()
