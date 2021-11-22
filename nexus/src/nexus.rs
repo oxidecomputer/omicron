@@ -17,6 +17,8 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
+use ipnetwork::Ipv4Network;
+use ipnetwork::Ipv6Network;
 use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -29,6 +31,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -65,6 +69,7 @@ use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use serde_json::de;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -1428,6 +1433,7 @@ impl Nexus {
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
+        let default_subnet_id = Uuid::new_v4();
         // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
@@ -1462,7 +1468,7 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake an utter nonsense. It should be eventually replaced with the proper behavior for creating
+        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
         // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
         // should all be apart of the same transaction.
         self.db_datastore.router_create_route(route).await?;
@@ -1473,6 +1479,31 @@ impl Nexus {
             params.clone(),
         );
         let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+
+        // TODO: batch this up with everything above
+        let subnet = db::model::VpcSubnet::new(
+            default_subnet_id,
+            vpc_id,
+            VpcSubnetCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: format!(
+                        "The default subnet for {}",
+                        params.identity.name
+                    ),
+                },
+                ipv4_block: Some(Ipv4Net(
+                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
+                    "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
+                )),
+                ipv6_block: Some(Ipv6Net(
+                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
+                    "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
+                )),
+            },
+        );
+        self.db_datastore.vpc_create_subnet(subnet).await?;
+
         self.create_default_vpc_firewall(&vpc_id).await?;
         Ok(vpc.into())
     }
