@@ -162,7 +162,7 @@ resource Project {
 
 # For now, we use one generic resource to represent every kind of thing inside
 # the Project.  That's because they all have the same behavior.
-resource ProjectResource {
+resource ProjectChild {
 	permissions = [
 		"list_children",
 		"modify",
@@ -183,8 +183,8 @@ has_relation(fleet: Fleet, "parent_fleet", organization: Organization)
 	if organization.fleet = fleet;
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
-has_relation(project: Project, "parent_project", project_resource: ProjectResource)
-	if project_resource.project = project;
+has_relation(project: Project, "parent_project", project_child: ProjectChild)
+	if project_child.project = project;
 
 # Define role relationships
 has_role(actor: AuthenticatedActor, role: String, resource: Resource)

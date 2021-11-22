@@ -906,7 +906,7 @@ impl DataStore {
     pub async fn project_delete_disk(
         &self,
         opctx: &OpContext,
-        disk_authz: authz::ProjectResource,
+        disk_authz: authz::ProjectChild,
     ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();

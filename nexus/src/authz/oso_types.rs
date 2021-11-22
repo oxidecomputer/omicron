@@ -41,7 +41,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Fleet::get_polar_class(),
         Organization::get_polar_class(),
         Project::get_polar_class(),
-        ProjectResource::get_polar_class(),
+        ProjectChild::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;
@@ -283,8 +283,8 @@ impl Project {
         &self,
         resource_type: ResourceType,
         resource_id: Uuid,
-    ) -> ProjectResource {
-        ProjectResource {
+    ) -> ProjectChild {
+        ProjectChild {
             organization_id: self.organization_id,
             project_id: self.project_id,
             resource_type,
@@ -326,26 +326,26 @@ impl From<&db::model::Project> for Project {
 ///
 /// This would include [`db::model::Instance`], [`db::model::Disk`], etc.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProjectResource {
+pub struct ProjectChild {
     organization_id: Uuid,
     project_id: Uuid,
     resource_type: ResourceType,
     resource_id: Uuid,
 }
 
-impl ProjectResource {
+impl ProjectChild {
     pub fn id(&self) -> &Uuid {
         &self.resource_id
     }
 }
 
-impl oso::PolarClass for ProjectResource {
+impl oso::PolarClass for ProjectChild {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .set_equality_check(|a1, a2| a1 == a2)
             .add_method(
                 "has_role",
-                |pr: &ProjectResource,
+                |pr: &ProjectChild,
                  actor: AuthenticatedActor,
                  role: String| {
                     actor.has_role_resource(
@@ -355,7 +355,7 @@ impl oso::PolarClass for ProjectResource {
                     )
                 },
             )
-            .add_attribute_getter("project", |pr: &ProjectResource| Project {
+            .add_attribute_getter("project", |pr: &ProjectChild| Project {
                 organization_id: pr.organization_id,
                 project_id: pr.project_id,
             })

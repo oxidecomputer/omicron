@@ -640,7 +640,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<(db::model::Disk, authz::ProjectResource)> {
+    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
