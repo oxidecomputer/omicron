@@ -16,7 +16,7 @@ async fn test_sessions() {
     let testctx = &cptestctx.external_client;
 
     // logout always gives the same response whether you have a session or not
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/logout")
+    RequestBuilder::new(&testctx, Method::POST, "/logout")
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
@@ -24,7 +24,7 @@ async fn test_sessions() {
         )
         .execute()
         .await
-        .unwrap();
+        .expect("failed to clear cookie and 204 on logout");
 
     // log in and pull the token out of the header so we can use it for authed requests
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
@@ -35,7 +35,7 @@ async fn test_sessions() {
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await
-        .unwrap();
+        .expect("failed to log in");
 
     let session_cookie = get_header_value(login, header::SET_COOKIE);
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
@@ -51,36 +51,41 @@ async fn test_sessions() {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .body(Some(org_params.clone()))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
-        .await;
+        .await
+        .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
-        .await;
+        .await
+        .expect("failed to 302 on unauthed console page request");
 
     // now make same requests with cookie
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, session_token)
         .body(Some(org_params.clone()))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
         .execute()
-        .await;
+        .await
+        .expect("failed to create org with session cookie");
 
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        // TODO: this will stop 404ing once we handle rendering the template better
+        // .expect_status(Some(StatusCode::OK))
         .execute()
-        .await;
-    // TODO: expect error here
+        .await
+        .expect("failed to get console page with session cookie");
 
     // logout with an actual session should delete the session in the db
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/logout")
+    RequestBuilder::new(&testctx, Method::POST, "/logout")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
@@ -90,22 +95,24 @@ async fn test_sessions() {
         )
         .execute()
         .await
-        .unwrap();
+        .expect("failed to log out");
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, session_token)
         .body(Some(org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
-        .await;
+        .await
+        .expect("failed to get 401 for unauthed API request");
 
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
-        .await;
+        .await
+        .expect("failed to get 302 for unauthed console request");
 
     cptestctx.teardown().await;
 }
@@ -121,7 +128,7 @@ async fn test_console_pages() {
         .expect_response_header(header::LOCATION, "https://idp.com/login")
         .execute()
         .await
-        .unwrap();
+        .expect("failed to redirect to IdP on auth failure");
 
     // get session
 
@@ -140,19 +147,21 @@ async fn test_assets() {
         RequestBuilder::new(&testctx, Method::GET, "/assets/nonexistent.svg")
             .expect_status(Some(StatusCode::NOT_FOUND))
             .execute()
-            .await;
+            .await
+            .expect("failed to 404 on nonexistent asset");
 
     // symlink 404s
     let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/a_symlink")
         .expect_status(Some(StatusCode::NOT_FOUND))
         .execute()
-        .await;
+        .await
+        .expect("failed to 404 on symlink");
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
         .execute()
         .await
-        .unwrap();
+        .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
 
