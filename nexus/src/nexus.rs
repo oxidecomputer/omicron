@@ -64,6 +64,7 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use steno::SagaId;
@@ -103,6 +104,8 @@ pub trait TestInterfaces {
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession>;
 }
+
+pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 /**
  * Manages an Oxide fleet -- the heart of the control plane
@@ -2162,6 +2165,42 @@ impl Nexus {
 
     pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
         self.db_datastore.session_hard_delete(token).await
+    }
+
+    /// Downloads a file from the within [`BASE_ARTIFACT_DIR`].
+    pub async fn download_artifact<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<Vec<u8>, Error> {
+        let path = path.as_ref();
+        if !path.starts_with(BASE_ARTIFACT_DIR) {
+            return Err(Error::internal_error(
+                "Cannot access path outside artifact directory",
+            ));
+        }
+
+        // TODO: If the artifact doesn't exist, we should download it.
+        //
+        // There also exists the question of "when should we *remove* things
+        // from BASE_ARTIFACT_DIR", which we should also resolve. Demo-quality solution
+        // could be "destroy it on boot" or something.
+
+        // TODO: These artifacts could be quite large - we should figure out how to
+        // stream this file back instead of holding it entirely in-memory in a
+        // Vec<u8>.
+        //
+        // Options:
+        // - RFC 7233 - "Range Requests" (is this HTTP/1.1 only?)
+        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
+        // - "Roll our own". See:
+        // https://stackoverflow.com/questions/20969331/standard-method-for-http-partial-upload-resume-upload
+        let body = tokio::fs::read(&path).await.map_err(|e| {
+            Error::internal_error(&format!(
+                "Cannot read artifact from filesystem: {}",
+                e
+            ))
+        })?;
+        Ok(body)
     }
 }
 

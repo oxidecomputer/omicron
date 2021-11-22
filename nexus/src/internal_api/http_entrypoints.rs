@@ -1,3 +1,4 @@
+use crate::nexus::BASE_ARTIFACT_DIR;
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
@@ -12,6 +13,8 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use http::{Response, StatusCode};
+use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
@@ -19,6 +22,7 @@ use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -35,6 +39,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
+        api.register(cpapi_artifact_download)?;
         Ok(())
     }
 
@@ -202,6 +207,83 @@ async fn cpapi_metrics_collect(
     let producer_id = path_params.into_inner().producer_id;
     let handler =
         async { collect(&context.producer_registry, producer_id).await };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
+}
+
+/// Deserialized input path.
+#[derive(Deserialize, JsonSchema)]
+struct AllPath {
+    path: Vec<String>,
+}
+
+/// Endpoint used by Sled Agents to download cached artifacts.
+#[endpoint {
+    method = GET,
+    path = "/artifacts/{path:.*}",
+    // TODO: Buggy without this
+    unpublished = true,
+}]
+async fn cpapi_artifact_download(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<AllPath>,
+) -> Result<Response<Body>, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+    let mut entry = PathBuf::from(BASE_ARTIFACT_DIR);
+    let path = path.into_inner().path;
+
+    let handler = async {
+        for component in &path {
+            // Dropshot should not provide "." and ".." components.
+            assert_ne!(component, ".");
+            assert_ne!(component, "..");
+            entry.push(component);
+
+            // We explicitly prohibit consumers from following symlinks to prevent
+            // showing data outside of the intended directory.
+            let m = entry.symlink_metadata().map_err(|_| {
+                HttpError::for_bad_request(
+                    None,
+                    "Cannot query for symlink info".to_string(),
+                )
+            })?;
+            if m.file_type().is_symlink() {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Cannot traverse symlinks".to_string(),
+                ));
+            }
+        }
+
+        if entry.is_dir() {
+            return Err(HttpError::for_bad_request(
+                None,
+                "Directory download not supported".to_string(),
+            ));
+        }
+
+        let entry = entry.canonicalize().map_err(|e| {
+            HttpError::for_bad_request(
+                None,
+                format!("Cannot canonicalize path: {}", e),
+            )
+        })?;
+
+        let body = nexus.download_artifact(&entry).await?;
+
+        // Derive the MIME type from the file name
+        let content_type = mime_guess::from_path(&entry)
+            .first()
+            .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, content_type)
+            .body(body.into())?)
+    };
     context
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)

@@ -1,13 +1,10 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
-use dropshot::endpoint;
-use dropshot::ApiDescription;
-use dropshot::HttpError;
-use dropshot::HttpResponseOk;
-use dropshot::Path;
-use dropshot::RequestContext;
-use dropshot::TypedBody;
+use dropshot::{
+    endpoint, ApiDescription, HttpError, HttpResponseOk, Path, RequestContext,
+    TypedBody,
+};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
@@ -25,6 +22,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put)?;
         api.register(disk_put)?;
+        api.register(update_artifact)?;
         Ok(())
     }
 
@@ -85,4 +83,33 @@ async fn disk_put(
         )
         .await?,
     ))
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub enum UpdateArtifactKind {
+    Zone,
+}
+
+// TODO: De-duplicate this struct with the one in iliana's PR?
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+struct UpdateArtifact {
+    pub name: String,
+    pub version: i64,
+    pub kind: UpdateArtifactKind,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/update"
+}]
+async fn update_artifact(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    artifact: TypedBody<UpdateArtifact>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let sa = rqctx.context();
+
+    // TODO: pass to `update_artifact`.
+    let _artifact = artifact.into_inner();
+
+    Ok(HttpResponseOk(sa.update_artifact().await?))
 }

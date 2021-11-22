@@ -117,6 +117,8 @@ async fn do_run() -> Result<(), CmdError> {
                 nexus_address: nexus_addr,
                 dropshot: ConfigDropshot {
                     bind_address: sled_agent_addr,
+                    // TODO: Check me?
+                    // request_body_max_bytes: 1 << 20,
                     ..Default::default()
                 },
                 log: ConfigLogging::StderrTerminal {
