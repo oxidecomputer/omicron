@@ -50,6 +50,9 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
 use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcFirewallRule;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
@@ -119,6 +122,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_routers_post)?;
         api.register(vpc_routers_delete_router)?;
         api.register(vpc_routers_put_router)?;
+
+        api.register(vpc_firewall_rules_get)?;
+        api.register(vpc_firewall_rules_put)?;
 
         api.register(routers_routes_get)?;
         api.register(routers_routes_get_route)?;
@@ -1322,6 +1328,74 @@ async fn vpc_subnets_put_subnet(
             )
             .await?;
         Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * VPC Firewalls
+ */
+
+/**
+ * List firewall rules for a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+ }]
+async fn vpc_firewall_rules_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcFirewallRule>>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // Without this check, if firewall rules change while someone is listing
+    // the rules, they will see a mix of the old and new rules.
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let rules = nexus
+            .vpc_list_firewall_rules(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?;
+        Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Replace the firewall rules for a VPC
+ */
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    router_params: TypedBody<VpcFirewallRuleUpdateParams>,
+) -> Result<HttpResponseOk<VpcFirewallRuleUpdateResult>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let rules = nexus
+            .vpc_update_firewall_rules(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(rules))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
