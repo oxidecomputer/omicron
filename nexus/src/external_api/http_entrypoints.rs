@@ -1364,7 +1364,10 @@ async fn vpc_firewall_rules_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -42,7 +42,6 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcCreateParams;
-use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterCreateParams;
@@ -1546,17 +1545,14 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<VpcFirewallRule> {
+    ) -> ListResultVec<db::model::VpcFirewallRule> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let subnets = self
             .db_datastore
             .vpc_list_firewall_rules(&vpc.id(), pagparams)
-            .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect::<Vec<VpcFirewallRule>>();
+            .await?;
         Ok(subnets)
     }
 
