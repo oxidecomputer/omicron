@@ -291,7 +291,11 @@ CREATE TABLE omicron.public.vpc (
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
     system_router_id UUID NOT NULL,
-    dns_name STRING(63) NOT NULL
+    dns_name STRING(63) NOT NULL,
+
+    /* Used to ensure that two requests do not concurrently modify the
+       VPC's firewall */
+    firewall_gen INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -338,6 +342,19 @@ CREATE TABLE omicron.public.network_interface (
     ip INET NOT NULL
 );
 
+/* TODO-completeness
+
+ * We currently have a NetworkInterface table with the IP and MAC addresses inline.
+ * Eventually, we'll probably want to move these to their own tables, and
+ * refer to them here, most notably to support multiple IPs per NIC, as well
+ * as moving IPs between NICs on different instances, etc.
+ */
+
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
@@ -364,15 +381,52 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_router (
 ) WHERE
     time_deleted IS NULL;
 
-/* TODO-completeness
+CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
+    'disabled',
+    'enabled'
+);
 
- * We currently have a NetworkInterface table with the IP and MAC addresses inline.
- * Eventually, we'll probably want to move these to their own tables, and
- * refer to them here, most notably to support multiple IPs per NIC, as well
- * as moving IPs between NICs on different instances, etc.
- */
+CREATE TYPE omicron.public.vpc_firewall_rule_direction AS ENUM (
+    'inbound',
+    'outbound'
+);
 
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
+    'allow',
+    'deny'
+);
+
+CREATE TYPE omicron.public.vpc_firewall_rule_protocol AS ENUM (
+    'TCP',
+    'UDP',
+    'ICMP'
+);
+
+CREATE TABLE omicron.public.vpc_firewall_rule (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    vpc_id UUID NOT NULL,
+    status omicron.public.vpc_firewall_rule_status NOT NULL,
+    direction omicron.public.vpc_firewall_rule_direction NOT NULL,
+    /* Array of targets. 128 was picked to include plenty of space for
+       a tag, colon, and resource identifier. */
+    targets STRING(128)[] NOT NULL,
+    /* Also an array of targets */
+    filter_hosts STRING(128)[],
+    filter_ports STRING(11)[],
+    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
+    action omicron.public.vpc_firewall_rule_action NOT NULL,
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.vpc_router (
     vpc_id,
     name
 ) WHERE

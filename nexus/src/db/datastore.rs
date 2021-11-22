@@ -18,14 +18,17 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{AsyncInsertError, DatastoreCollection};
+use super::collection_insert::{
+    AsyncInsertError, DatastoreCollection, SyncInsertError,
+};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
+use diesel::prelude::*;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -51,8 +54,8 @@ use crate::db::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, Vpc, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate,
+        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -1284,6 +1287,12 @@ impl DataStore {
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
         use db::schema::vpc::dsl;
 
+        // Note that we don't ensure the firewall rules are empty here, because
+        // we allow deleting VPCs with firewall rules present. Inserting new
+        // rules is serialized with respect to the deletion by the row lock
+        // associated with the VPC row, since we use the collection insert CTE
+        // pattern to add firewall rules.
+
         let now = Utc::now();
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1300,6 +1309,101 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcFirewallRule> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        paginated(dsl::vpc_firewall_rule, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .select(VpcFirewallRule::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn vpc_delete_all_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        // TODO-performance: Paginate this update to avoid long queries
+        diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    /// Replace all firewall rules with the given rules
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        rules: Vec<VpcFirewallRule>,
+    ) -> UpdateResult<Vec<VpcFirewallRule>> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now));
+
+        let insert_new_query = Vpc::insert_resource(
+            *vpc_id,
+            diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
+        );
+
+        // TODO-scalability: Ideally this would be a CTE so we don't need to
+        // hold a transaction open across multiple roundtrips from the database,
+        // but for now we're using a transaction due to the severely decreased
+        // legibility of CTEs via diesel right now.
+        self.pool()
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+
+                // The generation count update on the vpc table row will take a
+                // write lock on the row, ensuring that the vpc was not deleted
+                // concurently.
+                insert_new_query.insert_and_get_results(conn).map_err(|e| {
+                    match e {
+                        SyncInsertError::CollectionNotFound => {
+                            diesel::result::Error::RollbackTransaction
+                        }
+                        SyncInsertError::DatabaseError(e) => e,
+                    }
+                })
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::ById(*vpc_id),
+                )
+            })
     }
 
     pub async fn vpc_list_subnets(
