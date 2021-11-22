@@ -8,6 +8,8 @@ use std::sync::Arc;
 mod oso_types;
 pub use oso_types::Action;
 pub use oso_types::Organization;
+pub use oso_types::Project;
+pub use oso_types::ProjectChild;
 pub use oso_types::DATABASE;
 pub use oso_types::FLEET;
 
@@ -85,7 +87,8 @@ impl Context {
 mod test {
     /*
      * These are essentially unit tests for the policy itself.
-     * TODO-coverage This is just a start.
+     * TODO-coverage This is just a start.  But we need roles to do a more
+     * comprehensive test.
      * TODO If this gets any more complicated, we could consider automatically
      * generating the test cases.  We could precreate a bunch of resources and
      * some users with different roles.  Then we could run through a table that
@@ -134,11 +137,11 @@ mod test {
     fn test_organization() {
         let authz_privileged =
             authz_context_for_actor(TEST_USER_UUID_PRIVILEGED);
-        authz_privileged.authorize(Action::CreateOrganization, FLEET).expect(
+        authz_privileged.authorize(Action::CreateChild, FLEET).expect(
             "expected privileged user to be able to create organization",
         );
         let authz_nobody = authz_context_for_actor(TEST_USER_UUID_UNPRIVILEGED);
-        authz_nobody.authorize(Action::CreateOrganization, FLEET).expect_err(
+        authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
             "expected unprivileged user not to be able to create organization",
         );
         let authz_noauth = authz_context_noauth();

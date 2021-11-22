@@ -425,16 +425,18 @@ impl Nexus {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(pagparams).await
+        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
     }
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(pagparams).await
+        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
@@ -637,7 +639,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
+    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -646,16 +648,28 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
+        let disk = self
+            .db_datastore
+            .disk_fetch_by_name(&project_id, disk_name)
+            .await?;
+        let disk_id = disk.id();
+        Ok((
+            disk,
+            authz::FLEET
+                .organization(organization_id)
+                .project(project_id)
+                .resource(ResourceType::Disk, disk_id),
+        ))
     }
 
     pub async fn project_delete_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let disk = self
+        let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let runtime = disk.runtime();
@@ -685,7 +699,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.id()).await
+        self.db_datastore.project_delete_disk(opctx, authz_disk).await
     }
 
     /*
@@ -1124,7 +1138,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
@@ -1167,7 +1181,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
@@ -1294,7 +1308,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
