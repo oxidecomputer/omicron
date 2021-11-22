@@ -3,8 +3,8 @@ pub mod name;
 
 use std::{convert::TryFrom, str::FromStr};
 
-use id::*;
-use name::*;
+pub use id::*;
+pub use name::*;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ impl TryFrom<String> for Identifier {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if is_uuid(value) {
+        if is_uuid(&value) {
             Ok(Identifier::Id(value.parse()?))
         } else {
             Ok(Identifier::Name(value.parse()?))
@@ -43,6 +43,6 @@ impl From<Identifier> for String {
     }
 }
 
-fn is_uuid(s: String) -> bool {
+fn is_uuid(s: &String) -> bool {
     s.parse::<Uuid>().is_ok()
 }

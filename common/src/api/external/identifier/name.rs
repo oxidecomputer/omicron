@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, convert::TryFrom, str::FromStr};
 
 use parse_display::Display;
-use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -56,7 +55,7 @@ pub struct Name(String);
 impl TryFrom<String> for Name {
     type Error = NameError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if super::is_uuid(value) {
+        if super::is_uuid(&value) {
             return Err(NameError::UuidConflict(value));
         }
 
@@ -167,6 +166,17 @@ impl JsonSchema for Name {
 }
 
 impl Name {
+    /**
+     * Parse an `Name`.  This is a convenience wrapper around
+     * `Name::try_from(String)` that marshals any error into an appropriate
+     * `Error`.
+     */
+    pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
+        value.parse().map_err(|e| Error::InvalidValue {
+            label: String::from(label),
+            message: e,
+        })
+    }
     /**
      * Return the `&str` representing the actual name.
      */

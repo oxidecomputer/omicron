@@ -4,7 +4,7 @@
  * For HTTP-level error handling, see Dropshot.
  */
 
-use crate::api::external::Name;
+use crate::api::external::identifier::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
 use serde::Deserialize;

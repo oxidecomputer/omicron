@@ -38,8 +38,8 @@
  * each resource paginated that way).  Where possible, we should share code.
  */
 
+use crate::api::external::identifier::Name;
 use crate::api::external::DataPageParams;
-use crate::api::external::Name;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
 use dropshot::HttpError;

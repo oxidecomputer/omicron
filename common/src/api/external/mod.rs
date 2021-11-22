@@ -33,6 +33,7 @@ use std::fmt::Result as FormatResult;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::str::FromStr;
+use uuid::Uuid;
 
 /*
  * The type aliases below exist primarily to ensure consistency among return
