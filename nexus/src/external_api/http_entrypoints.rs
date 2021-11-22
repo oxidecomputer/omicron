@@ -202,6 +202,7 @@ async fn organizations_get(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
         let params = ScanByNameOrId::from_query(&query)?;
         let field = pagination_field_for_scan_params(params);
@@ -209,14 +210,14 @@ async fn organizations_get(
         let organizations = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.organizations_list_by_id(&page_selector).await?
+                nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
 
             PagField::Name => {
                 let page_selector =
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&page_selector).await?
+                nexus.organizations_list_by_name(&opctx, &page_selector).await?
             }
         }
         .into_iter()
@@ -602,7 +603,7 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let disk = nexus
+        let (disk, _) = nexus
             .project_lookup_disk(&organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
@@ -628,8 +629,14 @@ async fn project_disks_delete_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .project_delete_disk(&organization_name, &project_name, &disk_name)
+            .project_delete_disk(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };
@@ -1040,7 +1047,11 @@ async fn project_vpcs_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
         Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1077,7 +1088,7 @@ async fn project_vpcs_get_vpc(
         let vpc = nexus
             .project_lookup_vpc(&organization_name, &project_name, &vpc_name)
             .await?;
-        Ok(HttpResponseOk(vpc))
+        Ok(HttpResponseOk(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1108,7 +1119,7 @@ async fn project_vpcs_post(
                 &new_vpc_params,
             )
             .await?;
-        Ok(HttpResponseCreated(vpc))
+        Ok(HttpResponseCreated(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1193,7 +1204,10 @@ async fn vpc_subnets_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|vpc| vpc.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1233,7 +1247,7 @@ async fn vpc_subnets_get_subnet(
                 &path.subnet_name,
             )
             .await?;
-        Ok(HttpResponseOk(subnet))
+        Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1262,7 +1276,7 @@ async fn vpc_subnets_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(subnet))
+        Ok(HttpResponseCreated(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1357,7 +1371,10 @@ async fn vpc_firewall_rules_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1422,7 +1439,10 @@ async fn vpc_routers_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1462,7 +1482,7 @@ async fn vpc_routers_get_router(
                 &path.router_name,
             )
             .await?;
-        Ok(HttpResponseOk(vpc_router))
+        Ok(HttpResponseOk(vpc_router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1492,7 +1512,7 @@ async fn vpc_routers_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(router))
+        Ok(HttpResponseCreated(router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1585,7 +1605,10 @@ async fn routers_routes_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|route| route.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1627,7 +1650,7 @@ async fn routers_routes_get_route(
                 &path.route_name,
             )
             .await?;
-        Ok(HttpResponseOk(route))
+        Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1648,7 +1671,7 @@ async fn routers_routes_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let router = nexus
+        let route = nexus
             .router_create_route(
                 &path.organization_name,
                 &path.project_name,
@@ -1658,7 +1681,7 @@ async fn routers_routes_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(router))
+        Ok(HttpResponseCreated(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

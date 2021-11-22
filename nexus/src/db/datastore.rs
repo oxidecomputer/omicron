@@ -154,7 +154,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateOrganization, authz::FLEET)?;
+        opctx.authorize(authz::Action::CreateChild, authz::FLEET)?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
@@ -283,13 +283,15 @@ impl DataStore {
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -302,13 +304,15 @@ impl DataStore {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -902,9 +906,16 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+    pub async fn project_delete_disk(
+        &self,
+        opctx: &OpContext,
+        disk_authz: authz::ProjectChild,
+    ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
+
+        let disk_id = disk_authz.id();
+        opctx.authorize(authz::Action::Delete, disk_authz)?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
@@ -916,7 +927,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

@@ -164,7 +164,7 @@ function mkjson
 function cmd_organizations_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /organizations
+	do_curl_authn /organizations
 }
 
 function cmd_organization_create_demo
@@ -308,7 +308,7 @@ function cmd_disk_get
 function cmd_disk_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/disks/$3" -X DELETE
+	do_curl_authz "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo

@@ -409,7 +409,7 @@ impl<'a> NexusRequest<'a> {
     /// Returns a new `NexusRequest` suitable for `DELETE $uri`
     pub fn object_delete(testctx: &'a ClientTestContext, uri: &str) -> Self {
         NexusRequest::new(
-            RequestBuilder::new(testctx, http::Method::GET, uri)
+            RequestBuilder::new(testctx, http::Method::DELETE, uri)
                 .expect_status(Some(http::StatusCode::NO_CONTENT)),
         )
     }
