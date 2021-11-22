@@ -30,7 +30,6 @@ pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub struct ControlPlaneTestContext {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub console_client: ClientTestContext,
     pub server: omicron_nexus::Server,
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
@@ -44,7 +43,6 @@ impl ControlPlaneTestContext {
     pub async fn teardown(mut self) {
         self.server.http_server_external.close().await.unwrap();
         self.server.http_server_internal.close().await.unwrap();
-        self.server.http_server_console.close().await.unwrap();
         self.database.cleanup().await.unwrap();
         self.clickhouse.cleanup().await.unwrap();
         self.sled_agent.http_server.close().await.unwrap();
@@ -110,10 +108,6 @@ pub async fn test_setup_with_config(
         server.http_server_internal.local_addr(),
         logctx.log.new(o!("component" => "internal client test context")),
     );
-    let testctx_console = ClientTestContext::new(
-        server.http_server_console.local_addr(),
-        logctx.log.new(o!("component" => "console api client test context")),
-    );
 
     /* Set up a single sled agent. */
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
@@ -151,7 +145,6 @@ pub async fn test_setup_with_config(
         server,
         external_client: testctx_external,
         internal_client: testctx_internal,
-        console_client: testctx_console,
         database,
         clickhouse,
         sled_agent: sa,

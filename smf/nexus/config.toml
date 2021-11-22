@@ -27,10 +27,6 @@ bind_address = "127.0.0.1:12220"
 # IP address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
 
-[dropshot_console]
-# IP address and TCP port on which to listen for the console API
-bind_address = "127.0.0.1:12222"
-
 [log]
 # Show log messages of this level and more severe
 level = "info"

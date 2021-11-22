@@ -1,5 +1,9 @@
 /*!
  * Handler functions (entrypoints) for console-related routes.
+ *
+ * This was originally conceived as a separate dropshot server from the external API,
+ * but in order to avoid CORS issues for now, we are serving these routes directly
+ * from the external API.
  */
 use crate::authn::external::{
     cookies::Cookies,
@@ -11,36 +15,13 @@ use crate::authn::external::{
 use crate::authn::TEST_USER_UUID_PRIVILEGED;
 use crate::context::OpContext;
 use crate::ServerContext;
-use dropshot::{
-    endpoint, ApiDescription, HttpError, Path, RequestContext, TypedBody,
-};
+use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use mime_guess;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
-
-type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
-
-/**
- * Returns a description of the part of the nexus API dedicated to the web console
- */
-pub fn console_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(login)?;
-        api.register(logout)?;
-        api.register(console_page)?;
-        api.register(asset)?;
-        Ok(())
-    }
-
-    let mut api = NexusApiDescription::new();
-    if let Err(err) = register_endpoints(&mut api) {
-        panic!("failed to register entrypoints: {}", err);
-    }
-    api
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -53,10 +34,11 @@ pub struct LoginParams {
 // ignored. we will probably end up with a real username/password login
 // endpoint, but I think it will only be for use while setting up the rack
 #[endpoint {
-     method = POST,
-     path = "/login",
- }]
-async fn login(
+   method = POST,
+   path = "/login",
+   unpublished = true,
+}]
+pub async fn login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _params: TypedBody<LoginParams>,
 ) -> Result<Response<Body>, HttpError> {
@@ -80,13 +62,14 @@ async fn login(
 }
 
 /**
- * Log user out of web console by deleting session.
- */
+* Log user out of web console by deleting session.
+*/
 #[endpoint {
-     method = POST,
-     path = "/logout",
- }]
-async fn logout(
+   method = POST,
+   path = "/logout",
+   unpublished = true,
+}]
+pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     cookies: Cookies,
 ) -> Result<Response<Body>, HttpError> {
@@ -114,16 +97,23 @@ async fn logout(
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct RestPathParam {
+pub struct RestPathParam {
     path: Vec<String>,
 }
 
-// TODO: /c/ prefix is def not what we want long-term but it makes things easy for now
+// Dropshot does not have route match ranking and does not allow overlapping
+// route definitions, so we cannot have a catchall `/*` route for console pages
+// and then also define, e.g., `/api/blah/blah` and give the latter priority
+// because it's a more specific match. So for now we simply give the console
+// catchall route a prefix to avoid overlap. Long-term, if a route prefix is
+// part of the solution, we would probably prefer it to be on the API endpoints,
+// not on the console pages.
 #[endpoint {
-     method = GET,
-     path = "/c/{path:.*}",
- }]
-async fn console_page(
+   method = GET,
+   path = "/c/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
@@ -162,12 +152,11 @@ async fn console_page(
 /// Fetch a static asset from the configured assets directory. 404 on virtually
 /// all errors. No auth. NO SENSITIVE FILES.
 #[endpoint {
-     method = GET,
-     path = "/assets/{path:.*}",
-     // don't want this to show up in the OpenAPI spec (which we don't generate anyway)
-     unpublished = true,
- }]
-async fn asset(
+   method = GET,
+   path = "/assets/{path:.*}",
+   unpublished = true,
+}]
+pub async fn asset(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {

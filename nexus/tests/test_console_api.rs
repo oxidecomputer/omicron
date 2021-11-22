@@ -5,7 +5,7 @@ pub mod common;
 use common::http_testing::{RequestBuilder, TestResponse};
 use common::test_setup;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::console_api::http_entrypoints::LoginParams;
+use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 
 extern crate slog;
@@ -13,11 +13,10 @@ extern crate slog;
 #[tokio::test]
 async fn test_sessions() {
     let cptestctx = test_setup("test_sessions").await;
-    let console_testctx = &cptestctx.console_client;
-    let external_testctx = &cptestctx.external_client;
+    let testctx = &cptestctx.external_client;
 
     // logout always gives the same response whether you have a session or not
-    let _ = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/logout")
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
@@ -28,7 +27,7 @@ async fn test_sessions() {
         .unwrap();
 
     // log in and pull the token out of the header so we can use it for authed requests
-    let login = RequestBuilder::new(&console_testctx, Method::POST, "/login")
+    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
         .body(Some(LoginParams {
             username: "".parse().unwrap(),
             password: "".parse().unwrap(),
@@ -52,37 +51,36 @@ async fn test_sessions() {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    let _ =
-        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
-            .body(Some(org_params.clone()))
-            .expect_status(Some(StatusCode::UNAUTHORIZED))
-            .execute()
-            .await;
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+        .body(Some(org_params.clone()))
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await;
 
     // console pages don't 401, they 302
-    let _ = RequestBuilder::new(&external_testctx, Method::POST, "/c/whatever")
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/c/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await;
 
     // now make same requests with cookie
-    let _ =
-        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
-            .header(header::COOKIE, session_token)
-            .body(Some(org_params.clone()))
-            // TODO: explicit expect_status not needed. decide whether to keep it anyway
-            .expect_status(Some(StatusCode::CREATED))
-            .execute()
-            .await;
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+        .header(header::COOKIE, session_token)
+        .body(Some(org_params.clone()))
+        // TODO: explicit expect_status not needed. decide whether to keep it anyway
+        .expect_status(Some(StatusCode::CREATED))
+        .execute()
+        .await;
 
-    let _ = RequestBuilder::new(&console_testctx, Method::GET, "/c/whatever")
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await;
+    // TODO: expect error here
 
     // logout with an actual session should delete the session in the db
-    let _ = RequestBuilder::new(&console_testctx, Method::POST, "/logout")
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/logout")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
@@ -96,15 +94,14 @@ async fn test_sessions() {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    let _ =
-        RequestBuilder::new(&external_testctx, Method::POST, "/organizations")
-            .header(header::COOKIE, session_token)
-            .body(Some(org_params))
-            .expect_status(Some(StatusCode::UNAUTHORIZED))
-            .execute()
-            .await;
+    let _ = RequestBuilder::new(&testctx, Method::POST, "/organizations")
+        .header(header::COOKIE, session_token)
+        .body(Some(org_params))
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await;
 
-    let _ = RequestBuilder::new(&console_testctx, Method::GET, "/c/whatever")
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
         .header(header::COOKIE, session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -116,7 +113,7 @@ async fn test_sessions() {
 #[tokio::test]
 async fn test_console_pages() {
     let cptestctx = test_setup("test_console_pages").await;
-    let testctx = &cptestctx.console_client;
+    let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
     let _ = RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
@@ -136,7 +133,7 @@ async fn test_console_pages() {
 #[tokio::test]
 async fn test_assets() {
     let cptestctx = test_setup("test_assets").await;
-    let testctx = &cptestctx.console_client;
+    let testctx = &cptestctx.external_client;
 
     // nonexistent file 404s
     let _ =

@@ -38,8 +38,6 @@ pub struct Config {
     pub dropshot_external: ConfigDropshot,
     /** Dropshot configuration for internal API server */
     pub dropshot_internal: ConfigDropshot,
-    /** Dropshot configuration for console server */
-    pub dropshot_console: ConfigDropshot,
     /** Identifier for this instance of Nexus */
     pub id: uuid::Uuid,
     /** */
@@ -272,9 +270,6 @@ mod test {
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [dropshot_console]
-            bind_address = "10.1.2.3:4569"
-            request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
@@ -308,12 +303,6 @@ mod test {
                         .unwrap(),
                     ..Default::default()
                 },
-                dropshot_console: ConfigDropshot {
-                    bind_address: "10.1.2.3:4569"
-                        .parse::<SocketAddr>()
-                        .unwrap(),
-                    ..Default::default()
-                },
                 log: ConfigLogging::File {
                     level: ConfigLoggingLevel::Debug,
                     if_exists: ConfigLoggingIfExists::Fail,
@@ -341,9 +330,6 @@ mod test {
             request_body_max_bytes = 1024
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [dropshot_console]
-            bind_address = "10.1.2.3:4569"
             request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"
@@ -380,9 +366,6 @@ mod test {
             request_body_max_bytes = 1024
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [dropshot_console]
-            bind_address = "10.1.2.3:4569"
             request_body_max_bytes = 1024
             [database]
             url = "postgresql://127.0.0.1?sslmode=disable"

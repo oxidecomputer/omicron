@@ -15,7 +15,6 @@
 pub mod authn; // Public only for testing
 mod authz;
 mod config;
-pub mod console_api; // public for testing
 mod context;
 pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
@@ -25,7 +24,6 @@ mod saga_interface;
 mod sagas;
 
 pub use config::Config;
-use console_api::http_entrypoints::console_api;
 pub use context::ServerContext;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
@@ -77,8 +75,6 @@ pub struct Server {
     pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /** dropshot server for internal API */
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
-    /** dropshot server for console API */
-    pub http_server_console: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
 impl Server {
@@ -113,24 +109,10 @@ impl Server {
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
 
-        let http_server_starter_console = dropshot::HttpServerStarter::new(
-            &config.dropshot_console,
-            console_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_console")),
-        )
-        .map_err(|error| format!("initializing console server: {}", error))?;
-
         let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
-        let http_server_console = http_server_starter_console.start();
 
-        Ok(Server {
-            apictx,
-            http_server_external,
-            http_server_internal,
-            http_server_console,
-        })
+        Ok(Server { apictx, http_server_external, http_server_internal })
     }
 
     /**
@@ -148,9 +130,6 @@ impl Server {
             self.http_server_internal
                 .await
                 .map_err(|e| format!("internal: {}", e)),
-            self.http_server_console
-                .await
-                .map_err(|e| format!("console: {}", e)),
         ]
         .into_iter()
         .filter(Result::is_err)
