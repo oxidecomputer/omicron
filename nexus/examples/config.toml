@@ -6,8 +6,8 @@
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
 # Directory of static assets for the console
-# NOTE: relative to <root>/nexus 
-assets_directory = "tests/fixtures" # TODO: figure out value
+# NOTE: relative to repo root
+assets_directory = "nexus/tests/fixtures" # TODO: figure out value
 
 # List of authentication schemes to support.
 #

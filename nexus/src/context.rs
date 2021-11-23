@@ -68,7 +68,7 @@ impl ServerContext {
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
-    ) -> Arc<ServerContext> {
+    ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .authn
             .schemes_external
@@ -107,15 +107,14 @@ impl ServerContext {
 
         // TODO: currently relative to the execution dir, should this be absolute?
         let assets_directory = current_dir()
-            .expect("could not access current directory")
+            .map_err(|e| e.to_string())?
             .join(config.assets_directory.to_owned());
-        // TODO: do we want to assert this? there are no other asserts in here
-        assert!(
-            assets_directory.exists(),
-            "assets directory must exist at start time"
-        );
 
-        Arc::new(ServerContext {
+        if !assets_directory.exists() {
+            return Err("assets_directory must exist at start time".to_string());
+        }
+
+        Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
                 log.new(o!("component" => "nexus")),
@@ -138,7 +137,7 @@ impl ServerContext {
                 ),
             },
             assets_directory,
-        })
+        }))
     }
 }
 
