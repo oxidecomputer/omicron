@@ -95,30 +95,14 @@ impl<'a> RequestBuilder<'a> {
         KE: std::error::Error + Send + Sync + 'static,
         VE: std::error::Error + Send + Sync + 'static,
     {
-        let header_name_dbg = format!("{:?}", name);
-        let header_value_dbg = format!("{:?}", value);
-        let header_name: Result<http::header::HeaderName, _> =
-            name.try_into().with_context(|| {
-                format!("converting header name {}", header_name_dbg)
-            });
-        let header_value: Result<http::header::HeaderValue, _> =
-            value.try_into().with_context(|| {
-                format!(
-                    "converting value for header {}: {}",
-                    header_name_dbg, header_value_dbg
-                )
-            });
-        match (header_name, header_value) {
-            (Ok(name), Ok(value)) => {
+        match parse_header_pair(name, value) {
+            Err(error) => {
+                self.error = Some(error);
+            }
+            Ok((name, value)) => {
                 self.headers.append(name, value);
             }
-            (Err(error), _) => {
-                self.error = Some(error);
-            }
-            (_, Err(error)) => {
-                self.error = Some(error);
-            }
-        };
+        }
         self
     }
 
@@ -184,30 +168,14 @@ impl<'a> RequestBuilder<'a> {
         KE: std::error::Error + Send + Sync + 'static,
         VE: std::error::Error + Send + Sync + 'static,
     {
-        let header_name_dbg = format!("{:?}", name);
-        let header_value_dbg = format!("{:?}", value);
-        let header_name: Result<http::header::HeaderName, _> =
-            name.try_into().with_context(|| {
-                format!("converting header name {}", header_name_dbg)
-            });
-        let header_value: Result<http::header::HeaderValue, _> =
-            value.try_into().with_context(|| {
-                format!(
-                    "converting value for header {}: {}",
-                    header_name_dbg, header_value_dbg
-                )
-            });
-        match (header_name, header_value) {
-            (Ok(name), Ok(value)) => {
+        match parse_header_pair(name, value) {
+            Err(error) => {
+                self.error = Some(error);
+            }
+            Ok((name, value)) => {
                 self.expected_response_headers.append(name, value);
             }
-            (Err(error), _) => {
-                self.error = Some(error);
-            }
-            (_, Err(error)) => {
-                self.error = Some(error);
-            }
-        };
+        }
         self
     }
 
@@ -376,6 +344,32 @@ impl<'a> RequestBuilder<'a> {
 
         Ok(test_response)
     }
+}
+
+fn parse_header_pair<K, V, KE, VE>(
+    name: K,
+    value: V,
+) -> Result<(http::header::HeaderName, http::header::HeaderValue), anyhow::Error>
+where
+    K: TryInto<http::header::HeaderName, Error = KE> + Debug,
+    V: TryInto<http::header::HeaderValue, Error = VE> + Debug,
+    KE: std::error::Error + Send + Sync + 'static,
+    VE: std::error::Error + Send + Sync + 'static,
+{
+    let header_name_dbg = format!("{:?}", name);
+    let header_value_dbg = format!("{:?}", value);
+
+    let header_name = name.try_into().with_context(|| {
+        format!("converting header name {}", header_name_dbg)
+    })?;
+    let header_value = value.try_into().with_context(|| {
+        format!(
+            "converting value for header {}: {}",
+            header_name_dbg, header_value_dbg
+        )
+    })?;
+
+    Ok((header_name, header_value))
 }
 
 /// Represents a response from an HTTP server
