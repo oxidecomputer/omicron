@@ -8,3 +8,4 @@ tools/clickhouse*
 tools/cockroach*
 clickhouse/
 cockroachdb/
+nexus/assets/

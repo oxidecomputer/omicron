@@ -12,7 +12,7 @@ use crate::authn::external::{
         SessionStore, SESSION_COOKIE_COOKIE_NAME,
     },
 };
-use crate::authn::TEST_USER_UUID_PRIVILEGED;
+use crate::authn::{TEST_USER_UUID_PRIVILEGED, TEST_USER_UUID_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
 use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
@@ -22,12 +22,12 @@ use mime_guess;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginParams {
     pub username: String,
-    pub password: String,
 }
 
 // for now this is just for testing purposes, and the username and password are
@@ -38,15 +38,28 @@ pub struct LoginParams {
    path = "/login",
    unpublished = true,
 }]
-pub async fn login(
+pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _params: TypedBody<LoginParams>,
+    params: TypedBody<LoginParams>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let params = params.into_inner();
+    let user_id: Option<Uuid> = match params.username.as_str() {
+        "privileged" => Some(TEST_USER_UUID_PRIVILEGED.parse().unwrap()),
+        "unprivileged" => Some(TEST_USER_UUID_UNPRIVILEGED.parse().unwrap()),
+        _ => None,
+    };
+
+    if user_id.is_none() {
+        return Ok(Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body("".into())?); // TODO: failed login response body?
+    }
+
     let session = nexus
         // TODO: obviously
-        .session_create(TEST_USER_UUID_PRIVILEGED.parse().unwrap())
+        .session_create(user_id.unwrap())
         .await?;
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -57,8 +70,7 @@ pub async fn login(
                 apictx.session_idle_timeout(),
             ),
         )
-        .body("ok".into()) // TODO: what do we return from login?
-        .unwrap())
+        .body("ok".into())?) // TODO: what do we return from login?
 }
 
 /**
@@ -101,6 +113,34 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
+// Serve the console bundle without an auth gate just for the login form. This
+// is meant to stand in for the customers identity provider. Since this is a
+// placeholder, it's easiest to build the form into the console bundle. If we
+// really wanted a login form, we would probably make it a standalone page.
+// Otherwise the user is downloading a bunch of JS for nothing.
+#[endpoint {
+   method = GET,
+   path = "/login",
+   unpublished = true,
+}]
+pub async fn spoof_login_form(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    serve_console_index(rqctx.context().assets_directory.clone()).await
+}
+
+async fn serve_console_index(
+    assets_directory: PathBuf,
+) -> Result<Response<Body>, HttpError> {
+    let file = assets_directory.join(PathBuf::from("index.html"));
+    let file_contents =
+        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+        .body(file_contents.into())?)
+}
+
 // Dropshot does not have route match ranking and does not allow overlapping
 // route definitions, so we cannot have a catchall `/*` route for console pages
 // and then also define, e.g., `/api/blah/blah` and give the latter priority
@@ -131,21 +171,14 @@ pub async fn console_page(
     if let Ok(opctx) = opctx {
         if opctx.authn.actor().is_some() {
             let apictx = rqctx.context();
-            let file =
-                &apictx.assets_directory.join(PathBuf::from("index.html"));
-            let file_contents =
-                tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
-            return Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-                .body(file_contents.into())?);
+            return serve_console_index(apictx.assets_directory.clone()).await;
         }
     }
 
     // otherwise redirect to idp
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, "https://idp.com/login")
+        .header(http::header::LOCATION, "/login")
         .body("".into())?)
 }
 

@@ -142,7 +142,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
 
-        api.register(console_api::login)?;
+        api.register(console_api::spoof_login)?;
+        api.register(console_api::spoof_login_form)?;
         api.register(console_api::logout)?;
         api.register(console_api::console_page)?;
         api.register(console_api::asset)?;

@@ -28,10 +28,7 @@ async fn test_sessions() {
 
     // log in and pull the token out of the header so we can use it for authed requests
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(LoginParams {
-            username: "".parse().unwrap(),
-            password: "".parse().unwrap(),
-        }))
+        .body(Some(LoginParams { username: "privileged".to_string() }))
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await

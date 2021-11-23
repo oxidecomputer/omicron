@@ -7,7 +7,7 @@ id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
 # Directory of static assets for the console
 # NOTE: relative to repo root
-assets_directory = "nexus/tests/fixtures" # TODO: figure out value
+assets_directory = "nexus/assets" # TODO: figure out value
 
 # List of authentication schemes to support.
 #
@@ -16,7 +16,7 @@ assets_directory = "nexus/tests/fixtures" # TODO: figure out value
 # yet.
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof"]
+schemes_external = ["spoof", "session_cookie"]
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
 
