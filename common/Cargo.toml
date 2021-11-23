@@ -68,7 +68,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.13"
+version = "1.14"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -82,7 +82,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 expectorate = "1.0.4"
 serde_urlencoded = "0.7.0"
-tokio = { version = "1.13", features = [ "test-util" ] }
+tokio = { version = "1.14", features = [ "test-util" ] }
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
