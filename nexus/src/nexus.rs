@@ -17,6 +17,8 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
+use ipnetwork::Ipv4Network;
+use ipnetwork::Ipv6Network;
 use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -29,6 +31,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -55,11 +59,10 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
-use omicron_common::sled_agent_client;
-use omicron_common::OximeterClient;
-use omicron_common::SledAgentClient;
+use oximeter_client::Client as OximeterClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -257,20 +260,18 @@ impl Nexus {
                 oximeter_info.address,
             );
             for producer in producers.into_iter() {
-                let producer_info =
-                    omicron_common::oximeter_client::types::ProducerEndpoint {
-                        id: producer.id(),
-                        address: SocketAddr::new(
-                            producer.ip.ip(),
-                            producer.port.try_into().unwrap(),
-                        )
-                        .to_string(),
-                        base_route: producer.base_route,
-                        interval:
-                            omicron_common::oximeter_client::types::Duration::from(
-                                Duration::from_secs_f64(producer.interval),
-                            ),
-                    };
+                let producer_info = oximeter_client::types::ProducerEndpoint {
+                    id: producer.id(),
+                    address: SocketAddr::new(
+                        producer.ip.ip(),
+                        producer.port.try_into().unwrap(),
+                    )
+                    .to_string(),
+                    base_route: producer.base_route,
+                    interval: oximeter_client::types::Duration::from(
+                        Duration::from_secs_f64(producer.interval),
+                    ),
+                };
                 client
                     .producers_post(&producer_info)
                     .await
@@ -282,15 +283,12 @@ impl Nexus {
 
     /// Register as a metric producer with the oximeter metric collection server.
     pub async fn register_as_producer(&self, address: SocketAddr) {
-        let producer_endpoint =
-            omicron_common::nexus_client::types::ProducerEndpoint {
-                id: self.id,
-                address: address.to_string(),
-                base_route: String::from("/metrics/collect"),
-                interval: omicron_common::nexus_client::types::Duration::from(
-                    Duration::from_secs(10),
-                ),
-            };
+        let producer_endpoint = nexus::ProducerEndpoint {
+            id: self.id,
+            address,
+            base_route: String::from("/metrics/collect"),
+            interval: Duration::from_secs(10),
+        };
         let register = || async {
             debug!(self.log, "registering nexus as metric producer");
             register(address, &self.log, &producer_endpoint)
@@ -425,16 +423,18 @@ impl Nexus {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(pagparams).await
+        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
     }
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(pagparams).await
+        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
@@ -637,7 +637,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
+    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -646,16 +646,28 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
+        let disk = self
+            .db_datastore
+            .disk_fetch_by_name(&project_id, disk_name)
+            .await?;
+        let disk_id = disk.id();
+        Ok((
+            disk,
+            authz::FLEET
+                .organization(organization_id)
+                .project(project_id)
+                .resource(ResourceType::Disk, disk_id),
+        ))
     }
 
     pub async fn project_delete_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let disk = self
+        let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let runtime = disk.runtime();
@@ -685,7 +697,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.id()).await
+        self.db_datastore.project_delete_disk(opctx, authz_disk).await
     }
 
     /*
@@ -1124,7 +1136,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
@@ -1167,7 +1179,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
@@ -1294,7 +1306,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
@@ -1418,6 +1430,7 @@ impl Nexus {
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
+        let default_subnet_id = Uuid::new_v4();
         // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
         // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
         // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
@@ -1452,7 +1465,7 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake an utter nonsense. It should be eventually replaced with the proper behavior for creating
+        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
         // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
         // should all be apart of the same transaction.
         self.db_datastore.router_create_route(route).await?;
@@ -1463,6 +1476,31 @@ impl Nexus {
             params.clone(),
         );
         let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+
+        // TODO: batch this up with everything above
+        let subnet = db::model::VpcSubnet::new(
+            default_subnet_id,
+            vpc_id,
+            VpcSubnetCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: format!(
+                        "The default subnet for {}",
+                        params.identity.name
+                    ),
+                },
+                ipv4_block: Some(Ipv4Net(
+                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
+                    "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
+                )),
+                ipv6_block: Some(Ipv6Net(
+                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
+                    "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
+                )),
+            },
+        );
+        self.db_datastore.vpc_create_subnet(subnet).await?;
+
         self.create_default_vpc_firewall(&vpc_id).await?;
         Ok(vpc)
     }
@@ -2123,11 +2161,9 @@ impl Nexus {
         let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
         collector
-            .producers_post(
-                &omicron_common::oximeter_client::types::ProducerEndpoint::from(
-                    &producer_info,
-                ),
-            )
+            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
+                &producer_info,
+            ))
             .await
             .map_err(Error::from)?;
         info!(

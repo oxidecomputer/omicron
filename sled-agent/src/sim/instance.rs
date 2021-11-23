@@ -5,14 +5,14 @@
 use super::simulatable::Simulatable;
 
 use async_trait::async_trait;
+use nexus_client;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
-use omicron_common::nexus_client;
-use omicron_common::NexusClient;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
 use uuid::Uuid;

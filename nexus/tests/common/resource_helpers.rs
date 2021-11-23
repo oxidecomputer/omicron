@@ -13,6 +13,22 @@ use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Project};
 
+pub async fn objects_list_page_authz<ItemType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> dropshot::ResultsPage<ItemType>
+where
+    ItemType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_get(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request")
+        .response_body()
+        .unwrap()
+}
+
 pub async fn create_organization(
     client: &ClientTestContext,
     organization_name: &str,

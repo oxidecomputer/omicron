@@ -461,7 +461,7 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ResourceType {
     Organization,
     Project,
@@ -1505,7 +1505,7 @@ pub struct RouterRouteUpdateParams {
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
-    /// common identifying metadata */
+    /// common identifying metadata
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
     pub status: VpcFirewallRuleStatus,

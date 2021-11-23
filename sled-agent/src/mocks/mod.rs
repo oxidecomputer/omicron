@@ -1,10 +1,8 @@
 //! Mock structures for testing.
 
 use mockall::mock;
-use omicron_common::{
-    api::external::Error,
-    nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo},
-};
+use nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo};
+use omicron_common::api::external::Error;
 use slog::Logger;
 use uuid::Uuid;
 
