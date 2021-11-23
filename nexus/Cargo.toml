@@ -14,7 +14,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 cookie = "0.15"
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-futures = "0.3.15"
+futures = "0.3.18"
 hex = "0.4.3"
 http = "0.2.5"
 hyper = "0.14"
