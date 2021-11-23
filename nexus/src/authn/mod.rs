@@ -41,9 +41,15 @@ use uuid::Uuid;
 // be very useful, but it beats a random uuid.
 //
 
+/// User id reserved for an internal user that can initialize the database
+// NOTE: This uuid is duplicated in dbinit.sql.
+// "0001" is the first possible user that wouldn't be confused with 0, or root
+pub const USER_UUID_DB_INIT: &str = "001de000-05e4-0000-0000-000000000001";
+
 /// User id reserved for a test user that's granted many privileges for the
 /// purpose of running automated tests.
 // "4007" looks a bit like "root".
+// XXX rename test users to match new convention
 pub const TEST_USER_UUID_PRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000004007";
 
@@ -51,6 +57,11 @@ pub const TEST_USER_UUID_PRIVILEGED: &str =
 // 60001 is the decimal uid for "nobody" on Helios.
 pub const TEST_USER_UUID_UNPRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000060001";
+
+/// User id reserved for a test user that has no privileges.
+// "3a8a" looks a bit like "saga"
+pub const USER_UUID_SAGA_RECOVERY: &str =
+    "001de000-05e4-0000-0000-000000003a8a";
 
 /// Describes how the actor performing the current operation is authenticated
 ///
@@ -92,6 +103,26 @@ impl Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
     }
 
+    /// Returns an authenticated context for saga recovery
+    pub fn internal_saga_recovery() -> Context {
+        // XXX TODO-coverage
+        Context::context_for_actor(USER_UUID_SAGA_RECOVERY.parse().unwrap())
+    }
+
+    /// Returns an authenticated context for Nexus-startup database
+    /// initialization
+    pub fn internal_db_init() -> Context {
+        // XXX TODO-coverage
+        Context::context_for_actor(USER_UUID_DB_INIT.parse().unwrap())
+    }
+
+    fn context_for_actor(actor_id: Uuid) -> Context {
+        Context {
+            kind: Kind::Authenticated(Details { actor: Actor(actor_id) }),
+            schemes_tried: Vec::new(),
+        }
+    }
+
     /// Returns an authenticated context for a special testing user
     // TODO-security This eventually needs to go.  But for now, this is used
     // in unit tests.
@@ -107,10 +138,7 @@ impl Context {
     /// This is used for unit testing the authorization rules.
     #[cfg(test)]
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
-        Context {
-            kind: Kind::Authenticated(Details { actor: Actor(actor_id) }),
-            schemes_tried: Vec::new(),
-        }
+        Context::context_for_actor(actor_id)
     }
 }
 

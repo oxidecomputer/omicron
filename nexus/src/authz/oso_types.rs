@@ -185,6 +185,7 @@ impl AuthenticatedActor {
      */
     fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
         self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
+            || self.actor_id.to_string() == authn::USER_UUID_DB_INIT
     }
 }
 

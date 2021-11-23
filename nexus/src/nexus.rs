@@ -2,6 +2,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authn;
 use crate::authz;
 use crate::config;
 use crate::context::OpContext;
@@ -186,13 +187,13 @@ impl Nexus {
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
+            authn::Context::internal_db_init(),
         );
         populate_start(
             populate_ctx,
             Arc::clone(&db_datastore),
             Arc::clone(&populate_status),
         );
-        // XXX test suite may need to block on this
 
         let nexus = Nexus {
             id: config.id,
@@ -206,10 +207,12 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
+        // XXX add authz to saga recovery
         let nexus_arc = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
+            authn::Context::internal_saga_recovery(),
         );
         let recovery_task = db::recover(
             opctx,
@@ -222,6 +225,10 @@ impl Nexus {
 
         *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
+    }
+
+    pub async fn populate_status(&self) -> DataPopulateStatus {
+        self.populate_status.lock().await.clone()
     }
 
     /*

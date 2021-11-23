@@ -1897,11 +1897,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::user_predefined::dsl;
 
-        // TODO-security We'd like to do an authz check here, but what user
-        // would this context use?  This is the context that's responsible for
-        // predefining users!  We could ship one bootstrap user in the database
-        // used to create these other users. XXX Could do this now.
-        let conn = self.pool_authorized(opctx)?;
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
 
         struct UserPredefinedInfo {
             id: &'static str,
@@ -1910,14 +1906,18 @@ impl DataStore {
         }
 
         let predefined_users = [
+            /*
+             * Note: "db_init" is also a predefined user, but that one by
+             * necessity is created with the database.
+             */
             UserPredefinedInfo {
                 id: authn::TEST_USER_UUID_PRIVILEGED,
-                name: "test_user_privileged",
+                name: "test-user-privileged",
                 description: "built-in user for testing with all privileges",
             },
             UserPredefinedInfo {
                 id: authn::TEST_USER_UUID_UNPRIVILEGED,
-                name: "test_user_unprivileged",
+                name: "test-user-unprivileged",
                 description: "built-in user for testing with no privileges",
             },
         ]
@@ -1953,7 +1953,7 @@ impl DataStore {
             .values(predefined_users)
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(conn)
+            .execute_async(self.pool_authorized(opctx)?)
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
         info!(opctx.log, "created {} predefined users", count);

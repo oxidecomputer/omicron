@@ -599,6 +599,22 @@ CREATE TABLE omicron.public.user_predefined (
 
 CREATE UNIQUE INDEX ON omicron.public.user_predefined (name);
 
+/* User used by Nexus to create other users.  Do NOT add more users here! */
+INSERT INTO omicron.public.user_predefined (
+    id,
+    name,
+    description,
+    time_created,
+    time_modified
+) VALUES (
+    /* NOTE: this uuid is duplicated in nexus::authn. */
+    '001de000-05e4-0000-0000-000000000001',
+    'db-init',
+    'user used for database initialization',
+    NOW(),
+    NOW()
+);
+
 
 /*******************************************************************/
 

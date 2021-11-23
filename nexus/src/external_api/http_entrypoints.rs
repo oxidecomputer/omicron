@@ -1940,10 +1940,12 @@ async fn users_get(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let pagparams =
+        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let users = nexus.users_predefined_list(&opctx, &pagparams)
+        let users = nexus
+            .users_predefined_list(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())

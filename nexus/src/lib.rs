@@ -30,6 +30,7 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;
 pub use nexus::TestInterfaces;
+pub use populate::DataPopulateStatus;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;

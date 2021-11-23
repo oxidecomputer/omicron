@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 // This exists only for debugging today.  We could include more information
 // here, like how many attempts we've made, when we started, etc.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataPopulateStatus {
     Unstarted,
     InProgress,
