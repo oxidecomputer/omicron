@@ -1505,7 +1505,7 @@ pub struct RouterRouteUpdateParams {
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
-    /// common identifying metadata */
+    /// common identifying metadata
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
