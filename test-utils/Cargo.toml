@@ -28,7 +28,7 @@ version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.13"
+version = "1.14"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
