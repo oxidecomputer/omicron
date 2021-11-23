@@ -4,8 +4,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, router_route, sled, vpc,
-    vpc_firewall_rule, vpc_router, vpc_subnet,
+    organization, oximeter, project, rack, router_route, sled, user_predefined,
+    vpc, vpc_firewall_rule, vpc_router, vpc_subnet,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -1637,5 +1637,21 @@ impl ConsoleSession {
     pub fn new(token: String, user_id: Uuid) -> Self {
         let now = Utc::now();
         Self { token, user_id, time_last_used: now, time_created: now }
+    }
+}
+
+/// Describes a predefined user, as stored in the database
+#[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+#[table_name = "user_predefined"]
+pub struct UserPredefined {
+    #[diesel(embed)]
+    identity: UserPredefinedIdentity,
+}
+
+impl UserPredefined {
+    /// Creates a new database UserPredefined object.
+    pub fn new(id: Uuid, params: params::UserPredefinedCreate) -> Self {
+        let id = Uuid::new_v4();
+        Self { identity: UserPredefinedIdentity::new(id, params.identity) }
     }
 }

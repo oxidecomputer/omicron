@@ -235,6 +235,17 @@ table! {
     }
 }
 
+table! {
+    user_predefined (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
@@ -252,4 +263,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_subnet,
     vpc_router,
     vpc_firewall_rule,
+    user_predefined,
 );

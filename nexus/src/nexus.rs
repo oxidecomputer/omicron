@@ -10,6 +10,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
 use crate::external_api::params;
 use crate::internal_api::params::OximeterInfo;
+use crate::populate::DataPopulateStatus;
+use crate::populate::populate_start;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -131,6 +133,9 @@ pub struct Nexus {
 
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+
+    /** Status of background task to populate database */
+    populate_status: Arc<tokio::sync::Mutex<DataPopulateStatus>>,
 }
 
 /*
@@ -168,6 +173,25 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        /*
+         * TODO-cleanup We may want a first-class subsystem for managing startup
+         * background tasks.  It could use a Future for each one, a status enum
+         * for each one, status communication via channels, and a single task to
+         * run them all.
+         */
+        let populate_status =
+            Arc::new(tokio::sync::Mutex::new(DataPopulateStatus::default()));
+        let populate_ctx = OpContext::for_background(
+            log.new(o!("component" => "DataLoader")),
+            Arc::clone(&authz),
+        );
+        populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            Arc::clone(&populate_status),
+        );
+
         let nexus = Nexus {
             id: config.id,
             rack_id: *rack_id,
@@ -176,6 +200,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
+            populate_status,
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -193,7 +218,7 @@ impl Nexus {
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
+        *nexus_arc.recovery_task.lock() = Some(recovery_task);
         nexus_arc
     }
 

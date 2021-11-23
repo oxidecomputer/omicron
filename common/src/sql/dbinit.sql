@@ -572,6 +572,37 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 /*
+ * IAM
+ */
+
+/*
+ * Users defined by the system
+ *
+ * The ids and names for these users are well-known (i.e., they are used by
+ * Nexus directly, so changing these would potentially break compatibility).
+ */
+CREATE TABLE omicron.public.user_predefined (
+    /*
+     * Identity metadata
+     *
+     * TODO-cleanup This uses the "resource identity" pattern because we want a
+     * name and description, but it's not valid to support sort-deleting these
+     * records.
+     */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+);
+
+CREATE UNIQUE INDEX ON omicron.public.user_predefined (name);
+
+
+/*******************************************************************/
+
+/*
  * Metadata for the schema itself.  This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */

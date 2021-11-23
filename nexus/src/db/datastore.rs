@@ -24,14 +24,16 @@ use super::collection_insert::{
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
+use crate::external_api::params;
+use anyhow::Context;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -40,6 +42,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{
+    CreateResult, IdentityMetadataCreateParams,
+};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -54,8 +59,8 @@ use crate::db::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
         OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
-        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        RouterRouteUpdate, Sled, UserPredefined, Vpc, VpcFirewallRule,
+        VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -1842,6 +1847,79 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    /// Load built-in users into the database
+    ///
+    /// Most datastore methods are intended to be called from a request context,
+    /// so they return [`api::external::Error`].  This is called from a Nexus
+    /// background job that can really only keep retrying until it succeeds, so
+    /// more fine-grained errors are not useful.
+    pub async fn load_predefined_users(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), anyhow::Error> {
+        use db::schema::user_predefined::dsl;
+
+        // TODO-security We'd like to do an authz check here, but what user
+        // would this context use?  This is the context that's responsible for
+        // predefining users!  We could ship one bootstrap user in the database
+        // used to create these other users. XXX Could do this now.
+        let conn =
+            self.pool_authorized(opctx).context("loading predefined users")?;
+
+        struct UserPredefinedInfo {
+            id: &'static str,
+            name: &'static str,
+            description: &'static str,
+        }
+
+        let predefined_users = &[
+            UserPredefinedInfo {
+                id: authn::TEST_USER_UUID_PRIVILEGED,
+                name: "test_user_privileged",
+                description: "built-in user for testing with all privileges",
+            },
+            UserPredefinedInfo {
+                id: authn::TEST_USER_UUID_UNPRIVILEGED,
+                name: "test_user_unprivileged",
+                description: "built-in user for testing with no privileges",
+            },
+        ]
+        .iter()
+        .map(|u| {
+            let id = u.id.parse().unwrap_or_else(|error| {
+                panic!(
+                    "hardcoded id for user {:?} is invalid: {:#}",
+                    u.id, error
+                )
+            });
+            let name = api::external::Name::try_from(String::from(u.name))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "hardcoded name for user {} is invalid: {:#}",
+                        id, error
+                    )
+                });
+            UserPredefined::new(
+                id,
+                params::UserPredefinedCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name,
+                        description: String::from(u.description),
+                    },
+                },
+            )
+        })
+        .collect::<Vec<UserPredefined>>();
+
+        diesel::insert_into(dsl::user_predefined)
+            .values(predefined_users)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .get_result_async(conn)
+            .await
+            .context("failed to load predefined users")
     }
 }
 
