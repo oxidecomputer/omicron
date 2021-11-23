@@ -644,6 +644,7 @@ using https://github.com/oxidecomputer/progenitor[Progenitor]. Clients are
 automatically updated when the coresponding OpenAPI document is modified.
 
 Note that Omicron contains a nominally circular dependency:
+
 * Nexus depends on the Sled Agent client
 * The Sled Agent client is derived from the OpenAPI document emitted by Sled Agent
 * Sled Agent depends on the Nexus client

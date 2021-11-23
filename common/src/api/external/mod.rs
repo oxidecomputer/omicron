@@ -23,14 +23,16 @@ use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
+use std::iter::FromIterator;
 use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -134,6 +136,7 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
     Deserialize,
     Display,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
@@ -458,7 +461,7 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ResourceType {
     Organization,
     Project,
@@ -469,6 +472,7 @@ pub enum ResourceType {
     Sled,
     SagaDbg,
     Vpc,
+    VpcFirewallRule,
     VpcSubnet,
     VpcRouter,
     RouterRoute,
@@ -491,6 +495,7 @@ impl Display for ResourceType {
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
                 ResourceType::Vpc => "vpc",
+                ResourceType::VpcFirewallRule => "vpc firewall rule",
                 ResourceType::VpcSubnet => "vpc subnet",
                 ResourceType::VpcRouter => "vpc router",
                 ResourceType::RouterRoute => "vpc router route",
@@ -1306,26 +1311,6 @@ pub enum RouteTarget {
     InternetGateway(Name),
 }
 
-impl TryFrom<NetworkTarget> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
-            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(RouteTarget::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
 impl TryFrom<String> for RouteTarget {
     type Error = String;
 
@@ -1354,6 +1339,26 @@ impl From<RouteTarget> for NetworkTarget {
             RouteTarget::InternetGateway(name) => {
                 NetworkTarget::InternetGateway(name)
             }
+        }
+    }
+}
+
+impl TryFrom<NetworkTarget> for RouteTarget {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
+            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
+            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(RouteTarget::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
+                value
+            )),
         }
     }
 }
@@ -1497,6 +1502,421 @@ pub struct RouterRouteUpdateParams {
     pub destination: RouteDestination,
 }
 
+/// A single rule in a VPC firewall
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRule {
+    /// common identifying metadata */
+    pub identity: IdentityMetadata,
+    /// whether this rule is in effect
+    pub status: VpcFirewallRuleStatus,
+    /// whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallRuleDirection,
+    /// list of sets of instances that the rule applies to
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    /// reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+    /// whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallRuleAction,
+    /// the relative priority of this rule
+    pub priority: VpcFirewallRulePriority,
+}
+
+/// A single rule in a VPC firewall
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleUpdate {
+    // In an update, the name is encoded as a key in the JSON object, so we
+    // don't include one here
+    /// human-readable free-form text about a resource
+    pub description: String,
+    /// whether this rule is in effect
+    pub status: VpcFirewallRuleStatus,
+    /// whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallRuleDirection,
+    /// list of sets of instances that the rule applies to
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    /// reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+    /// whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallRuleAction,
+    /// the relative priority of this rule
+    pub priority: VpcFirewallRulePriority,
+}
+
+/**
+ * Updateable properties of a [`Vpc`]'s firewall
+ * Note that VpcFirewallRules are implicitly created along with a Vpc,
+ * so there is no explicit creation.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcFirewallRuleUpdateParams {
+    #[serde(flatten)]
+    pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
+}
+
+/**
+ * Response to an update replacing [`Vpc`]'s firewall
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcFirewallRuleUpdateResult {
+    #[serde(flatten)]
+    pub rules: HashMap<Name, VpcFirewallRule>,
+}
+
+impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = VpcFirewallRule>,
+    {
+        Self {
+            rules: iter
+                .into_iter()
+                .map(|rule| (rule.identity.name.clone(), rule))
+                .collect(),
+        }
+    }
+}
+
+/// Firewall rule priority. This is a value from 0 to 65535, with rules with
+/// lower values taking priority over higher values.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct VpcFirewallRulePriority(pub u16);
+
+/// Filter for a firewall rule. A given packet must match every field that is
+/// present for the rule to apply to it. A packet matches a field if any entry
+/// in that field matches the packet.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleFilter {
+    /// If present, the sources (if incoming) or destinations (if outgoing)
+    /// this rule applies to.
+    pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
+
+    /// If present, the networking protocols this rule applies to.
+    pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+
+    /// If present, the destination ports this rule applies to.
+    pub ports: Option<Vec<L4PortRange>>,
+}
+
+/// The protocols that may be specified in a firewall rule's filter
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum VpcFirewallRuleProtocol {
+    Tcp,
+    Udp,
+    Icmp,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallRuleStatus {
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallRuleDirection {
+    Inbound,
+    Outbound,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum VpcFirewallRuleAction {
+    Allow,
+    Deny,
+}
+
+/// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
+/// possible targets that a firewall rule can be attached to.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleTarget {
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    // Tags not yet implemented
+    //Tag(Name),
+}
+
+impl TryFrom<String> for VpcFirewallRuleTarget {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        VpcFirewallRuleTarget::try_from(
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
+        )
+    }
+}
+
+impl FromStr for VpcFirewallRuleTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        VpcFirewallRuleTarget::try_from(String::from(value))
+    }
+}
+
+impl From<VpcFirewallRuleTarget> for NetworkTarget {
+    fn from(target: VpcFirewallRuleTarget) -> Self {
+        match target {
+            VpcFirewallRuleTarget::Vpc(name) => NetworkTarget::Vpc(name),
+            VpcFirewallRuleTarget::Subnet(name) => NetworkTarget::Subnet(name),
+            VpcFirewallRuleTarget::Instance(name) => {
+                NetworkTarget::Instance(name)
+            }
+        }
+    }
+}
+
+impl TryFrom<NetworkTarget> for VpcFirewallRuleTarget {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Vpc(name) => Ok(VpcFirewallRuleTarget::Vpc(name)),
+            NetworkTarget::Subnet(name) => {
+                Ok(VpcFirewallRuleTarget::Subnet(name))
+            }
+            NetworkTarget::Instance(name) => {
+                Ok(VpcFirewallRuleTarget::Instance(name))
+            }
+            _ => Err(format!(
+                "Invalid VpcFirewallRuleTarget {}, only vpc, subnet, and instance, \
+                are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl Display for VpcFirewallRuleTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
+/// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
+/// possible targets that a route can forward to.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleHostFilter {
+    Vpc(Name),
+    Subnet(Name),
+    Instance(Name),
+    // Tags not yet implemented
+    // Tag(Name),
+    Ip(IpAddr),
+    InternetGateway(Name),
+}
+
+impl TryFrom<String> for VpcFirewallRuleHostFilter {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        VpcFirewallRuleHostFilter::try_from(
+            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
+        )
+    }
+}
+
+impl FromStr for VpcFirewallRuleHostFilter {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        VpcFirewallRuleHostFilter::try_from(String::from(value))
+    }
+}
+
+impl From<VpcFirewallRuleHostFilter> for NetworkTarget {
+    fn from(target: VpcFirewallRuleHostFilter) -> Self {
+        match target {
+            VpcFirewallRuleHostFilter::Vpc(name) => NetworkTarget::Vpc(name),
+            VpcFirewallRuleHostFilter::Subnet(name) => {
+                NetworkTarget::Subnet(name)
+            }
+            VpcFirewallRuleHostFilter::Instance(name) => {
+                NetworkTarget::Instance(name)
+            }
+            VpcFirewallRuleHostFilter::Ip(ip) => NetworkTarget::Ip(ip),
+            VpcFirewallRuleHostFilter::InternetGateway(name) => {
+                NetworkTarget::InternetGateway(name)
+            }
+        }
+    }
+}
+
+impl TryFrom<NetworkTarget> for VpcFirewallRuleHostFilter {
+    type Error = String;
+
+    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
+        match value {
+            NetworkTarget::Vpc(name) => {
+                Ok(VpcFirewallRuleHostFilter::Vpc(name))
+            }
+            NetworkTarget::Subnet(name) => {
+                Ok(VpcFirewallRuleHostFilter::Subnet(name))
+            }
+            NetworkTarget::Instance(name) => {
+                Ok(VpcFirewallRuleHostFilter::Instance(name))
+            }
+            NetworkTarget::Ip(ip) => Ok(VpcFirewallRuleHostFilter::Ip(ip)),
+            NetworkTarget::InternetGateway(name) => {
+                Ok(VpcFirewallRuleHostFilter::InternetGateway(name))
+            }
+            _ => Err(format!(
+                "Invalid VpcFirewallRuleHostFilter {}, only vpc, subnet, \
+                instance, ip, and inetgw are allowed",
+                value
+            )),
+        }
+    }
+}
+
+impl Display for VpcFirewallRuleHostFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        let target = NetworkTarget::from(self.clone());
+        write!(f, "{}", target)
+    }
+}
+
+/// Port number used in a transport-layer protocol like TCP or UDP
+/// Note that 0 is an invalid port number.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Display,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct L4Port(pub NonZeroU16);
+
+impl From<NonZeroU16> for L4Port {
+    fn from(port: NonZeroU16) -> L4Port {
+        L4Port(port)
+    }
+}
+
+impl TryFrom<u16> for L4Port {
+    type Error = <NonZeroU16 as TryFrom<u16>>::Error;
+    fn try_from(port: u16) -> Result<L4Port, Self::Error> {
+        NonZeroU16::try_from(port).map(L4Port)
+    }
+}
+
+/// A range of transport layer ports. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct L4PortRange {
+    /// The first port in the range
+    pub first: L4Port,
+    /// The last port in the range
+    pub last: L4Port,
+}
+
+impl FromStr for L4PortRange {
+    type Err = String;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        const INVALID_PORT_NUMBER_MSG: &'static str = "invalid port number";
+
+        match range.split_once('-') {
+            None => {
+                let port = range
+                    .parse::<NonZeroU16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
+                Ok(L4PortRange { first: port, last: port })
+            }
+            Some((left, right)) => {
+                let first = left
+                    .parse::<NonZeroU16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
+                let last = right
+                    .parse::<NonZeroU16>()
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .into();
+                Ok(L4PortRange { first, last })
+            }
+        }
+    }
+}
+
+impl TryFrom<String> for L4PortRange {
+    type Error = <L4PortRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for L4PortRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for L4PortRange {
+    fn schema_name() -> String {
+        "L4PortRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of IP ports".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of IP ports. The second port \
+                    may be omitted to represent a single port"
+                        .to_string(),
+                ),
+                examples: vec!["22".into(), "6667-7000".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(11),  // 5 digits for each port and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
 /// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
@@ -1579,10 +1999,14 @@ pub struct NetworkInterface {
 
 #[cfg(test)]
 mod test {
-    use super::ByteCount;
-    use super::Name;
+    use super::{
+        ByteCount, L4Port, L4PortRange, Name, NetworkTarget,
+        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
+        VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
+    };
     use crate::api::external::Error;
-    use crate::api::external::NetworkTarget;
     use std::convert::TryFrom;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1711,6 +2135,148 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_ip_port_range_from_str() {
+        assert_eq!(
+            L4PortRange::try_from("65532".to_string()),
+            Ok(L4PortRange {
+                first: L4Port::try_from(65532).unwrap(),
+                last: L4Port::try_from(65532).unwrap()
+            })
+        );
+        assert_eq!(
+            L4PortRange::try_from("22-53".to_string()),
+            Ok(L4PortRange {
+                first: L4Port::try_from(22).unwrap(),
+                last: L4Port::try_from(53).unwrap()
+            })
+        );
+
+        assert_eq!(
+            L4PortRange::try_from("".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("65536".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("65535-65536".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("0x23".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("0".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("0-20".to_string()),
+            Err("invalid port number".to_string())
+        );
+        assert_eq!(
+            L4PortRange::try_from("-20".to_string()),
+            Err("invalid port number".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ip_port_range_into_str() {
+        let range = L4PortRange {
+            first: L4Port::try_from(12345).unwrap(),
+            last: L4Port::try_from(12345).unwrap(),
+        }
+        .to_string();
+        assert_eq!(range, "12345");
+
+        let range: String = L4PortRange {
+            first: L4Port::try_from(1).unwrap(),
+            last: L4Port::try_from(1024).unwrap(),
+        }
+        .to_string();
+        assert_eq!(range, "1-1024");
+    }
+
+    #[test]
+    fn test_firewall_deserialization() {
+        let json = r#"
+            {
+            "allow-internal-inbound": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": {"hosts": [ { "type": "vpc", "value": "default" } ]},
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic between instances"
+            },
+            "rule2": {
+                "status": "disabled",
+                "direction": "outbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": {"ports": [ "22-25", "27" ], "protocols": [ "UDP" ]},
+                "action": "deny",
+                "priority": 65533,
+                "description": "second rule"
+            }
+            }
+            "#;
+        let params =
+            serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
+        assert_eq!(params.rules.len(), 2);
+        assert_eq!(
+            params.rules[&Name::try_from("allow-internal-inbound".to_string())
+                .unwrap()],
+            VpcFirewallRuleUpdate {
+                status: VpcFirewallRuleStatus::Enabled,
+                direction: VpcFirewallRuleDirection::Inbound,
+                targets: vec![VpcFirewallRuleTarget::Vpc(
+                    "default".parse().unwrap()
+                )],
+                filters: VpcFirewallRuleFilter {
+                    hosts: Some(vec![VpcFirewallRuleHostFilter::Vpc(
+                        "default".parse().unwrap()
+                    )]),
+                    ports: None,
+                    protocols: None,
+                },
+                action: VpcFirewallRuleAction::Allow,
+                priority: VpcFirewallRulePriority(65534),
+                description: "allow inbound traffic between instances"
+                    .to_string(),
+            }
+        );
+        assert_eq!(
+            params.rules[&Name::try_from("rule2".to_string()).unwrap()],
+            VpcFirewallRuleUpdate {
+                status: VpcFirewallRuleStatus::Disabled,
+                direction: VpcFirewallRuleDirection::Outbound,
+                targets: vec![VpcFirewallRuleTarget::Vpc(
+                    "default".parse().unwrap()
+                )],
+                filters: VpcFirewallRuleFilter {
+                    hosts: None,
+                    ports: Some(vec![
+                        L4PortRange {
+                            first: L4Port::try_from(22).unwrap(),
+                            last: L4Port::try_from(25).unwrap()
+                        },
+                        L4PortRange {
+                            first: L4Port::try_from(27).unwrap(),
+                            last: L4Port::try_from(27).unwrap()
+                        }
+                    ]),
+                    protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
+                },
+                action: VpcFirewallRuleAction::Deny,
+                priority: VpcFirewallRulePriority(65533),
+                description: "second rule".to_string(),
+            }
+        );
     }
 
     #[test]
