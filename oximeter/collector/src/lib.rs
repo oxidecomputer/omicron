@@ -9,7 +9,6 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
-use omicron_common::nexus_client;
 use oximeter::types::ProducerResults;
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};

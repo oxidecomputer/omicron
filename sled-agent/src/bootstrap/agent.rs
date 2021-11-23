@@ -38,7 +38,7 @@ pub enum BootstrapError {
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub struct Agent {
+pub(crate) struct Agent {
     /// Debug log
     log: Logger,
 }

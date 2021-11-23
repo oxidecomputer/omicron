@@ -1470,6 +1470,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "omicron-common",
+ "percent-encoding",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "normalize-line-endings"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1612,6 +1627,7 @@ dependencies = [
  "openapiv3 0.5.0",
  "oso",
  "oximeter",
+ "oximeter-client",
  "oximeter-collector",
  "oximeter-db",
  "oximeter-instruments",
@@ -1625,6 +1641,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-agent-client",
  "slog",
  "steno",
  "structopt",
@@ -1651,10 +1668,9 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "http",
- "hyper",
  "ipnetwork",
  "mockall",
+ "nexus-client",
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
@@ -1831,11 +1847,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "omicron-common",
+ "percent-encoding",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "dropshot",
  "expectorate",
+ "nexus-client",
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
@@ -1905,6 +1937,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dropshot",
+ "nexus-client",
  "omicron-common",
  "oximeter",
  "reqwest",
@@ -2987,6 +3020,22 @@ name = "slab"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
+
+[[package]]
+name = "sled-agent-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "omicron-common",
+ "percent-encoding",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "slog",
+ "uuid",
+]
 
 [[package]]
 name = "slog"

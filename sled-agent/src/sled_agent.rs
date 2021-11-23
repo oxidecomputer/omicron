@@ -15,7 +15,7 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 use crate::common::vlan::VlanID;
 use crate::instance_manager::InstanceManager;
