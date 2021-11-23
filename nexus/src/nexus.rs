@@ -64,7 +64,6 @@ use omicron_common::OximeterClient;
 use omicron_common::SledAgentClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
-use serde_json::de;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
