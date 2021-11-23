@@ -20,7 +20,7 @@ async fn test_sessions() {
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
-            "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
         )
         .execute()
         .await
@@ -122,7 +122,7 @@ async fn test_console_pages() {
     // request to console page route without auth should redirect to IdP
     let _ = RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
         .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(header::LOCATION, "https://idp.com/login")
+        .expect_response_header(header::LOCATION, "/login")
         .execute()
         .await
         .expect("failed to redirect to IdP on auth failure");

@@ -36,7 +36,8 @@ pub struct LoginParams {
 #[endpoint {
    method = POST,
    path = "/login",
-   unpublished = true,
+   // this would be unpublished, but it's convenient for the console to be able
+   // to use the generated client to make this post
 }]
 pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -74,12 +75,14 @@ pub async fn spoof_login(
 }
 
 /**
-* Log user out of web console by deleting session.
-*/
+ * Log user out of web console by deleting session.
+ */
 #[endpoint {
+   // important for security that this be a POST despite the empty req body
    method = POST,
    path = "/logout",
-   unpublished = true,
+   // this would be unpublished, but it's convenient for the console to be able
+   // to use the generated client to make this post
 }]
 pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

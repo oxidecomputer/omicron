@@ -174,6 +174,29 @@
         }
       }
     },
+    "/login": {
+      "post": {
+        "operationId": "spoof_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {}
+      }
+    },
+    "/logout": {
+      "post": {
+        "description": "Log user out of web console by deleting session.",
+        "operationId": "logout",
+        "responses": {}
+      }
+    },
     "/organizations": {
       "get": {
         "description": "List all organizations.",
@@ -3165,6 +3188,17 @@
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
         "maxLength": 11
+      },
+      "LoginParams": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ]
       },
       "Name": {
         "title": "A name used in the API",
