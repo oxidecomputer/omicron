@@ -213,18 +213,15 @@ async fn cpapi_metrics_collect(
         .await
 }
 
-/// Deserialized input path.
 #[derive(Deserialize, JsonSchema)]
 struct AllPath {
-    path: Vec<String>,
+    path: String,
 }
 
 /// Endpoint used by Sled Agents to download cached artifacts.
 #[endpoint {
     method = GET,
-    path = "/artifacts/{path:.*}",
-    // TODO: Buggy without this
-    unpublished = true,
+    path = "/artifacts/{path}",
 }]
 async fn cpapi_artifact_download(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
@@ -233,7 +230,14 @@ async fn cpapi_artifact_download(
     let context = request_context.context();
     let nexus = &context.nexus;
     let mut entry = PathBuf::from(BASE_ARTIFACT_DIR);
-    let path = path.into_inner().path;
+
+    // TODO: Most of the below code is ready to accept a multi-component path,
+    // such as in:
+    // https://github.com/oxidecomputer/dropshot/blob/78be3deda556a9339ea09f3a9961fd91389f8757/dropshot/examples/file_server.rs#L86-L89
+    //
+    // However, openapi does *not* like that currently, so we limit the endpoint
+    // to only accepting single-component paths.
+    let path = vec![path.into_inner().path];
 
     let handler = async {
         for component in &path {

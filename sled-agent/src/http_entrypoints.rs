@@ -1,6 +1,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
+use super::updates::UpdateArtifact;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk, Path, RequestContext,
     TypedBody,
@@ -85,19 +86,6 @@ async fn disk_put(
     ))
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-pub enum UpdateArtifactKind {
-    Zone,
-}
-
-// TODO: De-duplicate this struct with the one in iliana's PR?
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-struct UpdateArtifact {
-    pub name: String,
-    pub version: i64,
-    pub kind: UpdateArtifactKind,
-}
-
 #[endpoint {
     method = POST,
     path = "/update"
@@ -107,9 +95,7 @@ async fn update_artifact(
     artifact: TypedBody<UpdateArtifact>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let sa = rqctx.context();
+    let artifact = artifact.into_inner();
 
-    // TODO: pass to `update_artifact`.
-    let _artifact = artifact.into_inner();
-
-    Ok(HttpResponseOk(sa.update_artifact().await?))
+    Ok(HttpResponseOk(sa.update_artifact(&artifact).await?))
 }

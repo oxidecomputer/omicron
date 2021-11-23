@@ -10,6 +10,24 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts/{path}": {
+      "get": {
+        "description": "Endpoint used by Sled Agents to download cached artifacts.",
+        "operationId": "cpapi_artifact_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {}
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "description": "Report updated state for a disk.",

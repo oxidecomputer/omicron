@@ -1,5 +1,6 @@
 //! Sled agent implementation
 
+use crate::updates;
 use crate::params::DiskStateRequested;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
@@ -24,7 +25,7 @@ use crate::instance_manager::InstanceManager;
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    _nexus_client: Arc<NexusClient>,
+    nexus_client: Arc<NexusClient>,
     instances: InstanceManager,
 }
 
@@ -40,7 +41,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { _nexus_client: nexus_client, instances })
+        Ok(SledAgent { nexus_client, instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.
@@ -67,10 +68,11 @@ impl SledAgent {
     }
 
     /// Downloads and applies an artifact.
-    pub async fn update_artifact(&self) -> Result<(), Error> {
-        // TODO: Call nexus endpoint, download the thing
-        // TODO: put it in the right spot
-        // TODO: "handle zones" - restart the service
-        todo!();
+    pub async fn update_artifact(
+        &self,
+        artifact: &updates::UpdateArtifact,
+    ) -> Result<(), Error> {
+        updates::apply_update(self.nexus_client.as_ref(), artifact).await;
+        Ok(())
     }
 }

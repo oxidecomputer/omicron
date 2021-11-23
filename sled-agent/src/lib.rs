@@ -22,6 +22,7 @@ mod instance_manager;
 mod params;
 pub mod server;
 mod sled_agent;
+mod updates;
 
 #[cfg(test)]
 mod mocks;

@@ -21,5 +21,9 @@ mock! {
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
         ) -> Result<(), Error>;
+        pub async fn cpapi_artifact_download(
+            &self,
+            name: &str
+        ) -> Result<(), Error>;
     }
 }
