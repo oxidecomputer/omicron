@@ -85,14 +85,8 @@ impl Server {
         }
 
         debug!(log, "registering metric server as a producer");
-        register(
-            config.registration_address,
-            &log,
-            &omicron_common::nexus_client::types::ProducerEndpoint::from(
-                &config.server_info,
-            ),
-        )
-        .await?;
+        register(config.registration_address, &log, &config.server_info)
+            .await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -164,14 +158,12 @@ async fn collect_endpoint(
 pub async fn register(
     address: SocketAddr,
     log: &slog::Logger,
-    server_info: &omicron_common::nexus_client::types::ProducerEndpoint,
+    server_info: &omicron_common::api::internal::nexus::ProducerEndpoint,
 ) -> Result<(), Error> {
-    let client = omicron_common::NexusClient::new(
-        &format!("http://{}", address),
-        log.clone(),
-    );
+    let client =
+        nexus_client::Client::new(&format!("http://{}", address), log.clone());
     client
-        .cpapi_producers_post(server_info)
+        .cpapi_producers_post(&server_info.into())
         .await
         .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }

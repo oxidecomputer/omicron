@@ -7,12 +7,13 @@ description = "Crate for producing metric data to be collected by the Oxide cont
 [dependencies]
 chrono = { version = "0.4.19", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
 reqwest = { version = "0.11.6", features = [ "json" ] }
 schemars = { version = "0.8.7", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
-tokio = "1.13"
+tokio = "1.14"
 thiserror = "1.0.30"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }

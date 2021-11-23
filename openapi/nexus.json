@@ -4034,7 +4034,7 @@
             ]
           },
           "identity": {
-            "description": "common identifying metadata */",
+            "description": "common identifying metadata",
             "allOf": [
               {
                 "$ref": "#/components/schemas/IdentityMetadata"

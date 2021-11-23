@@ -9,10 +9,9 @@ async-trait = "0.1.51"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
-futures = "0.3.15"
-http = "0.2.5"
-hyper = "0.14"
+futures = "0.3.18"
 ipnetwork = "0.18"
+nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
@@ -27,7 +26,7 @@ structopt = "0.3"
 tar = "0.4"
 tempfile = "3.2"
 thiserror = "1.0"
-tokio = { version = "1.13", features = [ "full" ] }
+tokio = { version = "1.14", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"
