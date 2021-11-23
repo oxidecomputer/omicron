@@ -366,8 +366,8 @@ impl<'a> NexusRequest<'a> {
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
         use omicron_nexus::authn;
         let header_value = match mode {
-            AuthnMode::UnprivilegedUser => authn::TEST_USER_UUID_UNPRIVILEGED,
-            AuthnMode::PrivilegedUser => authn::TEST_USER_UUID_PRIVILEGED,
+            AuthnMode::UnprivilegedUser => authn::USER_UUID_TEST_UNPRIVILEGED,
+            AuthnMode::PrivilegedUser => authn::USER_UUID_TEST_PRIVILEGED,
         };
 
         self.request_builder = self.request_builder.header(

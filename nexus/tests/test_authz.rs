@@ -37,7 +37,7 @@ async fn test_authz_basic() {
     // get back a 403 "Forbidden" response.
     let error = try_create_organization(
         client,
-        Some(omicron_nexus::authn::TEST_USER_UUID_UNPRIVILEGED),
+        Some(omicron_nexus::authn::USER_UUID_TEST_UNPRIVILEGED),
         StatusCode::FORBIDDEN,
     )
     .await;

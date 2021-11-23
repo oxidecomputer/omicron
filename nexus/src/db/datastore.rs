@@ -1911,14 +1911,19 @@ impl DataStore {
              * necessity is created with the database.
              */
             UserPredefinedInfo {
-                id: authn::TEST_USER_UUID_PRIVILEGED,
-                name: "test-user-privileged",
-                description: "built-in user for testing with all privileges",
+                id: authn::USER_UUID_SAGA_RECOVERY,
+                name: "saga-recovery",
+                description: "used for saga recovery",
             },
             UserPredefinedInfo {
-                id: authn::TEST_USER_UUID_UNPRIVILEGED,
-                name: "test-user-unprivileged",
-                description: "built-in user for testing with no privileges",
+                id: authn::USER_UUID_TEST_PRIVILEGED,
+                name: "test-privileged",
+                description: "used for testing with all privileges",
+            },
+            UserPredefinedInfo {
+                id: authn::USER_UUID_TEST_UNPRIVILEGED,
+                name: "test-unprivileged",
+                description: "used for testing with no privileges",
             },
         ]
         .iter()

@@ -46,22 +46,21 @@ use uuid::Uuid;
 // "0001" is the first possible user that wouldn't be confused with 0, or root
 pub const USER_UUID_DB_INIT: &str = "001de000-05e4-0000-0000-000000000001";
 
+/// User id reserved for an internal user used for saga recovery
+// "3a8a" looks a bit like "saga"
+pub const USER_UUID_SAGA_RECOVERY: &str =
+    "001de000-05e4-0000-0000-000000003a8a";
+
 /// User id reserved for a test user that's granted many privileges for the
 /// purpose of running automated tests.
 // "4007" looks a bit like "root".
-// XXX rename test users to match new convention
-pub const TEST_USER_UUID_PRIVILEGED: &str =
+pub const USER_UUID_TEST_PRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000004007";
 
 /// User id reserved for a test user that has no privileges.
 // 60001 is the decimal uid for "nobody" on Helios.
-pub const TEST_USER_UUID_UNPRIVILEGED: &str =
+pub const USER_UUID_TEST_UNPRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000060001";
-
-/// User id reserved for a test user that has no privileges.
-// "3a8a" looks a bit like "saga"
-pub const USER_UUID_SAGA_RECOVERY: &str =
-    "001de000-05e4-0000-0000-000000003a8a";
 
 /// Describes how the actor performing the current operation is authenticated
 ///
@@ -129,7 +128,7 @@ impl Context {
     #[cfg(test)]
     pub fn internal_test_user() -> Context {
         Context::test_context_for_actor(
-            TEST_USER_UUID_PRIVILEGED.parse().unwrap(),
+            USER_UUID_TEST_PRIVILEGED.parse().unwrap(),
         )
     }
 
@@ -145,7 +144,7 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
-    use super::TEST_USER_UUID_PRIVILEGED;
+    use super::USER_UUID_TEST_PRIVILEGED;
 
     #[test]
     fn test_internal_users() {
@@ -157,7 +156,7 @@ mod test {
         // test user.  This is used in a few places.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0.to_string(), TEST_USER_UUID_PRIVILEGED);
+        assert_eq!(actor.0.to_string(), USER_UUID_TEST_PRIVILEGED);
     }
 }
 

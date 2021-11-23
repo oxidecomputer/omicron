@@ -3,12 +3,14 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
+use std::collections::BTreeMap;
 
 pub mod common;
 use common::http_testing::AuthnMode;
 use common::http_testing::NexusRequest;
 use common::http_testing::RequestBuilder;
 use common::test_setup;
+use omicron_nexus::authn;
 use omicron_nexus::external_api::views::User;
 
 extern crate slog;
@@ -33,28 +35,27 @@ async fn test_users_predefined() {
     .await
     .unwrap();
 
-    let users = NexusRequest::object_get(&testctx, "/users")
+    let mut users = NexusRequest::object_get(&testctx, "/users")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .unwrap()
         .response_body::<ResultsPage<User>>()
         .unwrap()
-        .items;
-    assert_eq!(
-        users[0].identity.id.to_string(),
-        omicron_nexus::authn::USER_UUID_DB_INIT
-    );
-    assert_eq!(users[0].identity.name, "db-init");
-    assert_eq!(
-        users[1].identity.id.to_string(),
-        omicron_nexus::authn::TEST_USER_UUID_PRIVILEGED
-    );
-    assert_eq!(users[1].identity.name, "test-user-privileged");
-    assert_eq!(
-        users[2].identity.id.to_string(),
-        omicron_nexus::authn::TEST_USER_UUID_UNPRIVILEGED
-    );
-    assert_eq!(users[2].identity.name, "test-user-unprivileged");
+        .items
+        .into_iter()
+        .map(|u| (u.identity.name.to_string(), u))
+        .collect::<BTreeMap<String, User>>();
+
+    // XXX names should be constants too?
+    let u = users.remove(&"db-init".to_string()).unwrap();
+    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_DB_INIT);
+    let u = users.remove(&"saga-recovery".to_string()).unwrap();
+    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_SAGA_RECOVERY);
+    let u = users.remove(&"test-privileged".to_string()).unwrap();
+    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_PRIVILEGED);
+    let u = users.remove(&"test-unprivileged".to_string()).unwrap();
+    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_UNPRIVILEGED);
+    assert!(users.is_empty(), "found unexpected built-in users");
     cptestctx.teardown().await;
 }
