@@ -28,7 +28,6 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::external_api::params;
-use anyhow::Context;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -54,6 +53,7 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
+        public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
@@ -1849,24 +1849,59 @@ impl DataStore {
             })
     }
 
+    pub async fn users_predefined_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<UserPredefined> {
+        use db::schema::user_predefined::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated(dsl::user_predefined, dsl::name, pagparams)
+            .select(UserPredefined::as_select())
+            .load_async::<UserPredefined>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn user_predefined_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<UserPredefined> {
+        use db::schema::user_predefined::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        dsl::user_predefined
+            .filter(dsl::name.eq(name.clone()))
+            .select(UserPredefined::as_select())
+            .first_async::<UserPredefined>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
     /// Load built-in users into the database
-    ///
-    /// Most datastore methods are intended to be called from a request context,
-    /// so they return [`api::external::Error`].  This is called from a Nexus
-    /// background job that can really only keep retrying until it succeeds, so
-    /// more fine-grained errors are not useful.
     pub async fn load_predefined_users(
         &self,
         opctx: &OpContext,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), Error> {
         use db::schema::user_predefined::dsl;
 
         // TODO-security We'd like to do an authz check here, but what user
         // would this context use?  This is the context that's responsible for
         // predefining users!  We could ship one bootstrap user in the database
         // used to create these other users. XXX Could do this now.
-        let conn =
-            self.pool_authorized(opctx).context("loading predefined users")?;
+        let conn = self.pool_authorized(opctx)?;
 
         struct UserPredefinedInfo {
             id: &'static str,
@@ -1874,7 +1909,7 @@ impl DataStore {
             description: &'static str,
         }
 
-        let predefined_users = &[
+        let predefined_users = [
             UserPredefinedInfo {
                 id: authn::TEST_USER_UUID_PRIVILEGED,
                 name: "test_user_privileged",
@@ -1913,13 +1948,16 @@ impl DataStore {
         })
         .collect::<Vec<UserPredefined>>();
 
-        diesel::insert_into(dsl::user_predefined)
+        debug!(opctx.log, "attempting to create predefined users");
+        let count = diesel::insert_into(dsl::user_predefined)
             .values(predefined_users)
             .on_conflict(dsl::id)
             .do_nothing()
-            .get_result_async(conn)
+            .execute_async(conn)
             .await
-            .context("failed to load predefined users")
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} predefined users", count);
+        Ok(())
     }
 }
 

@@ -2,6 +2,7 @@
 
 use crate::context::OpContext;
 use crate::db::DataStore;
+use omicron_common::backoff;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -12,6 +13,7 @@ pub enum DataPopulateStatus {
     Unstarted,
     InProgress,
     Done,
+    Failed(String),
 }
 
 impl Default for DataPopulateStatus {
@@ -39,14 +41,43 @@ async fn populate(
         *status = DataPopulateStatus::InProgress;
     }
 
-    /*
-     * XXX Use exponential backoff?
-     */
-    datastore.load_predefined_users(&opctx).await;
+    let db_result = backoff::retry_notify(
+        backoff::internal_service_policy(),
+        || async {
+            datastore.load_predefined_users(&opctx).await.map_err(|error| {
+                use omicron_common::api::external::Error;
+                match &error {
+                    Error::ServiceUnavailable { .. } => {
+                        backoff::BackoffError::Transient(error)
+                    }
+                    _ => backoff::BackoffError::Permanent(error),
+                }
+            })
+        },
+        |error, delay| {
+            warn!(
+                opctx.log,
+                "failed to load predefined users; will retry in {:?}", delay;
+                "error_message" => ?error,
+            );
+        },
+    )
+    .await;
 
-    {
-        let mut status = result.lock().await;
-        assert_eq!(*status, DataPopulateStatus::InProgress);
+    let mut status = result.lock().await;
+    assert_eq!(*status, DataPopulateStatus::InProgress);
+    if let Err(error) = db_result {
+        /*
+         * TODO-autonomy this should raise an alert, bump a counter, or raise
+         * some other red flag that something is wrong.  (This should be
+         * unlikely in practice.)
+         */
+        error!(opctx.log,
+            "gave up trying to load predefined users";
+            "error_message" => ?error
+        );
+        *status = DataPopulateStatus::Failed(error.to_string());
+    } else {
         *status = DataPopulateStatus::Done;
     }
 }

@@ -3314,7 +3314,7 @@
         ]
       },
       "ProjectCreate": {
-        "description": "Create-time parameters for an [`Project`]",
+        "description": "Create-time parameters for a [`Project`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3351,7 +3351,7 @@
         ]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of an [`Project`]",
+        "description": "Updateable properties of a [`Project`]",
         "type": "object",
         "properties": {
           "description": {

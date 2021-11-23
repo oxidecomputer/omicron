@@ -51,30 +51,16 @@ pub fn diesel_pool_result_optional<T>(
     }
 }
 
-/// Converts a Diesel pool error to an external error.
+/// Converts a Diesel pool error to an external error when operating on a
+/// particular resource
 pub fn public_error_from_diesel_pool(
     error: PoolError,
     resource_type: ResourceType,
     lookup_type: LookupType,
 ) -> PublicError {
-    match error {
-        PoolError::Connection(error) => match error {
-            ConnectionError::Checkout(error) => {
-                PublicError::ServiceUnavailable {
-                    internal_message: format!(
-                        "Failed to access connection pool: {}",
-                        error
-                    ),
-                }
-            }
-            ConnectionError::Query(error) => {
-                public_error_from_diesel(error, resource_type, lookup_type)
-            }
-        },
-        PoolError::Timeout => {
-            PublicError::unavail("Timeout accessing connection pool")
-        }
-    }
+    public_error_from_diesel_pool_helper(error, |error| {
+        public_error_from_diesel(error, resource_type, lookup_type)
+    })
 }
 
 /// Converts a Diesel pool error to an external error,
@@ -84,21 +70,44 @@ pub fn public_error_from_diesel_pool_create(
     resource_type: ResourceType,
     object_name: &str,
 ) -> PublicError {
+    public_error_from_diesel_pool_helper(error, |error| {
+        public_error_from_diesel_create(error, resource_type, object_name)
+    })
+}
+
+/// Converts a Diesel pool error to an external error for a case where we do not
+/// expect the query to fail and the error cannot be easily summarized for an
+/// end user
+pub fn public_error_from_diesel_pool_shouldnt_fail(
+    error: PoolError,
+) -> PublicError {
+    public_error_from_diesel_pool_helper(error, |diesel_error| {
+        PublicError::internal_error(&format!(
+            "unexpected database error: {:#}",
+            diesel_error
+        ))
+    })
+}
+
+/// Handles the common cases for all pool errors (particularly around transient
+/// errors while delegating the special case of
+/// `PoolError::Connection(ConnectionError::Query(diesel_error))` to
+/// `make_query_error(diesel_error)`, allowing the caller to decide how to
+/// format a message for that case.
+fn public_error_from_diesel_pool_helper<F>(
+    error: PoolError,
+    make_query_error: F,
+) -> PublicError
+where
+    F: FnOnce(DieselError) -> PublicError,
+{
     match error {
         PoolError::Connection(error) => match error {
-            ConnectionError::Checkout(error) => {
-                PublicError::ServiceUnavailable {
-                    internal_message: format!(
-                        "Failed to access connection pool: {}",
-                        error
-                    ),
-                }
-            }
-            ConnectionError::Query(error) => public_error_from_diesel_create(
-                error,
-                resource_type,
-                object_name,
-            ),
+            ConnectionError::Checkout(error) => PublicError::unavail(&format!(
+                "Failed to access connection pool: {}",
+                error
+            )),
+            ConnectionError::Query(error) => make_query_error(error),
         },
         PoolError::Timeout => {
             PublicError::unavail("Timeout accessing connection pool")
@@ -107,7 +116,7 @@ pub fn public_error_from_diesel_pool_create(
 }
 
 /// Converts a Diesel error to an external error.
-pub fn public_error_from_diesel(
+fn public_error_from_diesel(
     error: DieselError,
     resource_type: ResourceType,
     lookup_type: LookupType,
@@ -129,7 +138,7 @@ pub fn public_error_from_diesel(
 
 /// Converts a Diesel error to an external error, when requested as
 /// part of a creation operation.
-pub fn public_error_from_diesel_create(
+fn public_error_from_diesel_create(
     error: DieselError,
     resource_type: ResourceType,
     object_name: &str,

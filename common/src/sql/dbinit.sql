@@ -594,7 +594,7 @@ CREATE TABLE omicron.public.user_predefined (
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
+    time_deleted TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX ON omicron.public.user_predefined (name);

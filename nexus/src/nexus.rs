@@ -10,8 +10,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
 use crate::external_api::params;
 use crate::internal_api::params::OximeterInfo;
-use crate::populate::DataPopulateStatus;
 use crate::populate::populate_start;
+use crate::populate::DataPopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -134,7 +134,8 @@ pub struct Nexus {
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
-    /** Status of background task to populate database */
+    /** Status of background task to populate database (here for debugging) */
+    #[allow(dead_code)]
     populate_status: Arc<tokio::sync::Mutex<DataPopulateStatus>>,
 }
 
@@ -191,6 +192,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             Arc::clone(&populate_status),
         );
+        // XXX test suite may need to block on this
 
         let nexus = Nexus {
             id: config.id,
@@ -218,7 +220,7 @@ impl Nexus {
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock() = Some(recovery_task);
+        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
     }
 
@@ -2057,6 +2059,26 @@ impl Nexus {
             .map_err(|_: ()| {
                 Error::not_found_by_id(ResourceType::SagaDbg, &id)
             })?
+    }
+
+    /*
+     * Predefined users
+     */
+
+    pub async fn users_predefined_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::UserPredefined> {
+        self.db_datastore.users_predefined_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn user_predefined_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::UserPredefined> {
+        self.db_datastore.user_predefined_fetch(opctx, name).await
     }
 
     /*

@@ -1651,7 +1651,6 @@ pub struct UserPredefined {
 impl UserPredefined {
     /// Creates a new database UserPredefined object.
     pub fn new(id: Uuid, params: params::UserPredefinedCreate) -> Self {
-        let id = Uuid::new_v4();
         Self { identity: UserPredefinedIdentity::new(id, params.identity) }
     }
 }

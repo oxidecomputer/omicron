@@ -35,7 +35,7 @@ impl Into<Organization> for model::Organization {
  */
 
 /**
- * Client view of an [`Project`]
+ * Client view of a [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -55,5 +55,29 @@ impl Into<Project> for model::Project {
             identity: self.identity(),
             organization_id: self.organization_id,
         }
+    }
+}
+
+/*
+ * PREDEFINED USERS
+ */
+
+/**
+ * Client view of a [`User`]
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    /*
+     * TODO-correctness is flattening here (and in all the other types) the
+     * intent in RFD 4?
+     */
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+impl Into<User> for model::UserPredefined {
+    fn into(self) -> User {
+        User { identity: self.identity() }
     }
 }
