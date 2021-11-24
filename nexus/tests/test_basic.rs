@@ -209,7 +209,7 @@ async fn test_projects_basic() {
             .execute()
             .await
             .expect("failed to make request")
-            .response_body()
+            .parsed_body()
             .unwrap();
             assert_eq!(new_project.identity.name.as_str(), project_name);
             assert_eq!(
@@ -422,7 +422,7 @@ async fn test_projects_basic() {
     .execute()
     .await
     .expect("expected request to fail")
-    .response_body::<HttpErrorResponseBody>()
+    .parsed_body::<HttpErrorResponseBody>()
     .unwrap();
     assert_eq!("already exists: project \"simproject1\"", error.message);
 
@@ -447,7 +447,7 @@ async fn test_projects_basic() {
     .execute()
     .await
     .expect("expected request to fail")
-    .response_body::<HttpErrorResponseBody>()
+    .parsed_body::<HttpErrorResponseBody>()
     .unwrap();
     assert!(error.message.starts_with(
         "unable to parse body: name contains invalid character: \"_\" \
@@ -469,7 +469,7 @@ async fn test_projects_basic() {
             .execute()
             .await
             .expect("failed to make request")
-            .response_body()
+            .parsed_body()
             .unwrap();
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
