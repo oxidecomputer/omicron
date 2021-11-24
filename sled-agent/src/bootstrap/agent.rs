@@ -37,7 +37,7 @@ pub enum BootstrapError {
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
 
-    #[error("Error running SPDM protocol")]
+    #[error("Error running SPDM protocol: {0}")]
     Spdm(#[from] SpdmError)
 }
 
