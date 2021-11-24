@@ -5,6 +5,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.48"
+bincode = "1.3.3"
 async-trait = "0.1.51"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -13,9 +14,11 @@ futures = "0.3.18"
 ipnetwork = "0.18"
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
+p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
+rand = { version = "0.8.4", features = ["getrandom"] }
 reqwest = "0.11.5"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -29,6 +32,7 @@ thiserror = "1.0"
 tokio = { version = "1.14", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
+vsss-rs = { version = "2.0.0-pre0", features = ["std"] }
 zone = "0.1"
 
 [dev-dependencies]
