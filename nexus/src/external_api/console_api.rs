@@ -30,14 +30,13 @@ pub struct LoginParams {
     pub username: String,
 }
 
-// for now this is just for testing purposes, and the username and password are
-// ignored. we will probably end up with a real username/password login
+/// This is just for demo purposes. we will probably end up with a real username/password login
 // endpoint, but I think it will only be for use while setting up the rack
 #[endpoint {
    method = POST,
    path = "/login",
-   // this would be unpublished, but it's convenient for the console to be able
-   // to use the generated client to make this post
+   // TODO: this should be unpublished, but for now it's convenient for the
+   // console to use the generated client for this request
 }]
 pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -55,6 +54,7 @@ pub async fn spoof_login(
     if user_id.is_none() {
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
+            .header(header::SET_COOKIE, clear_session_cookie_header_value())
             .body("".into())?); // TODO: failed login response body?
     }
 
@@ -75,14 +75,14 @@ pub async fn spoof_login(
 }
 
 /**
- * Log user out of web console by deleting session.
+ * Log user out of web console by deleting session in both server and browser.
  */
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,
    path = "/logout",
-   // this would be unpublished, but it's convenient for the console to be able
-   // to use the generated client to make this post
+   // TODO: this should be unpublished, but for now it's convenient for the
+   // console to use the generated client for this request
 }]
 pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -119,8 +119,8 @@ pub struct RestPathParam {
 // Serve the console bundle without an auth gate just for the login form. This
 // is meant to stand in for the customers identity provider. Since this is a
 // placeholder, it's easiest to build the form into the console bundle. If we
-// really wanted a login form, we would probably make it a standalone page.
-// Otherwise the user is downloading a bunch of JS for nothing.
+// really wanted a login form, we would probably make it a standalone page,
+// otherwise the user is downloading a bunch of JS for nothing.
 #[endpoint {
    method = GET,
    path = "/login",
