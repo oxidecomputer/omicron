@@ -438,6 +438,11 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE INDEX ON omicron.public.network_interface (
+   instance_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
     'custom'

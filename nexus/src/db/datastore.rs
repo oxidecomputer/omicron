@@ -852,7 +852,7 @@ impl DataStore {
         instance_names: T,
     ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
         use db::schema::{instance, network_interface};
-        // TODO: make sure there's an index on network_interface::instance_id
+        // TODO-performance: paginate the results of this query?
         let ifaces = network_interface::table
             .inner_join(
                 instance::table
@@ -888,7 +888,7 @@ impl DataStore {
         subnet_names: T,
     ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
         use db::schema::{network_interface, vpc_subnet};
-        // TODO: make sure there's an index on network_interface::subnet_id
+        // TODO-performance: paginate the results of this query?
         let subnets = network_interface::table
             .inner_join(
                 vpc_subnet::table
@@ -924,6 +924,7 @@ impl DataStore {
         subnet_names: T,
     ) -> Result<HashMap<Name, Vec<ipnetwork::IpNetwork>>, Error> {
         use db::schema::vpc_subnet;
+        // TODO-performance: paginate the results of this query?
         let subnets = vpc_subnet::table
             .select(VpcSubnet::as_select())
             .filter(vpc_subnet::vpc_id.eq(vpc.id()))
