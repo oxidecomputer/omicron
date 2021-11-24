@@ -75,11 +75,12 @@ impl<'a> RequestBuilder<'a> {
             body: hyper::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
+                http::header::CACHE_CONTROL,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
-                http::header::SET_COOKIE,
                 http::header::LOCATION,
+                http::header::SET_COOKIE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
             expected_response_headers: http::HeaderMap::new(),

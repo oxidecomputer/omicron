@@ -114,6 +114,9 @@ impl ServerContext {
             return Err("assets_directory must exist at start time".to_string());
         }
 
+        // TODO: check for particular assets, like console index.html
+        // leaving that out for now so we don't break nexus in dev for everyone
+
         Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,

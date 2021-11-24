@@ -141,6 +141,7 @@ async fn serve_console_index(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+        .header(http::header::CACHE_CONTROL, "max-age=600")
         .body(file_contents.into())?)
 }
 
@@ -150,7 +151,8 @@ async fn serve_console_index(
 // because it's a more specific match. So for now we simply give the console
 // catchall route a prefix to avoid overlap. Long-term, if a route prefix is
 // part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages.
+// not on the console pages. Conveniently, all the console page routes start
+// with /orgs already.
 #[endpoint {
    method = GET,
    path = "/orgs/{path:.*}",
@@ -211,6 +213,7 @@ pub async fn asset(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, &content_type)
+        .header(http::header::CACHE_CONTROL, "max-age=600")
         .body(file_contents.into())?)
 }
 
