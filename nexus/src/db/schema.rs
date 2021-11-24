@@ -40,7 +40,7 @@ table! {
 }
 
 table! {
-    metricproducer (id) {
+    metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
@@ -53,7 +53,7 @@ table! {
 }
 
 table! {
-    networkinterface (id) {
+    network_interface (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -116,7 +116,7 @@ table! {
 }
 
 table! {
-    saganodeevent (saga_id, node_id, event_type) {
+    saga_node_event (saga_id, node_id, event_type) {
         saga_id -> Uuid,
         node_id -> Int8,
         event_type -> Text,
@@ -135,7 +135,7 @@ table! {
 }
 
 table! {
-    consolesession (token) {
+    console_session (token) {
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
@@ -163,12 +163,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
+        system_router_id -> Uuid,
         dns_name -> Text,
+        firewall_gen -> Int8,
     }
 }
 
 table! {
-    vpcsubnet (id) {
+    vpc_subnet (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -182,7 +184,39 @@ table! {
 }
 
 table! {
-    vpcrouter (id) {
+    vpc_router (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::db::model::VpcRouterKindEnum,
+        vpc_id -> Uuid,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    router_route (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::db::model::RouterRouteKindEnum,
+        router_id -> Uuid,
+        target -> Text,
+        destination -> Text,
+    }
+}
+
+table! {
+    use crate::db::model;
+    use diesel::sql_types::*;
+
+    vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -190,22 +224,32 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
+        status -> model::VpcFirewallRuleStatusEnum,
+        direction -> model::VpcFirewallRuleDirectionEnum,
+        targets -> Array<Text>,
+        filter_hosts -> Nullable<Array<Text>>,
+        filter_ports -> Nullable<Array<Text>>,
+        filter_protocols -> Nullable<Array<model::VpcFirewallRuleProtocolEnum>>,
+        action -> model::VpcFirewallRuleActionEnum,
+        priority -> Int4,
     }
 }
 
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
-    metricproducer,
-    networkinterface,
+    metric_producer,
+    network_interface,
     organization,
     oximeter,
     project,
     saga,
-    saganodeevent,
-    consolesession,
+    saga_node_event,
+    console_session,
     sled,
+    router_route,
     vpc,
-    vpcsubnet,
-    vpcrouter
+    vpc_subnet,
+    vpc_router,
+    vpc_firewall_rule,
 );

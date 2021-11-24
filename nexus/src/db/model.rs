@@ -3,18 +3,22 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    consolesession, disk, instance, metricproducer, networkinterface,
-    organization, oximeter, project, rack, sled, vpc, vpcrouter, vpcsubnet,
+    console_session, disk, instance, metric_producer, network_interface,
+    organization, oximeter, project, rack, router_route, sled, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet,
 };
+use crate::external_api::params;
+use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::{Backend, BinaryRawValue, RawValue};
 use diesel::deserialize::{self, FromSql};
-use diesel::serialize::{self, ToSql};
+use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -28,6 +32,7 @@ use uuid::Uuid;
 #[derive(
     Clone,
     Debug,
+    Display,
     AsExpression,
     FromSqlRow,
     Eq,
@@ -41,6 +46,7 @@ use uuid::Uuid;
 #[sql_type = "sql_types::Text"]
 #[serde(transparent)]
 #[repr(transparent)]
+#[display("{0}")]
 pub struct Name(pub external::Name);
 
 NewtypeFrom! { () pub struct Name(external::Name); }
@@ -140,6 +146,48 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+/// Representation of a [`u16`] in the database.
+/// We need this because the database does not support unsigned types.
+/// This handles converting from the database's INT4 to the actual u16.
+#[derive(
+    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+)]
+#[sql_type = "sql_types::Int4"]
+#[repr(transparent)]
+pub struct SqlU16(pub u16);
+
+NewtypeFrom! { () pub struct SqlU16(u16); }
+NewtypeDeref! { () pub struct SqlU16(u16); }
+
+impl SqlU16 {
+    pub fn new(port: u16) -> Self {
+        Self(port)
+    }
+}
+
+impl<DB> ToSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i32::from(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        u16::try_from(i32::from_sql(bytes)?).map(SqlU16).map_err(|e| e.into())
     }
 }
 
@@ -301,6 +349,7 @@ pub struct Sled {
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
@@ -339,7 +388,7 @@ pub struct Organization {
 
 impl Organization {
     /// Creates a new database Organization object.
-    pub fn new(params: external::OrganizationCreateParams) -> Self {
+    pub fn new(params: params::OrganizationCreate) -> Self {
         let id = Uuid::new_v4();
         Self {
             identity: OrganizationIdentity::new(id, params.identity),
@@ -355,12 +404,6 @@ impl DatastoreCollection<Project> for Organization {
     type CollectionIdColumn = project::dsl::organization_id;
 }
 
-impl Into<external::Organization> for Organization {
-    fn into(self) -> external::Organization {
-        external::Organization { identity: self.identity() }
-    }
-}
-
 /// Describes a set of updates for the [`Organization`] model.
 #[derive(AsChangeset)]
 #[table_name = "organization"]
@@ -370,8 +413,8 @@ pub struct OrganizationUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::OrganizationUpdateParams> for OrganizationUpdate {
-    fn from(params: external::OrganizationUpdateParams) -> Self {
+impl From<params::OrganizationUpdate> for OrganizationUpdate {
+    fn from(params: params::OrganizationUpdate) -> Self {
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
@@ -392,22 +435,10 @@ pub struct Project {
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(
-        organization_id: Uuid,
-        params: external::ProjectCreateParams,
-    ) -> Self {
+    pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
             organization_id: organization_id,
-        }
-    }
-}
-
-impl Into<external::Project> for Project {
-    fn into(self) -> external::Project {
-        external::Project {
-            identity: self.identity(),
-            organization_id: self.organization_id,
         }
     }
 }
@@ -421,8 +452,8 @@ pub struct ProjectUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::ProjectUpdateParams> for ProjectUpdate {
-    fn from(params: external::ProjectUpdateParams) -> Self {
+impl From<params::ProjectUpdate> for ProjectUpdate {
+    fn from(params: params::ProjectUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -797,12 +828,13 @@ impl Into<external::DiskAttachment> for DiskAttachment {
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "metricproducer"]
+#[table_name = "metric_producer"]
 pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
 
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
     pub interval: f64,
     pub base_route: String,
@@ -844,11 +876,12 @@ pub struct OximeterInfo {
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
 impl OximeterInfo {
-    pub fn new(info: &internal::nexus::OximeterInfo) -> Self {
+    pub fn new(info: &internal_api::params::OximeterInfo) -> Self {
         let now = Utc::now();
         Self {
             id: info.collector_id,
@@ -867,17 +900,29 @@ pub struct Vpc {
     identity: VpcIdentity,
 
     pub project_id: Uuid,
+    pub system_router_id: Uuid,
     pub dns_name: Name,
+
+    /// firewall generation number, used as a child resource generation number
+    /// per RFD 192
+    pub firewall_gen: Generation,
 }
 
 impl Vpc {
     pub fn new(
         vpc_id: Uuid,
         project_id: Uuid,
+        system_router_id: Uuid,
         params: external::VpcCreateParams,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self { identity, project_id, dns_name: params.dns_name.into() }
+        Self {
+            identity,
+            project_id,
+            system_router_id,
+            dns_name: params.dns_name.into(),
+            firewall_gen: Generation::new(),
+        }
     }
 }
 
@@ -886,9 +931,17 @@ impl Into<external::Vpc> for Vpc {
         external::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
+            system_router_id: self.system_router_id,
             dns_name: self.dns_name.0,
         }
     }
+}
+
+impl DatastoreCollection<VpcFirewallRule> for Vpc {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc::dsl::firewall_gen;
+    type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;
+    type CollectionIdColumn = vpc_firewall_rule::dsl::vpc_id;
 }
 
 #[derive(AsChangeset)]
@@ -912,7 +965,7 @@ impl From<external::VpcUpdateParams> for VpcUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnet {
     #[diesel(embed)]
     identity: VpcSubnetIdentity,
@@ -950,7 +1003,7 @@ impl Into<external::VpcSubnet> for VpcSubnet {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcsubnet"]
+#[table_name = "vpc_subnet"]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -971,34 +1024,127 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
     }
 }
 
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
+    pub struct VpcRouterKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcRouterKindEnum"]
+    pub struct VpcRouterKind(pub external::VpcRouterKind);
+
+    // Enum values
+    System => b"system"
+    Custom => b"custom"
+);
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
 
     pub vpc_id: Uuid,
+    pub kind: VpcRouterKind,
+    pub rcgen: Generation,
 }
 
 impl VpcRouter {
     pub fn new(
         router_id: Uuid,
         vpc_id: Uuid,
+        kind: external::VpcRouterKind,
         params: external::VpcRouterCreateParams,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id }
+        Self {
+            identity,
+            vpc_id,
+            kind: VpcRouterKind(kind),
+            rcgen: Generation::new(),
+        }
     }
+}
+
+impl DatastoreCollection<RouterRoute> for VpcRouter {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc_router::dsl::rcgen;
+    type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
+    type CollectionIdColumn = router_route::dsl::router_id;
 }
 
 impl Into<external::VpcRouter> for VpcRouter {
     fn into(self) -> external::VpcRouter {
-        external::VpcRouter { identity: self.identity(), vpc_id: self.vpc_id }
+        external::VpcRouter {
+            identity: self.identity(),
+            vpc_id: self.vpc_id,
+            kind: self.kind.0,
+        }
     }
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpcrouter"]
+#[table_name = "vpc_router"]
 pub struct VpcRouterUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1015,8 +1161,457 @@ impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
     }
 }
 
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "router_route_kind", type_schema = "public")]
+    pub struct RouterRouteKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "RouterRouteKindEnum"]
+    pub struct RouterRouteKind(pub external::RouterRouteKind);
+
+    // Enum values
+    Default => b"default"
+    VpcSubnet => b"vpc_subnet"
+    VpcPeering => b"vpc_peering"
+    Custom => b"custom"
+);
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteTarget(pub external::RouteTarget);
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(RouteTarget(
+            String::from_sql(bytes)?.parse::<external::RouteTarget>()?,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct RouteDestination(pub external::RouteDestination);
+
+impl RouteDestination {
+    pub fn new(state: external::RouteDestination) -> Self {
+        Self(state)
+    }
+
+    pub fn state(&self) -> &external::RouteDestination {
+        &self.0
+    }
+}
+
+impl<DB> ToSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for RouteDestination
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(RouteDestination::new(
+            String::from_sql(bytes)?.parse::<external::RouteDestination>()?,
+        ))
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "router_route"]
+pub struct RouterRoute {
+    #[diesel(embed)]
+    identity: RouterRouteIdentity,
+
+    pub kind: RouterRouteKind,
+    pub router_id: Uuid,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+impl RouterRoute {
+    pub fn new(
+        route_id: Uuid,
+        router_id: Uuid,
+        kind: external::RouterRouteKind,
+        params: external::RouterRouteCreateParams,
+    ) -> Self {
+        let identity = RouterRouteIdentity::new(route_id, params.identity);
+        Self {
+            identity,
+            router_id,
+            kind: RouterRouteKind(kind),
+            target: RouteTarget(params.target),
+            destination: RouteDestination::new(params.destination),
+        }
+    }
+}
+
+impl Into<external::RouterRoute> for RouterRoute {
+    fn into(self) -> external::RouterRoute {
+        external::RouterRoute {
+            identity: self.identity(),
+            router_id: self.router_id,
+            kind: self.kind.0,
+            target: self.target.0.clone(),
+            destination: self.destination.state().clone(),
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[table_name = "router_route"]
+pub struct RouterRouteUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
+    fn from(params: external::RouterRouteUpdateParams) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            target: RouteTarget(params.target),
+            destination: RouteDestination::new(params.destination),
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
+    pub struct VpcFirewallRuleStatusEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleStatusEnum"]
+    pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
+
+    Disabled => b"disabled"
+    Enabled => b"enabled"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
+NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
+    pub struct VpcFirewallRuleDirectionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleDirectionEnum"]
+    pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
+
+    Inbound => b"inbound"
+    Outbound => b"outbound"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
+NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
+    pub struct VpcFirewallRuleActionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleActionEnum"]
+    pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
+
+    Allow => b"allow"
+    Deny => b"deny"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
+    pub struct VpcFirewallRuleProtocolEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleProtocolEnum"]
+    pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
+
+    Tcp => b"TCP"
+    Udp => b"UDP"
+    Icmp => b"ICMP"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+
+/// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
+NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
+NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
+
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleTarget
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRuleTarget" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleTarget(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleTarget>()?,
+        ))
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
+NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRuleHostFilter" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleHostFilter(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleHostFilter>()?,
+        ))
+    }
+}
+
+/// Newtype wrapper around [`external::L4PortRange`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct L4PortRange(pub external::L4PortRange);
+NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
+NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
+
+impl<DB> ToSql<sql_types::Text, DB> for L4PortRange
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "L4PortRange" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for L4PortRange
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        String::from_sql(bytes)?.parse().map(L4PortRange).map_err(|e| e.into())
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[repr(transparent)]
+#[sql_type = "sql_types::Int4"]
+pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
+NewtypeFrom! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+NewtypeDeref! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+
+impl<DB> ToSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        SqlU16(self.0 .0).to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRulePriority" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRulePriority(external::VpcFirewallRulePriority(
+            *SqlU16::from_sql(bytes)?,
+        )))
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "vpc_firewall_rule"]
+pub struct VpcFirewallRule {
+    #[diesel(embed)]
+    pub identity: VpcFirewallRuleIdentity,
+
+    pub vpc_id: Uuid,
+    pub status: VpcFirewallRuleStatus,
+    pub direction: VpcFirewallRuleDirection,
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    pub filter_hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
+    pub filter_ports: Option<Vec<L4PortRange>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+    pub action: VpcFirewallRuleAction,
+    pub priority: VpcFirewallRulePriority,
+}
+
+impl VpcFirewallRule {
+    pub fn new(
+        rule_id: Uuid,
+        vpc_id: Uuid,
+        rule_name: external::Name,
+        rule: &external::VpcFirewallRuleUpdate,
+    ) -> Self {
+        let identity = VpcFirewallRuleIdentity::new(
+            rule_id,
+            external::IdentityMetadataCreateParams {
+                name: rule_name,
+                description: rule.description.clone(),
+            },
+        );
+        Self {
+            identity,
+            vpc_id,
+            status: rule.status.into(),
+            direction: rule.direction.into(),
+            targets: rule
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filter_hosts: rule.filters.hosts.as_ref().map(|hosts| {
+                hosts
+                    .iter()
+                    .map(|target| VpcFirewallRuleHostFilter(target.clone()))
+                    .collect()
+            }),
+            filter_ports: rule.filters.ports.as_ref().map(|ports| {
+                ports.iter().map(|range| L4PortRange(*range)).collect()
+            }),
+            filter_protocols: rule.filters.protocols.as_ref().map(|protos| {
+                protos.iter().map(|proto| (*proto).into()).collect()
+            }),
+            action: rule.action.into(),
+            priority: rule.priority.into(),
+        }
+    }
+
+    pub fn vec_from_params(
+        vpc_id: Uuid,
+        params: external::VpcFirewallRuleUpdateParams,
+    ) -> Vec<VpcFirewallRule> {
+        params
+            .rules
+            .iter()
+            .map(|(name, rule)| {
+                VpcFirewallRule::new(Uuid::new_v4(), vpc_id, name.clone(), rule)
+            })
+            .collect()
+    }
+}
+
+impl Into<external::VpcFirewallRule> for VpcFirewallRule {
+    fn into(self) -> external::VpcFirewallRule {
+        external::VpcFirewallRule {
+            identity: self.identity(),
+            status: self.status.into(),
+            direction: self.direction.into(),
+            targets: self
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filters: external::VpcFirewallRuleFilter {
+                hosts: self.filter_hosts.map(|hosts| {
+                    hosts.iter().map(|host| host.0.clone()).collect()
+                }),
+                ports: self
+                    .filter_ports
+                    .map(|ports| ports.iter().map(|range| range.0).collect()),
+                protocols: self.filter_protocols.map(|protocols| {
+                    protocols.iter().map(|protocol| protocol.0).collect()
+                }),
+            },
+            action: self.action.into(),
+            priority: self.priority.into(),
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Resource)]
-#[table_name = "networkinterface"]
+#[table_name = "network_interface"]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
@@ -1030,7 +1625,7 @@ pub struct NetworkInterface {
 // TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "consolesession"]
+#[table_name = "console_session"]
 pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,

@@ -1,9 +1,9 @@
 //! Sled agent implementation
 
+use crate::params::DiskStateRequested;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
@@ -15,7 +15,7 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 use crate::common::vlan::VlanID;
 use crate::instance_manager::InstanceManager;

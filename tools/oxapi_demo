@@ -3,7 +3,7 @@
 # prototype server.
 #
 
-OXAPI_URL='http://127.0.0.1:12220'
+OXAPI_URL="${OXAPI_URL:-http://127.0.0.1:12220}"
 ARG0="$(basename "${BASH_SOURCE[0]}")"
 NO_AUTHENTICATE=false
 HELP="$(cat <<EOF
@@ -58,6 +58,10 @@ VPCS
     vpc_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME
     vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+
+VPC FIREWALL
+
+    vpc_firewall_rules_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME
 
 HARDWARE
 
@@ -160,7 +164,7 @@ function mkjson
 function cmd_organizations_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /organizations
+	do_curl_authn /organizations
 }
 
 function cmd_organization_create_demo
@@ -230,7 +234,7 @@ function cmd_instance_create_demo
 	# memory is 1024 * 1024 * 256
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	mkjson name="$3" description="an instance called $3" ncpus=1 \
-	    memory=268435456 bootDiskSize=1 hostname="$2" |
+	    memory=268435456 bootDiskSize=1 hostname="$3" |
 		do_curl "/organizations/$1/projects/$2/instances" -X POST -T -
 }
 
@@ -304,7 +308,7 @@ function cmd_disk_get
 function cmd_disk_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/disks/$3" -X DELETE
+	do_curl_authz "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo
@@ -313,6 +317,7 @@ function cmd_vpc_create_demo
 	mkjson name="$3" dnsName="$4" description="a vpc called $3" |
 	    do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
 }
+
 
 function cmd_vpc_get
 {
@@ -324,6 +329,12 @@ function cmd_vpc_delete
 {
 	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
 	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
+}
+
+function cmd_vpc_firewall_rules_get
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/firewall/rules"
 }
 
 function cmd_racks_list

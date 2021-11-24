@@ -8,6 +8,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::Name;
+use crate::external_api::params;
+use crate::internal_api::params::OximeterInfo;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -15,6 +17,9 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
+use ipnetwork::Ipv4Network;
+use ipnetwork::Ipv6Network;
+use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -26,39 +31,38 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::OrganizationCreateParams;
-use omicron_common::api::external::OrganizationUpdateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::ProjectCreateParams;
-use omicron_common::api::external::ProjectUpdateParams;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcCreateParams;
-use omicron_common::api::external::VpcRouter;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterCreateParams;
+use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::OximeterInfo;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::sled_agent::DiskStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
-use omicron_common::OximeterClient;
-use omicron_common::SledAgentClient;
+use oximeter_client::Client as OximeterClient;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -252,20 +256,26 @@ impl Nexus {
                 "collector_id" => ?oximeter_info.collector_id,
             );
             let client = self.build_oximeter_client(
-                oximeter_info.collector_id,
+                &oximeter_info.collector_id,
                 oximeter_info.address,
             );
             for producer in producers.into_iter() {
-                let producer_info = ProducerEndpoint {
+                let producer_info = oximeter_client::types::ProducerEndpoint {
                     id: producer.id(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
-                    ),
+                    )
+                    .to_string(),
                     base_route: producer.base_route,
-                    interval: Duration::from_secs_f64(producer.interval),
+                    interval: oximeter_client::types::Duration::from(
+                        Duration::from_secs_f64(producer.interval),
+                    ),
                 };
-                client.register_producer(&producer_info).await?;
+                client
+                    .producers_post(&producer_info)
+                    .await
+                    .map_err(Error::from)?;
             }
         }
         Ok(())
@@ -273,7 +283,7 @@ impl Nexus {
 
     /// Register as a metric producer with the oximeter metric collection server.
     pub async fn register_as_producer(&self, address: SocketAddr) {
-        let producer_endpoint = ProducerEndpoint {
+        let producer_endpoint = nexus::ProducerEndpoint {
             id: self.id,
             address,
             base_route: String::from("/metrics/collect"),
@@ -281,7 +291,7 @@ impl Nexus {
         };
         let register = || async {
             debug!(self.log, "registering nexus as metric producer");
-            register(address, &producer_endpoint)
+            register(address, &self.log, &producer_endpoint)
                 .await
                 .map_err(backoff::BackoffError::Transient)
         };
@@ -300,29 +310,17 @@ impl Nexus {
         .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
-    /// Return a client to the Oximeter instance with the given ID.
-    pub async fn oximeter_client(
-        &self,
-        id: Uuid,
-    ) -> Result<OximeterClient, Error> {
-        let oximeter_info = self.db_datastore.oximeter_fetch(id).await?;
-        let address = SocketAddr::new(
-            oximeter_info.ip.ip(),
-            oximeter_info.port.try_into().unwrap(),
-        );
-        Ok(self.build_oximeter_client(oximeter_info.id, address))
-    }
-
     // Internal helper to build an Oximeter client from its ID and address (common data between
     // model type and the API type).
     fn build_oximeter_client(
         &self,
-        id: Uuid,
+        id: &Uuid,
         address: SocketAddr,
     ) -> OximeterClient {
         let client_log =
             self.log.new(o!("oximeter-collector" => id.to_string()));
-        let client = OximeterClient::new(id, address, client_log);
+        let client =
+            OximeterClient::new(&format!("http://{}", address), client_log);
         info!(
             self.log,
             "registered oximeter collector client";
@@ -410,7 +408,7 @@ impl Nexus {
     pub async fn organization_create(
         &self,
         opctx: &OpContext,
-        new_organization: &OrganizationCreateParams,
+        new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
         let db_org = db::model::Organization::new(new_organization.clone());
         self.db_datastore.organization_create(opctx, db_org).await
@@ -425,16 +423,18 @@ impl Nexus {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(pagparams).await
+        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
     }
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(pagparams).await
+        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
     pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
@@ -444,9 +444,11 @@ impl Nexus {
     pub async fn organization_update(
         &self,
         name: &Name,
-        new_params: &OrganizationUpdateParams,
+        new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
-        self.db_datastore.organization_update(name, &new_params).await
+        self.db_datastore
+            .organization_update(name, new_params.clone().into())
+            .await
     }
 
     /*
@@ -456,7 +458,7 @@ impl Nexus {
     pub async fn project_create(
         &self,
         organization_name: &Name,
-        new_project: &ProjectCreateParams,
+        new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
@@ -474,12 +476,10 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
-        let id = Uuid::new_v4();
         let _ = self
-            .db_datastore
             .project_create_vpc(
-                &id,
-                &db_project.id(),
+                &organization_name,
+                &new_project.identity.name.clone().into(),
                 &VpcCreateParams {
                     identity: IdentityMetadataCreateParams {
                         name: "default".parse().unwrap(),
@@ -549,14 +549,18 @@ impl Nexus {
         &self,
         organization_name: &Name,
         project_name: &Name,
-        new_params: &ProjectUpdateParams,
+        new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
             .await?;
         self.db_datastore
-            .project_update(&organization_id, project_name, &new_params)
+            .project_update(
+                &organization_id,
+                project_name,
+                new_params.clone().into(),
+            )
             .await
     }
 
@@ -602,15 +606,13 @@ impl Nexus {
         }
 
         let disk_id = Uuid::new_v4();
-        let disk_created = self
-            .db_datastore
-            .project_create_disk(
-                &disk_id,
-                &project.id(),
-                params,
-                &db::model::DiskRuntimeState::new(),
-            )
-            .await?;
+        let disk = db::model::Disk::new(
+            disk_id,
+            project.id(),
+            params.clone(),
+            db::model::DiskRuntimeState::new(),
+        );
+        let disk_created = self.db_datastore.project_create_disk(disk).await?;
 
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
@@ -635,7 +637,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
+    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -644,16 +646,28 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        self.db_datastore.disk_fetch_by_name(&project_id, disk_name).await
+        let disk = self
+            .db_datastore
+            .disk_fetch_by_name(&project_id, disk_name)
+            .await?;
+        let disk_id = disk.id();
+        Ok((
+            disk,
+            authz::FLEET
+                .organization(organization_id)
+                .project(project_id)
+                .resource(ResourceType::Disk, disk_id),
+        ))
     }
 
     pub async fn project_delete_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let disk = self
+        let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let runtime = disk.runtime();
@@ -683,7 +697,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(&disk.id()).await
+        self.db_datastore.project_delete_disk(opctx, authz_disk).await
     }
 
     /*
@@ -910,7 +924,17 @@ impl Nexus {
         let sled = self.sled_lookup(id).await?;
 
         let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        Ok(Arc::new(SledAgentClient::new(id, sled.address(), log)))
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .unwrap();
+        Ok(Arc::new(SledAgentClient::new_with_client(
+            &format!("http://{}", sled.address()),
+            client,
+            log,
+        )))
     }
 
     /**
@@ -1041,17 +1065,31 @@ impl Nexus {
          * beat us to it.
          */
 
+        let runtime: nexus::InstanceRuntimeState =
+            instance.runtime().clone().into();
+
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
-        let instance_hardware = InstanceHardware {
-            runtime: instance.runtime().clone().into(),
+        let instance_hardware = sled_agent_client::types::InstanceHardware {
+            runtime: sled_agent_client::types::InstanceRuntimeState::from(
+                runtime,
+            ),
             nics: vec![],
         };
 
         let new_runtime = sa
-            .instance_ensure(instance.id(), instance_hardware, requested)
-            .await?;
+            .instance_put(
+                &instance.id(),
+                &sled_agent_client::types::InstanceEnsureBody {
+                    initial: instance_hardware,
+                    target: requested.into(),
+                },
+            )
+            .await
+            .map_err(Error::from)?;
+
+        let new_runtime: nexus::InstanceRuntimeState = new_runtime.into();
 
         self.db_datastore
             .instance_update_runtime(&instance.id(), &new_runtime.into())
@@ -1098,7 +1136,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
@@ -1141,7 +1179,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
@@ -1240,7 +1278,9 @@ impl Nexus {
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            DiskStateRequested::Attached(*instance_id),
+            sled_agent_client::types::DiskStateRequested::Attached(
+                *instance_id,
+            ),
         )
         .await?;
         let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
@@ -1266,7 +1306,7 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let disk = self
+        let (disk, _) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
         let instance_id = &instance.id();
@@ -1310,7 +1350,7 @@ impl Nexus {
         self.disk_set_runtime(
             &disk,
             self.instance_sled(&instance).await?,
-            DiskStateRequested::Detached,
+            sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
         Ok(())
@@ -1324,14 +1364,30 @@ impl Nexus {
         &self,
         disk: &db::model::Disk,
         sa: Arc<SledAgentClient>,
-        requested: DiskStateRequested,
+        requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
+        let runtime: DiskRuntimeState = disk.runtime().into();
+
         /*
          * Ask the SA to begin the state change.  Then update the database to
          * reflect the new intermediate state.
          */
-        let new_runtime =
-            sa.disk_ensure(disk.id(), disk.runtime().into(), requested).await?;
+        let new_runtime = sa
+            .disk_put(
+                &disk.id(),
+                &sled_agent_client::types::DiskEnsureBody {
+                    initial_runtime:
+                        sled_agent_client::types::DiskRuntimeState::from(
+                            runtime,
+                        ),
+                    target: requested,
+                },
+            )
+            .await
+            .map_err(Error::from)?;
+
+        let new_runtime: DiskRuntimeState = new_runtime.into();
+
         self.db_datastore
             .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
@@ -1343,7 +1399,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Vpc> {
+    ) -> ListResultVec<db::model::Vpc> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -1352,13 +1408,8 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        let vpcs = self
-            .db_datastore
-            .project_list_vpcs(&project_id, pagparams)
-            .await?
-            .into_iter()
-            .map(|vpc| vpc.into())
-            .collect::<Vec<Vpc>>();
+        let vpcs =
+            self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
         Ok(vpcs)
     }
 
@@ -1367,7 +1418,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         params: &VpcCreateParams,
-    ) -> CreateResult<Vpc> {
+    ) -> CreateResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -1376,12 +1427,94 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        let id = Uuid::new_v4();
-        let vpc = self
-            .db_datastore
-            .project_create_vpc(&id, &project_id, params)
-            .await?;
-        Ok(vpc.into())
+        let vpc_id = Uuid::new_v4();
+        let system_router_id = Uuid::new_v4();
+        let default_route_id = Uuid::new_v4();
+        let default_subnet_id = Uuid::new_v4();
+        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
+        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
+        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
+        // its underlying system
+        let router = db::model::VpcRouter::new(
+            system_router_id,
+            vpc_id,
+            VpcRouterKind::System,
+            VpcRouterCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "system".parse().unwrap(),
+                    description: "Routes are automatically added to this router as vpc subnets are created".into()
+                }
+            }
+            );
+        let _ = self.db_datastore.vpc_create_router(router).await?;
+        let route = db::model::RouterRoute::new(
+            default_route_id,
+            system_router_id,
+            RouterRouteKind::Default,
+            RouterRouteCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: "The default route of a vpc".to_string(),
+                },
+                target: RouteTarget::InternetGateway(
+                    "outbound".parse().unwrap(),
+                ),
+                destination: RouteDestination::Vpc(
+                    params.identity.name.clone(),
+                ),
+            },
+        );
+
+        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
+        // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
+        // should all be apart of the same transaction.
+        self.db_datastore.router_create_route(route).await?;
+        let vpc = db::model::Vpc::new(
+            vpc_id,
+            project_id,
+            system_router_id,
+            params.clone(),
+        );
+        let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+
+        // TODO: batch this up with everything above
+        let subnet = db::model::VpcSubnet::new(
+            default_subnet_id,
+            vpc_id,
+            VpcSubnetCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: format!(
+                        "The default subnet for {}",
+                        params.identity.name
+                    ),
+                },
+                ipv4_block: Some(Ipv4Net(
+                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
+                    "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
+                )),
+                ipv6_block: Some(Ipv6Net(
+                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
+                    "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
+                )),
+            },
+        );
+        self.db_datastore.vpc_create_subnet(subnet).await?;
+
+        self.create_default_vpc_firewall(&vpc_id).await?;
+        Ok(vpc)
+    }
+
+    async fn create_default_vpc_firewall(
+        &self,
+        vpc_id: &Uuid,
+    ) -> CreateResult<()> {
+        let rules = db::model::VpcFirewallRule::vec_from_params(
+            *vpc_id,
+            DEFAULT_FIREWALL_RULES.clone(),
+        );
+        self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
+        Ok(())
     }
 
     pub async fn project_lookup_vpc(
@@ -1389,7 +1522,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-    ) -> LookupResult<Vpc> {
+    ) -> LookupResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
             .organization_lookup_id_by_name(organization_name)
@@ -1398,11 +1531,7 @@ impl Nexus {
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_fetch_by_name(&project_id, vpc_name)
-            .await?
-            .into())
+        Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
     pub async fn project_update_vpc(
@@ -1422,7 +1551,10 @@ impl Nexus {
             .await?;
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self.db_datastore.project_update_vpc(&vpc.id(), params).await?)
+        Ok(self
+            .db_datastore
+            .project_update_vpc(&vpc.id(), params.clone().into())
+            .await?)
     }
 
     pub async fn project_delete_vpc(
@@ -1434,7 +1566,55 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        self.db_datastore.project_delete_vpc(&vpc.identity.id).await
+        // TODO: This should eventually use a saga to call the
+        // networking subsystem to have it clean up the networking resources
+        self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
+        self.db_datastore.project_delete_vpc(&vpc.id()).await?;
+
+        // Delete all firewall rules after deleting the VPC, to ensure no
+        // firewall rules get added between rules deletion and VPC deletion.
+        self.db_datastore.vpc_delete_all_firewall_rules(&vpc.id()).await
+    }
+
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::VpcFirewallRule> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let subnets = self
+            .db_datastore
+            .vpc_list_firewall_rules(&vpc.id(), pagparams)
+            .await?;
+        Ok(subnets)
+    }
+
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &VpcFirewallRuleUpdateParams,
+    ) -> UpdateResult<VpcFirewallRuleUpdateResult> {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        let rules = db::model::VpcFirewallRule::vec_from_params(
+            vpc.id(),
+            params.clone(),
+        );
+        let result = self
+            .db_datastore
+            .vpc_update_firewall_rules(&vpc.id(), rules)
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect();
+        Ok(result)
     }
 
     pub async fn vpc_list_subnets(
@@ -1443,17 +1623,12 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<VpcSubnet> {
+    ) -> ListResultVec<db::model::VpcSubnet> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let subnets = self
-            .db_datastore
-            .vpc_list_subnets(&vpc.identity.id, pagparams)
-            .await?
-            .into_iter()
-            .map(|subnet| subnet.into())
-            .collect::<Vec<VpcSubnet>>();
+        let subnets =
+            self.db_datastore.vpc_list_subnets(&vpc.id(), pagparams).await?;
         Ok(subnets)
     }
 
@@ -1463,36 +1638,35 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
-    ) -> LookupResult<VpcSubnet> {
+    ) -> LookupResult<db::model::VpcSubnet> {
         // TODO: join projects, vpcs, and subnets and do this in one query
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         Ok(self
             .db_datastore
-            .vpc_subnet_fetch_by_name(&vpc.identity.id, subnet_name)
-            .await?
-            .into())
+            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
+            .await?)
     }
 
+    // TODO: When a subnet is created it should add a route entry into the VPC's system router
     pub async fn vpc_create_subnet(
         &self,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcSubnetCreateParams,
-    ) -> CreateResult<VpcSubnet> {
+    ) -> CreateResult<db::model::VpcSubnet> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let subnet = self
-            .db_datastore
-            .vpc_create_subnet(&id, &vpc.identity.id, params)
-            .await?;
-        Ok(subnet.into())
+        let subnet = db::model::VpcSubnet::new(id, vpc.id(), params.clone());
+        let subnet = self.db_datastore.vpc_create_subnet(subnet).await?;
+        Ok(subnet)
     }
 
+    // TODO: When a subnet is deleted it should remove its entry from the VPC's system router.
     pub async fn vpc_delete_subnet(
         &self,
         organization_name: &Name,
@@ -1508,7 +1682,7 @@ impl Nexus {
                 subnet_name,
             )
             .await?;
-        self.db_datastore.vpc_delete_subnet(&subnet.identity.id).await
+        self.db_datastore.vpc_delete_subnet(&subnet.id()).await
     }
 
     pub async fn vpc_update_subnet(
@@ -1529,7 +1703,7 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .vpc_update_subnet(&subnet.identity.id, params)
+            .vpc_update_subnet(&subnet.id(), params.clone().into())
             .await?)
     }
 
@@ -1539,17 +1713,12 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<VpcRouter> {
+    ) -> ListResultVec<db::model::VpcRouter> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let routers = self
-            .db_datastore
-            .vpc_list_routers(&vpc.identity.id, pagparams)
-            .await?
-            .into_iter()
-            .map(|router| router.into())
-            .collect::<Vec<VpcRouter>>();
+        let routers =
+            self.db_datastore.vpc_list_routers(&vpc.id(), pagparams).await?;
         Ok(routers)
     }
 
@@ -1559,15 +1728,14 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
-    ) -> LookupResult<VpcRouter> {
+    ) -> LookupResult<db::model::VpcRouter> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         Ok(self
             .db_datastore
-            .vpc_router_fetch_by_name(&vpc.identity.id, router_name)
-            .await?
-            .into())
+            .vpc_router_fetch_by_name(&vpc.id(), router_name)
+            .await?)
     }
 
     pub async fn vpc_create_router(
@@ -1575,19 +1743,22 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
+        kind: &VpcRouterKind,
         params: &VpcRouterCreateParams,
-    ) -> CreateResult<VpcRouter> {
+    ) -> CreateResult<db::model::VpcRouter> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let router = self
-            .db_datastore
-            .vpc_create_router(&id, &vpc.identity.id, params)
-            .await?;
-        Ok(router.into())
+        let router =
+            db::model::VpcRouter::new(id, vpc.id(), *kind, params.clone());
+        let router = self.db_datastore.vpc_create_router(router).await?;
+        Ok(router)
     }
 
+    // TODO: When a router is deleted all its routes should be deleted
+    // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
+    //       or trigger an error
     pub async fn vpc_delete_router(
         &self,
         organization_name: &Name,
@@ -1603,7 +1774,12 @@ impl Nexus {
                 router_name,
             )
             .await?;
-        self.db_datastore.vpc_delete_router(&router.identity.id).await
+        if router.kind.0 == VpcRouterKind::System {
+            return Err(Error::MethodNotAllowed {
+                internal_message: "Cannot delete system router".to_string(),
+            });
+        }
+        self.db_datastore.vpc_delete_router(&router.id()).await
     }
 
     pub async fn vpc_update_router(
@@ -1624,7 +1800,144 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .vpc_update_router(&router.identity.id, params)
+            .vpc_update_router(&router.id(), params.clone().into())
+            .await?)
+    }
+
+    /**
+     * VPC Router routes
+     */
+
+    pub async fn router_list_routes(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::RouterRoute> {
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
+        let routes = self
+            .db_datastore
+            .router_list_routes(&router.id(), pagparams)
+            .await?;
+        Ok(routes)
+    }
+
+    pub async fn router_lookup_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+    ) -> LookupResult<db::model::RouterRoute> {
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
+        Ok(self
+            .db_datastore
+            .router_route_fetch_by_name(&router.id(), route_name)
+            .await?)
+    }
+
+    pub async fn router_create_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        kind: &RouterRouteKind,
+        params: &RouterRouteCreateParams,
+    ) -> CreateResult<db::model::RouterRoute> {
+        let router = self
+            .vpc_lookup_router(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+            )
+            .await?;
+        let id = Uuid::new_v4();
+        let route =
+            db::model::RouterRoute::new(id, router.id(), *kind, params.clone());
+        let route = self.db_datastore.router_create_route(route).await?;
+        Ok(route)
+    }
+
+    pub async fn router_delete_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+    ) -> DeleteResult {
+        let route = self
+            .router_lookup_route(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+                route_name,
+            )
+            .await?;
+        // Only custom routes can be deleted
+        if route.kind.0 != RouterRouteKind::Custom {
+            return Err(Error::MethodNotAllowed {
+                internal_message: "DELETE not allowed on system routes"
+                    .to_string(),
+            });
+        }
+        self.db_datastore.router_delete_route(&route.id()).await
+    }
+
+    pub async fn router_update_route(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+        route_name: &Name,
+        params: &RouterRouteUpdateParams,
+    ) -> UpdateResult<()> {
+        let route = self
+            .router_lookup_route(
+                organization_name,
+                project_name,
+                vpc_name,
+                router_name,
+                route_name,
+            )
+            .await?;
+        // TODO: Write a test for this once there's a way to test it (i.e. subnets automatically register to the system router table)
+        match route.kind.0 {
+            RouterRouteKind::Custom | RouterRouteKind::Default => (),
+            _ => {
+                return Err(Error::MethodNotAllowed {
+                    internal_message: format!(
+                        "routes of type {} from the system table of VPC {} are not modifiable",
+                        route.kind.0,
+                        vpc_name
+                    ),
+                })
+            }
+        }
+        Ok(self
+            .db_datastore
+            .router_update_route(&route.id(), params.clone().into())
             .await?)
     }
 
@@ -1842,18 +2155,22 @@ impl Nexus {
      */
     pub async fn assign_producer(
         &self,
-        producer_info: ProducerEndpoint,
+        producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let collector = self.next_collector().await?;
-        let db_info =
-            db::model::ProducerEndpoint::new(&producer_info, collector.id);
+        let (collector, id) = self.next_collector().await?;
+        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
         self.db_datastore.producer_endpoint_create(&db_info).await?;
-        collector.register_producer(&producer_info).await?;
+        collector
+            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
+                &producer_info,
+            ))
+            .await
+            .map_err(Error::from)?;
         info!(
             self.log,
             "assigned collector to new producer";
             "producer_id" => ?producer_info.id,
-            "collector_id" => ?collector.id,
+            "collector_id" => ?id,
         );
         Ok(())
     }
@@ -1861,7 +2178,7 @@ impl Nexus {
     /**
      * Return an oximeter collector to assign a newly-registered producer
      */
-    async fn next_collector(&self) -> Result<OximeterClient, Error> {
+    async fn next_collector(&self) -> Result<(OximeterClient, Uuid), Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {
             marker: None,
@@ -1874,7 +2191,8 @@ impl Nexus {
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
-        Ok(self.build_oximeter_client(info.id, address))
+        let id = info.id;
+        Ok((self.build_oximeter_client(&id, address), id))
     }
 
     pub async fn session_fetch(
@@ -1945,4 +2263,46 @@ impl TestInterfaces for Nexus {
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
     }
+}
+
+lazy_static! {
+    static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
+        serde_json::from_str(r#"{
+            "allow-internal-inbound": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
+            },
+            "allow-ssh": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 22 from anywhere"
+            },
+            "allow-icmp": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "protocols": [ "ICMP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound ICMP traffic from anywhere"
+            },
+            "allow-rdp": {
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 3389 from anywhere"
+            }
+        }"#).unwrap();
 }

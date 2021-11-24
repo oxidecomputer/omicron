@@ -6,11 +6,10 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 
-use omicron_common::api::internal::nexus::SledAgentStartupInfo;
+use nexus_client::Client as NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::sync::Arc;
 
@@ -36,8 +35,10 @@ impl Server {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
-        let nexus_client =
-            Arc::new(NexusClient::new(config.nexus_address, client_log));
+        let nexus_client = Arc::new(NexusClient::new(
+            &format!("http://{}", config.nexus_address),
+            client_log,
+        ));
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
@@ -72,12 +73,14 @@ impl Server {
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
-            nexus_client
-                .notify_sled_agent_online(
-                    config.id,
-                    SledAgentStartupInfo { sa_address },
+            (nexus_client
+                .cpapi_sled_agents_post(
+                    &config.id,
+                    &nexus_client::types::SledAgentStartupInfo {
+                        sa_address: sa_address.to_string(),
+                    },
                 )
-                .await
+                .await)
                 .map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {

@@ -19,6 +19,7 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod http_testing;
 pub mod resource_helpers;
 
 const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
@@ -33,9 +34,9 @@ pub struct ControlPlaneTestContext {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
-    sled_agent: omicron_sled_agent::sim::Server,
-    oximeter: Oximeter,
-    producer: ProducerServer,
+    pub sled_agent: omicron_sled_agent::sim::Server,
+    pub oximeter: Oximeter,
+    pub producer: ProducerServer,
 }
 
 impl ControlPlaneTestContext {
@@ -181,7 +182,7 @@ pub async fn start_oximeter(
     let db = oximeter_collector::DbConfig {
         address: SocketAddr::new("::1".parse().unwrap(), db_port),
         batch_size: 10,
-        batch_interval: 10,
+        batch_interval: 1,
     };
     let config = oximeter_collector::Config {
         id,
@@ -241,7 +242,7 @@ pub async fn start_producer_server(
         id,
         address: producer_address,
         base_route: "/collect".to_string(),
-        interval: Duration::from_secs(10),
+        interval: Duration::from_secs(1),
     };
     let config = oximeter_producer::Config {
         server_info,

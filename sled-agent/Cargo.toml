@@ -4,16 +4,19 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0.48"
 async-trait = "0.1.51"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
-futures = "0.3.15"
-http = "0.2.5"
-hyper = "0.14"
+futures = "0.3.18"
 ipnetwork = "0.18"
+nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+percent-encoding = "2.1.0"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
+reqwest = "0.11.5"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
@@ -21,8 +24,9 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.2"
 thiserror = "1.0"
-tokio = { version = "1.13", features = [ "full" ] }
+tokio = { version = "1.14", features = [ "full" ] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 zone = "0.1"

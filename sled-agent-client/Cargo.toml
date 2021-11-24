@@ -1,0 +1,30 @@
+[package]
+name = "sled-agent-client"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+percent-encoding = "2.1.0"
+
+[dependencies.chrono]
+version = "0.4"
+features = [ "serde" ]
+
+[dependencies.omicron-common]
+path = "../common"
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive" ]
+
+[dependencies.slog]
+version = "2.5"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.uuid]
+version = "0.8"
+features = [ "serde", "v4" ]

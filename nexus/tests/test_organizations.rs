@@ -1,9 +1,11 @@
-use omicron_common::api::external::Organization;
+use omicron_nexus::external_api::views::Organization;
 
-use dropshot::test_util::{object_delete, object_get, objects_list_page};
+use dropshot::test_util::{object_delete, object_get};
 
 pub mod common;
-use common::resource_helpers::{create_organization, create_project};
+use common::resource_helpers::{
+    create_organization, create_project, objects_list_page_authz,
+};
 use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
@@ -41,7 +43,9 @@ async fn test_organizations() {
 
     // Verify GET /organizations works
     let organizations =
-        objects_list_page::<Organization>(client, "/organizations").await.items;
+        objects_list_page_authz::<Organization>(client, "/organizations")
+            .await
+            .items;
     assert_eq!(organizations.len(), 2);
     // alphabetical order for now
     assert_eq!(organizations[0].identity.name, o2_name);
@@ -58,7 +62,9 @@ async fn test_organizations() {
 
     // Verify the org is gone from the organizations list
     let organizations =
-        objects_list_page::<Organization>(client, "/organizations").await.items;
+        objects_list_page_authz::<Organization>(client, "/organizations")
+            .await
+            .items;
     assert_eq!(organizations.len(), 1);
     assert_eq!(organizations[0].identity.name, o2_name);
 

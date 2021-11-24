@@ -4,7 +4,6 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 
-use omicron_common::api::internal::nexus::SledAgentStartupInfo;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -13,7 +12,7 @@ use std::sync::Arc;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -33,8 +32,10 @@ impl Server {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
-        let nexus_client =
-            Arc::new(NexusClient::new(config.nexus_address, client_log));
+        let nexus_client = Arc::new(NexusClient::new(
+            &format!("http://{}", config.nexus_address),
+            client_log,
+        ));
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
@@ -68,9 +69,11 @@ impl Server {
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
             nexus_client
-                .notify_sled_agent_online(
-                    config.id,
-                    SledAgentStartupInfo { sa_address },
+                .cpapi_sled_agents_post(
+                    &config.id,
+                    &nexus_client::types::SledAgentStartupInfo {
+                        sa_address: sa_address.to_string(),
+                    },
                 )
                 .await
                 .map_err(BackoffError::Transient)

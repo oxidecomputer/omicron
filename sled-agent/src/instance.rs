@@ -33,7 +33,7 @@ use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -301,8 +301,14 @@ impl InstanceInner {
 
         // Notify Nexus of the state change.
         self.nexus_client
-            .notify_instance_updated(self.id(), self.state.current())
-            .await?;
+            .cpapi_instances_put(
+                self.id(),
+                &nexus_client::types::InstanceRuntimeState::from(
+                    self.state.current(),
+                ),
+            )
+            .await
+            .map_err(Error::from)?;
 
         // Take the next action, if any.
         if let Some(action) = action {
@@ -345,6 +351,8 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
+            // TODO: Actual disks need to be wired up here.
+            disks: vec![],
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -1007,12 +1015,15 @@ mod test {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         nexus_client
-            .expect_notify_instance_updated()
+            .expect_cpapi_instances_put()
             .times(1)
             .in_sequence(seq)
             .return_once(move |id, state| {
                 assert_eq!(id, &test_uuid());
-                assert_eq!(state.run_state, expected_state);
+                assert_eq!(
+                    InstanceState::from(&state.run_state),
+                    expected_state
+                );
                 tx.send(()).unwrap();
                 Ok(())
             });

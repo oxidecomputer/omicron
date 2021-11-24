@@ -18,14 +18,17 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{DatastoreCollection, InsertError};
+use super::collection_insert::{
+    AsyncInsertError, DatastoreCollection, SyncInsertError,
+};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
+use diesel::prelude::*;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -42,7 +45,6 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db::model::VpcRouterUpdate;
 use crate::db::{
     self,
     error::{
@@ -51,8 +53,9 @@ use crate::db::{
     model::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
         Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, Sled, Vpc,
-        VpcRouter, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -151,7 +154,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateOrganization, authz::FLEET)?;
+        opctx.authorize(authz::Action::CreateChild, authz::FLEET)?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
@@ -280,13 +283,15 @@ impl DataStore {
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -299,13 +304,15 @@ impl DataStore {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -320,10 +327,9 @@ impl DataStore {
     pub async fn organization_update(
         &self,
         name: &Name,
-        update_params: &api::external::OrganizationUpdateParams,
+        updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
-        let updates: OrganizationUpdate = update_params.clone().into();
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
@@ -357,11 +363,11 @@ impl DataStore {
         .insert_and_get_result_async(self.pool())
         .await
         .map_err(|e| match e {
-            InsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Organization,
                 lookup_type: LookupType::ById(organization_id),
             },
-            InsertError::DatabaseError(e) => {
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool_create(
                     e,
                     ResourceType::Project,
@@ -496,10 +502,9 @@ impl DataStore {
         &self,
         organization_id: &Uuid,
         name: &Name,
-        update_params: &api::external::ProjectUpdateParams,
+        updates: ProjectUpdate,
     ) -> UpdateResult<Project> {
         use db::schema::project::dsl;
-        let updates: ProjectUpdate = update_params.clone().into();
 
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
@@ -547,19 +552,11 @@ impl DataStore {
      */
     pub async fn project_create_instance(
         &self,
-        instance_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::InstanceCreateParams,
-        runtime_initial: &InstanceRuntimeState,
+        instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
 
-        let instance = Instance::new(
-            *instance_id,
-            *project_id,
-            params,
-            runtime_initial.clone(),
-        );
+        let gen = instance.runtime().gen;
         let name = instance.name().clone();
         let instance: Instance = diesel::insert_into(dsl::instance)
             .values(instance)
@@ -583,7 +580,7 @@ impl DataStore {
             instance.runtime().state
         );
         bail_unless!(
-            instance.runtime().gen == runtime_initial.gen,
+            instance.runtime().gen == gen,
             "newly-created Instance has unexpected generation: {:?}",
             instance.runtime().gen
         );
@@ -782,21 +779,10 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_disk(
-        &self,
-        disk_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::DiskCreateParams,
-        runtime_initial: &DiskRuntimeState,
-    ) -> CreateResult<Disk> {
+    pub async fn project_create_disk(&self, disk: Disk) -> CreateResult<Disk> {
         use db::schema::disk::dsl;
 
-        let disk = Disk::new(
-            *disk_id,
-            *project_id,
-            params.clone(),
-            runtime_initial.clone(),
-        );
+        let gen = disk.runtime().gen;
         let name = disk.name().clone();
         let disk: Disk = diesel::insert_into(dsl::disk)
             .values(disk)
@@ -820,7 +806,7 @@ impl DataStore {
             runtime.disk_state
         );
         bail_unless!(
-            runtime.gen == runtime_initial.gen,
+            runtime.gen == gen,
             "newly-created Disk has unexpected generation: {:?}",
             runtime.gen
         );
@@ -920,9 +906,16 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+    pub async fn project_delete_disk(
+        &self,
+        opctx: &OpContext,
+        disk_authz: authz::ProjectChild,
+    ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
+
+        let disk_id = disk_authz.id();
+        opctx.authorize(authz::Action::Delete, disk_authz)?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
@@ -934,7 +927,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1029,10 +1022,10 @@ impl DataStore {
         &self,
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
-        use db::schema::metricproducer::dsl;
+        use db::schema::metric_producer::dsl;
 
         // TODO: see https://github.com/oxidecomputer/omicron/issues/323
-        diesel::insert_into(dsl::metricproducer)
+        diesel::insert_into(dsl::metric_producer)
             .values(producer.clone())
             .on_conflict(dsl::id)
             .do_update()
@@ -1061,8 +1054,8 @@ impl DataStore {
         oximeter_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
-        use db::schema::metricproducer::dsl;
-        paginated(dsl::metricproducer, dsl::id, &pagparams)
+        use db::schema::metric_producer::dsl;
+        paginated(dsl::metric_producer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
@@ -1104,11 +1097,11 @@ impl DataStore {
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        use db::schema::saganodeevent::dsl;
+        use db::schema::saga_node_event::dsl;
 
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
-        diesel::insert_into(dsl::saganodeevent)
+        diesel::insert_into(dsl::saga_node_event)
             .values(event.clone())
             .execute_async(self.pool())
             .await
@@ -1194,8 +1187,8 @@ impl DataStore {
         id: db::saga_types::SagaId,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<steno::SagaNodeEvent> {
-        use db::schema::saganodeevent::dsl;
-        paginated(dsl::saganodeevent, dsl::saga_id, &pagparams)
+        use db::schema::saga_node_event::dsl;
+        paginated(dsl::saga_node_event, dsl::saga_id, &pagparams)
             .filter(dsl::saga_id.eq(id))
             .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
             .await
@@ -1235,15 +1228,9 @@ impl DataStore {
             })
     }
 
-    pub async fn project_create_vpc(
-        &self,
-        vpc_id: &Uuid,
-        project_id: &Uuid,
-        params: &api::external::VpcCreateParams,
-    ) -> Result<Vpc, Error> {
+    pub async fn project_create_vpc(&self, vpc: Vpc) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
-        let vpc = Vpc::new(*vpc_id, *project_id, params.clone());
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
@@ -1265,10 +1252,9 @@ impl DataStore {
     pub async fn project_update_vpc(
         &self,
         vpc_id: &Uuid,
-        params: &api::external::VpcUpdateParams,
+        updates: VpcUpdate,
     ) -> Result<(), Error> {
         use db::schema::vpc::dsl;
-        let updates: VpcUpdate = params.clone().into();
 
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1312,6 +1298,12 @@ impl DataStore {
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
         use db::schema::vpc::dsl;
 
+        // Note that we don't ensure the firewall rules are empty here, because
+        // we allow deleting VPCs with firewall rules present. Inserting new
+        // rules is serialized with respect to the deletion by the row lock
+        // associated with the VPC row, since we use the collection insert CTE
+        // pattern to add firewall rules.
+
         let now = Utc::now();
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1330,14 +1322,109 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcFirewallRule> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        paginated(dsl::vpc_firewall_rule, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .select(VpcFirewallRule::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn vpc_delete_all_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        // TODO-performance: Paginate this update to avoid long queries
+        diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    /// Replace all firewall rules with the given rules
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        rules: Vec<VpcFirewallRule>,
+    ) -> UpdateResult<Vec<VpcFirewallRule>> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now));
+
+        let insert_new_query = Vpc::insert_resource(
+            *vpc_id,
+            diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
+        );
+
+        // TODO-scalability: Ideally this would be a CTE so we don't need to
+        // hold a transaction open across multiple roundtrips from the database,
+        // but for now we're using a transaction due to the severely decreased
+        // legibility of CTEs via diesel right now.
+        self.pool()
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+
+                // The generation count update on the vpc table row will take a
+                // write lock on the row, ensuring that the vpc was not deleted
+                // concurently.
+                insert_new_query.insert_and_get_results(conn).map_err(|e| {
+                    match e {
+                        SyncInsertError::CollectionNotFound => {
+                            diesel::result::Error::RollbackTransaction
+                        }
+                        SyncInsertError::DatabaseError(e) => e,
+                    }
+                })
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::ById(*vpc_id),
+                )
+            })
+    }
+
     pub async fn vpc_list_subnets(
         &self,
         vpc_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
-        paginated(dsl::vpcsubnet, dsl::name, &pagparams)
+        paginated(dsl::vpc_subnet, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .select(VpcSubnet::as_select())
@@ -1356,9 +1443,9 @@ impl DataStore {
         vpc_id: &Uuid,
         subnet_name: &Name,
     ) -> LookupResult<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
-        dsl::vpcsubnet
+        dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(subnet_name.clone()))
@@ -1376,15 +1463,12 @@ impl DataStore {
 
     pub async fn vpc_create_subnet(
         &self,
-        subnet_id: &Uuid,
-        vpc_id: &Uuid,
-        params: &api::external::VpcSubnetCreateParams,
+        subnet: VpcSubnet,
     ) -> CreateResult<VpcSubnet> {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
-        let subnet = VpcSubnet::new(*subnet_id, *vpc_id, params.clone());
         let name = subnet.name().clone();
-        let subnet = diesel::insert_into(dsl::vpcsubnet)
+        let subnet = diesel::insert_into(dsl::vpc_subnet)
             .values(subnet)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -1402,10 +1486,10 @@ impl DataStore {
     }
 
     pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
-        use db::schema::vpcsubnet::dsl;
+        use db::schema::vpc_subnet::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::vpcsubnet)
+        diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(dsl::time_deleted.eq(now))
@@ -1425,12 +1509,11 @@ impl DataStore {
     pub async fn vpc_update_subnet(
         &self,
         subnet_id: &Uuid,
-        params: &api::external::VpcSubnetUpdateParams,
+        updates: VpcSubnetUpdate,
     ) -> Result<(), Error> {
-        use db::schema::vpcsubnet::dsl;
-        let updates: VpcSubnetUpdate = params.clone().into();
+        use db::schema::vpc_subnet::dsl;
 
-        diesel::update(dsl::vpcsubnet)
+        diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*subnet_id))
             .set(updates)
@@ -1451,9 +1534,9 @@ impl DataStore {
         vpc_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
-        paginated(dsl::vpcrouter, dsl::name, pagparams)
+        paginated(dsl::vpc_router, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .select(VpcRouter::as_select())
@@ -1473,9 +1556,9 @@ impl DataStore {
         vpc_id: &Uuid,
         router_name: &Name,
     ) -> LookupResult<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
-        dsl::vpcrouter
+        dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
             .filter(dsl::name.eq(router_name.clone()))
@@ -1493,15 +1576,12 @@ impl DataStore {
 
     pub async fn vpc_create_router(
         &self,
-        router_id: &Uuid,
-        vpc_id: &Uuid,
-        params: &api::external::VpcRouterCreateParams,
+        router: VpcRouter,
     ) -> CreateResult<VpcRouter> {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
-        let router = VpcRouter::new(*router_id, *vpc_id, params.clone());
         let name = router.name().clone();
-        let router = diesel::insert_into(dsl::vpcrouter)
+        let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
             .on_conflict(dsl::id)
             .do_nothing()
@@ -1519,10 +1599,10 @@ impl DataStore {
     }
 
     pub async fn vpc_delete_router(&self, router_id: &Uuid) -> DeleteResult {
-        use db::schema::vpcrouter::dsl;
+        use db::schema::vpc_router::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::vpcrouter)
+        diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*router_id))
             .set(dsl::time_deleted.eq(now))
@@ -1542,12 +1622,11 @@ impl DataStore {
     pub async fn vpc_update_router(
         &self,
         router_id: &Uuid,
-        params: &api::external::VpcRouterUpdateParams,
+        updates: VpcRouterUpdate,
     ) -> Result<(), Error> {
-        use db::schema::vpcrouter::dsl;
-        let updates: VpcRouterUpdate = params.clone().into();
+        use db::schema::vpc_router::dsl;
 
-        diesel::update(dsl::vpcrouter)
+        diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*router_id))
             .set(updates)
@@ -1558,6 +1637,124 @@ impl DataStore {
                     e,
                     ResourceType::VpcRouter,
                     LookupType::ById(*router_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn router_list_routes(
+        &self,
+        router_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<RouterRoute> {
+        use db::schema::router_route::dsl;
+
+        paginated(dsl::router_route, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .select(RouterRoute::as_select())
+            .load_async::<db::model::RouterRoute>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn router_route_fetch_by_name(
+        &self,
+        router_id: &Uuid,
+        route_name: &Name,
+    ) -> LookupResult<RouterRoute> {
+        use db::schema::router_route::dsl;
+
+        dsl::router_route
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::router_id.eq(*router_id))
+            .filter(dsl::name.eq(route_name.clone()))
+            .select(RouterRoute::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ByName(route_name.as_str().to_owned()),
+                )
+            })
+    }
+
+    pub async fn router_create_route(
+        &self,
+        route: RouterRoute,
+    ) -> CreateResult<RouterRoute> {
+        use db::schema::router_route::dsl;
+        let router_id = route.router_id;
+        let name = route.name().clone();
+
+        VpcRouter::insert_resource(
+            router_id,
+            diesel::insert_into(dsl::router_route).values(route),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::VpcRouter,
+                lookup_type: LookupType::ById(router_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::RouterRoute,
+                    name.as_str(),
+                )
+            }
+        })
+    }
+
+    pub async fn router_delete_route(&self, route_id: &Uuid) -> DeleteResult {
+        use db::schema::router_route::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::router_route)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*route_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(RouterRoute::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn router_update_route(
+        &self,
+        route_id: &Uuid,
+        route_update: RouterRouteUpdate,
+    ) -> Result<(), Error> {
+        use db::schema::router_route::dsl;
+
+        diesel::update(dsl::router_route)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*route_id))
+            .set(route_update)
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::RouterRoute,
+                    LookupType::ById(*route_id),
                 )
             })?;
         Ok(())
@@ -1577,8 +1774,8 @@ impl DataStore {
         &self,
         token: String,
     ) -> LookupResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
-        dsl::consolesession
+        use db::schema::console_session::dsl;
+        dsl::console_session
             .filter(dsl::token.eq(token.clone()))
             .select(ConsoleSession::as_select())
             .first_async(self.pool())
@@ -1595,9 +1792,9 @@ impl DataStore {
         &self,
         session: ConsoleSession,
     ) -> CreateResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::insert_into(dsl::consolesession)
+        diesel::insert_into(dsl::console_session)
             .values(session)
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool())
@@ -1614,9 +1811,9 @@ impl DataStore {
         &self,
         token: String,
     ) -> UpdateResult<ConsoleSession> {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::update(dsl::consolesession)
+        diesel::update(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
@@ -1632,9 +1829,9 @@ impl DataStore {
 
     // putting "hard" in the name because we don't do this with any other model
     pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        use db::schema::consolesession::dsl;
+        use db::schema::console_session::dsl;
 
-        diesel::delete(dsl::consolesession)
+        diesel::delete(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
             .execute_async(self.pool())
             .await
@@ -1655,11 +1852,9 @@ mod test {
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::db::DataStore;
+    use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, OrganizationCreateParams,
-        ProjectCreateParams,
-    };
+    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -1673,7 +1868,7 @@ mod test {
         let pool = db::Pool::new(&cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
-        let organization = Organization::new(OrganizationCreateParams {
+        let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "org".parse().unwrap(),
                 description: "desc".to_string(),
@@ -1684,7 +1879,7 @@ mod test {
 
         let project = Project::new(
             organization.id(),
-            ProjectCreateParams {
+            params::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
