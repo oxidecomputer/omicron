@@ -11,6 +11,7 @@ async-trait = "0.1.51"
 bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 oximeter = { path = "../oximeter" }
+regex = "1.5.4"
 reqwest = { version = "0.11.7", features = [ "json" ] }
 schemars = { version = "0.8.8", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
@@ -25,6 +26,7 @@ uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 omicron-test-utils = { path = "../../test-utils" }
+itertools = "0.10.1"
 
 [[bin]]
 name = "oxdb"

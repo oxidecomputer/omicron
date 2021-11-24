@@ -115,3 +115,12 @@ pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
 };
+
+/// Construct the timeseries name for a Target and Metric.
+pub fn timeseries_name<T, M>(target: &T, metric: &M) -> String
+where
+    T: Target,
+    M: Metric,
+{
+    format!("{}:{}", target.name(), metric.name())
+}
