@@ -284,6 +284,83 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
         Self(s.0.to_string())
     }
 }
+
+impl From<ipnetwork::IpNetwork> for types::IpNetwork {
+    fn from(s: ipnetwork::IpNetwork) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
+    fn from(s: omicron_common::api::external::L4PortRange) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleAction>
+    for types::VpcFirewallRuleAction
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleAction) -> Self {
+        match s {
+            omicron_common::api::external::VpcFirewallRuleAction::Allow => {
+                Self::Allow
+            }
+            omicron_common::api::external::VpcFirewallRuleAction::Deny => {
+                Self::Deny
+            }
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleDirection>
+    for types::VpcFirewallRuleDirection
+{
+    fn from(
+        s: omicron_common::api::external::VpcFirewallRuleDirection,
+    ) -> Self {
+        match s {
+            omicron_common::api::external::VpcFirewallRuleDirection::Inbound => {
+                Self::Inbound
+            }
+            omicron_common::api::external::VpcFirewallRuleDirection::Outbound => {
+                Self::Outbound
+            }
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleStatus>
+    for types::VpcFirewallRuleStatus
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleStatus) -> Self {
+        match s {
+            omicron_common::api::external::VpcFirewallRuleStatus::Enabled => {
+                Self::Enabled
+            }
+            omicron_common::api::external::VpcFirewallRuleStatus::Disabled => {
+                Self::Disabled
+            }
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
+    for types::VpcFirewallRuleProtocol
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleProtocol) -> Self {
+        match s {
+            omicron_common::api::external::VpcFirewallRuleProtocol::Tcp => {
+                Self::Tcp
+            }
+            omicron_common::api::external::VpcFirewallRuleProtocol::Udp => {
+                Self::Udp
+            }
+            omicron_common::api::external::VpcFirewallRuleProtocol::Icmp => {
+                Self::Icmp
+            }
+        }
+    }
+}
 /**
  * Exposes additional [`Client`] interfaces for use by the test suite. These
  * are bonus endpoints, not generated in the real client.

@@ -3095,6 +3095,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "ipnetwork",
  "omicron-common",
  "percent-encoding",
  "progenitor",

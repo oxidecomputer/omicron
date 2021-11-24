@@ -6,7 +6,7 @@
  * HTTP entrypoint functions for the sled agent's exposed API
  */
 
-use crate::params::DiskEnsureBody;
+use crate::params::{DiskEnsureBody, VpcFirewallRulesEnsureBody};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -36,6 +36,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
+        api.register(vpc_firewall_rules_put)?;
         Ok(())
     }
 
@@ -127,5 +128,31 @@ async fn disk_poke_post(
     let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     sa.disk_poke(disk_id).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Path parameters for VPC requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    vpc_id: Uuid,
+}
+
+// TODO: Evaluate whether we want to keep this endpoint as is. This was
+// developed ad-hoc in preparation for the Milestone 3 demo.
+#[endpoint {
+    method = PUT,
+    path = "/vpc/{vpc_id}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    path_params: Path<VpcPathParam>,
+    body: TypedBody<VpcFirewallRulesEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let _sa = rqctx.context();
+    let _vpc_id = path_params.into_inner().vpc_id;
+    let _body_args = body.into_inner();
+
+    // TODO: Actually send the firewall rules to OPTE
+
     Ok(HttpResponseUpdatedNoContent())
 }

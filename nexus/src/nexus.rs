@@ -19,6 +19,7 @@ use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
+use futures::future::join_all;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
@@ -1689,18 +1690,50 @@ impl Nexus {
             .vpc_update_firewall_rules(&vpc.id(), rules)
             .await?;
 
-        let rules_for_sled =
-            self.resolve_firewall_rules_for_sled_agent(&vpc, &rules).await?;
-
-        let sleds = self
-            .db_datastore
-            .vpc_resolve_to_sleds(&vpc.id())
-            .await?
-            .iter()
-            .map(|sled| async move { self.sled_client(&sled.id()).await });
+        self.send_sled_agents_firewall_rules(&vpc, &rules).await?;
 
         let result = rules.into_iter().map(|rule| rule.into()).collect();
         Ok(result)
+    }
+
+    async fn send_sled_agents_firewall_rules(
+        &self,
+        vpc: &db::model::Vpc,
+        rules: &Vec<crate::db::model::VpcFirewallRule>,
+    ) -> Result<(), Error> {
+        let rules_for_sled =
+            self.resolve_firewall_rules_for_sled_agent(&vpc, &rules).await?;
+        let sled_rules_request =
+            sled_agent_client::types::VpcFirewallRulesEnsureBody {
+                rules: rules_for_sled,
+            };
+
+        let vpc_to_sleds =
+            self.db_datastore.vpc_resolve_to_sleds(&vpc.id()).await?;
+        let mut sled_requests = Vec::with_capacity(vpc_to_sleds.len());
+        for sled in &vpc_to_sleds {
+            let sled_id = sled.id();
+            let vpc_id = vpc.id();
+            let sled_rules_request = sled_rules_request.clone();
+            sled_requests.push(async move {
+                self.sled_client(&sled_id)
+                    .await?
+                    .vpc_firewall_rules_put(&vpc_id, &sled_rules_request)
+                    .await
+            });
+        }
+        let results = join_all(sled_requests).await;
+        // TODO-correctness: Actually do something about the failures here
+        for (sled, result) in vpc_to_sleds.iter().zip(results) {
+            if let Err(e) = result {
+                warn!(self.log, "failed to update firewall rules on sled agent";
+                    "sled_id" => %sled.id(),
+                    "vpc_id" => %vpc.id(),
+                    "error" => %e);
+            }
+        }
+
+        Ok(())
     }
 
     // TODO: move this somewhere else
@@ -1708,7 +1741,7 @@ impl Nexus {
         &self,
         vpc: &db::model::Vpc,
         rules: &Vec<crate::db::model::VpcFirewallRule>,
-    ) -> Result<Vec<OpteFirewallRule>, Error> {
+    ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
         // Gather list of Instances and Subnets to resolve
         let mut instances = HashSet::new();
         let mut subnets = HashSet::new();
@@ -1781,7 +1814,7 @@ impl Nexus {
                 })
                 .collect();
 
-        let mut opte_rules = Vec::with_capacity(rules.len());
+        let mut sled_agent_rules = Vec::with_capacity(rules.len());
         for rule in rules {
             let mut targets = Vec::with_capacity(rule.targets.len());
             for target in &rule.targets {
@@ -1795,30 +1828,28 @@ impl Nexus {
                     //    with the semantics of the rules. Rules with bad
                     //    references should likely at least be flagged to users
                     external::VpcFirewallRuleTarget::Instance(name) => {
-                        targets.extend_from_slice(
-                            instance_interfaces
-                                .get(&name)
-                                .ok_or_else(|| {
-                                    Error::not_found_by_name(
-                                        ResourceType::Instance,
-                                        &name,
-                                    )
-                                })?
-                                .as_slice(),
-                        );
+                        for interface in
+                            instance_interfaces.get(&name).ok_or_else(|| {
+                                Error::not_found_by_name(
+                                    ResourceType::Instance,
+                                    &name,
+                                )
+                            })?
+                        {
+                            targets.push(interface.into());
+                        }
                     }
                     external::VpcFirewallRuleTarget::Subnet(name) => {
-                        targets.extend_from_slice(
-                            subnet_interfaces
-                                .get(&name)
-                                .ok_or_else(|| {
-                                    Error::not_found_by_name(
-                                        ResourceType::VpcSubnet,
-                                        &name,
-                                    )
-                                })?
-                                .as_slice(),
-                        );
+                        for interface in
+                            subnet_interfaces.get(&name).ok_or_else(|| {
+                                Error::not_found_by_name(
+                                    ResourceType::VpcSubnet,
+                                    &name,
+                                )
+                            })?
+                        {
+                            targets.push(interface.into());
+                        }
                     }
                     // TODO: How do we resolve VPC targets?
                     external::VpcFirewallRuleTarget::Vpc(_name) => (),
@@ -1839,19 +1870,21 @@ impl Nexus {
                                         &name,
                                     )
                                 })? {
-                                    host_addrs.push(interface.ip.into());
+                                    host_addrs.push(ipnetwork::IpNetwork::from(interface.ip).into());
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Subnet(name) => {
-                                host_addrs.extend_from_slice(subnet_networks.get(&name).ok_or_else(|| {
+                                for subnet in subnet_networks.get(&name).ok_or_else(|| {
                                     Error::not_found_by_name(
                                         ResourceType::VpcSubnet,
                                         &name,
                                     )
-                                })?.as_slice());
+                                })? {
+                                    host_addrs.push(subnet.clone().into());
+                                }
                             }
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
-                                host_addrs.push(ipnetwork::IpNetwork::from(*addr));
+                                host_addrs.push(ipnetwork::IpNetwork::from(*addr).into());
                             }
                             // TODO: How do we resolve VPC targets?
                             external::VpcFirewallRuleHostFilter::Vpc(_name) => {
@@ -1866,18 +1899,23 @@ impl Nexus {
                 }
             };
 
-            opte_rules.push(OpteFirewallRule {
-                status: rule.status,
-                direction: rule.direction,
-                targets: targets,
-                filter_hosts: filter_hosts,
-                filter_ports: rule.filter_ports.clone(),
-                filter_protocols: rule.filter_protocols.clone(),
-                action: rule.action,
-                priority: rule.priority,
+            sled_agent_rules.push(sled_agent_client::types::VpcFirewallRule {
+                status: rule.status.0.into(),
+                direction: rule.direction.0.into(),
+                targets,
+                filter_hosts,
+                filter_ports: rule
+                    .filter_ports
+                    .as_ref()
+                    .map(|ports| ports.iter().map(|v| v.0.into()).collect()),
+                filter_protocols: rule.filter_protocols.as_ref().map(
+                    |protocols| protocols.iter().map(|v| v.0.into()).collect(),
+                ),
+                action: rule.action.0.into(),
+                priority: rule.priority.0 .0,
             });
         }
-        Ok(opte_rules)
+        Ok(sled_agent_rules)
     }
 
     pub async fn vpc_list_subnets(
@@ -2568,17 +2606,4 @@ lazy_static! {
                 "description": "allow inbound TCP connections on port 3389 from anywhere"
             }
         }"#).unwrap();
-}
-
-// TODO: move this somewhere else
-pub struct OpteFirewallRule {
-    pub status: crate::db::model::VpcFirewallRuleStatus,
-    pub direction: crate::db::model::VpcFirewallRuleDirection,
-    pub targets: Vec<external::NetworkInterface>,
-    pub filter_hosts: Option<Vec<ipnetwork::IpNetwork>>,
-    pub filter_ports: Option<Vec<crate::db::model::L4PortRange>>,
-    pub filter_protocols:
-        Option<Vec<crate::db::model::VpcFirewallRuleProtocol>>,
-    pub action: crate::db::model::VpcFirewallRuleAction,
-    pub priority: crate::db::model::VpcFirewallRulePriority,
 }

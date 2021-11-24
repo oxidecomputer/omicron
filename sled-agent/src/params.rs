@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_common::api::external::{
+    L4PortRange, NetworkInterface, VpcFirewallRuleAction,
+    VpcFirewallRuleDirection, VpcFirewallRulePriority, VpcFirewallRuleProtocol,
+    VpcFirewallRuleStatus,
+};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -39,3 +44,28 @@ pub struct DiskEnsureBody {
     /// requested runtime state of the Disk
     pub target: DiskStateRequested,
 }
+
+/// Sent to a sled agent to establish the current firewall rules for a VPC
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VpcFirewallRulesEnsureBody {
+    pub rules: Vec<VpcFirewallRule>,
+}
+
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VpcFirewallRule {
+    pub status: VpcFirewallRuleStatus,
+    pub direction: VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    #[schemars(with = "Option<Vec<IpNetworkDef>>")]
+    pub filter_hosts: Option<Vec<ipnetwork::IpNetwork>>,
+    pub filter_ports: Option<Vec<L4PortRange>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+    pub action: VpcFirewallRuleAction,
+    pub priority: VpcFirewallRulePriority,
+}
+
+#[derive(JsonSchema)]
+#[serde(remote = "ipnetwork::IpNetwork")]
+/// IPv4 (in dotted quad) or IPv6address, followed by a slash and prefix length
+struct IpNetworkDef(String);
