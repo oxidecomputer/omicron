@@ -520,6 +520,8 @@ pub struct InstanceRuntimeState {
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
     pub sled_uuid: Uuid,
+    #[column_name = "active_propolis_id"]
+    pub propolis_uuid: Uuid,
     #[column_name = "ncpus"]
     pub ncpus: InstanceCpuCount,
     #[column_name = "memory"]
@@ -545,6 +547,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         Self {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
+            propolis_uuid: state.propolis_uuid,
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -560,6 +563,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         internal::nexus::InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
+            propolis_uuid: self.propolis_uuid,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,

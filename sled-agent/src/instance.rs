@@ -204,6 +204,8 @@ impl Drop for Vnic {
 }
 
 struct InstanceInner {
+    id: Uuid,
+
     log: Logger,
 
     // Properties visible to Propolis
@@ -225,6 +227,11 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    /// UUID of the underlying propolis-server process
+    fn propolis_id(&self) -> &Uuid {
         &self.properties.id
     }
 
@@ -270,7 +277,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.id(), request)
+            .instance_state_put(*self.propolis_id(), request)
             .await
             .map_err(|e| Error::InternalError {
                 internal_message: format!(
@@ -395,9 +402,10 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
+            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id,
+                id: initial.runtime.propolis_uuid,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -462,7 +470,7 @@ impl Instance {
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
-        let zname = zone_name(inner.id());
+        let zname = zone_name(inner.propolis_id());
 
         let nics_to_put_in_zone: Vec<String> = guest_nics
             .iter()
@@ -492,13 +500,13 @@ impl Instance {
         // Run Propolis in the Zone.
         let port = 12400;
         let server_addr = SocketAddr::new(network.ip(), port);
-        Zones::run_propolis(&zname, inner.id(), &server_addr)?;
+        Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
-        let fmri = fmri_name(inner.id());
+        let fmri = fmri_name(inner.propolis_id());
         wait_for_service(Some(&zname), &fmri).await?;
 
         let client = Arc::new(PropolisClient::new(
@@ -543,7 +551,7 @@ impl Instance {
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
-        let zname = zone_name(inner.id());
+        let zname = zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
 
@@ -572,9 +580,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (id, client) = {
+        let (propolis_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.id();
+            let id = *inner.propolis_id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -584,7 +592,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response = client
-                .instance_state_monitor(id, gen)
+                .instance_state_monitor(propolis_id, gen)
                 .await
                 .map_err(|e| Error::InternalError {
                     internal_message: format!(
@@ -986,6 +994,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
+                propolis_uuid: Uuid::new_v4(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
