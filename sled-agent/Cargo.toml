@@ -13,6 +13,7 @@ futures = "0.3.18"
 ipnetwork = "0.18"
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
+opteadm = { path = "../../opte/opteadm" }
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }

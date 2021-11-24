@@ -20,7 +20,7 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -204,7 +204,7 @@ impl Vnic {
         // of the VPC subnet. In any event, the point is that we can
         // get by with a lot less information by pushing SNAT to the
         // side for now.
-        let ipcfg = IpConfig {
+        let ip_cfg = IpConfig {
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
             gw_mac: opteadm::EtherAddr::from(
