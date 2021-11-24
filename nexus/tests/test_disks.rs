@@ -73,7 +73,7 @@ async fn test_disks() {
     .execute()
     .await
     .expect("unexpected success")
-    .response_body::<dropshot::HttpErrorResponseBody>()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
