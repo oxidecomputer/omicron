@@ -368,7 +368,7 @@ impl DataStore {
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, org.clone())?;
+        opctx.authorize(authz::Action::CreateChild, *org)?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
