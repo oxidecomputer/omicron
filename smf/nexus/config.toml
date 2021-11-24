@@ -5,15 +5,17 @@
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
+[console]
 # Directory of static assets for the console
 # NOTE: relative to repo root 
 assets_directory = "tests/fixtures" # TODO: figure out value
+cache_control_max_age_minutes = 10
+session_idle_timeout_minutes = 60
+session_absolute_timeout_minutes = 480
 
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
 schemes_external = ["spoof"]
-session_idle_timeout_minutes = 60
-session_absolute_timeout_minutes = 480
 
 [database]
 # URL for connecting to the database

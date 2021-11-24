@@ -129,20 +129,7 @@ pub struct RestPathParam {
 pub async fn spoof_login_form(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx.context().assets_directory.clone()).await
-}
-
-async fn serve_console_index(
-    assets_directory: PathBuf,
-) -> Result<Response<Body>, HttpError> {
-    let file = assets_directory.join(PathBuf::from("index.html"));
-    let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-        .header(http::header::CACHE_CONTROL, "max-age=600")
-        .body(file_contents.into())?)
+    serve_console_index(rqctx.context()).await
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping
@@ -175,8 +162,7 @@ pub async fn console_page(
     // makes the right API requests.
     if let Ok(opctx) = opctx {
         if opctx.authn.actor().is_some() {
-            let apictx = rqctx.context();
-            return serve_console_index(apictx.assets_directory.clone()).await;
+            return serve_console_index(rqctx.context()).await;
         }
     }
 
@@ -201,7 +187,7 @@ pub async fn asset(
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    let file = find_file(path, &apictx.assets_directory)?;
+    let file = find_file(path, &apictx.console_config.assets_directory)?;
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
 
@@ -213,7 +199,30 @@ pub async fn asset(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, &content_type)
-        .header(http::header::CACHE_CONTROL, "max-age=600")
+        .header(http::header::CACHE_CONTROL, cache_control_header_value(apictx))
+        .body(file_contents.into())?)
+}
+
+fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
+    format!(
+        "max-age={}",
+        apictx.console_config.cache_control_max_age.num_seconds()
+    )
+}
+
+async fn serve_console_index(
+    apictx: &Arc<ServerContext>,
+) -> Result<Response<Body>, HttpError> {
+    let file = apictx
+        .console_config
+        .assets_directory
+        .join(PathBuf::from("index.html"));
+    let file_contents =
+        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
+        .header(http::header::CACHE_CONTROL, cache_control_header_value(apictx))
         .body(file_contents.into())?)
 }
 
