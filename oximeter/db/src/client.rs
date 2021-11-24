@@ -289,7 +289,12 @@ impl DbWrite for Client {
                 }
             }
 
-            if !seen_timeseries.contains(sample.timeseries_key.as_str()) {
+            // Key on both the timeseries name and key, as timeseries may actually share keys.
+            let key = (
+                sample.timeseries_name.as_str(),
+                sample.timeseries_key.as_str(),
+            );
+            if !seen_timeseries.contains(&key) {
                 for (table_name, table_rows) in model::unroll_field_rows(sample)
                 {
                     rows.entry(table_name)
@@ -305,7 +310,7 @@ impl DbWrite for Client {
                 .or_insert_with(Vec::new)
                 .push(measurement_row);
 
-            seen_timeseries.insert(sample.timeseries_key.as_str());
+            seen_timeseries.insert(key);
         }
 
         // Insert the new schema into the database
@@ -879,5 +884,75 @@ mod tests {
             client.ping().await,
             Err(Error::DatabaseUnavailable(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_differentiate_by_timeseries_name() {
+        #[derive(Debug, Default, PartialEq, oximeter::Target)]
+        struct MyTarget {
+            id: i64,
+        }
+
+        // These two metrics share a target and have no fields. Thus they have the same timeseries
+        // keys. This test is to verify we can distinguish between them, which relies on their
+        // names.
+        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+        struct FirstMetric {
+            datum: i64,
+        }
+
+        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+        struct SecondMetric {
+            datum: i64,
+        }
+
+        let log = Logger::root(slog::Discard, o!());
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        let target = MyTarget::default();
+        let first_metric = FirstMetric::default();
+        let second_metric = SecondMetric::default();
+
+        let samples = &[
+            Sample::new(&target, &first_metric),
+            Sample::new(&target, &second_metric),
+        ];
+        client
+            .insert_samples(samples)
+            .await
+            .expect("Failed to insert test samples");
+
+        let filter = query::TimeseriesFilter {
+            timeseries_name: String::from("my_target:second_metric"),
+            filters: vec![query::FieldFilter::new("id", &[0]).unwrap()],
+            time_filter: None,
+        };
+        println!("{:#?}", filter);
+        let results = client
+            .filter_timeseries(&filter)
+            .await
+            .expect("Failed to select test samples");
+        println!("{:#?}", results);
+        //std::thread::sleep(std::time::Duration::from_secs(1000));
+        assert_eq!(results.len(), 1, "Expected only one timeseries");
+        let timeseries = &results[0];
+        assert_eq!(
+            timeseries.measurements.len(),
+            1,
+            "Expected only one sample"
+        );
+        assert_eq!(timeseries.target.name, "my_target");
+        assert_eq!(timeseries.metric.name, "second_metric");
     }
 }
