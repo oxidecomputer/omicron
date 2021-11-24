@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 #
 # oxapi_demo: wrapper around curl(1) to run basic requests against the Oxide API
 # prototype server.
